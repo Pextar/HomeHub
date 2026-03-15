@@ -1,0 +1,11 @@
+# RF Socket Controller
+
+node_modules/
+dist/
+build/
+*.exe
+*.log
+.env
+config.yaml
+config.json
+

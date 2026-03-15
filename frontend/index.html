@@ -1,0 +1,542 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RF Socket Controller</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            color: #fff;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        header {
+            text-align: center;
+            padding: 40px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+            margin-bottom: 30px;
+        }
+        
+        h1 {
+            font-size: 2.5em;
+            background: linear-gradient(90deg, #00d4ff, #7b2cbf);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 10px;
+        }
+        
+        .subtitle {
+            color: #888;
+            font-size: 1.1em;
+        }
+        
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .stat-card {
+            background: rgba(255,255,255,0.05);
+            border-radius: 12px;
+            padding: 20px;
+            text-align: center;
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+        
+        .stat-value {
+            font-size: 2em;
+            font-weight: bold;
+            color: #00d4ff;
+        }
+        
+        .stat-label {
+            color: #888;
+            margin-top: 5px;
+        }
+        
+        .sockets-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .socket-card {
+            background: rgba(255,255,255,0.05);
+            border-radius: 16px;
+            padding: 24px;
+            border: 1px solid rgba(255,255,255,0.1);
+            transition: all 0.3s ease;
+        }
+        
+        .socket-card:hover {
+            border-color: rgba(0,212,255,0.3);
+            transform: translateY(-2px);
+        }
+        
+        .socket-card.on {
+            border-color: #00ff88;
+            background: rgba(0,255,136,0.05);
+        }
+        
+        .socket-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+        
+        .socket-name {
+            font-size: 1.3em;
+            font-weight: 600;
+        }
+        
+        .socket-room {
+            color: #888;
+            font-size: 0.9em;
+        }
+        
+        .socket-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 16px;
+        }
+        
+        .status-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #ff4444;
+        }
+        
+        .status-indicator.on {
+            background: #00ff88;
+            box-shadow: 0 0 10px #00ff88;
+        }
+        
+        .socket-controls {
+            display: flex;
+            gap: 10px;
+        }
+        
+        .btn {
+            flex: 1;
+            padding: 12px 20px;
+            border: none;
+            border-radius: 8px;
+            font-size: 1em;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .btn-on {
+            background: linear-gradient(135deg, #00ff88, #00cc6a);
+            color: #000;
+        }
+        
+        .btn-on:hover {
+            transform: scale(1.05);
+            box-shadow: 0 4px 15px rgba(0,255,136,0.4);
+        }
+        
+        .btn-off {
+            background: linear-gradient(135deg, #ff4444, #cc3333);
+            color: #fff;
+        }
+        
+        .btn-off:hover {
+            transform: scale(1.05);
+            box-shadow: 0 4px 15px rgba(255,68,68,0.4);
+        }
+        
+        .btn-toggle {
+            background: linear-gradient(135deg, #00d4ff, #0099cc);
+            color: #fff;
+        }
+        
+        .add-socket-btn {
+            background: linear-gradient(135deg, #7b2cbf, #5a1d8f);
+            color: #fff;
+            padding: 16px 32px;
+            font-size: 1.1em;
+            border-radius: 12px;
+            border: none;
+            cursor: pointer;
+            margin: 20px 0;
+            transition: all 0.3s;
+        }
+        
+        .add-socket-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(123,44,191,0.4);
+        }
+        
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.8);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+        
+        .modal.active {
+            display: flex;
+        }
+        
+        .modal-content {
+            background: #1a1a2e;
+            padding: 30px;
+            border-radius: 16px;
+            width: 90%;
+            max-width: 500px;
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+        
+        .modal-title {
+            font-size: 1.5em;
+            margin-bottom: 20px;
+            background: linear-gradient(90deg, #00d4ff, #7b2cbf);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        
+        .form-group {
+            margin-bottom: 20px;
+        }
+        
+        .form-label {
+            display: block;
+            margin-bottom: 8px;
+            color: #888;
+        }
+        
+        .form-input {
+            width: 100%;
+            padding: 12px;
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 8px;
+            color: #fff;
+            font-size: 1em;
+        }
+        
+        .form-input:focus {
+            outline: none;
+            border-color: #00d4ff;
+        }
+        
+        .form-select {
+            width: 100%;
+            padding: 12px;
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 8px;
+            color: #fff;
+            font-size: 1em;
+        }
+        
+        .form-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 30px;
+        }
+        
+        .btn-cancel {
+            flex: 1;
+            padding: 12px;
+            background: rgba(255,255,255,0.1);
+            border: 1px solid rgba(255,255,255,0.2);
+            border-radius: 8px;
+            color: #fff;
+            cursor: pointer;
+        }
+        
+        .btn-save {
+            flex: 2;
+            padding: 12px;
+            background: linear-gradient(135deg, #00d4ff, #7b2cbf);
+            border: none;
+            border-radius: 8px;
+            color: #fff;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        
+        @media (max-width: 768px) {
+            .sockets-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            h1 {
+                font-size: 1.8em;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>⚡ RF Socket Controller</h1>
+            <p class="subtitle">Control your 433MHz devices from anywhere</p>
+        </header>
+        
+        <div class="stats" id="stats">
+            <div class="stat-card">
+                <div class="stat-value" id="total-sockets">0</div>
+                <div class="stat-label">Total Sockets</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="active-sockets">0</div>
+                <div class="stat-label">Currently On</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="scheduled-tasks">0</div>
+                <div class="stat-label">Scheduled Tasks</div>
+            </div>
+        </div>
+        
+        <button class="add-socket-btn" onclick="openModal()">+ Add New Socket</button>
+        
+        <div class="sockets-grid" id="sockets-grid">
+            <!-- Sockets will be loaded here -->
+        </div>
+    </div>
+    
+    <!-- Add Socket Modal -->
+    <div class="modal" id="modal">
+        <div class="modal-content">
+            <h2 class="modal-title">Add New Socket</h2>
+            
+            <div class="form-group">
+                <label class="form-label">Socket Name</label>
+                <input type="text" class="form-input" id="socket-name" placeholder="e.g., Living Room Lamp">
+            </div>
+            
+            <div class="form-group">
+                <label class="form-label">Room/Location</label>
+                <input type="text" class="form-input" id="socket-room" placeholder="e.g., Living Room">
+            </div>
+            
+            <div class="form-group">
+                <label class="form-label">RF Code</label>
+                <input type="text" class="form-input" id="socket-code" placeholder="e.g., 12345">
+            </div>
+            
+            <div class="form-group">
+                <label class="form-label">Protocol</label>
+                <select class="form-select" id="socket-protocol">
+                    <option value="nexa">Nexa</option>
+                    <option value="kaku">KAKU (KlikAanKlikUit)</option>
+                    <option value="intertechno">Intertechno</option>
+                    <option value="raw">Raw/Custom</option>
+                </select>
+            </div>
+            
+            <div class="form-actions">
+                <button class="btn-cancel" onclick="closeModal()">Cancel</button>
+                <button class="btn-save" onclick="saveSocket()">Save Socket</button>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        const API_URL = window.location.origin + '/api';
+        
+        // Load sockets on page load
+        document.addEventListener('DOMContentLoaded', loadSockets);
+        
+        async function loadSockets() {
+            try {
+                const response = await fetch(`${API_URL}/sockets`);
+                const sockets = await response.json();
+                
+                updateStats(sockets);
+                renderSockets(sockets);
+            } catch (error) {
+                console.error('Failed to load sockets:', error);
+                document.getElementById('sockets-grid').innerHTML = 
+                    '<div style="text-align:center;padding:40px;color:#888;">Failed to load sockets. Is the backend running?</div>';
+            }
+        }
+        
+        function updateStats(sockets) {
+            const total = sockets.length;
+            const active = sockets.filter(s => s.state).length;
+            
+            document.getElementById('total-sockets').textContent = total;
+            document.getElementById('active-sockets').textContent = active;
+            
+            // Load schedules count
+            fetch(`${API_URL}/schedules`)
+                .then(r => r.json())
+                .then(schedules => {
+                    document.getElementById('scheduled-tasks').textContent = schedules.length;
+                })
+                .catch(() => {
+                    document.getElementById('scheduled-tasks').textContent = '0';
+                });
+        }
+        
+        function renderSockets(sockets) {
+            const grid = document.getElementById('sockets-grid');
+            
+            if (sockets.length === 0) {
+                grid.innerHTML = '<div style="text-align:center;padding:40px;color:#888;">No sockets configured. Click "Add New Socket" to get started.</div>';
+                return;
+            }
+            
+            grid.innerHTML = sockets.map(socket => `
+                <div class="socket-card ${socket.state ? 'on' : ''}" data-id="${socket.id}">
+                    <div class="socket-header">
+                        <div>
+                            <div class="socket-name">${escapeHtml(socket.name)}</div>
+                            <div class="socket-room">${escapeHtml(socket.room || 'No room')}</div>
+                        </div>
+                    </div>
+                    
+                    <div class="socket-status">
+                        <div class="status-indicator ${socket.state ? 'on' : ''}"></div>
+                        <span>${socket.state ? 'ON' : 'OFF'}</span>
+                    </div>
+                    
+                    <div class="socket-controls">
+                        <button class="btn btn-on" onclick="turnOn('${socket.id}')">ON</button>
+                        <button class="btn btn-off" onclick="turnOff('${socket.id}')">OFF</button>
+                        <button class="btn btn-toggle" onclick="toggleSocket('${socket.id}')">Toggle</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+        
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        async function turnOn(id) {
+            try {
+                const response = await fetch(`${API_URL}/sockets/${id}/on`, { method: 'POST' });
+                if (response.ok) {
+                    loadSockets();
+                } else {
+                    alert('Failed to turn on socket');
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                alert('Network error');
+            }
+        }
+        
+        async function turnOff(id) {
+            try {
+                const response = await fetch(`${API_URL}/sockets/${id}/off`, { method: 'POST' });
+                if (response.ok) {
+                    loadSockets();
+                } else {
+                    alert('Failed to turn off socket');
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                alert('Network error');
+            }
+        }
+        
+        async function toggleSocket(id) {
+            try {
+                const response = await fetch(`${API_URL}/sockets/${id}/toggle`, { method: 'POST' });
+                if (response.ok) {
+                    loadSockets();
+                } else {
+                    alert('Failed to toggle socket');
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                alert('Network error');
+            }
+        }
+        
+        function openModal() {
+            document.getElementById('modal').classList.add('active');
+        }
+        
+        function closeModal() {
+            document.getElementById('modal').classList.remove('active');
+            document.getElementById('socket-name').value = '';
+            document.getElementById('socket-room').value = '';
+            document.getElementById('socket-code').value = '';
+        }
+        
+        async function saveSocket() {
+            const name = document.getElementById('socket-name').value.trim();
+            const room = document.getElementById('socket-room').value.trim();
+            const code = document.getElementById('socket-code').value.trim();
+            const protocol = document.getElementById('socket-protocol').value;
+            
+            if (!name || !code) {
+                alert('Please enter a name and RF code');
+                return;
+            }
+            
+            const socket = {
+                name: name,
+                room: room,
+                code: code,
+                protocol: protocol,
+                state: false
+            };
+            
+            try {
+                const response = await fetch(`${API_URL}/sockets`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(socket)
+                });
+                
+                if (response.ok) {
+                    closeModal();
+                    loadSockets();
+                } else {
+                    alert('Failed to save socket');
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                alert('Network error');
+            }
+        }
+        
+        // Close modal on outside click
+        document.getElementById('modal').addEventListener('click', function(e) {
+            if (e.target === this) {
+                closeModal();
+            }
+        });
+        
+        // Refresh every 30 seconds
+        setInterval(loadSockets, 30000);
+    </script>
+</body>
+</html>
