@@ -1,10 +1,10 @@
 # RF Socket Controller
 
-Control 433MHz RF sockets via web interface.
+Control 433MHz RF sockets via a web / installable PWA.
 
 ## Architecture
 - **Backend**: Go REST API with GPIO/RF control
-- **Frontend**: React web UI
+- **Frontend**: Svelte 5 + Vite + vite-plugin-pwa (installable, works offline)
 - **Hardware**: 433MHz transmitter on Raspberry Pi
 
 ## Features

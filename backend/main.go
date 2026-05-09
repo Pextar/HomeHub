@@ -151,10 +151,12 @@ func main() {
 	api.HandleFunc("/timers/{id}", deleteTimer).Methods("DELETE")
 	api.HandleFunc("/sockets/{id}/timer", createSocketTimer).Methods("POST")
 
-	// Static files (frontend). Use a custom handler so /healthz-style probes
-	// against unknown paths still get the SPA shell rather than directory
-	// listings of the frontend folder.
-	r.PathPrefix("/").Handler(http.FileServer(http.Dir("./frontend/")))
+	// Static files (Svelte build output). The Svelte SPA is built by `vite
+	// build` into ./frontend/dist/. We serve real files when they exist
+	// (fingerprinted JS/CSS, the manifest, the service worker, icons) and
+	// fall back to index.html for any unknown path so client-side routing
+	// works on hard refresh and PWA navigation requests.
+	r.PathPrefix("/").Handler(spaHandler("./frontend/dist"))
 
 	cors := handlers.CORS(
 		handlers.AllowedOrigins([]string{"*"}),
@@ -198,6 +200,35 @@ func main() {
 		log.Printf("graceful shutdown failed: %v", err)
 	}
 	log.Println("bye")
+}
+
+// spaHandler serves files from `dir`, falling back to index.html for any
+// path that doesn't map to an actual file. This is what makes the Svelte
+// SPA's hash-free deep links work on a hard refresh.
+func spaHandler(dir string) http.Handler {
+	fs := http.FileServer(http.Dir(dir))
+	indexPath := filepath.Join(dir, "index.html")
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// API routes are matched before this handler, so we never see them
+		// here; just guard against a missing build with a clear message.
+		if _, err := os.Stat(indexPath); os.IsNotExist(err) {
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			http.Error(w,
+				"frontend/dist/index.html is missing — run `npm install && npm run build` in ./frontend.",
+				http.StatusServiceUnavailable)
+			return
+		}
+
+		// Try the literal file first.
+		path := filepath.Join(dir, filepath.Clean(r.URL.Path))
+		if info, err := os.Stat(path); err == nil && !info.IsDir() {
+			fs.ServeHTTP(w, r)
+			return
+		}
+
+		// Fallback: serve the SPA shell.
+		http.ServeFile(w, r, indexPath)
+	})
 }
 
 // loggingMiddleware logs each request's method, path, status and duration.
