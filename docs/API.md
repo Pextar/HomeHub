@@ -8,6 +8,23 @@ http://raspberry-pi-ip:8080/api
 
 ## Endpoints
 
+### Health
+
+#### Health check
+```
+GET /api/health
+```
+
+Response:
+```json
+{
+  "status": "ok",
+  "sockets": 3,
+  "schedules": 2,
+  "time": "2026-05-09T16:02:00Z"
+}
+```
+
 ### Sockets
 
 #### List All Sockets
@@ -93,6 +110,41 @@ POST /api/sockets/{id}/off
 POST /api/sockets/{id}/toggle
 ```
 
+#### Bulk: Turn All On/Off
+```
+POST /api/sockets/all/on
+POST /api/sockets/all/off
+```
+
+Response:
+```json
+{
+  "updated": 3,
+  "failures": []
+}
+```
+
+### Rooms
+
+#### List Rooms
+```
+GET /api/rooms
+```
+
+Response:
+```json
+[
+  { "name": "Living Room", "sockets": 2, "on": 1 },
+  { "name": "Bedroom", "sockets": 1, "on": 0 }
+]
+```
+
+#### Turn All Sockets in a Room On/Off
+```
+POST /api/rooms/{room}/on
+POST /api/rooms/{room}/off
+```
+
 ### Schedules
 
 #### List All Schedules
@@ -132,9 +184,30 @@ Request body:
 
 Days: 0=Sunday, 1=Monday, ..., 6=Saturday
 
+#### Update Schedule
+```
+PUT /api/schedules/{id}
+```
+
+Request body (any subset of fields can be updated; `enabled` is always honored):
+```json
+{
+  "time": "19:30",
+  "enabled": false
+}
+```
+
 #### Delete Schedule
 ```
 DELETE /api/schedules/{id}
+```
+
+## Error Format
+
+All errors are returned as JSON:
+
+```json
+{ "error": "name and code are required" }
 ```
 
 ## Protocols
