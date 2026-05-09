@@ -32,6 +32,14 @@
                     <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M7 2h2v4H7zm8 0h2v4h-2zM5 8h14a2 2 0 012 2v4a8 8 0 01-7 7.94V22h-4v-.06A8 8 0 013 14v-4a2 2 0 012-2z"/></svg>
                     Sockets
                 </a>
+                <a class="nav-item" href="#/groups" data-route="groups">
+                    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M12 12a4 4 0 100-8 4 4 0 000 8zm-8 8a8 8 0 0116 0H4z"/></svg>
+                    Groups
+                </a>
+                <a class="nav-item" href="#/scenes" data-route="scenes">
+                    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 16.8l-6.2 4.5 2.4-7.4L2 9.4h7.6z"/></svg>
+                    Scenes
+                </a>
                 <a class="nav-item" href="#/schedules" data-route="schedules">
                     <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M12 2a10 10 0 100 20 10 10 0 000-20zm1 11h5v-2h-4V6h-2v7z"/></svg>
                     Schedules
@@ -102,11 +110,11 @@
                 </div>
                 <div class="stat-card">
                     <div class="stat-icon" data-tone="warn">
-                        <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/></svg>
+                        <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M12 12a4 4 0 100-8 4 4 0 000 8zm-8 8a8 8 0 0116 0H4z"/></svg>
                     </div>
                     <div>
-                        <div class="stat-value" data-stat="rooms">0</div>
-                        <div class="stat-label">Rooms</div>
+                        <div class="stat-value" data-stat="groups">0</div>
+                        <div class="stat-label">Groups &amp; scenes</div>
                     </div>
                 </div>
             </div>
@@ -120,6 +128,21 @@
                     <button class="btn btn-secondary" data-action="all-off">Turn all off</button>
                     <button class="btn btn-ghost" data-action="refresh">Refresh</button>
                 </div>
+            </div>
+
+            <div class="card" data-section="scenes">
+                <div class="card-header">
+                    <h2>Scenes</h2>
+                    <button class="btn btn-ghost" data-action="add-scene">New scene</button>
+                </div>
+                <div class="scene-grid" data-scenes></div>
+            </div>
+
+            <div class="card" data-section="timers" hidden>
+                <div class="card-header">
+                    <h2>Pending timers</h2>
+                </div>
+                <div class="timer-list" data-timers></div>
             </div>
 
             <div class="card">
@@ -154,6 +177,14 @@
         </div>
     </template>
 
+    <template id="tpl-groups">
+        <div class="groups-view" data-list></div>
+    </template>
+
+    <template id="tpl-scenes">
+        <div class="scenes-view" data-list></div>
+    </template>
+
     <template id="tpl-empty-sockets">
         <div class="empty-state">
             <svg viewBox="0 0 24 24" width="48" height="48" aria-hidden="true"><path fill="currentColor" d="M7 2h2v4H7zm8 0h2v4h-2zM5 8h14a2 2 0 012 2v4a8 8 0 01-7 7.94V22h-4v-.06A8 8 0 013 14v-4a2 2 0 012-2z"/></svg>
@@ -176,6 +207,24 @@
         <div class="empty-state empty-state-compact">
             <h3>No matches</h3>
             <p>Try a different search or clear the filters.</p>
+        </div>
+    </template>
+
+    <template id="tpl-empty-groups">
+        <div class="empty-state">
+            <svg viewBox="0 0 24 24" width="48" height="48" aria-hidden="true"><path fill="currentColor" d="M12 12a4 4 0 100-8 4 4 0 000 8zm-8 8a8 8 0 0116 0H4z"/></svg>
+            <h3>No groups yet</h3>
+            <p>Group sockets together to control them in one click.</p>
+            <button class="btn btn-primary" data-action="add-group">Add group</button>
+        </div>
+    </template>
+
+    <template id="tpl-empty-scenes">
+        <div class="empty-state">
+            <svg viewBox="0 0 24 24" width="48" height="48" aria-hidden="true"><path fill="currentColor" d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 16.8l-6.2 4.5 2.4-7.4L2 9.4h7.6z"/></svg>
+            <h3>No scenes yet</h3>
+            <p>Save the perfect lighting combo as a scene and recall it anytime.</p>
+            <button class="btn btn-primary" data-action="add-scene">Add scene</button>
         </div>
     </template>
 

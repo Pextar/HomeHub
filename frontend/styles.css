@@ -628,6 +628,148 @@ select:focus-visible, input:focus-visible, textarea:focus-visible {
 }
 .day-preset-btn:hover { background: var(--surface-hover); color: var(--text); }
 
+/* ---------- Groups & Scenes ---------- */
+.entity-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+}
+.entity-card {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: var(--space-4) var(--space-5);
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: var(--space-3);
+    align-items: start;
+}
+.entity-head { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.entity-name { font-weight: 600; font-size: 1rem; }
+.entity-meta { color: var(--text-muted); font-size: 12px; }
+.entity-members {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: var(--space-2);
+}
+.member-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 10px;
+    border-radius: 999px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    font-size: 12px;
+    color: var(--text-muted);
+}
+.member-chip[data-action="on"] { color: var(--success); border-color: rgba(52, 211, 153, 0.3); }
+.member-chip[data-action="off"] { color: var(--danger); border-color: rgba(248, 113, 113, 0.3); }
+.entity-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); justify-content: flex-end; }
+
+.scene-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: var(--space-3);
+}
+.scene-tile {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: var(--space-4);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    cursor: pointer;
+    transition: border-color var(--t-fast), background var(--t-fast);
+    text-align: left;
+}
+.scene-tile:hover { border-color: var(--border-strong); background: var(--surface-hover); }
+.scene-tile-name { font-weight: 600; }
+.scene-tile-meta { color: var(--text-muted); font-size: 12px; }
+
+/* Member picker (used in group/scene modals) */
+.member-picker {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    max-height: 280px;
+    overflow-y: auto;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 4px;
+    background: var(--surface);
+}
+.member-picker-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: 8px 10px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+}
+.member-picker-row:hover { background: var(--surface-hover); }
+.member-picker-row input { width: auto; padding: 0; }
+.member-picker-row .meta { color: var(--text-muted); font-size: 12px; margin-left: auto; }
+.member-picker-row select {
+    width: auto;
+    padding: 4px 10px;
+    margin-left: auto;
+    font-size: 12px;
+}
+
+/* Pending timers list */
+.timer-list { display: flex; flex-direction: column; gap: var(--space-2); }
+.timer-row {
+    display: grid;
+    grid-template-columns: auto 1fr auto auto;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-3) var(--space-4);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+}
+.timer-row .countdown {
+    font-family: var(--font-mono);
+    font-weight: 600;
+    color: var(--primary);
+}
+
+/* Segmented control */
+.segmented {
+    display: inline-flex;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 3px;
+    gap: 2px;
+}
+.segmented input { display: none; }
+.segmented label {
+    padding: 6px 14px;
+    border-radius: 7px;
+    cursor: pointer;
+    color: var(--text-muted);
+    font-weight: 500;
+    font-size: 13px;
+    transition: background var(--t-fast), color var(--t-fast);
+}
+.segmented input:checked + label {
+    background: var(--bg-elevated);
+    color: var(--text);
+    box-shadow: var(--shadow-sm);
+}
+
+/* Quick presets row (used in timer modal) */
+.preset-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+}
+.preset-row .btn { flex: 0 0 auto; }
+
 /* ---------- Empty state ---------- */
 .empty-state {
     display: flex;

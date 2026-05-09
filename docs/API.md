@@ -202,6 +202,57 @@ Request body (any subset of fields can be updated; `enabled` is always honored):
 DELETE /api/schedules/{id}
 ```
 
+### Groups
+
+A group is a curated collection of socket IDs that can be controlled together.
+
+```
+GET    /api/groups
+POST   /api/groups          { "name": "...", "socket_ids": ["...", "..."] }
+GET    /api/groups/{id}
+PUT    /api/groups/{id}
+DELETE /api/groups/{id}
+POST   /api/groups/{id}/on
+POST   /api/groups/{id}/off
+POST   /api/groups/{id}/toggle
+```
+
+Schedules can target a group by setting `target_type` to `"group"` and
+`target_id` to the group's ID.
+
+### Scenes
+
+A scene drives a specific set of sockets to specific states in one call.
+
+```
+GET    /api/scenes
+POST   /api/scenes          { "name": "...", "actions": [{"socket_id": "...", "action": "on"}] }
+GET    /api/scenes/{id}
+PUT    /api/scenes/{id}
+DELETE /api/scenes/{id}
+POST   /api/scenes/{id}/activate
+```
+
+Schedules can target a scene by setting `target_type` to `"scene"` and
+`target_id` to the scene's ID. The `action` field is then implicitly
+"activate".
+
+### Timers (one-shot)
+
+Persistent fire-once timers — useful for "off in 30 minutes" actions.
+
+```
+GET    /api/timers
+POST   /api/timers          { "target_type": "socket"|"group"|"scene",
+                              "target_id":   "...",
+                              "action":      "on"|"off"|"toggle",
+                              "in_seconds":  900 }
+DELETE /api/timers/{id}
+POST   /api/sockets/{id}/timer   (convenience: target inferred from URL)
+```
+
+`fires_at` (RFC3339) may be sent instead of `in_seconds`.
+
 ## Error Format
 
 All errors are returned as JSON:

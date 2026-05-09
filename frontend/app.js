@@ -46,6 +46,7 @@ const api = {
     socketOn(id)             { return this.req(`/sockets/${encodeURIComponent(id)}/on`, { method: "POST" }); },
     socketOff(id)            { return this.req(`/sockets/${encodeURIComponent(id)}/off`, { method: "POST" }); },
     socketToggle(id)         { return this.req(`/sockets/${encodeURIComponent(id)}/toggle`, { method: "POST" }); },
+    socketTimer(id, body)    { return this.req(`/sockets/${encodeURIComponent(id)}/timer`, { method: "POST", body }); },
     allOn()                  { return this.req("/sockets/all/on", { method: "POST" }); },
     allOff()                 { return this.req("/sockets/all/off", { method: "POST" }); },
     roomOn(room)             { return this.req(`/rooms/${encodeURIComponent(room)}/on`, { method: "POST" }); },
@@ -55,6 +56,19 @@ const api = {
     createSchedule(body)     { return this.req("/schedules", { method: "POST", body }); },
     updateSchedule(id, body) { return this.req(`/schedules/${encodeURIComponent(id)}`, { method: "PUT", body }); },
     deleteSchedule(id)       { return this.req(`/schedules/${encodeURIComponent(id)}`, { method: "DELETE" }); },
+    listGroups()             { return this.req("/groups"); },
+    createGroup(body)        { return this.req("/groups", { method: "POST", body }); },
+    updateGroup(id, body)    { return this.req(`/groups/${encodeURIComponent(id)}`, { method: "PUT", body }); },
+    deleteGroup(id)          { return this.req(`/groups/${encodeURIComponent(id)}`, { method: "DELETE" }); },
+    groupAction(id, action)  { return this.req(`/groups/${encodeURIComponent(id)}/${action}`, { method: "POST" }); },
+    listScenes()             { return this.req("/scenes"); },
+    createScene(body)        { return this.req("/scenes", { method: "POST", body }); },
+    updateScene(id, body)    { return this.req(`/scenes/${encodeURIComponent(id)}`, { method: "PUT", body }); },
+    deleteScene(id)          { return this.req(`/scenes/${encodeURIComponent(id)}`, { method: "DELETE" }); },
+    activateScene(id)        { return this.req(`/scenes/${encodeURIComponent(id)}/activate`, { method: "POST" }); },
+    listTimers()             { return this.req("/timers"); },
+    createTimer(body)        { return this.req("/timers", { method: "POST", body }); },
+    deleteTimer(id)          { return this.req(`/timers/${encodeURIComponent(id)}`, { method: "DELETE" }); },
 };
 
 // ---------- App state ----------
@@ -62,10 +76,17 @@ const state = {
     sockets: [],
     schedules: [],
     rooms: [],
+    groups: [],
+    scenes: [],
+    timers: [],
     search: "",
     roomFilter: "",
     loadedOnce: false,
 };
+
+function socketById(id)  { return state.sockets.find(s => s.id === id); }
+function groupById(id)   { return state.groups.find(g => g.id === id); }
+function sceneById(id)   { return state.scenes.find(s => s.id === id); }
 
 // ---------- Utilities ----------
 const $  = (sel, root = document) => root.querySelector(sel);
@@ -243,14 +264,20 @@ async function refreshHealth() {
 // ---------- Data loading ----------
 async function loadAll() {
     try {
-        const [sockets, schedules, rooms] = await Promise.all([
+        const [sockets, schedules, rooms, groups, scenes, timers] = await Promise.all([
             api.listSockets(),
             api.listSchedules(),
             api.listRooms(),
+            api.listGroups(),
+            api.listScenes(),
+            api.listTimers(),
         ]);
         state.sockets = sockets || [];
         state.schedules = schedules || [];
         state.rooms = rooms || [];
+        state.groups = groups || [];
+        state.scenes = scenes || [];
+        state.timers = timers || [];
         state.loadedOnce = true;
         renderCurrentRoute();
     } catch (e) {
@@ -290,11 +317,11 @@ const views = {
         const total = state.sockets.length;
         const on = state.sockets.filter(s => s.state).length;
         const enabledSchedules = state.schedules.filter(s => s.enabled).length;
-        const roomCount = state.rooms.length;
+        const groupSceneCount = state.groups.length + state.scenes.length;
         $("[data-stat=total]", root).textContent = total;
         $("[data-stat=on]", root).textContent = on;
         $("[data-stat=schedules]", root).textContent = enabledSchedules;
-        $("[data-stat=rooms]", root).textContent = roomCount;
+        $("[data-stat=groups]", root).textContent = groupSceneCount;
 
         // Quick actions
         $("[data-action=all-on]", root).addEventListener("click", () => withConfirm({
@@ -318,6 +345,26 @@ const views = {
         }));
         $("[data-action=refresh]", root).addEventListener("click", loadAll);
 
+        // Scenes (compact tiles)
+        $("[data-action=add-scene]", root).addEventListener("click", () => openSceneModal());
+        const scenesRoot = $("[data-scenes]", root);
+        if (state.scenes.length === 0) {
+            scenesRoot.appendChild(el("p", { class: "field-help" }, "No scenes yet. Click “New scene” to combine a few sockets into a one-tap action."));
+        } else {
+            for (const s of state.scenes) scenesRoot.appendChild(renderSceneTile(s));
+        }
+
+        // Pending timers
+        const timersCard = $("[data-section=timers]", root);
+        const timersRoot = $("[data-timers]", root);
+        if (state.timers.length === 0) {
+            timersCard.hidden = true;
+        } else {
+            timersCard.hidden = false;
+            timersRoot.innerHTML = "";
+            for (const t of state.timers) timersRoot.appendChild(renderTimerRow(t));
+        }
+
         // Rooms
         const roomsRoot = $("[data-rooms]", root);
         if (state.rooms.length === 0) {
@@ -327,6 +374,62 @@ const views = {
                 roomsRoot.appendChild(renderRoomCard(r));
             }
         }
+    },
+
+    groups() {
+        setTopbar({
+            title: "Groups",
+            subtitle: `${state.groups.length} configured`,
+            actions: [{
+                label: "Add group",
+                class: "btn-primary",
+                onClick: () => openGroupModal(),
+            }],
+        });
+
+        const root = $("#view-root");
+        root.innerHTML = "";
+        const view = tpl("tpl-groups");
+        root.appendChild(view);
+
+        const list = $("[data-list]", view);
+        if (state.groups.length === 0) {
+            const empty = tpl("tpl-empty-groups");
+            $("[data-action=add-group]", empty).addEventListener("click", () => openGroupModal());
+            list.appendChild(empty);
+            return;
+        }
+        const wrap = el("div", { class: "entity-list" });
+        for (const g of state.groups) wrap.appendChild(renderGroupCard(g));
+        list.appendChild(wrap);
+    },
+
+    scenes() {
+        setTopbar({
+            title: "Scenes",
+            subtitle: `${state.scenes.length} configured`,
+            actions: [{
+                label: "Add scene",
+                class: "btn-primary",
+                onClick: () => openSceneModal(),
+            }],
+        });
+
+        const root = $("#view-root");
+        root.innerHTML = "";
+        const view = tpl("tpl-scenes");
+        root.appendChild(view);
+
+        const list = $("[data-list]", view);
+        if (state.scenes.length === 0) {
+            const empty = tpl("tpl-empty-scenes");
+            $("[data-action=add-scene]", empty).addEventListener("click", () => openSceneModal());
+            list.appendChild(empty);
+            return;
+        }
+        const wrap = el("div", { class: "entity-list" });
+        for (const s of state.scenes) wrap.appendChild(renderSceneCard(s));
+        list.appendChild(wrap);
     },
 
     sockets() {
@@ -478,6 +581,12 @@ function renderSocketCard(s) {
             el("div", { class: "socket-menu" },
                 el("button", {
                     class: "icon-btn",
+                    "aria-label": "Set timer",
+                    title: "Set timer",
+                    onclick: () => openTimerModal(s),
+                }, iconSVG("timer")),
+                el("button", {
+                    class: "icon-btn",
                     "aria-label": "Edit",
                     onclick: () => openSocketModal(s),
                 }, iconSVG("edit")),
@@ -539,16 +648,35 @@ function renderRoomCard(r) {
     );
 }
 
+function describeTarget(targetType, targetId, fallbackSocketId) {
+    const tt = targetType || (fallbackSocketId ? "socket" : "");
+    const tid = targetId || fallbackSocketId;
+    if (tt === "socket") {
+        const s = socketById(tid);
+        return s ? { kind: "Socket", label: s.name, sub: s.room || "Unassigned" }
+                 : { kind: "Socket", label: `(missing socket: ${tid})`, sub: "—" };
+    }
+    if (tt === "group") {
+        const g = groupById(tid);
+        return g ? { kind: "Group", label: g.name, sub: `${g.socket_ids.length} sockets` }
+                 : { kind: "Group", label: `(missing group: ${tid})`, sub: "—" };
+    }
+    if (tt === "scene") {
+        const sc = sceneById(tid);
+        return sc ? { kind: "Scene", label: sc.name, sub: `${sc.actions.length} actions` }
+                  : { kind: "Scene", label: `(missing scene: ${tid})`, sub: "—" };
+    }
+    return { kind: "?", label: "Unknown target", sub: "" };
+}
+
 function renderScheduleRow(s) {
-    const socket = state.sockets.find(x => x.id === s.socket_id);
-    const target = socket ? socket.name : `(missing socket: ${s.socket_id})`;
-    const room = socket ? (socket.room || "Unassigned") : "—";
+    const t = describeTarget(s.target_type, s.target_id, s.socket_id);
 
     return el("div", { class: "schedule-row" },
         el("div", { class: "schedule-time" }, s.time),
         el("div", { class: "schedule-info" },
-            el("div", { class: "schedule-target" }, target),
-            el("div", { class: "schedule-meta" }, `${room} · ${formatDays(s.days)}`),
+            el("div", { class: "schedule-target" }, `${t.kind}: ${t.label}`),
+            el("div", { class: "schedule-meta" }, `${t.sub} · ${formatDays(s.days)}`),
         ),
         el("span", { class: "schedule-action", dataset: { action: s.action } }, s.action),
         el("label", { class: "switch", title: s.enabled ? "Enabled" : "Disabled" },
@@ -665,23 +793,67 @@ function openSocketModal(existing = null) {
 // ---------- Schedule modal ----------
 function openScheduleModal(existing = null) {
     const isEdit = !!existing;
-    if (state.sockets.length === 0) {
-        toasts.warn("No sockets", "Add a socket before creating schedules.");
+    if (state.sockets.length === 0 && state.groups.length === 0 && state.scenes.length === 0) {
+        toasts.warn("Nothing to schedule", "Add a socket, group, or scene first.");
         return;
     }
 
-    const socketSel = el("select", { required: true },
-        ...state.sockets.map(s => {
-            const opt = el("option", { value: s.id }, `${s.name}${s.room ? ` · ${s.room}` : ""}`);
-            if (existing?.socket_id === s.id) opt.selected = true;
-            return opt;
-        }),
-    );
-    const actionSel = el("select", { required: true },
-        el("option", { value: "on" }, "Turn ON"),
-        el("option", { value: "off" }, "Turn OFF"),
-    );
-    actionSel.value = existing?.action || "on";
+    // Initial target type: prefer existing target_type, else fall back to
+    // socket_id, else first available kind.
+    const initialType = existing?.target_type
+        || (existing?.socket_id ? "socket" : null)
+        || (state.sockets.length ? "socket" : state.groups.length ? "group" : "scene");
+
+    const targetTypeSeg = renderSegmented("schedule-target-type", initialType, [
+        { value: "socket", label: "Socket", disabled: state.sockets.length === 0 },
+        { value: "group",  label: "Group",  disabled: state.groups.length === 0 },
+        { value: "scene",  label: "Scene",  disabled: state.scenes.length === 0 },
+    ]);
+
+    const targetSel = el("select", { required: true });
+    const actionSel = el("select", { required: true });
+    const actionField = field("Action", actionSel);
+
+    function rebuildTarget() {
+        const tt = $("input:checked", targetTypeSeg).value;
+        targetSel.innerHTML = "";
+        if (tt === "socket") {
+            for (const s of state.sockets) {
+                targetSel.appendChild(el("option", { value: s.id }, `${s.name}${s.room ? ` · ${s.room}` : ""}`));
+            }
+        } else if (tt === "group") {
+            for (const g of state.groups) {
+                targetSel.appendChild(el("option", { value: g.id }, `${g.name} · ${g.socket_ids.length} sockets`));
+            }
+        } else {
+            for (const sc of state.scenes) {
+                targetSel.appendChild(el("option", { value: sc.id }, `${sc.name} · ${sc.actions.length} actions`));
+            }
+        }
+        const wantId = existing?.target_id || existing?.socket_id;
+        if (wantId && targetSel.querySelector(`option[value="${CSS.escape(wantId)}"]`)) {
+            targetSel.value = wantId;
+        }
+
+        // Action options depend on target type. Scenes have no choice — they
+        // always activate.
+        actionSel.innerHTML = "";
+        if (tt === "scene") {
+            actionSel.appendChild(el("option", { value: "activate" }, "Activate"));
+            actionField.style.opacity = "0.6";
+            actionSel.disabled = true;
+        } else {
+            actionSel.appendChild(el("option", { value: "on" }, "Turn ON"));
+            actionSel.appendChild(el("option", { value: "off" }, "Turn OFF"));
+            actionSel.appendChild(el("option", { value: "toggle" }, "Toggle"));
+            actionField.style.opacity = "1";
+            actionSel.disabled = false;
+            actionSel.value = (existing?.action && ["on","off","toggle"].includes(existing.action))
+                ? existing.action : "on";
+        }
+    }
+    for (const r of $$("input", targetTypeSeg)) r.addEventListener("change", rebuildTarget);
+    rebuildTarget();
 
     const timeInput = el("input", {
         type: "time", required: true,
@@ -730,9 +902,10 @@ function openScheduleModal(existing = null) {
     );
 
     const body = el("form", { onsubmit: e => { e.preventDefault(); save(); } },
+        field("Target type", targetTypeSeg),
         el("div", { class: "field-row" },
-            field("Socket", socketSel),
-            field("Action", actionSel),
+            field("Target", targetSel),
+            actionField,
         ),
         field("Time", timeInput, "24-hour HH:MM in the server's local time."),
         field("Days", el("div", null, dayPicker, presets), "Leave empty to fire every day."),
@@ -741,13 +914,19 @@ function openScheduleModal(existing = null) {
 
     async function save() {
         const days = [...selectedDays].sort((a, b) => a - b);
+        const tt = $("input:checked", targetTypeSeg).value;
         const payload = {
-            socket_id: socketSel.value,
+            target_type: tt,
+            target_id: targetSel.value,
             action: actionSel.value,
             time: timeInput.value,
             days,
             enabled: enabledCb.checked,
         };
+        if (!payload.target_id) {
+            toasts.warn("Missing target", "Pick something to schedule.");
+            return;
+        }
         if (!payload.time) {
             toasts.warn("Missing time", "Please pick a time.");
             return;
@@ -798,6 +977,7 @@ function iconSVG(name) {
     path.setAttribute("d", {
         edit:  "M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 000-1.41l-2.34-2.34a1 1 0 00-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z",
         trash: "M6 19a2 2 0 002 2h8a2 2 0 002-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z",
+        timer: "M15 1H9v2h6V1zm-4 13h2V8h-2v6zm8.03-6.61l1.42-1.42a10 10 0 00-1.41-1.41l-1.42 1.42A8 8 0 0012 4a8 8 0 100 16 8 8 0 007.03-12.61z",
     }[name]);
     svg.appendChild(path);
     return svg;
@@ -822,6 +1002,388 @@ function withConfirm(opts, run) {
             toasts.error("Action failed", e.message || String(e));
         }
     });
+}
+
+// ---------- Group rendering & modal ----------
+function renderGroupCard(g) {
+    const memberChips = g.socket_ids.map(id => {
+        const s = socketById(id);
+        return el("span", { class: "member-chip" }, s ? s.name : `(missing: ${id})`);
+    });
+    return el("article", { class: "entity-card" },
+        el("div", { class: "entity-head" },
+            el("div", { class: "entity-name" }, g.name),
+            el("div", { class: "entity-meta" }, `${g.socket_ids.length} socket${g.socket_ids.length === 1 ? "" : "s"}`),
+            el("div", { class: "entity-members" }, ...memberChips),
+        ),
+        el("div", { class: "entity-actions" },
+            el("button", { class: "btn btn-success", onclick: () => action(() => api.groupAction(g.id, "on"), `${g.name} on`) }, "On"),
+            el("button", { class: "btn btn-danger", onclick: () => action(() => api.groupAction(g.id, "off"), `${g.name} off`) }, "Off"),
+            el("button", { class: "btn", onclick: () => action(() => api.groupAction(g.id, "toggle"), `${g.name} toggled`) }, "Toggle"),
+            el("button", { class: "icon-btn", "aria-label": "Edit", onclick: () => openGroupModal(g) }, iconSVG("edit")),
+            el("button", {
+                class: "icon-btn danger",
+                "aria-label": "Delete",
+                onclick: () => withConfirm({
+                    title: "Delete group?",
+                    message: `“${g.name}” and any schedules pointing at it will be removed. The sockets themselves are not affected.`,
+                    confirmLabel: "Delete",
+                    danger: true,
+                }, async () => {
+                    await api.deleteGroup(g.id);
+                    toasts.success("Group deleted", g.name);
+                    await loadAll();
+                }),
+            }, iconSVG("trash")),
+        ),
+    );
+}
+
+function openGroupModal(existing = null) {
+    const isEdit = !!existing;
+    if (state.sockets.length === 0) {
+        toasts.warn("No sockets", "Add a socket before creating a group.");
+        return;
+    }
+    const nameField = field("Name", el("input", {
+        type: "text", required: true, autocomplete: "off",
+        placeholder: "e.g. Living room lights",
+        value: existing?.name || "",
+    }));
+    const selectedIds = new Set(existing?.socket_ids || []);
+    const picker = el("div", { class: "member-picker", role: "group", "aria-label": "Members" });
+    const sortedSockets = [...state.sockets].sort((a, b) => {
+        const ar = (a.room || "").toLowerCase(), br = (b.room || "").toLowerCase();
+        if (ar !== br) return ar.localeCompare(br);
+        return a.name.localeCompare(b.name);
+    });
+    for (const s of sortedSockets) {
+        const cb = el("input", { type: "checkbox" });
+        cb.checked = selectedIds.has(s.id);
+        cb.addEventListener("change", () => {
+            if (cb.checked) selectedIds.add(s.id); else selectedIds.delete(s.id);
+        });
+        picker.appendChild(el("label", { class: "member-picker-row" },
+            cb,
+            el("div", null,
+                el("div", null, s.name),
+                el("div", { class: "field-help" }, s.room || "Unassigned"),
+            ),
+            el("span", { class: "meta" }, s.code),
+        ));
+    }
+    const membersField = field(
+        `Members (${state.sockets.length} sockets)`,
+        picker,
+        "Toggle the sockets that belong to this group.",
+    );
+
+    const body = el("form", { onsubmit: e => { e.preventDefault(); save(); } },
+        nameField, membersField,
+    );
+
+    async function save() {
+        const payload = {
+            name: $("input", nameField).value.trim(),
+            socket_ids: [...selectedIds],
+        };
+        if (!payload.name) {
+            toasts.warn("Missing name", "Give the group a name.");
+            return;
+        }
+        try {
+            if (isEdit) {
+                await api.updateGroup(existing.id, payload);
+                toasts.success("Group updated", payload.name);
+            } else {
+                await api.createGroup(payload);
+                toasts.success("Group created", payload.name);
+            }
+            modal.close();
+            await loadAll();
+        } catch (e) {
+            toasts.error("Save failed", e.message);
+        }
+    }
+
+    modal.open({
+        title: isEdit ? "Edit group" : "New group",
+        subtitle: "Groups let you control multiple sockets in one tap.",
+        body,
+        actions: [
+            { label: "Cancel", class: "btn-ghost", onClick: () => modal.close() },
+            { label: isEdit ? "Save" : "Create group", class: "btn-primary", onClick: save },
+        ],
+    });
+}
+
+// ---------- Scene rendering & modal ----------
+function renderSceneTile(sc) {
+    return el("button", {
+        class: "scene-tile",
+        type: "button",
+        onclick: () => action(() => api.activateScene(sc.id), `Scene activated: ${sc.name}`),
+    },
+        el("div", { class: "scene-tile-name" }, sc.name),
+        el("div", { class: "scene-tile-meta" }, `${sc.actions.length} action${sc.actions.length === 1 ? "" : "s"}`),
+    );
+}
+
+function renderSceneCard(sc) {
+    const chips = sc.actions.map(a => {
+        const socket = socketById(a.socket_id);
+        const label = socket ? socket.name : `(missing)`;
+        return el("span", { class: "member-chip", dataset: { action: a.action } },
+            `${label} → ${a.action.toUpperCase()}`);
+    });
+    return el("article", { class: "entity-card" },
+        el("div", { class: "entity-head" },
+            el("div", { class: "entity-name" }, sc.name),
+            el("div", { class: "entity-meta" }, `${sc.actions.length} action${sc.actions.length === 1 ? "" : "s"}`),
+            el("div", { class: "entity-members" }, ...chips),
+        ),
+        el("div", { class: "entity-actions" },
+            el("button", {
+                class: "btn btn-primary",
+                onclick: () => action(() => api.activateScene(sc.id), `Scene activated: ${sc.name}`),
+            }, "Activate"),
+            el("button", { class: "icon-btn", "aria-label": "Edit", onclick: () => openSceneModal(sc) }, iconSVG("edit")),
+            el("button", {
+                class: "icon-btn danger",
+                "aria-label": "Delete",
+                onclick: () => withConfirm({
+                    title: "Delete scene?",
+                    message: `“${sc.name}” and any schedules pointing at it will be removed.`,
+                    confirmLabel: "Delete",
+                    danger: true,
+                }, async () => {
+                    await api.deleteScene(sc.id);
+                    toasts.success("Scene deleted", sc.name);
+                    await loadAll();
+                }),
+            }, iconSVG("trash")),
+        ),
+    );
+}
+
+function openSceneModal(existing = null) {
+    const isEdit = !!existing;
+    if (state.sockets.length === 0) {
+        toasts.warn("No sockets", "Add a socket before creating a scene.");
+        return;
+    }
+    const nameField = field("Name", el("input", {
+        type: "text", required: true, autocomplete: "off",
+        placeholder: "e.g. Movie night",
+        value: existing?.name || "",
+    }));
+
+    // Map socketId -> "ignore" | "on" | "off"
+    const initial = new Map();
+    if (existing) for (const a of existing.actions) initial.set(a.socket_id, a.action);
+
+    const picker = el("div", { class: "member-picker", role: "group", "aria-label": "Scene actions" });
+    const sortedSockets = [...state.sockets].sort((a, b) => {
+        const ar = (a.room || "").toLowerCase(), br = (b.room || "").toLowerCase();
+        if (ar !== br) return ar.localeCompare(br);
+        return a.name.localeCompare(b.name);
+    });
+    const rowSelects = new Map();
+    for (const s of sortedSockets) {
+        const sel = el("select", null,
+            el("option", { value: "ignore" }, "Ignore"),
+            el("option", { value: "on" }, "Turn on"),
+            el("option", { value: "off" }, "Turn off"),
+        );
+        sel.value = initial.get(s.id) || "ignore";
+        rowSelects.set(s.id, sel);
+        picker.appendChild(el("div", { class: "member-picker-row" },
+            el("div", null,
+                el("div", null, s.name),
+                el("div", { class: "field-help" }, s.room || "Unassigned"),
+            ),
+            sel,
+        ));
+    }
+    const membersField = field(
+        "Per-socket actions",
+        picker,
+        "Set each socket to On, Off, or Ignore. Ignored sockets are not touched when the scene runs.",
+    );
+
+    const body = el("form", { onsubmit: e => { e.preventDefault(); save(); } },
+        nameField, membersField,
+    );
+
+    async function save() {
+        const actions = [];
+        for (const [sid, sel] of rowSelects) {
+            if (sel.value !== "ignore") actions.push({ socket_id: sid, action: sel.value });
+        }
+        const payload = {
+            name: $("input", nameField).value.trim(),
+            actions,
+        };
+        if (!payload.name) {
+            toasts.warn("Missing name", "Give the scene a name.");
+            return;
+        }
+        if (actions.length === 0) {
+            toasts.warn("No actions", "Set at least one socket to On or Off.");
+            return;
+        }
+        try {
+            if (isEdit) {
+                await api.updateScene(existing.id, payload);
+                toasts.success("Scene updated", payload.name);
+            } else {
+                await api.createScene(payload);
+                toasts.success("Scene created", payload.name);
+            }
+            modal.close();
+            await loadAll();
+        } catch (e) {
+            toasts.error("Save failed", e.message);
+        }
+    }
+
+    modal.open({
+        title: isEdit ? "Edit scene" : "New scene",
+        subtitle: "A scene drives selected sockets to specific states in one tap.",
+        body,
+        actions: [
+            { label: "Cancel", class: "btn-ghost", onClick: () => modal.close() },
+            { label: isEdit ? "Save" : "Create scene", class: "btn-primary", onClick: save },
+        ],
+    });
+}
+
+// ---------- Timer modal & rendering ----------
+function renderTimerRow(t) {
+    const target = describeTarget(t.target_type, t.target_id);
+    const firesAt = new Date(t.fires_at);
+    const countdownEl = el("span", { class: "countdown" }, formatCountdown(firesAt));
+    // Live tick — update once per second while this node is in the DOM.
+    const interval = setInterval(() => {
+        if (!countdownEl.isConnected) {
+            clearInterval(interval);
+            return;
+        }
+        countdownEl.textContent = formatCountdown(firesAt);
+    }, 1000);
+
+    return el("div", { class: "timer-row" },
+        el("span", { class: "schedule-action", dataset: { action: t.action === "on" ? "on" : "off" } },
+            t.action),
+        el("div", null,
+            el("div", null, `${target.kind}: ${target.label}`),
+            el("div", { class: "field-help" }, firesAt.toLocaleString()),
+        ),
+        countdownEl,
+        el("button", {
+            class: "icon-btn danger",
+            "aria-label": "Cancel timer",
+            onclick: async () => {
+                try {
+                    await api.deleteTimer(t.id);
+                    toasts.success("Timer cancelled");
+                    await loadAll();
+                } catch (e) { toasts.error("Failed", e.message); }
+            },
+        }, iconSVG("trash")),
+    );
+}
+
+function formatCountdown(when) {
+    const ms = when.getTime() - Date.now();
+    if (ms <= 0) return "now";
+    const s = Math.floor(ms / 1000);
+    if (s < 60) return `${s}s`;
+    const m = Math.floor(s / 60);
+    if (m < 60) return `${m}m ${s % 60}s`;
+    const h = Math.floor(m / 60);
+    return `${h}h ${m % 60}m`;
+}
+
+function openTimerModal(socket) {
+    const presets = [
+        { label: "1 min",  seconds: 60 },
+        { label: "15 min", seconds: 15 * 60 },
+        { label: "30 min", seconds: 30 * 60 },
+        { label: "1 hour", seconds: 60 * 60 },
+        { label: "2 hours", seconds: 2 * 60 * 60 },
+        { label: "4 hours", seconds: 4 * 60 * 60 },
+    ];
+
+    const actionSeg = renderSegmented("timer-action", "off", [
+        { value: "off", label: "Turn off" },
+        { value: "on",  label: "Turn on" },
+        { value: "toggle", label: "Toggle" },
+    ]);
+
+    const customMins = el("input", { type: "number", min: "1", placeholder: "Minutes", style: "max-width:160px" });
+
+    const body = el("form", { onsubmit: e => { e.preventDefault(); submitCustom(); } },
+        field("Action", actionSeg),
+        field("Quick presets", el("div", { class: "preset-row" },
+            ...presets.map(p => el("button", {
+                type: "button",
+                class: "btn btn-secondary",
+                onclick: () => fire(p.seconds, p.label),
+            }, p.label))),
+            "Click a preset to set the timer immediately.",
+        ),
+        field("Custom", el("div", { style: "display:flex; gap:8px; align-items:center" },
+            customMins,
+            el("button", { type: "submit", class: "btn btn-primary" }, "Set custom timer"),
+        ), "Pick any number of minutes."),
+    );
+
+    async function fire(seconds, label) {
+        const action = $("input:checked", actionSeg).value;
+        try {
+            await api.socketTimer(socket.id, { action, in_seconds: seconds, note: `Quick: ${label}` });
+            toasts.success("Timer set", `${socket.name}: ${action} in ${label}`);
+            modal.close();
+            await loadAll();
+        } catch (e) { toasts.error("Failed", e.message); }
+    }
+    function submitCustom() {
+        const mins = parseInt(customMins.value, 10);
+        if (!Number.isFinite(mins) || mins <= 0) {
+            toasts.warn("Pick a duration", "Enter a positive number of minutes.");
+            return;
+        }
+        fire(mins * 60, `${mins} min`);
+    }
+
+    modal.open({
+        title: `Set a timer · ${socket.name}`,
+        subtitle: "Schedules a one-shot action and removes itself once it fires.",
+        body,
+        actions: [
+            { label: "Close", class: "btn-ghost", onClick: () => modal.close() },
+        ],
+    });
+}
+
+// ---------- Segmented control helper ----------
+function renderSegmented(name, defaultValue, options) {
+    const container = el("div", { class: "segmented", role: "radiogroup" });
+    for (const opt of options) {
+        const id = `${name}_${opt.value}`;
+        const input = el("input", { type: "radio", name, id, value: opt.value, disabled: opt.disabled || false });
+        if (opt.value === defaultValue) input.checked = true;
+        const label = el("label", { for: id, "aria-disabled": opt.disabled ? "true" : null }, opt.label);
+        if (opt.disabled) label.style.opacity = "0.4";
+        container.append(input, label);
+    }
+    // If the default was disabled, pick the first enabled one.
+    if (!container.querySelector("input:checked")) {
+        const first = container.querySelector("input:not([disabled])");
+        if (first) first.checked = true;
+    }
+    return container;
 }
 
 // ---------- Routing ----------
