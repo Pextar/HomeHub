@@ -9,3 +9,7 @@ build/
 config.yaml
 config.json
 
+# Persistent runtime state and compiled binary
+backend/data/
+backend/rf-controller
+
