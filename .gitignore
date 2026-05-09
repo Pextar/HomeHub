@@ -13,3 +13,10 @@ config.json
 backend/data/
 backend/rf-controller
 
+# Frontend tooling
+frontend/node_modules/
+frontend/dist/
+frontend/dev-dist/
+frontend/.vite/
+frontend/stats.html
+
