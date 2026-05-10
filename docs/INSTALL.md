@@ -43,48 +43,66 @@ sudo apt-get install wiringpi
 
 ## Software Installation
 
-### 1. Clone Repository
+### Recommended: cross-compile from your laptop
+
+For a 64-bit Pi (Pi 3/4/5 on 64-bit Pi OS or Ubuntu) you do NOT need Go or
+Node on the Pi. Build a release locally and rsync it over SSH:
 
 ```bash
 git clone https://github.com/Pextar/rf-socket-controller.git
 cd rf-socket-controller
+
+# 1. Build a release into dist/release/  (binary + frontend + systemd unit)
+scripts/build-pi.sh
+#    For 32-bit Pi OS / Pi Zero/1/2: GOARCH=arm GOARM=7 scripts/build-pi.sh
+
+# 2. Deploy over SSH (defaults to pi@raspberrypi.local)
+scripts/deploy-pi.sh                  # or: scripts/deploy-pi.sh pi@192.168.1.42
 ```
 
-### 2. Build the frontend (Svelte + Vite + PWA)
+`scripts/deploy-pi.sh` does the following on the Pi:
 
-The web UI is a Svelte 5 app compiled to static files served by the Go
-backend. Node.js 18+ is required at build time only.
+- rsyncs the binary and `frontend/dist/` to `~/rf-socket-controller/`,
+- seeds `.env` from `env.example` on first run (never overwrites an
+  existing `.env`),
+- installs `rf-controller.service` into `/etc/systemd/system/`, then
+  `daemon-reload` + `enable` + `restart`.
+
+After the first deploy, set credentials and (optionally) the port:
 
 ```bash
-cd frontend
-npm install
-npm run build
-cd ..
+ssh pi@raspberrypi.local 'nano ~/rf-socket-controller/.env \
+  && sudo systemctl restart rf-controller'
 ```
 
-This produces `frontend/dist/`, which the Go server serves.
+The systemd unit assumes the SSH user is `pi`; if not, edit
+`deploy/rf-controller.service` (User= and the WorkingDirectory paths)
+before `scripts/build-pi.sh`.
 
-### 3. Build Backend
+### Authentication
+
+The server reads `AUTH_USER` and `AUTH_PASS` from the environment. When
+both are set, every HTTP request requires HTTP Basic Auth — browsers
+prompt once and remember credentials for the session, and the PWA install
+keeps working. Leave both blank to disable auth (NOT recommended on
+shared networks).
+
+### Build on the Pi instead (alternative)
+
+Only if you would rather not cross-compile — Node 18+ and Go 1.21+ are
+required on the Pi:
 
 ```bash
-cd backend
-go mod tidy
-go build -o rf-controller
+cd frontend && npm install && npm run build && cd ..
+cd backend  && go build -o rf-controller && cd ..
+AUTH_USER=admin AUTH_PASS=secret PORT=8080 ./backend/rf-controller
 ```
 
-### 4. Run
+### Access the web UI
 
-```bash
-./rf-controller
-# Or with a custom port:
-PORT=3000 ./rf-controller
-```
+Open `http://raspberrypi.local:8080` (or `http://<pi-ip>:8080`).
 
-### 5. Access Web Interface
-
-Open browser to: `http://raspberry-pi-ip:8080`
-
-The page is also a Progressive Web App: on Chrome / Safari you can use
+The page is also a Progressive Web App: on Chrome / Safari use
 "Install" / "Add to Home Screen" to get an installable shortcut that
 works offline (the shell loads even without network — controlling
 sockets still requires the Pi to be reachable).
@@ -128,33 +146,15 @@ Data is stored in `./data/` directory:
 - `sockets.json` - Socket configurations
 - `schedules.json` - Timer schedules
 
-## Autostart (Optional)
+## Autostart
 
-Create systemd service:
+`scripts/deploy-pi.sh` installs `deploy/rf-controller.service` for you.
+If you ever need to reinstall by hand:
 
 ```bash
-sudo nano /etc/systemd/system/rf-controller.service
-```
-
-Add:
-```ini
-[Unit]
-Description=RF Socket Controller
-After=network.target
-
-[Service]
-Type=simple
-User=pi
-WorkingDirectory=/home/pi/rf-socket-controller/backend
-ExecStart=/home/pi/rf-socket-controller/backend/rf-controller
-Restart=on-failure
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Enable:
-```bash
-sudo systemctl enable rf-controller
-sudo systemctl start rf-controller
+sudo install -m 644 ~/rf-socket-controller/rf-controller.service \
+  /etc/systemd/system/rf-controller.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now rf-controller
+journalctl -u rf-controller -f
 ```
