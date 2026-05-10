@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -106,6 +107,15 @@ func main() {
 
 	r := mux.NewRouter()
 	r.Use(loggingMiddleware)
+
+	authUser := os.Getenv("AUTH_USER")
+	authPass := os.Getenv("AUTH_PASS")
+	if authUser != "" && authPass != "" {
+		r.Use(basicAuthMiddleware(authUser, authPass))
+		log.Printf("HTTP basic auth enabled for user %q", authUser)
+	} else {
+		log.Printf("HTTP basic auth DISABLED — set AUTH_USER and AUTH_PASS to enable")
+	}
 
 	api := r.PathPrefix("/api").Subrouter()
 	api.HandleFunc("/health", getHealth).Methods("GET")
@@ -229,6 +239,32 @@ func spaHandler(dir string) http.Handler {
 		// Fallback: serve the SPA shell.
 		http.ServeFile(w, r, indexPath)
 	})
+}
+
+// basicAuthMiddleware gates the whole app behind HTTP basic auth. It is only
+// installed when both AUTH_USER and AUTH_PASS are non-empty. Comparison uses
+// constant-time to avoid leaking the credentials via timing. CORS preflight
+// (OPTIONS) is allowed through so browsers can negotiate cross-origin in dev.
+func basicAuthMiddleware(user, pass string) mux.MiddlewareFunc {
+	expectUser := []byte(user)
+	expectPass := []byte(pass)
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodOptions {
+				next.ServeHTTP(w, r)
+				return
+			}
+			u, p, ok := r.BasicAuth()
+			if !ok ||
+				subtle.ConstantTimeCompare([]byte(u), expectUser) != 1 ||
+				subtle.ConstantTimeCompare([]byte(p), expectPass) != 1 {
+				w.Header().Set("WWW-Authenticate", `Basic realm="rf-socket-controller", charset="UTF-8"`)
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 // loggingMiddleware logs each request's method, path, status and duration.

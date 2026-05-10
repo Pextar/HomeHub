@@ -1,0 +1,23 @@
+[Unit]
+Description=RF Socket Controller
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/rf-socket-controller
+EnvironmentFile=-/home/pi/rf-socket-controller/.env
+ExecStart=/home/pi/rf-socket-controller/rf-controller
+Restart=on-failure
+RestartSec=5
+
+# Hardening — relax these if you need broader access.
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/home/pi/rf-socket-controller/data
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
