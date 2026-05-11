@@ -2,19 +2,20 @@
     import Modal from "../components/Modal.svelte";
     import { closeModal } from "../lib/modal.svelte";
     import { api } from "../lib/api";
-    import { toasts, data } from "../lib/stores";
+    import { toasts, data } from "../lib/stores.svelte";
     import { PROTOCOLS } from "../lib/utils";
+    import { untrack } from "svelte";
     import type { Socket } from "../lib/types";
 
     interface Props { existing?: Socket | null; }
     let { existing = null }: Props = $props();
 
-    let name = $state(existing?.name ?? "");
-    let room = $state(existing?.room ?? "");
-    let code = $state(existing?.code ?? "");
-    let protocol = $state(existing?.protocol || "nexa");
+    let name = $state(untrack(() => existing?.name ?? ""));
+    let room = $state(untrack(() => existing?.room ?? ""));
+    let code = $state(untrack(() => existing?.code ?? ""));
+    let protocol = $state(untrack(() => existing?.protocol || "nexa"));
 
-    const isEdit = !!existing;
+    const isEdit = $derived(!!existing);
 
     async function save() {
         const payload = {

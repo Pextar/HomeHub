@@ -2,23 +2,26 @@
     import Modal from "../components/Modal.svelte";
     import { closeModal } from "../lib/modal.svelte";
     import { api } from "../lib/api";
-    import { data, toasts } from "../lib/stores";
+    import { data, toasts } from "../lib/stores.svelte";
     import { sortedSockets } from "../lib/utils";
+    import { untrack } from "svelte";
     import type { Scene } from "../lib/types";
 
     interface Props { existing?: Scene | null; }
     let { existing = null }: Props = $props();
-    const isEdit = !!existing;
+    const isEdit = $derived(!!existing);
 
     const sockets = $derived(sortedSockets(data.value.sockets));
 
-    // Map socket_id -> "ignore" | "on" | "off"
-    const initial = new Map<string, "ignore" | "on" | "off">();
-    if (existing) for (const a of existing.actions) initial.set(a.socket_id, a.action);
+    const initial = untrack(() => {
+        const m = new Map<string, "ignore" | "on" | "off">();
+        if (existing) for (const a of existing.actions) m.set(a.socket_id, a.action);
+        return m;
+    });
 
-    let name = $state(existing?.name ?? "");
+    let name = $state(untrack(() => existing?.name ?? ""));
     let perSocket = $state<Record<string, "ignore" | "on" | "off">>(
-        Object.fromEntries(sockets.map(s => [s.id, initial.get(s.id) ?? "ignore"]))
+        untrack(() => Object.fromEntries(sockets.map(s => [s.id, initial.get(s.id) ?? "ignore"])))
     );
 
     async function save() {
@@ -60,7 +63,7 @@
                     placeholder="e.g. Movie night" autocomplete="off" required />
             </div>
             <div class="field" style="margin-top:var(--space-4)">
-                <label>Per-socket actions</label>
+                <span class="field-label">Per-socket actions</span>
                 <div class="picker">
                     {#each sockets as s (s.id)}
                         <div class="picker-row">

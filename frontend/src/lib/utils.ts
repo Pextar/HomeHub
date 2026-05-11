@@ -1,5 +1,5 @@
 import type { Group, Scene, Schedule, Socket, Timer } from "./types";
-import { data, toasts } from "./stores";
+import { data, toasts } from "./stores.svelte";
 
 export const DAY_SHORT = ["S", "M", "T", "W", "T", "F", "S"];
 export const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];

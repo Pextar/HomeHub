@@ -1,6 +1,6 @@
 <script lang="ts">
     import Icon from "./Icon.svelte";
-    import { route, theme, data } from "../lib/stores";
+    import { route, theme, data } from "../lib/stores.svelte";
     import type { Route } from "../lib/types";
 
     const items: { route: Route; icon: any; label: string }[] = [
@@ -138,25 +138,52 @@
 
     @media (max-width: 900px) {
         .sidebar {
-            position: static;
+            position: fixed;
+            bottom: 0; left: 0; right: 0;
+            top: auto;
             height: auto;
             flex-direction: row;
-            align-items: center;
-            gap: var(--space-3);
-            padding: var(--space-3) var(--space-4);
-            overflow-x: auto;
+            align-items: stretch;
+            border-right: none;
+            border-top: 1px solid var(--border);
+            padding: 0;
+            padding-bottom: env(safe-area-inset-bottom);
+            z-index: 100;
+            gap: 0;
         }
-        .brand { padding: 0; border: 0; margin: 0; flex-shrink: 0; }
-        .nav { flex-direction: row; gap: 4px; }
+        .brand { display: none; }
+        .nav { flex-direction: row; flex: 1; gap: 0; }
+        .nav-item {
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 3px;
+            padding: 8px 4px;
+            border-radius: 0;
+            font-size: 11px;
+            flex: 1;
+            min-height: 52px;
+        }
         .footer {
             flex-direction: row;
-            align-items: center;
+            align-items: stretch;
             margin-top: 0;
-            margin-left: auto;
+            margin-left: 0;
             border-top: 0;
             padding-top: 0;
-            gap: var(--space-2);
+            gap: 0;
         }
         .health { display: none; }
+        .theme-toggle {
+            flex-direction: column;
+            gap: 3px;
+            padding: 8px var(--space-2);
+            border: none;
+            border-radius: 0;
+            font-size: 11px;
+            min-width: 52px;
+            min-height: 52px;
+            justify-content: center;
+        }
     }
 </style>

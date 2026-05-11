@@ -2,17 +2,18 @@
     import Modal from "../components/Modal.svelte";
     import { closeModal } from "../lib/modal.svelte";
     import { api } from "../lib/api";
-    import { data, toasts } from "../lib/stores";
+    import { data, toasts } from "../lib/stores.svelte";
     import { sortedSockets } from "../lib/utils";
+    import { untrack } from "svelte";
     import type { Group } from "../lib/types";
 
     interface Props { existing?: Group | null; }
     let { existing = null }: Props = $props();
-    const isEdit = !!existing;
+    const isEdit = $derived(!!existing);
 
     const sockets = $derived(sortedSockets(data.value.sockets));
-    let name = $state(existing?.name ?? "");
-    let selected = $state(new Set(existing?.socket_ids ?? []));
+    let name = $state(untrack(() => existing?.name ?? ""));
+    let selected = $state(untrack(() => new Set(existing?.socket_ids ?? [])));
 
     function toggle(id: string) {
         if (selected.has(id)) selected.delete(id);
@@ -51,7 +52,7 @@
                     placeholder="e.g. Living room lights" autocomplete="off" required />
             </div>
             <div class="field" style="margin-top:var(--space-4)">
-                <label>Members ({sockets.length} sockets)</label>
+                <span class="field-label">Members ({sockets.length} sockets)</span>
                 <div class="picker">
                     {#each sockets as s (s.id)}
                         <label class="picker-row">

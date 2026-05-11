@@ -114,4 +114,22 @@
         padding-top: var(--space-4);
         margin-top: var(--space-2);
     }
+
+    @media (max-width: 600px) {
+        .root { align-items: flex-end; padding: 0; }
+        .dialog {
+            max-width: 100% !important;
+            border-bottom-left-radius: 0;
+            border-bottom-right-radius: 0;
+            max-height: 92vh;
+            padding: var(--space-4);
+            animation-name: slide-up;
+        }
+        @keyframes slide-up {
+            from { opacity: 0; transform: translateY(40px); }
+            to   { opacity: 1; transform: none; }
+        }
+        .actions { flex-direction: column; }
+        .actions :global(.btn) { width: 100%; justify-content: center; }
+    }
 </style>

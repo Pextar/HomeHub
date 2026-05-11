@@ -8,7 +8,7 @@
     import Schedules from "./views/Schedules.svelte";
     import Groups from "./views/Groups.svelte";
     import Scenes from "./views/Scenes.svelte";
-    import { data, route, toasts } from "./lib/stores";
+    import { data, route, toasts } from "./lib/stores.svelte";
     import type { Route } from "./lib/types";
 
     // PWA service-worker auto-update via vite-plugin-pwa.
@@ -74,6 +74,9 @@
     }
     @media (max-width: 900px) {
         .app { grid-template-columns: 1fr; }
-        .main { padding: var(--space-5); }
+        .main {
+            padding: var(--space-4);
+            padding-bottom: calc(var(--space-4) + 60px + env(safe-area-inset-bottom));
+        }
     }
 </style>

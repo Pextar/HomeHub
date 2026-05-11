@@ -4,7 +4,7 @@
     import EntityCard from "../components/EntityCard.svelte";
     import Icon from "../components/Icon.svelte";
     import { api } from "../lib/api";
-    import { data, toasts } from "../lib/stores";
+    import { data, toasts } from "../lib/stores.svelte";
     import { runAction } from "../lib/utils";
     import { openModal } from "../lib/modal.svelte";
     import GroupModal from "../modals/GroupModal.svelte";

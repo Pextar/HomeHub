@@ -5,26 +5,28 @@
     import Switch from "../components/Switch.svelte";
     import { closeModal } from "../lib/modal.svelte";
     import { api } from "../lib/api";
-    import { data, toasts } from "../lib/stores";
+    import { data, toasts } from "../lib/stores.svelte";
+    import { untrack } from "svelte";
     import type { Schedule, TargetType } from "../lib/types";
 
     interface Props { existing?: Schedule | null; }
     let { existing = null }: Props = $props();
-    const isEdit = !!existing;
+    const isEdit = $derived(!!existing);
 
     const v = data.value;
 
-    const initialType: TargetType =
+    const initialType: TargetType = untrack(() =>
         (existing?.target_type as TargetType | undefined)
         ?? (existing?.socket_id ? "socket" : null)
-        ?? (v.sockets.length ? "socket" : v.groups.length ? "group" : "scene");
+        ?? (v.sockets.length ? "socket" : v.groups.length ? "group" : "scene")
+    );
 
     let targetType = $state<string>(initialType);
-    let targetId = $state<string>(existing?.target_id || existing?.socket_id || "");
-    let action = $state<string>(existing?.action ?? "on");
-    let time = $state(existing?.time || "08:00");
-    let days = $state<number[]>([...(existing?.days ?? [])]);
-    let enabled = $state(existing ? existing.enabled : true);
+    let targetId = $state<string>(untrack(() => existing?.target_id || existing?.socket_id || ""));
+    let action = $state<string>(untrack(() => existing?.action ?? "on"));
+    let time = $state(untrack(() => existing?.time || "08:00"));
+    let days = $state<number[]>(untrack(() => [...(existing?.days ?? [])]));
+    let enabled = $state(untrack(() => existing ? existing.enabled : true));
 
     // Available targets for the current type, plus reset of selection /
     // action when switching type.
@@ -75,7 +77,7 @@
     {#snippet body()}
         <form onsubmit={(e) => { e.preventDefault(); save(); }}>
             <div class="field">
-                <label>Target type</label>
+                <span class="field-label">Target type</span>
                 <Segmented
                     name="sched-target-type"
                     bind:value={targetType}
@@ -114,7 +116,7 @@
                 <div class="field-help">24-hour HH:MM in the server's local time.</div>
             </div>
             <div class="field" style="margin-top:var(--space-4)">
-                <label>Days</label>
+                <span class="field-label">Days</span>
                 <DayPicker bind:days={days} />
                 <div class="field-help">Leave empty to fire every day.</div>
             </div>

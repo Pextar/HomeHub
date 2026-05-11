@@ -3,7 +3,7 @@
     import Segmented from "../components/Segmented.svelte";
     import { closeModal } from "../lib/modal.svelte";
     import { api } from "../lib/api";
-    import { data, toasts } from "../lib/stores";
+    import { data, toasts } from "../lib/stores.svelte";
     import type { Socket, SocketAction } from "../lib/types";
 
     interface Props { socket: Socket; }
@@ -50,7 +50,7 @@
     {#snippet body()}
         <form onsubmit={submitCustom}>
             <div class="field">
-                <label>Action</label>
+                <span class="field-label">Action</span>
                 <Segmented
                     name="timer-action"
                     bind:value={action}
@@ -62,7 +62,7 @@
                 />
             </div>
             <div class="field" style="margin-top:var(--space-4)">
-                <label>Quick presets</label>
+                <span class="field-label">Quick presets</span>
                 <div class="presets">
                     {#each presets as p}
                         <button type="button" class="btn btn-secondary"

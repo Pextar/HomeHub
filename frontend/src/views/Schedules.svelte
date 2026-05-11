@@ -2,7 +2,7 @@
     import Topbar from "../components/Topbar.svelte";
     import EmptyState from "../components/EmptyState.svelte";
     import ScheduleRow from "../components/ScheduleRow.svelte";
-    import { data } from "../lib/stores";
+    import { data } from "../lib/stores.svelte";
     import { openModal } from "../lib/modal.svelte";
     import ScheduleModal from "../modals/ScheduleModal.svelte";
 

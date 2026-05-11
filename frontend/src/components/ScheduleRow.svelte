@@ -4,7 +4,7 @@
     import { api } from "../lib/api";
     import { describeTarget, formatDays } from "../lib/utils";
     import { openModal } from "../lib/modal.svelte";
-    import { toasts, data } from "../lib/stores";
+    import { toasts, data } from "../lib/stores.svelte";
     import type { Schedule } from "../lib/types";
     import ScheduleModal from "../modals/ScheduleModal.svelte";
     import ConfirmModal from "./ConfirmModal.svelte";

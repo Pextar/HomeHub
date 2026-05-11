@@ -4,7 +4,7 @@
     import SocketCard from "../components/SocketCard.svelte";
     import EmptyState from "../components/EmptyState.svelte";
     import { api } from "../lib/api";
-    import { data, toasts } from "../lib/stores";
+    import { data, toasts } from "../lib/stores.svelte";
     import { groupSocketsByRoom, runAction } from "../lib/utils";
     import { openModal } from "../lib/modal.svelte";
     import SocketModal from "../modals/SocketModal.svelte";
@@ -54,7 +54,7 @@
             <Icon name="search" size={16} />
             <input type="search" placeholder="Search sockets…" bind:value={search} aria-label="Search sockets" />
         </div>
-        <select bind:value={roomFilter} aria-label="Filter by room" style="max-width:240px">
+        <select bind:value={roomFilter} aria-label="Filter by room" class="room-filter">
             <option value="">All rooms</option>
             {#each allRooms as r}
                 <option value={r}>{r}</option>
@@ -119,6 +119,13 @@
         color: var(--text);
     }
     .search input::placeholder { color: var(--text-faint); }
+    .room-filter { max-width: 200px; }
+
+    @media (max-width: 600px) {
+        .toolbar { flex-direction: column; align-items: stretch; }
+        .search { min-width: 0; }
+        .room-filter { max-width: none; }
+    }
 
     .room-section { display: flex; flex-direction: column; gap: var(--space-3); }
     .room-section + .room-section { margin-top: var(--space-6); }

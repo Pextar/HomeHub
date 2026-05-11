@@ -3,7 +3,7 @@
     import { api } from "../lib/api";
     import { runAction } from "../lib/utils";
     import { openModal } from "../lib/modal.svelte";
-    import { toasts, data } from "../lib/stores";
+    import { toasts, data } from "../lib/stores.svelte";
     import type { Socket } from "../lib/types";
     import SocketModal from "../modals/SocketModal.svelte";
     import TimerModal from "../modals/TimerModal.svelte";

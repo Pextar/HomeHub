@@ -189,7 +189,7 @@ select:focus-visible, input:focus-visible, textarea:focus-visible {
 
 .field { display: flex; flex-direction: column; gap: 6px; }
 .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); }
-.field label { font-size: 13px; color: var(--text-muted); }
+.field label, .field-label { font-size: 13px; color: var(--text-muted); }
 .field-help { font-size: 12px; color: var(--text-faint); }
 
 /* ---------- Cards ---------- */
@@ -254,6 +254,18 @@ select:focus-visible, input:focus-visible, textarea:focus-visible {
 @keyframes shimmer {
     0% { background-position: 200% 0; }
     100% { background-position: -200% 0; }
+}
+
+/* ---------- Mobile ---------- */
+@media (max-width: 600px) {
+    /* Stack side-by-side field pairs vertically */
+    .field-row { grid-template-columns: 1fr; }
+
+    /* Larger touch targets for form controls (aim for ~44px) */
+    select, input[type="text"], input[type="time"], input[type="number"],
+    input[type="search"], input[type="password"], textarea {
+        padding: 11px 12px;
+    }
 }
 
 /* Reduced motion */
