@@ -9,6 +9,10 @@
     import { openModal } from "../lib/modal.svelte";
     import SceneModal from "../modals/SceneModal.svelte";
     import ConfirmModal from "../components/ConfirmModal.svelte";
+    import { fly, scale } from "svelte/transition";
+    import { flip } from "svelte/animate";
+    import { cubicOut } from "svelte/easing";
+    import { dur, stagger } from "../lib/motion";
 
     const v = $derived(data.value);
 
@@ -51,7 +55,11 @@
     </EmptyState>
 {:else}
     <div class="list">
-        {#each v.scenes as sc (sc.id)}
+        {#each v.scenes as sc, i (sc.id)}
+            <div
+                animate:flip={{ duration: dur(280), easing: cubicOut }}
+                in:fly={{ y: 12, duration: dur(240), delay: stagger(i), easing: cubicOut }}
+                out:scale={{ start: 0.97, opacity: 0, duration: dur(160) }}>
             <EntityCard
                 name={sc.name}
                 meta="{sc.actions.length} action{sc.actions.length === 1 ? '' : 's'}"
@@ -72,6 +80,7 @@
                     </button>
                 {/snippet}
             </EntityCard>
+            </div>
         {/each}
     </div>
 {/if}

@@ -4,9 +4,12 @@
 package api
 
 import (
+	"crypto/subtle"
+	"encoding/base64"
 	"encoding/json"
 	"log"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/gorilla/handlers"
@@ -17,10 +20,11 @@ import (
 
 // Server wires HTTP handlers to a Store.
 type Server struct {
-	Store    *store.Store
-	AuthUser string
-	AuthPass string
-	SPADir   string // path to the built Svelte app (e.g. "./frontend/dist")
+	Store         *store.Store
+	AuthUser      string
+	AuthPass      string
+	SessionSecret []byte // HMAC key for cookie sessions; see LoadOrCreateSessionSecret
+	SPADir        string // path to the built Svelte app (e.g. "./frontend/dist")
 }
 
 // Handler returns the configured router with logging, optional basic
@@ -29,18 +33,27 @@ func (s *Server) Handler() http.Handler {
 	r := mux.NewRouter()
 	r.Use(loggingMiddleware)
 
-	if s.AuthUser != "" && s.AuthPass != "" {
-		r.Use(basicAuthMiddleware(s.AuthUser, s.AuthPass))
-		log.Printf("HTTP basic auth enabled for user %q", s.AuthUser)
+	authEnabled := s.AuthUser != "" && s.AuthPass != ""
+	if authEnabled {
+		log.Printf("HTTP auth enabled for user %q (cookie session + basic fallback)", s.AuthUser)
 	} else {
-		log.Printf("HTTP basic auth DISABLED — set AUTH_USER and AUTH_PASS to enable")
+		log.Printf("HTTP auth DISABLED — set AUTH_USER and AUTH_PASS to enable")
 	}
 
+	// Auth endpoints are public — the SPA needs to reach /api/login without
+	// being authenticated, and /api/logout just clears the cookie.
+	r.HandleFunc("/api/login", s.handleLogin).Methods("POST")
+	r.HandleFunc("/api/logout", s.handleLogout).Methods("POST")
+
 	api := r.PathPrefix("/api").Subrouter()
+	if authEnabled {
+		api.Use(authMiddleware(s.AuthUser, s.AuthPass, s.SessionSecret))
+	}
 	api.HandleFunc("/health", s.getHealth).Methods("GET")
 
 	api.HandleFunc("/sockets", s.getSockets).Methods("GET")
 	api.HandleFunc("/sockets", s.createSocket).Methods("POST")
+	api.HandleFunc("/sockets/learn", s.learnSocket).Methods("POST")
 	api.HandleFunc("/sockets/all/on", s.bulkSetState(true)).Methods("POST")
 	api.HandleFunc("/sockets/all/off", s.bulkSetState(false)).Methods("POST")
 	api.HandleFunc("/sockets/{id}", s.getSocket).Methods("GET")
@@ -80,6 +93,9 @@ func (s *Server) Handler() http.Handler {
 	api.HandleFunc("/timers", s.createTimer).Methods("POST")
 	api.HandleFunc("/timers/{id}", s.deleteTimer).Methods("DELETE")
 
+	api.HandleFunc("/activity", s.getActivity).Methods("GET")
+	api.HandleFunc("/shortcut-auth", s.getShortcutAuth).Methods("GET")
+
 	r.PathPrefix("/").Handler(spaHandler(s.SPADir))
 
 	cors := handlers.CORS(
@@ -102,6 +118,65 @@ func writeJSON(w http.ResponseWriter, status int, v interface{}) {
 // writeError responds with a JSON {"error": "..."} body.
 func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
+}
+
+// handleLogin verifies credentials and sets the session cookie. Empty
+// AUTH_USER/AUTH_PASS means "auth is off" — we still accept the call so
+// the frontend's flow works uniformly, but the cookie is meaningless.
+func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request")
+		return
+	}
+	if s.AuthUser != "" && s.AuthPass != "" {
+		if subtle.ConstantTimeCompare([]byte(body.Username), []byte(s.AuthUser)) != 1 ||
+			subtle.ConstantTimeCompare([]byte(body.Password), []byte(s.AuthPass)) != 1 {
+			writeError(w, http.StatusUnauthorized, "invalid credentials")
+			return
+		}
+	}
+	setSessionCookie(w, s.SessionSecret, body.Username)
+	writeJSON(w, http.StatusOK, map[string]string{"username": body.Username})
+}
+
+func (s *Server) handleLogout(w http.ResponseWriter, _ *http.Request) {
+	clearSessionCookie(w)
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// getShortcutAuth returns the HTTP Basic auth header value for the
+// configured credentials, so the frontend's "iOS Shortcuts" helper can
+// hand the user a ready-to-paste Authorization header.
+//
+// This sits behind authMiddleware, so only an already-authenticated
+// client can reach it — and it grants nothing the caller's session
+// cookie didn't already grant. Returns an empty header when auth is off.
+func (s *Server) getShortcutAuth(w http.ResponseWriter, _ *http.Request) {
+	header := ""
+	if s.AuthUser != "" && s.AuthPass != "" {
+		token := base64.StdEncoding.EncodeToString([]byte(s.AuthUser + ":" + s.AuthPass))
+		header = "Basic " + token
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"header": header})
+}
+
+// getActivity returns the most recent activity log entries (newest first).
+// Supports ?limit=N (default 50, max 200).
+func (s *Server) getActivity(w http.ResponseWriter, r *http.Request) {
+	limit := 50
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	if limit > 200 {
+		limit = 200
+	}
+	writeJSON(w, http.StatusOK, s.Store.Activity.Recent(limit))
 }
 
 func (s *Server) getHealth(w http.ResponseWriter, r *http.Request) {

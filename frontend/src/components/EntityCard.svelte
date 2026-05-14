@@ -39,6 +39,10 @@
     grid-template-columns: 1fr auto;
     gap: var(--space-3);
     align-items: start;
+    transition: border-color var(--t-fast), transform var(--t-fast), box-shadow var(--t-fast);
+  }
+  @media (hover: hover) {
+    .card:hover { border-color: var(--border-strong); transform: translateY(-2px); box-shadow: var(--shadow-md); }
   }
   .info {
     display: flex;

@@ -75,7 +75,14 @@ func executeTimer(st *store.Store, t store.Timer) error {
 	defer st.Mu.Unlock()
 
 	delete(st.Timers, t.ID)
+	label := targetLabel(st, t.TargetType, t.TargetID)
 	err := st.ExecuteAction(t.TargetType, t.TargetID, t.Action)
+	entry := store.ActivityEntry{Kind: t.TargetType, Source: "timer", Action: t.Action, Label: label}
+	if err != nil {
+		entry.Status = "error"
+		entry.Error = err.Error()
+	}
+	st.Activity.Add(entry)
 	if saveErr := st.Save(); err == nil && saveErr != nil {
 		err = saveErr
 	}
@@ -93,7 +100,15 @@ func executeSchedule(st *store.Store, s store.Schedule) error {
 	if tt == "" && s.SocketID != "" {
 		tt, tid = "socket", s.SocketID
 	}
-	if err := st.ExecuteAction(tt, tid, action); err != nil {
+	label := targetLabel(st, tt, tid)
+	err := st.ExecuteAction(tt, tid, action)
+	entry := store.ActivityEntry{Kind: tt, Source: "schedule", Action: action, Label: label}
+	if err != nil {
+		entry.Status = "error"
+		entry.Error = err.Error()
+	}
+	st.Activity.Add(entry)
+	if err != nil {
 		return err
 	}
 
@@ -105,6 +120,26 @@ func executeSchedule(st *store.Store, s store.Schedule) error {
 	}
 	log.Printf("scheduler: %s %s (%s/%s)", action, s.ID, tt, tid)
 	return nil
+}
+
+// targetLabel resolves a (kind, id) pair to a human-readable name for
+// the activity log. Falls back to the id if the target was deleted.
+func targetLabel(st *store.Store, kind, id string) string {
+	switch kind {
+	case "socket":
+		if v, ok := st.Sockets[id]; ok {
+			return v.Name
+		}
+	case "group":
+		if v, ok := st.Groups[id]; ok {
+			return v.Name
+		}
+	case "scene":
+		if v, ok := st.Scenes[id]; ok {
+			return v.Name
+		}
+	}
+	return id
 }
 
 func dayMatches(days []int, weekday int) bool {

@@ -9,12 +9,15 @@ import (
 	"github.com/gorilla/mux"
 )
 
-// basicAuthMiddleware gates the whole app behind HTTP basic auth. It is
-// only installed when both user and pass are non-empty. Comparison uses
-// constant-time to avoid leaking the credentials via timing. CORS
-// preflight (OPTIONS) is allowed through so browsers can negotiate
-// cross-origin in dev.
-func basicAuthMiddleware(user, pass string) mux.MiddlewareFunc {
+// authMiddleware gates protected routes. It accepts either a valid signed
+// session cookie (set by /api/login) or HTTP basic auth matching the
+// configured AUTH_USER/AUTH_PASS — the latter so curl / scripted clients
+// still work without going through the login flow.
+//
+// Browsers no longer get a Basic-Auth WWW-Authenticate challenge (which
+// would pop the native login dialog and bypass our cookie flow); they get
+// a plain 401 the SPA handles with its custom login form.
+func authMiddleware(user, pass string, secret []byte) mux.MiddlewareFunc {
 	expectUser := []byte(user)
 	expectPass := []byte(pass)
 	return func(next http.Handler) http.Handler {
@@ -23,15 +26,20 @@ func basicAuthMiddleware(user, pass string) mux.MiddlewareFunc {
 				next.ServeHTTP(w, r)
 				return
 			}
+			if c, err := r.Cookie(cookieName); err == nil {
+				if _, ok := verifySession(secret, c.Value); ok {
+					next.ServeHTTP(w, r)
+					return
+				}
+			}
 			u, p, ok := r.BasicAuth()
-			if !ok ||
-				subtle.ConstantTimeCompare([]byte(u), expectUser) != 1 ||
-				subtle.ConstantTimeCompare([]byte(p), expectPass) != 1 {
-				w.Header().Set("WWW-Authenticate", `Basic realm="rf-socket-controller", charset="UTF-8"`)
-				http.Error(w, "unauthorized", http.StatusUnauthorized)
+			if ok &&
+				subtle.ConstantTimeCompare([]byte(u), expectUser) == 1 &&
+				subtle.ConstantTimeCompare([]byte(p), expectPass) == 1 {
+				next.ServeHTTP(w, r)
 				return
 			}
-			next.ServeHTTP(w, r)
+			writeError(w, http.StatusUnauthorized, "unauthorized")
 		})
 	}
 }

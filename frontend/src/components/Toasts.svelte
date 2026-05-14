@@ -1,14 +1,26 @@
 <script lang="ts">
     import { toasts } from "../lib/stores.svelte";
+    import { fly, scale } from "svelte/transition";
+    import { flip } from "svelte/animate";
+    import { cubicOut } from "svelte/easing";
+    import { dur } from "../lib/motion";
 </script>
 
 <div class="toasts" aria-live="polite" aria-atomic="false">
     {#each toasts.items as t (t.id)}
-        <div class="toast" data-tone={t.tone} role="status">
+        <div class="toast" data-tone={t.tone} role="status"
+            animate:flip={{ duration: dur(220), easing: cubicOut }}
+            in:fly={{ y: 16, duration: dur(240), easing: cubicOut }}
+            out:scale={{ start: 0.9, opacity: 0, duration: dur(160) }}>
             <div class="body">
                 <div class="title">{t.title}</div>
                 {#if t.message}<div class="msg">{t.message}</div>{/if}
             </div>
+            {#if t.action}
+                <button class="action" onclick={() => { t.action!.onClick(); toasts.dismiss(t.id); }}>
+                    {t.action.label}
+                </button>
+            {/if}
             <button class="close" aria-label="Dismiss" onclick={() => toasts.dismiss(t.id)}>×</button>
         </div>
     {/each}
@@ -36,7 +48,6 @@
         display: flex;
         gap: var(--space-3);
         align-items: flex-start;
-        animation: in 0.18s ease both;
         pointer-events: auto;
     }
     .toast[data-tone="success"] { border-left-color: var(--success); }
@@ -52,10 +63,17 @@
         font-size: 18px;
         line-height: 1;
     }
-    @keyframes in {
-        from { opacity: 0; transform: translateY(8px); }
-        to { opacity: 1; transform: translateY(0); }
+    .action {
+        background: transparent;
+        border: 1px solid var(--border-strong);
+        border-radius: var(--radius-sm);
+        color: var(--text);
+        font-weight: 600;
+        font-size: 12px;
+        padding: 4px 10px;
+        cursor: pointer;
     }
+    .action:hover { background: var(--surface-hover); }
 
     @media (max-width: 900px) {
         .toasts {

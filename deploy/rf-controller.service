@@ -5,10 +5,10 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=pi
-WorkingDirectory=/home/pi/rf-socket-controller
-EnvironmentFile=-/home/pi/rf-socket-controller/.env
-ExecStart=/home/pi/rf-socket-controller/rf-controller
+User=claw
+WorkingDirectory=/home/claw/rf-socket-controller
+EnvironmentFile=-/home/claw/rf-socket-controller/.env
+ExecStart=/home/claw/rf-socket-controller/rf-controller
 Restart=on-failure
 RestartSec=5
 
@@ -16,7 +16,7 @@ RestartSec=5
 NoNewPrivileges=true
 ProtectSystem=full
 ProtectHome=read-only
-ReadWritePaths=/home/pi/rf-socket-controller/data
+ReadWritePaths=/home/claw/rf-socket-controller/data
 PrivateTmp=true
 
 [Install]

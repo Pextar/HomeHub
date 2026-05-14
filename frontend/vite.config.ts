@@ -9,7 +9,10 @@ export default defineConfig({
   plugins: [
     svelte(),
     VitePWA({
-      registerType: "autoUpdate",
+      // "prompt" instead of "autoUpdate": we want onNeedRefresh to fire so the
+      // app can show a "Refresh" toast button. autoUpdate skips the waiting
+      // phase, which means the prompt never shows on an always-open PWA.
+      registerType: "prompt",
       includeAssets: ["pwa-icon.svg"],
       manifest: {
         name: "RF Socket Controller",
@@ -24,6 +27,11 @@ export default defineConfig({
         icons: [
           { src: "pwa-icon.svg", sizes: "any", type: "image/svg+xml", purpose: "any" },
           { src: "pwa-icon.svg", sizes: "any", type: "image/svg+xml", purpose: "maskable" },
+        ],
+        shortcuts: [
+          { name: "Sockets",   short_name: "Sockets",   url: "/#/sockets" },
+          { name: "Scenes",    short_name: "Scenes",    url: "/#/scenes" },
+          { name: "Schedules", short_name: "Schedules", url: "/#/schedules" },
         ],
       },
       workbox: {

@@ -26,12 +26,17 @@
         flex-direction: column;
         gap: var(--space-2);
         cursor: pointer;
-        transition: border-color var(--t-fast), background var(--t-fast);
+        transition: border-color var(--t-fast), background var(--t-fast),
+            transform var(--t-fast), box-shadow var(--t-fast);
         text-align: left;
         font: inherit;
         color: inherit;
     }
     .tile:hover { border-color: var(--border-strong); background: var(--surface-hover); }
+    @media (hover: hover) {
+        .tile:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); }
+    }
+    .tile:active { transform: translateY(0); }
     .name { font-weight: 600; }
     .meta { color: var(--text-muted); font-size: 12px; }
 </style>

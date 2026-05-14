@@ -32,7 +32,7 @@ cp -R "$ROOT/frontend/dist" "$RELEASE/frontend/dist"
 echo "==> Cross-compiling backend (GOOS=linux GOARCH=$GOARCH${GOARM:+ GOARM=$GOARM})"
 (
   cd "$ROOT/backend"
-  env CGO_ENABLED=0 GOOS=linux GOARCH="$GOARCH" "${GOARM_VAR[@]}" \
+  env CGO_ENABLED=0 GOOS=linux GOARCH="$GOARCH" ${GOARM_VAR[@]+"${GOARM_VAR[@]}"} \
     go build -trimpath -ldflags='-s -w' -o "$RELEASE/rf-controller" .
 )
 

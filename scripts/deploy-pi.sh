@@ -2,9 +2,9 @@
 # Deploy the release built by scripts/build-pi.sh to a Raspberry Pi over SSH.
 #
 # Usage:
-#   scripts/deploy-pi.sh                       # uses pi@raspberrypi.local
-#   scripts/deploy-pi.sh pi@192.168.1.42       # explicit target
-#   PI_HOST=pi@rpi.local scripts/deploy-pi.sh  # via env
+#   scripts/deploy-pi.sh                         # uses claw@raspberrypi.local
+#   scripts/deploy-pi.sh claw@192.168.1.42       # explicit target
+#   PI_HOST=claw@rpi.local scripts/deploy-pi.sh  # via env
 #
 # Layout on the Pi (under the SSH user's home):
 #   ~/rf-socket-controller/
@@ -14,14 +14,14 @@
 #     .env                     (seeded once from env.example, never overwritten)
 #     rf-controller.service    (systemd unit, copied to /etc/systemd/system/)
 #
-# The systemd unit uses User=pi and /home/pi/... — if your SSH user is not
-# "pi", edit deploy/rf-controller.service before deploying.
+# The systemd unit uses User=claw and /home/claw/... — if your SSH user is not
+# "claw", edit deploy/rf-controller.service before deploying.
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 RELEASE="$ROOT/dist/release"
 
-HOST="${1:-${PI_HOST:-pi@raspberrypi.local}}"
+HOST="${1:-${PI_HOST:-claw@raspberrypi.local}}"
 REMOTE_DIR="${PI_REMOTE_DIR:-rf-socket-controller}"
 
 if [ ! -x "$RELEASE/rf-controller" ]; then

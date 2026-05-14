@@ -32,6 +32,7 @@ type Store struct {
 	Groups    map[string]*Group
 	Scenes    map[string]*Scene
 	Timers    map[string]*Timer
+	Activity  *ActivityLog
 	DataDir   string
 	RF        RFSender
 }
@@ -53,6 +54,7 @@ func New(dataDir string, rf RFSender) *Store {
 		Groups:    make(map[string]*Group),
 		Scenes:    make(map[string]*Scene),
 		Timers:    make(map[string]*Timer),
+		Activity:  NewActivityLog(200),
 		DataDir:   dataDir,
 		RF:        rf,
 	}

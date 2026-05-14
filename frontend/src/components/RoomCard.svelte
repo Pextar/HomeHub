@@ -27,6 +27,10 @@
         display: flex;
         flex-direction: column;
         gap: var(--space-2);
+        transition: border-color var(--t-fast), transform var(--t-fast), box-shadow var(--t-fast);
+    }
+    @media (hover: hover) {
+        .room:hover { border-color: var(--border-strong); transform: translateY(-2px); box-shadow: var(--shadow-md); }
     }
     .name { font-weight: 600; }
     .meta { color: var(--text-muted); font-size: 12px; }

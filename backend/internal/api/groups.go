@@ -156,6 +156,12 @@ func (s *Server) groupAction(action string) http.HandlerFunc {
 			}
 			ok2++
 		}
+		entry := store.ActivityEntry{Kind: "group", Source: "manual", Action: action, Label: g.Name}
+		if len(failures) > 0 {
+			entry.Status = "error"
+			entry.Error = fmt.Sprintf("%d of %d failed", len(failures), ok2+len(failures))
+		}
+		s.Store.Activity.Add(entry)
 		if err := s.Store.Save(); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
 			return

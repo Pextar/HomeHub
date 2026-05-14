@@ -8,6 +8,7 @@ import type {
   BulkResult,
   TargetType,
   SocketAction,
+  ActivityEntry,
 } from "./types";
 
 const BASE = "/api";
@@ -28,9 +29,15 @@ async function req<T>(path: string, opts: RequestInit = {}): Promise<T> {
   if (res.status === 204) return undefined as T;
 
   const text = await res.text();
-  const data = text ? JSON.parse(text) : null;
+  let data: unknown = null;
+  if (text) {
+    try { data = JSON.parse(text); } catch { /* non-JSON body, leave data null */ }
+  }
   if (!res.ok) {
-    const msg = (data && (data as { error?: string }).error) || res.statusText || "Request failed";
+    const msg =
+      (data && typeof data === "object" && "error" in data && typeof (data as { error: unknown }).error === "string"
+        ? (data as { error: string }).error
+        : text || res.statusText || "Request failed");
     throw new ApiError(msg, res.status);
   }
   return data as T;
@@ -39,6 +46,14 @@ async function req<T>(path: string, opts: RequestInit = {}): Promise<T> {
 const json = (body: unknown) => JSON.stringify(body);
 
 export const api = {
+  // Auth
+  login(body: { username: string; password: string }) {
+    return req<{ username: string }>("/login", { method: "POST", body: json(body) });
+  },
+  logout() {
+    return req<{ status: string }>("/logout", { method: "POST" });
+  },
+
   health() {
     return req<{ status: string; sockets: number; schedules: number; groups: number; scenes: number; timers: number; time: string }>("/health");
   },
@@ -46,6 +61,9 @@ export const api = {
   // Sockets
   listSockets() { return req<Socket[]>("/sockets"); },
   createSocket(body: Partial<Socket>) { return req<Socket>("/sockets", { method: "POST", body: json(body) }); },
+  learnSocket(body: { protocol?: string } = {}) {
+    return req<{ code: string; protocol: string }>("/sockets/learn", { method: "POST", body: json(body) });
+  },
   updateSocket(id: string, body: Partial<Socket>) { return req<Socket>(`/sockets/${encodeURIComponent(id)}`, { method: "PUT", body: json(body) }); },
   deleteSocket(id: string) { return req<void>(`/sockets/${encodeURIComponent(id)}`, { method: "DELETE" }); },
   socketOn(id: string) { return req<Socket>(`/sockets/${encodeURIComponent(id)}/on`, { method: "POST" }); },
@@ -85,6 +103,12 @@ export const api = {
   activateScene(id: string) {
     return req<{ scene: string; updated: number; failures: unknown[] }>(`/scenes/${encodeURIComponent(id)}/activate`, { method: "POST" });
   },
+
+  // Activity
+  listActivity(limit = 50) { return req<ActivityEntry[]>(`/activity?limit=${limit}`); },
+
+  // iOS Shortcuts helper — ready-made Basic auth header for the configured creds.
+  shortcutAuth() { return req<{ header: string }>("/shortcut-auth"); },
 
   // Timers
   listTimers() { return req<Timer[]>("/timers"); },

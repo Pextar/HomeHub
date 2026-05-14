@@ -3,8 +3,10 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"math/rand"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -148,7 +150,22 @@ func (s *Server) setSocketState(w http.ResponseWriter, r *http.Request, target *
 		writeError(w, http.StatusNotFound, "socket not found")
 		return
 	}
-	if err := s.Store.ApplyState(socket, target); err != nil {
+	action := "toggle"
+	if target != nil {
+		if *target {
+			action = "on"
+		} else {
+			action = "off"
+		}
+	}
+	err := s.Store.ApplyState(socket, target)
+	entry := store.ActivityEntry{Kind: "socket", Source: "manual", Action: action, Label: socket.Name}
+	if err != nil {
+		entry.Status = "error"
+		entry.Error = err.Error()
+	}
+	s.Store.Activity.Add(entry)
+	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to send RF command: "+err.Error())
 		return
 	}
@@ -157,6 +174,54 @@ func (s *Server) setSocketState(w http.ResponseWriter, r *http.Request, target *
 		return
 	}
 	writeJSON(w, http.StatusOK, socket)
+}
+
+// learnSocket picks a random unused 7-digit code and broadcasts an ON
+// signal so a 433MHz socket in learn mode pairs to it. The caller then
+// saves the socket via the regular POST /sockets with the returned code.
+//
+// Workflow:
+//   1. User long-presses the physical socket's button (learn mode).
+//   2. Frontend hits this endpoint.
+//   3. Socket associates with the code; user verifies the socket clicked
+//      and then saves it.
+func (s *Server) learnSocket(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Protocol string `json:"protocol"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	protocol := strings.TrimSpace(body.Protocol)
+	if protocol == "" {
+		protocol = "nexa"
+	}
+
+	s.Store.Mu.RLock()
+	used := make(map[string]bool, len(s.Store.Sockets))
+	for _, sock := range s.Store.Sockets {
+		used[sock.Code] = true
+	}
+	s.Store.Mu.RUnlock()
+
+	// Pick a random 7-digit code that isn't already used. 32 attempts is
+	// plenty given the 9M-wide range.
+	var code string
+	for i := 0; i < 32; i++ {
+		c := strconv.Itoa(1_000_000 + rand.Intn(9_000_000))
+		if !used[c] {
+			code = c
+			break
+		}
+	}
+	if code == "" {
+		writeError(w, http.StatusInternalServerError, "could not find an unused code")
+		return
+	}
+
+	if err := s.Store.RF.Send(code, protocol, true); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to send learn signal: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"code": code, "protocol": protocol})
 }
 
 func (s *Server) toggleSocket(w http.ResponseWriter, r *http.Request) { s.setSocketState(w, r, nil) }
@@ -188,6 +253,16 @@ func (s *Server) bulkSetState(target bool) http.HandlerFunc {
 			}
 			ok++
 		}
+		action := "off"
+		if target {
+			action = "on"
+		}
+		entry := store.ActivityEntry{Kind: "bulk", Source: "manual", Action: action, Label: "All sockets"}
+		if len(failures) > 0 {
+			entry.Status = "error"
+			entry.Error = fmt.Sprintf("%d of %d failed", len(failures), ok+len(failures))
+		}
+		s.Store.Activity.Add(entry)
 		if err := s.Store.Save(); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
 			return

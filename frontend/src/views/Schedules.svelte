@@ -5,6 +5,10 @@
     import { data } from "../lib/stores.svelte";
     import { openModal } from "../lib/modal.svelte";
     import ScheduleModal from "../modals/ScheduleModal.svelte";
+    import { fly, scale } from "svelte/transition";
+    import { flip } from "svelte/animate";
+    import { cubicOut } from "svelte/easing";
+    import { dur, stagger } from "../lib/motion";
 
     const v = $derived(data.value);
 </script>
@@ -22,8 +26,13 @@
     </EmptyState>
 {:else}
     <div class="list">
-        {#each v.schedules as s (s.id)}
-            <ScheduleRow schedule={s} />
+        {#each v.schedules as s, i (s.id)}
+            <div
+                animate:flip={{ duration: dur(280), easing: cubicOut }}
+                in:fly={{ y: 12, duration: dur(240), delay: stagger(i), easing: cubicOut }}
+                out:scale={{ start: 0.97, opacity: 0, duration: dur(160) }}>
+                <ScheduleRow schedule={s} />
+            </div>
         {/each}
     </div>
 {/if}

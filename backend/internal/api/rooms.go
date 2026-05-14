@@ -1,11 +1,14 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 	"sort"
 	"strings"
 
 	"github.com/gorilla/mux"
+
+	"rf-socket-controller/internal/store"
 )
 
 // roomSetState returns a handler that switches every socket in a single
@@ -42,6 +45,16 @@ func (s *Server) roomSetState(target bool) http.HandlerFunc {
 			writeError(w, http.StatusNotFound, "no sockets in that room")
 			return
 		}
+		action := "off"
+		if target {
+			action = "on"
+		}
+		entry := store.ActivityEntry{Kind: "room", Source: "manual", Action: action, Label: room}
+		if len(failures) > 0 {
+			entry.Status = "error"
+			entry.Error = fmt.Sprintf("%d of %d failed", len(failures), ok+len(failures))
+		}
+		s.Store.Activity.Add(entry)
 		if err := s.Store.Save(); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
 			return

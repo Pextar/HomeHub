@@ -153,6 +153,12 @@ func (s *Server) activateScene(w http.ResponseWriter, r *http.Request) {
 		}
 		okCount++
 	}
+	entry := store.ActivityEntry{Kind: "scene", Source: "manual", Action: "activate", Label: scene.Name}
+	if len(failures) > 0 {
+		entry.Status = "error"
+		entry.Error = fmt.Sprintf("%d of %d failed", len(failures), okCount+len(failures))
+	}
+	s.Store.Activity.Add(entry)
 	if err := s.Store.Save(); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
 		return

@@ -8,6 +8,10 @@
     import { groupSocketsByRoom, runAction } from "../lib/utils";
     import { openModal } from "../lib/modal.svelte";
     import SocketModal from "../modals/SocketModal.svelte";
+    import { scale, fade } from "svelte/transition";
+    import { flip } from "svelte/animate";
+    import { cubicOut } from "svelte/easing";
+    import { dur, stagger } from "../lib/motion";
 
     const v = $derived(data.value);
 
@@ -68,7 +72,9 @@
         {#each sortedRooms as room (room)}
             {@const items = groups.get(room) ?? []}
             {@const onCount = items.filter(s => s.state).length}
-            <section class="room-section">
+            <section class="room-section"
+                animate:flip={{ duration: dur(280), easing: cubicOut }}
+                in:fade={{ duration: dur(180) }}>
                 <div class="room-header">
                     <h3>{room} · {items.length} sockets · {onCount} on</h3>
                     <div class="room-actions">
@@ -79,8 +85,12 @@
                     </div>
                 </div>
                 <div class="grid">
-                    {#each items as s (s.id)}
-                        <SocketCard socket={s} />
+                    {#each items as s, i (s.id)}
+                        <div class="grid-item"
+                            animate:flip={{ duration: dur(280), easing: cubicOut }}
+                            in:scale={{ start: 0.96, opacity: 0, duration: dur(240), delay: stagger(i), easing: cubicOut }}>
+                            <SocketCard socket={s} />
+                        </div>
                     {/each}
                 </div>
             </section>
@@ -145,4 +155,6 @@
         grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
         gap: var(--space-4);
     }
+    .grid-item { display: flex; }
+    .grid-item > :global(.card) { flex: 1; }
 </style>

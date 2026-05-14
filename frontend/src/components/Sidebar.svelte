@@ -1,7 +1,22 @@
 <script lang="ts">
     import Icon from "./Icon.svelte";
+    import ConfirmModal from "./ConfirmModal.svelte";
     import { route, theme, data } from "../lib/stores.svelte";
+    import { api } from "../lib/api";
+    import { openModal } from "../lib/modal.svelte";
     import type { Route } from "../lib/types";
+
+    async function signOut() {
+        const ok = await openModal<boolean>(ConfirmModal, {
+            title: "Sign out?",
+            message: "You'll need to enter your username and password again to get back in.",
+            confirmLabel: "Sign out",
+        });
+        if (!ok) return;
+        try { await api.logout(); } catch { /* ignore */ }
+        // Reload so LoginGate re-checks auth and shows the login form.
+        window.location.reload();
+    }
 
     const items: { route: Route; icon: any; label: string }[] = [
         { route: "dashboard", icon: "dashboard", label: "Dashboard" },
@@ -40,6 +55,10 @@
         <button class="theme-toggle" aria-label="Toggle theme" onclick={() => theme.toggle()}>
             <Icon name={theme.current === "dark" ? "moon" : "sun"} size={14} />
             <span>Theme</span>
+        </button>
+        <button class="theme-toggle" aria-label="Sign out" onclick={signOut}>
+            <Icon name="logout" size={14} />
+            <span>Sign out</span>
         </button>
         <div class="health" aria-live="polite">
             <span class="dot" data-state={data.value.health}></span>

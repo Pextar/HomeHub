@@ -63,10 +63,22 @@ export interface BulkResult {
 
 export type Route = "dashboard" | "sockets" | "groups" | "scenes" | "schedules";
 
+export interface ActivityEntry {
+  id: number;
+  time: string;
+  kind: "socket" | "group" | "scene" | "room" | "bulk";
+  source: "manual" | "schedule" | "timer";
+  action: string;
+  label: string;
+  status: "ok" | "error";
+  error?: string;
+}
+
 export interface ToastSpec {
   id: number;
   title: string;
   message?: string;
   tone: "info" | "success" | "warn" | "error";
   timeoutMs?: number;
+  action?: { label: string; onClick: () => void };
 }

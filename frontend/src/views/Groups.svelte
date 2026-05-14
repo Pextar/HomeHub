@@ -9,6 +9,10 @@
     import { openModal } from "../lib/modal.svelte";
     import GroupModal from "../modals/GroupModal.svelte";
     import ConfirmModal from "../components/ConfirmModal.svelte";
+    import { fly, scale } from "svelte/transition";
+    import { flip } from "svelte/animate";
+    import { cubicOut } from "svelte/easing";
+    import { dur, stagger } from "../lib/motion";
 
     const v = $derived(data.value);
 
@@ -48,7 +52,11 @@
     </EmptyState>
 {:else}
     <div class="list">
-        {#each v.groups as g (g.id)}
+        {#each v.groups as g, i (g.id)}
+            <div
+                animate:flip={{ duration: dur(280), easing: cubicOut }}
+                in:fly={{ y: 12, duration: dur(240), delay: stagger(i), easing: cubicOut }}
+                out:scale={{ start: 0.97, opacity: 0, duration: dur(160) }}>
             <EntityCard
                 name={g.name}
                 meta="{g.socket_ids.length} socket{g.socket_ids.length === 1 ? '' : 's'}"
@@ -71,6 +79,7 @@
                     </button>
                 {/snippet}
             </EntityCard>
+            </div>
         {/each}
     </div>
 {/if}

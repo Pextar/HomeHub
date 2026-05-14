@@ -1,5 +1,6 @@
 <script lang="ts">
     import Icon from "./Icon.svelte";
+    import { untrack } from "svelte";
     import { api } from "../lib/api";
     import { runAction } from "../lib/utils";
     import { openModal } from "../lib/modal.svelte";
@@ -11,6 +12,20 @@
 
     interface Props { socket: Socket; }
     let { socket }: Props = $props();
+
+    // One-shot "pulse" ring whenever the socket's state flips, so a
+    // remote toggle or schedule fire is visually obvious.
+    let prevState = untrack(() => socket.state);
+    let pulsing = $state(false);
+    $effect(() => {
+        const s = socket.state;
+        if (s !== prevState) {
+            prevState = s;
+            pulsing = true;
+            const t = setTimeout(() => { pulsing = false; }, 550);
+            return () => clearTimeout(t);
+        }
+    });
 
     async function confirmDelete() {
         const ok = await openModal<boolean>(ConfirmModal, {
@@ -30,7 +45,7 @@
     }
 </script>
 
-<article class="card" class:on={socket.state}>
+<article class="card" class:on={socket.state} class:pulsing>
     <div class="head">
         <div class="title">
             <div class="name" title={socket.name}>{socket.name}</div>
@@ -83,10 +98,25 @@
         display: flex;
         flex-direction: column;
         gap: var(--space-4);
-        transition: border-color var(--t-fast);
+        transition: border-color var(--t-fast), transform var(--t-fast), box-shadow var(--t-fast);
     }
     .card:hover { border-color: var(--border-strong); }
+    @media (hover: hover) {
+        .card:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); }
+    }
     .card.on { border-color: var(--success); box-shadow: inset 0 0 0 1px var(--success-soft); }
+
+    /* State-change pulse — an expanding ring that fades out. */
+    .card.pulsing.on { animation: pulse-on 0.55s ease-out; }
+    .card.pulsing:not(.on) { animation: pulse-off 0.55s ease-out; }
+    @keyframes pulse-on {
+        0%   { box-shadow: inset 0 0 0 1px var(--success-soft), 0 0 0 0 rgba(52, 211, 153, 0.55); }
+        100% { box-shadow: inset 0 0 0 1px var(--success-soft), 0 0 0 16px rgba(52, 211, 153, 0); }
+    }
+    @keyframes pulse-off {
+        0%   { box-shadow: 0 0 0 0 rgba(148, 163, 184, 0.45); }
+        100% { box-shadow: 0 0 0 14px rgba(148, 163, 184, 0); }
+    }
 
     .head {
         display: flex;

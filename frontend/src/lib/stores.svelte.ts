@@ -1,5 +1,5 @@
 import { api } from "./api";
-import type { Socket, Schedule, Group, Scene, Timer, RoomSummary, ToastSpec, Route } from "./types";
+import type { Socket, Schedule, Group, Scene, Timer, RoomSummary, ToastSpec, Route, ActivityEntry } from "./types";
 
 // Reactive global state. Svelte 5 runes ($state) make any property mutation
 // trigger downstream reactivity in components that read these values.
@@ -13,19 +13,21 @@ function createDataStore() {
     scenes: [] as Scene[],
     timers: [] as Timer[],
     rooms: [] as RoomSummary[],
+    activity: [] as ActivityEntry[],
     loaded: false,
     health: "unknown" as "ok" | "error" | "unknown",
   });
 
   async function refresh() {
     try {
-      const [sockets, schedules, groups, scenes, timers, rooms] = await Promise.all([
+      const [sockets, schedules, groups, scenes, timers, rooms, activity] = await Promise.all([
         api.listSockets(),
         api.listSchedules(),
         api.listGroups(),
         api.listScenes(),
         api.listTimers(),
         api.listRooms(),
+        api.listActivity(20),
       ]);
       data.sockets = sockets ?? [];
       data.schedules = schedules ?? [];
@@ -33,6 +35,7 @@ function createDataStore() {
       data.scenes = scenes ?? [];
       data.timers = timers ?? [];
       data.rooms = rooms ?? [];
+      data.activity = activity ?? [];
       data.loaded = true;
     } catch (e) {
       toasts.error("Failed to load data", (e as Error).message);
@@ -78,6 +81,7 @@ function createToastStore() {
   return {
     get items() { return items; },
     dismiss,
+    show,
     info:    (title: string, message?: string) => show({ title, message, tone: "info" }),
     success: (title: string, message?: string) => show({ title, message, tone: "success" }),
     warn:    (title: string, message?: string) => show({ title, message, tone: "warn" }),

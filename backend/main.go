@@ -27,11 +27,17 @@ func main() {
 		log.Fatalf("failed to load data: %v", err)
 	}
 
+	secret, err := api.LoadOrCreateSessionSecret(dataDir)
+	if err != nil {
+		log.Fatalf("failed to load session secret: %v", err)
+	}
+
 	server := &api.Server{
-		Store:    st,
-		AuthUser: os.Getenv("AUTH_USER"),
-		AuthPass: os.Getenv("AUTH_PASS"),
-		SPADir:   "./frontend/dist",
+		Store:         st,
+		AuthUser:      os.Getenv("AUTH_USER"),
+		AuthPass:      os.Getenv("AUTH_PASS"),
+		SessionSecret: secret,
+		SPADir:        "./frontend/dist",
 	}
 
 	port := os.Getenv("PORT")

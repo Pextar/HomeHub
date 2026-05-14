@@ -17,6 +17,22 @@
 
     const isEdit = $derived(!!existing);
 
+    let pairing = $state(false);
+
+    async function pair() {
+        if (pairing) return;
+        pairing = true;
+        try {
+            const r = await api.learnSocket({ protocol });
+            code = r.code;
+            toasts.success("Signal sent", "Did your socket click on? If not, long-press its button again and tap Pair.");
+        } catch (e) {
+            toasts.error("Pairing failed", (e as Error).message);
+        } finally {
+            pairing = false;
+        }
+    }
+
     async function save() {
         const payload = {
             name: name.trim(),
@@ -76,6 +92,17 @@
                     </select>
                 </div>
             </div>
+            {#if !isEdit}
+                <div class="field" style="margin-top:var(--space-3)">
+                    <button type="button" class="btn btn-secondary" onclick={pair} disabled={pairing}>
+                        {pairing ? "Sending…" : "Pair with socket"}
+                    </button>
+                    <div class="field-help">
+                        Long-press the button on your socket until its indicator flashes, then tap Pair.
+                        I'll pick a random code and broadcast it — the socket should click on.
+                    </div>
+                </div>
+            {/if}
         </form>
     {/snippet}
     {#snippet actions()}
