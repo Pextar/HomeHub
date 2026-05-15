@@ -68,6 +68,9 @@ func (s *Store) ValidateSchedule(sch *Schedule) error {
 			return errors.New("days values must be 0-6 (Sun-Sat)")
 		}
 	}
+	if sch.RandomOffsetMinutes < 0 || sch.RandomOffsetMinutes > 120 {
+		return errors.New("random_offset_minutes must be between 0 and 120")
+	}
 	return nil
 }
 

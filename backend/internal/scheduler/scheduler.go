@@ -7,14 +7,25 @@ package scheduler
 import (
 	"context"
 	"log"
+	"math/rand"
 	"time"
 
 	"rf-socket-controller/internal/store"
 )
 
+// pendingFire holds a randomly-delayed fire time for a schedule that has
+// random_offset_minutes set. enqueued is when the base time matched, used
+// to expire stale entries.
+type pendingFire struct {
+	fireAt   time.Time
+	enqueued time.Time
+}
+
 // Run blocks until ctx is cancelled. Spawn it in a goroutine.
 func Run(ctx context.Context, st *store.Store) {
 	lastFired := make(map[string]string)
+	// pending holds schedules that are waiting for their random offset to elapse.
+	pending := make(map[string]pendingFire)
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 
@@ -32,10 +43,27 @@ func Run(ctx context.Context, st *store.Store) {
 
 		// Collect due schedules and timers under a read lock.
 		var dueSchedules []store.Schedule
+		var toEnqueue []store.Schedule
 		var dueTimers []store.Timer
 		st.Mu.RLock()
 		for _, s := range st.Schedules {
-			if !s.Enabled || s.Time != hhmm {
+			if !s.Enabled {
+				continue
+			}
+			// If this schedule has a pending random-offset fire, check it.
+			if pf, ok := pending[s.ID]; ok {
+				maxAge := time.Duration(s.RandomOffsetMinutes)*time.Minute + 30*time.Second
+				if time.Since(pf.enqueued) > maxAge {
+					// Stale entry (e.g. schedule updated, or carried over from
+					// a previous day). Drop it and fall through to re-check.
+					delete(pending, s.ID)
+				} else if !now.Before(pf.fireAt) {
+					dueSchedules = append(dueSchedules, *s)
+				}
+				// Either way, skip the base-time check this tick.
+				continue
+			}
+			if s.Time != hhmm {
 				continue
 			}
 			if !dayMatches(s.Days, weekday) {
@@ -44,7 +72,11 @@ func Run(ctx context.Context, st *store.Store) {
 			if lastFired[s.ID] == stamp {
 				continue
 			}
-			dueSchedules = append(dueSchedules, *s)
+			if s.RandomOffsetMinutes > 0 {
+				toEnqueue = append(toEnqueue, *s)
+			} else {
+				dueSchedules = append(dueSchedules, *s)
+			}
 		}
 		for _, t := range st.Timers {
 			if !now.Before(t.FiresAt) {
@@ -53,7 +85,17 @@ func Run(ctx context.Context, st *store.Store) {
 		}
 		st.Mu.RUnlock()
 
+		// Register random-offset schedules into the pending map.
+		for _, s := range toEnqueue {
+			offsetSec := rand.Intn(s.RandomOffsetMinutes*60 + 1)
+			fireAt := now.Add(time.Duration(offsetSec) * time.Second)
+			pending[s.ID] = pendingFire{fireAt: fireAt, enqueued: now}
+			lastFired[s.ID] = stamp
+			log.Printf("scheduler: schedule %s queued with +%ds random offset", s.ID, offsetSec)
+		}
+
 		for _, s := range dueSchedules {
+			delete(pending, s.ID)
 			lastFired[s.ID] = stamp
 			if err := executeSchedule(st, s); err != nil {
 				log.Printf("scheduler: schedule %s failed: %v", s.ID, err)

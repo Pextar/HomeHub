@@ -20,6 +20,7 @@ export interface Schedule {
   time: string;
   days: number[];
   enabled: boolean;
+  random_offset_minutes?: number;
   last_fired_at?: string;
 }
 

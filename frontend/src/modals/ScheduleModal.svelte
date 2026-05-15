@@ -27,6 +27,7 @@
     let time = $state(untrack(() => existing?.time || "08:00"));
     let days = $state<number[]>(untrack(() => [...(existing?.days ?? [])]));
     let enabled = $state(untrack(() => existing ? existing.enabled : true));
+    let randomOffsetMinutes = $state<number>(untrack(() => existing?.random_offset_minutes ?? 0));
 
     // Available targets for the current type, plus reset of selection /
     // action when switching type.
@@ -53,6 +54,7 @@
             time,
             days,
             enabled,
+            random_offset_minutes: randomOffsetMinutes,
         };
         try {
             if (existing) {
@@ -119,6 +121,19 @@
                 <span class="field-label">Days</span>
                 <DayPicker bind:days={days} />
                 <div class="field-help">Leave empty to fire every day.</div>
+            </div>
+            <div class="field" style="margin-top:var(--space-4)">
+                <label for="sched-offset">Random interval</label>
+                <select id="sched-offset" bind:value={randomOffsetMinutes}>
+                    <option value={0}>None – fire at exact time</option>
+                    <option value={5}>Up to 5 min after</option>
+                    <option value={10}>Up to 10 min after</option>
+                    <option value={15}>Up to 15 min after</option>
+                    <option value={30}>Up to 30 min after</option>
+                    <option value={60}>Up to 60 min after</option>
+                    <option value={120}>Up to 2 hours after</option>
+                </select>
+                <div class="field-help">Fires at a random time within the chosen window.</div>
             </div>
             <label class="field" style="flex-direction:row; align-items:center; gap:12px; margin-top:var(--space-4)">
                 <Switch bind:checked={enabled} ariaLabel="Enabled" />
