@@ -38,6 +38,7 @@ echo "==> Cross-compiling backend (GOOS=linux GOARCH=$GOARCH${GOARM:+ GOARM=$GOA
 
 cp "$ROOT/deploy/rf-controller.service" "$RELEASE/"
 cp "$ROOT/deploy/env.example"            "$RELEASE/"
+cp "$ROOT/scripts/nexa_tx.py"            "$RELEASE/"
 
 echo "==> Release ready:"
 ls -lh "$RELEASE"

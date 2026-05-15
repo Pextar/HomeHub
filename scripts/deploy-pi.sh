@@ -9,6 +9,7 @@
 # Layout on the Pi (under the SSH user's home):
 #   ~/rf-socket-controller/
 #     rf-controller            (binary)
+#     nexa_tx.py               (lgpio-backed Nexa 433MHz transmitter helper)
 #     frontend/dist/           (built UI)
 #     data/                    (runtime state, never overwritten)
 #     .env                     (seeded once from env.example, never overwritten)
@@ -32,11 +33,12 @@ fi
 echo "==> Target: $HOST:~/$REMOTE_DIR"
 ssh "$HOST" "mkdir -p '$REMOTE_DIR' '$REMOTE_DIR/data'"
 
-echo "==> Syncing binary + frontend"
+echo "==> Syncing binary + transmitter helper + frontend"
 rsync -av --delete \
   --exclude='data/' \
   --exclude='.env' \
   "$RELEASE/rf-controller" \
+  "$RELEASE/nexa_tx.py" \
   "$RELEASE/frontend" \
   "$HOST:$REMOTE_DIR/"
 

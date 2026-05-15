@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -16,13 +17,30 @@ import (
 	"rf-socket-controller/internal/store"
 )
 
+// nexaScriptPath locates the lgpio-backed Nexa transmitter helper.
+// NEXA_TX_SCRIPT overrides it; otherwise we look for nexa_tx.py next to
+// the working directory (where deploy-pi.sh places it). An empty result
+// means the Nexa path runs in simulation mode — fine for laptop dev.
+func nexaScriptPath() string {
+	if p := os.Getenv("NEXA_TX_SCRIPT"); p != "" {
+		return p
+	}
+	if _, err := os.Stat("nexa_tx.py"); err == nil {
+		if abs, err := filepath.Abs("nexa_tx.py"); err == nil {
+			return abs
+		}
+		return "nexa_tx.py"
+	}
+	return ""
+}
+
 func main() {
 	dataDir := "./data"
 	if err := os.MkdirAll(dataDir, 0755); err != nil {
 		log.Fatalf("failed to create data directory %q: %v", dataDir, err)
 	}
 
-	st := store.New(dataDir, rf.Sender{})
+	st := store.New(dataDir, rf.Sender{NexaScript: nexaScriptPath()})
 	if err := st.Load(); err != nil {
 		log.Fatalf("failed to load data: %v", err)
 	}

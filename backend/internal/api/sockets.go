@@ -176,15 +176,20 @@ func (s *Server) setSocketState(w http.ResponseWriter, r *http.Request, target *
 	writeJSON(w, http.StatusOK, socket)
 }
 
-// learnSocket picks a random unused 7-digit code and broadcasts an ON
-// signal so a 433MHz socket in learn mode pairs to it. The caller then
-// saves the socket via the regular POST /sockets with the returned code.
+// learnSocket picks a random unused code and broadcasts an ON signal so
+// a 433MHz socket in learn mode pairs to it. The caller then saves the
+// socket via the regular POST /sockets with the returned code.
 //
 // Workflow:
 //   1. User long-presses the physical socket's button (learn mode).
 //   2. Frontend hits this endpoint.
 //   3. Socket associates with the code; user verifies the socket clicked
 //      and then saves it.
+//
+// For the Nexa self-learning protocol the code is "<houseID>:<unit>" —
+// each socket gets its own random 26-bit house id, so they never
+// collide and there is no per-controller 16-unit limit. Other protocols
+// keep the legacy random 7-digit code.
 func (s *Server) learnSocket(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Protocol string `json:"protocol"`
@@ -202,11 +207,15 @@ func (s *Server) learnSocket(w http.ResponseWriter, r *http.Request) {
 	}
 	s.Store.Mu.RUnlock()
 
-	// Pick a random 7-digit code that isn't already used. 32 attempts is
-	// plenty given the 9M-wide range.
+	// 32 attempts is plenty given how wide both code spaces are.
 	var code string
 	for i := 0; i < 32; i++ {
-		c := strconv.Itoa(1_000_000 + rand.Intn(9_000_000))
+		var c string
+		if strings.EqualFold(protocol, "nexa") {
+			c = fmt.Sprintf("%d:0", rand.Intn(1<<26))
+		} else {
+			c = strconv.Itoa(1_000_000 + rand.Intn(9_000_000))
+		}
 		if !used[c] {
 			code = c
 			break
