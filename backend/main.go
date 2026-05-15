@@ -13,6 +13,7 @@ import (
 
 	"rf-socket-controller/internal/api"
 	"rf-socket-controller/internal/rf"
+	"rf-socket-controller/internal/rx"
 	"rf-socket-controller/internal/scheduler"
 	"rf-socket-controller/internal/store"
 )
@@ -74,6 +75,7 @@ func main() {
 
 	schedCtx, stopScheduler := context.WithCancel(context.Background())
 	go scheduler.Run(schedCtx, st)
+	go rx.FromEnv().Run(schedCtx, st)
 
 	go func() {
 		log.Printf("RF Socket Controller listening on :%s", port)

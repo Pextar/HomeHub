@@ -67,3 +67,34 @@ type Timer struct {
 	CreatedAt  time.Time `json:"created_at"`
 	Note       string    `json:"note,omitempty"` // human-friendly description
 }
+
+// Sensor is a 433MHz device that reports a numeric value (temperature,
+// humidity, motion, light, etc.). Predefined Kinds get tailored UI; "custom"
+// covers anything else.
+//
+// The (Protocol, Code, Field) triple identifies how the receiver should
+// match incoming packets:
+//   - Protocol: which decoder produced the packet (e.g. "rtl_433")
+//   - Code:     stable per-device identifier (e.g. "Acurite-Tower:1234")
+//   - Field:    which JSON key to read as the numeric value (e.g.
+//               "temperature_C", "humidity"). Empty means "the only
+//               numeric field in the packet" — useful for simple sensors.
+type Sensor struct {
+	ID            string     `json:"id"`
+	Name          string     `json:"name"`
+	Kind          string     `json:"kind"`     // temperature|humidity|motion|light|power|custom
+	Unit          string     `json:"unit"`     // "°C", "%", "lux", "W", ...
+	Code          string     `json:"code"`     // 433MHz device identifier
+	Protocol      string     `json:"protocol"` // decoder/source label
+	Field         string     `json:"field,omitempty"`
+	Room          string     `json:"room,omitempty"`
+	LastValue     *float64   `json:"last_value,omitempty"`
+	LastReadingAt *time.Time `json:"last_reading_at,omitempty"`
+}
+
+// SensorReading is one timestamped value for a sensor. Stored in a
+// rolling window per sensor (see ReadingsHistorySize).
+type SensorReading struct {
+	Time  time.Time `json:"time"`
+	Value float64   `json:"value"`
+}

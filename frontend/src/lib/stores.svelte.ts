@@ -1,5 +1,5 @@
 import { api } from "./api";
-import type { Socket, Schedule, Group, Scene, Timer, RoomSummary, ToastSpec, Route, ActivityEntry } from "./types";
+import type { Socket, Schedule, Group, Scene, Timer, RoomSummary, ToastSpec, Route, ActivityEntry, Sensor } from "./types";
 
 // Reactive global state. Svelte 5 runes ($state) make any property mutation
 // trigger downstream reactivity in components that read these values.
@@ -14,13 +14,14 @@ function createDataStore() {
     timers: [] as Timer[],
     rooms: [] as RoomSummary[],
     activity: [] as ActivityEntry[],
+    sensors: [] as Sensor[],
     loaded: false,
     health: "unknown" as "ok" | "error" | "unknown",
   });
 
   async function refresh() {
     try {
-      const [sockets, schedules, groups, scenes, timers, rooms, activity] = await Promise.all([
+      const [sockets, schedules, groups, scenes, timers, rooms, activity, sensors] = await Promise.all([
         api.listSockets(),
         api.listSchedules(),
         api.listGroups(),
@@ -28,6 +29,7 @@ function createDataStore() {
         api.listTimers(),
         api.listRooms(),
         api.listActivity(20),
+        api.listSensors(),
       ]);
       data.sockets = sockets ?? [];
       data.schedules = schedules ?? [];
@@ -36,6 +38,7 @@ function createDataStore() {
       data.timers = timers ?? [];
       data.rooms = rooms ?? [];
       data.activity = activity ?? [];
+      data.sensors = sensors ?? [];
       data.loaded = true;
     } catch (e) {
       toasts.error("Failed to load data", (e as Error).message);
@@ -90,7 +93,7 @@ function createToastStore() {
 }
 
 function createRouteStore() {
-  const valid: Route[] = ["dashboard", "sockets", "groups", "scenes", "schedules"];
+  const valid: Route[] = ["dashboard", "sockets", "groups", "scenes", "schedules", "sensors"];
   const current = $state<{ route: Route }>({ route: parse() });
 
   function parse(): Route {

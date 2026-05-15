@@ -3,7 +3,9 @@
     import Icon from "../components/Icon.svelte";
     import RoomCard from "../components/RoomCard.svelte";
     import SceneTile from "../components/SceneTile.svelte";
+    import SensorCard from "../components/SensorCard.svelte";
     import TimerRow from "../components/TimerRow.svelte";
+    import { route } from "../lib/stores.svelte";
     import { api } from "../lib/api";
     import { data, toasts } from "../lib/stores.svelte";
     import { runAction } from "../lib/utils";
@@ -118,6 +120,24 @@
     {/if}
 </section>
 
+{#if v.sensors.length > 0}
+    <section class="card">
+        <div class="card-header">
+            <h2>Sensors</h2>
+            <button class="btn btn-ghost" onclick={() => route.go("sensors")}>View all</button>
+        </div>
+        <div class="sensors">
+            {#each v.sensors.slice(0, 6) as sensor, i (sensor.id)}
+                <div class="sensor-item"
+                    animate:flip={{ duration: dur(280), easing: cubicOut }}
+                    in:scale={{ start: 0.95, opacity: 0, duration: dur(220), delay: stagger(i), easing: cubicOut }}>
+                    <SensorCard {sensor} compact />
+                </div>
+            {/each}
+        </div>
+    </section>
+{/if}
+
 {#if v.timers.length > 0}
     <section class="card">
         <div class="card-header"><h2>Pending timers</h2></div>
@@ -208,6 +228,16 @@
         gap: var(--space-3);
     }
     .timers { display: flex; flex-direction: column; gap: var(--space-2); }
+    .sensors {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: var(--space-3);
+    }
+    @media (min-width: 600px) {
+        .sensors { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+    }
+    .sensor-item { display: flex; }
+    .sensor-item > :global(.card) { flex: 1; }
     .rooms {
         display: grid;
         grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));

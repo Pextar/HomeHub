@@ -126,6 +126,52 @@ func (s *Store) ValidateScene(sc *Scene) error {
 	return nil
 }
 
+// ValidateSensor normalizes and validates a sensor. Caller must hold Mu.
+// Allowed kinds: temperature, humidity, motion, light, power, custom.
+func (s *Store) ValidateSensor(sn *Sensor) error {
+	sn.Name = strings.TrimSpace(sn.Name)
+	sn.Kind = strings.ToLower(strings.TrimSpace(sn.Kind))
+	sn.Unit = strings.TrimSpace(sn.Unit)
+	sn.Code = strings.TrimSpace(sn.Code)
+	sn.Protocol = strings.TrimSpace(sn.Protocol)
+	sn.Field = strings.TrimSpace(sn.Field)
+	sn.Room = strings.TrimSpace(sn.Room)
+
+	if sn.Name == "" {
+		return errors.New("name is required")
+	}
+	switch sn.Kind {
+	case "temperature", "humidity", "motion", "light", "power", "custom":
+	case "":
+		sn.Kind = "custom"
+	default:
+		return errors.New("kind must be temperature, humidity, motion, light, power, or custom")
+	}
+	if sn.Code == "" {
+		return errors.New("code is required")
+	}
+	if sn.Unit == "" {
+		sn.Unit = defaultUnitForKind(sn.Kind)
+	}
+	return nil
+}
+
+func defaultUnitForKind(kind string) string {
+	switch kind {
+	case "temperature":
+		return "°C"
+	case "humidity":
+		return "%"
+	case "light":
+		return "lux"
+	case "power":
+		return "W"
+	case "motion":
+		return ""
+	}
+	return ""
+}
+
 // VerifyTarget checks that a target_type/target_id pair refers to an
 // existing entity. Caller must hold Mu.
 func (s *Store) VerifyTarget(tt, tid string) error {

@@ -98,6 +98,7 @@ func (s *Server) updateSchedule(w http.ResponseWriter, r *http.Request) {
 		merged.Days = updates.Days
 	}
 	merged.Enabled = updates.Enabled
+	merged.RandomOffsetMinutes = updates.RandomOffsetMinutes
 
 	if err := s.Store.ValidateSchedule(&merged); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())

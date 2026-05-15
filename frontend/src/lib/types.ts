@@ -62,7 +62,27 @@ export interface BulkResult {
   failures: { socket_id: string; error: string }[];
 }
 
-export type Route = "dashboard" | "sockets" | "groups" | "scenes" | "schedules";
+export type Route = "dashboard" | "sockets" | "groups" | "scenes" | "schedules" | "sensors";
+
+export type SensorKind = "temperature" | "humidity" | "motion" | "light" | "power" | "custom";
+
+export interface Sensor {
+  id: string;
+  name: string;
+  kind: SensorKind;
+  unit: string;
+  code: string;
+  protocol: string;
+  field?: string;
+  room?: string;
+  last_value?: number;
+  last_reading_at?: string;
+}
+
+export interface SensorReading {
+  time: string;
+  value: number;
+}
 
 export interface ActivityEntry {
   id: number;
