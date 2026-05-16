@@ -201,9 +201,10 @@
             border: none;
             border-radius: 0;
             font-size: 11px;
-            min-width: 52px;
+            min-width: 44px;
             min-height: 52px;
             justify-content: center;
         }
+        .theme-toggle span { display: none; }
     }
 </style>
