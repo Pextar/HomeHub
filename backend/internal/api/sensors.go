@@ -128,6 +128,51 @@ func (s *Server) deleteSensor(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// startSensorPair opens a discovery window in which the RX listener
+// records every unknown 433MHz emitter it hears. The frontend then polls
+// listDiscoveryCandidates to show the user candidates they can adopt.
+//
+// This mirrors learnSocket conceptually but in the opposite direction:
+// sockets learn a code we transmit; sensors transmit a code we capture.
+func (s *Server) startSensorPair(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Seconds int `json:"seconds"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	secs := body.Seconds
+	if secs <= 0 {
+		secs = 60
+	}
+	if secs > 300 {
+		secs = 300
+	}
+
+	s.Store.Mu.Lock()
+	until := s.Store.StartDiscovery(time.Duration(secs) * time.Second)
+	s.Store.Mu.Unlock()
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"active":  true,
+		"until":   until.UTC(),
+		"seconds": secs,
+	})
+}
+
+// listDiscoveryCandidates returns the current state of the pair window:
+// whether it's still open, when it closes, and every unknown emitter
+// heard so far (with sample numeric fields).
+func (s *Server) listDiscoveryCandidates(w http.ResponseWriter, _ *http.Request) {
+	s.Store.Mu.RLock()
+	active, until, candidates := s.Store.DiscoverySnapshot()
+	s.Store.Mu.RUnlock()
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"active":     active,
+		"until":      until.UTC(),
+		"candidates": candidates,
+	})
+}
+
 // getSensorReadings returns the rolling window of readings for one sensor.
 // Optional query params:
 //   - since_minutes=N: only readings from the last N minutes

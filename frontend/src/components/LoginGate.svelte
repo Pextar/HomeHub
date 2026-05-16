@@ -8,8 +8,8 @@
     }
     let { onAuthed, children }: Props = $props();
 
-    type State = "checking" | "needs-login" | "authed" | "logging-in";
-    let state = $state<State>("checking");
+    type Phase = "checking" | "needs-login" | "authed" | "logging-in";
+    let phase: Phase = $state("checking");
     let username = $state("");
     let password = $state("");
     let error = $state("");
@@ -19,14 +19,14 @@
     onMount(async () => {
         try {
             await api.health();
-            state = "authed";
+            phase = "authed";
             onAuthed?.();
         } catch (e) {
             if (e instanceof ApiError && e.status === 401) {
-                state = "needs-login";
+                phase = "needs-login";
                 return;
             }
-            state = "authed";
+            phase = "authed";
             onAuthed?.();
         }
     });
@@ -35,22 +35,22 @@
         e.preventDefault();
         if (!username || !password) return;
         error = "";
-        state = "logging-in";
+        phase = "logging-in";
         try {
             await api.login({ username, password });
             password = "";
-            state = "authed";
+            phase = "authed";
             onAuthed?.();
         } catch (e) {
             error = (e instanceof ApiError ? e.message : "Sign in failed");
-            state = "needs-login";
+            phase = "needs-login";
         }
     }
 </script>
 
-{#if state === "authed"}
+{#if phase === "authed"}
     {@render children?.()}
-{:else if state === "checking"}
+{:else if phase === "checking"}
     <div class="screen"><div class="splash">Loading…</div></div>
 {:else}
     <div class="screen">
@@ -71,8 +71,8 @@
                     autocomplete="current-password" required />
             </div>
             {#if error}<div class="error" role="alert">{error}</div>{/if}
-            <button class="btn btn-primary" type="submit" disabled={state === "logging-in"}>
-                {state === "logging-in" ? "Signing in…" : "Sign in"}
+            <button class="btn btn-primary" type="submit" disabled={phase === "logging-in"}>
+                {phase === "logging-in" ? "Signing in…" : "Sign in"}
             </button>
         </form>
     </div>

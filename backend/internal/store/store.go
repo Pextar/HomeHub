@@ -35,10 +35,11 @@ type Store struct {
 	Sensors   map[string]*Sensor
 	// Readings is a rolling window of recent values per sensor id.
 	// Trimmed to ReadingsHistorySize on each append.
-	Readings map[string][]SensorReading
-	Activity *ActivityLog
-	DataDir  string
-	RF       RFSender
+	Readings  map[string][]SensorReading
+	Activity  *ActivityLog
+	Discovery *Discovery
+	DataDir   string
+	RF        RFSender
 }
 
 const (
@@ -68,6 +69,7 @@ func New(dataDir string, rf RFSender) *Store {
 		Sensors:   make(map[string]*Sensor),
 		Readings:  make(map[string][]SensorReading),
 		Activity:  NewActivityLog(200),
+		Discovery: &Discovery{Candidates: make(map[string]*DiscoveryCandidate)},
 		DataDir:   dataDir,
 		RF:        rf,
 	}

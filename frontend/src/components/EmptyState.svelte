@@ -11,7 +11,7 @@
     }
     const iconNames = {
         socket: "socket", clock: "clock", groups: "groups",
-        scenes: "scenes", search: "search",
+        scenes: "scenes", search: "search", sensor: "sensor",
     } as const;
     let { icon, title, message, compact = false, children }: Props = $props();
 </script>

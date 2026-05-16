@@ -84,6 +84,21 @@ export interface SensorReading {
   value: number;
 }
 
+export interface DiscoveryCandidate {
+  protocol: string;
+  code: string;
+  fields: Record<string, number>;
+  count: number;
+  first_seen: string;
+  last_seen: string;
+}
+
+export interface DiscoveryState {
+  active: boolean;
+  until: string;
+  candidates: DiscoveryCandidate[];
+}
+
 export interface ActivityEntry {
   id: number;
   time: string;

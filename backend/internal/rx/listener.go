@@ -118,6 +118,7 @@ func (l Listener) dispatch(st *store.Store, packet map[string]interface{}) {
 	st.Mu.Lock()
 	defer st.Mu.Unlock()
 
+	matched := false
 	for _, sensor := range st.Sensors {
 		if !codeMatches(sensor.Code, composed, model, id) {
 			continue
@@ -126,6 +127,7 @@ func (l Listener) dispatch(st *store.Store, packet map[string]interface{}) {
 			!strings.EqualFold(sensor.Protocol, "rtl_433") {
 			continue
 		}
+		matched = true
 		value, ok := extractValue(packet, sensor.Field)
 		if !ok {
 			continue
@@ -135,6 +137,26 @@ func (l Listener) dispatch(st *store.Store, packet map[string]interface{}) {
 			log.Printf("rx: append reading for %s: %v", sensor.ID, err)
 		}
 	}
+
+	if !matched && composed != "" && st.DiscoveryActive() {
+		st.RecordCandidate(model, composed, numericFields(packet))
+	}
+}
+
+// numericFields returns every JSON key that decodes to a number,
+// skipping known identifier fields. Used by discovery so the UI can
+// show the user which numeric value each candidate is producing.
+func numericFields(packet map[string]interface{}) map[string]float64 {
+	out := make(map[string]float64, len(packet))
+	for k, v := range packet {
+		if isIdentifierField(k) {
+			continue
+		}
+		if f, ok := toFloat(v); ok {
+			out[k] = f
+		}
+	}
+	return out
 }
 
 func codeMatches(want, composed, model, id string) bool {

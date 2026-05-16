@@ -41,6 +41,45 @@ sudo apt-get install wiringpi
 # This provides codesend command
 ```
 
+### 433MHz Receiver (for sensors)
+
+Sensor pairing needs a receiver. The recommended setup is an **RTL-SDR
+USB dongle** (any RTL2832U + R820T2 stick, ~$15–25); decoded by
+`rtl_433`, it covers Acurite, Nexus, LaCrosse, Oregon, Fineoffset,
+Telldus and most other common 433 MHz sensor families out of the box.
+
+```bash
+sudo apt install -y rtl-433
+```
+
+Plug in the dongle, then smoke-test from a terminal:
+
+```bash
+rtl_433 -F json
+```
+
+Trigger a sensor (press a doorbell, wait for the thermometer to beacon).
+You should see one JSON line per packet. If you get `usb_claim_interface
+error -6` or "device busy", the kernel's DVB driver auto-bound to the
+dongle — unbind it and retry:
+
+```bash
+sudo modprobe -r dvb_usb_rtl28xxu rtl2832 rtl2830
+```
+
+The `rtl-433` package ships a udev rule that grants non-root access; if
+you still hit permission errors after a reboot, add yourself to the
+`plugdev` group: `sudo usermod -aG plugdev $USER` and log out / back in.
+
+`SENSOR_RX_CMD` in `.env` stays unset — the controller's default is
+already `rtl_433 -F json`. Restart the service after install:
+
+```bash
+sudo systemctl restart rf-controller
+```
+
+Then hit **Pair** on the Sensors page in the UI and trigger your sensor.
+
 ## Software Installation
 
 ### Recommended: cross-compile from your laptop

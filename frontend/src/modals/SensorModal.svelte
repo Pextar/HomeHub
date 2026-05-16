@@ -7,16 +7,21 @@
     import ConfirmModal from "../components/ConfirmModal.svelte";
     import type { Sensor, SensorKind } from "../lib/types";
 
-    interface Props { existing?: Sensor | null; }
-    let { existing = null }: Props = $props();
+    interface Prefill {
+        code?: string;
+        protocol?: string;
+        field?: string;
+    }
+    interface Props { existing?: Sensor | null; prefill?: Prefill | null; }
+    let { existing = null, prefill = null }: Props = $props();
     const isEdit = $derived(!!existing);
 
     let name = $state(untrack(() => existing?.name ?? ""));
     let kind = $state<SensorKind>(untrack(() => existing?.kind ?? "temperature"));
     let unit = $state(untrack(() => existing?.unit ?? defaultUnit(existing?.kind ?? "temperature")));
-    let code = $state(untrack(() => existing?.code ?? ""));
-    let protocol = $state(untrack(() => existing?.protocol ?? "rtl_433"));
-    let field = $state(untrack(() => existing?.field ?? defaultField(existing?.kind ?? "temperature")));
+    let code = $state(untrack(() => existing?.code ?? prefill?.code ?? ""));
+    let protocol = $state(untrack(() => existing?.protocol ?? prefill?.protocol ?? "rtl_433"));
+    let field = $state(untrack(() => existing?.field ?? prefill?.field ?? defaultField(existing?.kind ?? "temperature")));
     let room = $state(untrack(() => existing?.room ?? ""));
 
     // When the user changes kind, reset unit + field to their defaults

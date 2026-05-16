@@ -95,6 +95,8 @@ func (s *Server) Handler() http.Handler {
 
 	api.HandleFunc("/sensors", s.getSensors).Methods("GET")
 	api.HandleFunc("/sensors", s.createSensor).Methods("POST")
+	api.HandleFunc("/sensors/pair/start", s.startSensorPair).Methods("POST")
+	api.HandleFunc("/sensors/discover", s.listDiscoveryCandidates).Methods("GET")
 	api.HandleFunc("/sensors/{id}", s.updateSensor).Methods("PUT")
 	api.HandleFunc("/sensors/{id}", s.deleteSensor).Methods("DELETE")
 	api.HandleFunc("/sensors/{id}/readings", s.getSensorReadings).Methods("GET")
