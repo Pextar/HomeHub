@@ -21,6 +21,7 @@
     const items: { route: Route; icon: any; label: string }[] = [
         { route: "dashboard", icon: "dashboard", label: "Dashboard" },
         { route: "sockets",   icon: "socket",    label: "Sockets" },
+        { route: "sensors",   icon: "sensor",    label: "Sensors" },
         { route: "groups",    icon: "groups",    label: "Groups" },
         { route: "scenes",    icon: "scenes",    label: "Scenes" },
         { route: "schedules", icon: "clock",     label: "Schedules" },

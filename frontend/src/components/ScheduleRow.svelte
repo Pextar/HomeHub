@@ -44,7 +44,12 @@
 </script>
 
 <div class="row">
-    <div class="time">{schedule.time}</div>
+    <div class="time">
+        {schedule.time}
+        {#if schedule.random_offset_minutes}
+            <span class="offset">+{schedule.random_offset_minutes < 60 ? `${schedule.random_offset_minutes}m` : `${schedule.random_offset_minutes / 60}h`}</span>
+        {/if}
+    </div>
     <div class="info">
         <div class="target">{target.kind}: {target.label}</div>
         <div class="meta">{target.sub} · {formatDays(schedule.days)}</div>
@@ -77,6 +82,18 @@
         font-family: var(--font-mono);
         font-size: 1.25rem;
         font-weight: 600;
+        display: flex;
+        align-items: baseline;
+        gap: 4px;
+    }
+    .offset {
+        font-size: 0.65rem;
+        font-weight: 500;
+        color: var(--text-muted);
+        background: var(--bg-sunken);
+        border-radius: 4px;
+        padding: 1px 4px;
+        letter-spacing: 0.02em;
     }
     .info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
     .target { font-weight: 500; }

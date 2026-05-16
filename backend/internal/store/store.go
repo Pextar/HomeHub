@@ -32,9 +32,13 @@ type Store struct {
 	Groups    map[string]*Group
 	Scenes    map[string]*Scene
 	Timers    map[string]*Timer
-	Activity  *ActivityLog
-	DataDir   string
-	RF        RFSender
+	Sensors   map[string]*Sensor
+	// Readings is a rolling window of recent values per sensor id.
+	// Trimmed to ReadingsHistorySize on each append.
+	Readings map[string][]SensorReading
+	Activity *ActivityLog
+	DataDir  string
+	RF       RFSender
 }
 
 const (
@@ -43,6 +47,13 @@ const (
 	groupsFile    = "groups.json"
 	scenesFile    = "scenes.json"
 	timersFile    = "timers.json"
+	sensorsFile   = "sensors.json"
+	readingsFile  = "readings.json"
+
+	// ReadingsHistorySize caps how many readings are kept per sensor.
+	// At one sample per minute that's ~16 hours; at one per five minutes
+	// it's ~3.5 days. Plenty for the chart ranges the UI exposes.
+	ReadingsHistorySize = 1000
 )
 
 // New returns an empty Store wired to dataDir and rf. Call Load to read
@@ -54,6 +65,8 @@ func New(dataDir string, rf RFSender) *Store {
 		Groups:    make(map[string]*Group),
 		Scenes:    make(map[string]*Scene),
 		Timers:    make(map[string]*Timer),
+		Sensors:   make(map[string]*Sensor),
+		Readings:  make(map[string][]SensorReading),
 		Activity:  NewActivityLog(200),
 		DataDir:   dataDir,
 		RF:        rf,
@@ -79,6 +92,12 @@ func (s *Store) Load() error {
 	if err := readJSON(filepath.Join(s.DataDir, timersFile), &s.Timers); err != nil {
 		return fmt.Errorf("loading timers: %w", err)
 	}
+	if err := readJSON(filepath.Join(s.DataDir, sensorsFile), &s.Sensors); err != nil {
+		return fmt.Errorf("loading sensors: %w", err)
+	}
+	if err := readJSON(filepath.Join(s.DataDir, readingsFile), &s.Readings); err != nil {
+		return fmt.Errorf("loading readings: %w", err)
+	}
 	if s.Sockets == nil {
 		s.Sockets = make(map[string]*Socket)
 	}
@@ -93,6 +112,12 @@ func (s *Store) Load() error {
 	}
 	if s.Timers == nil {
 		s.Timers = make(map[string]*Timer)
+	}
+	if s.Sensors == nil {
+		s.Sensors = make(map[string]*Sensor)
+	}
+	if s.Readings == nil {
+		s.Readings = make(map[string][]SensorReading)
 	}
 
 	for _, sch := range s.Schedules {
@@ -121,7 +146,43 @@ func (s *Store) Save() error {
 	if err := writeJSON(filepath.Join(s.DataDir, timersFile), s.Timers); err != nil {
 		return fmt.Errorf("saving timers: %w", err)
 	}
+	if err := writeJSON(filepath.Join(s.DataDir, sensorsFile), s.Sensors); err != nil {
+		return fmt.Errorf("saving sensors: %w", err)
+	}
 	return nil
+}
+
+// SaveSensors persists only the sensors and readings files. Called from
+// the RX hot path so a steady stream of incoming readings doesn't rewrite
+// every JSON file on disk. Caller must hold Mu.
+func (s *Store) SaveSensors() error {
+	if err := writeJSON(filepath.Join(s.DataDir, sensorsFile), s.Sensors); err != nil {
+		return fmt.Errorf("saving sensors: %w", err)
+	}
+	if err := writeJSON(filepath.Join(s.DataDir, readingsFile), s.Readings); err != nil {
+		return fmt.Errorf("saving readings: %w", err)
+	}
+	return nil
+}
+
+// AppendReading adds one reading to a sensor's rolling window, updates
+// the sensor's LastValue/LastReadingAt, and persists. Caller must hold Mu.
+func (s *Store) AppendReading(sensorID string, r SensorReading) error {
+	sensor, ok := s.Sensors[sensorID]
+	if !ok {
+		return fmt.Errorf("sensor %q not found", sensorID)
+	}
+	hist := append(s.Readings[sensorID], r)
+	if len(hist) > ReadingsHistorySize {
+		// Drop oldest, keep the tail.
+		hist = hist[len(hist)-ReadingsHistorySize:]
+	}
+	s.Readings[sensorID] = hist
+	v := r.Value
+	t := r.Time
+	sensor.LastValue = &v
+	sensor.LastReadingAt = &t
+	return s.SaveSensors()
 }
 
 func readJSON(path string, v interface{}) error {

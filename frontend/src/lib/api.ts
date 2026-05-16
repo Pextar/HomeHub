@@ -9,6 +9,8 @@ import type {
   TargetType,
   SocketAction,
   ActivityEntry,
+  Sensor,
+  SensorReading,
 } from "./types";
 
 const BASE = "/api";
@@ -116,6 +118,22 @@ export const api = {
     return req<Timer>("/timers", { method: "POST", body: json(body) });
   },
   deleteTimer(id: string) { return req<void>(`/timers/${encodeURIComponent(id)}`, { method: "DELETE" }); },
+
+  // Sensors
+  listSensors() { return req<Sensor[]>("/sensors"); },
+  createSensor(body: Partial<Sensor>) { return req<Sensor>("/sensors", { method: "POST", body: json(body) }); },
+  updateSensor(id: string, body: Partial<Sensor>) { return req<Sensor>(`/sensors/${encodeURIComponent(id)}`, { method: "PUT", body: json(body) }); },
+  deleteSensor(id: string) { return req<void>(`/sensors/${encodeURIComponent(id)}`, { method: "DELETE" }); },
+  sensorReadings(id: string, opts: { since_minutes?: number; limit?: number } = {}) {
+    const q = new URLSearchParams();
+    if (opts.since_minutes) q.set("since_minutes", String(opts.since_minutes));
+    if (opts.limit) q.set("limit", String(opts.limit));
+    const qs = q.toString();
+    return req<SensorReading[]>(`/sensors/${encodeURIComponent(id)}/readings${qs ? `?${qs}` : ""}`);
+  },
+  postSensorReading(id: string, body: { value: number; time?: string }) {
+    return req<SensorReading>(`/sensors/${encodeURIComponent(id)}/readings`, { method: "POST", body: json(body) });
+  },
 };
 
 export type Api = typeof api;

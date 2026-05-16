@@ -93,6 +93,13 @@ func (s *Server) Handler() http.Handler {
 	api.HandleFunc("/timers", s.createTimer).Methods("POST")
 	api.HandleFunc("/timers/{id}", s.deleteTimer).Methods("DELETE")
 
+	api.HandleFunc("/sensors", s.getSensors).Methods("GET")
+	api.HandleFunc("/sensors", s.createSensor).Methods("POST")
+	api.HandleFunc("/sensors/{id}", s.updateSensor).Methods("PUT")
+	api.HandleFunc("/sensors/{id}", s.deleteSensor).Methods("DELETE")
+	api.HandleFunc("/sensors/{id}/readings", s.getSensorReadings).Methods("GET")
+	api.HandleFunc("/sensors/{id}/readings", s.postSensorReading).Methods("POST")
+
 	api.HandleFunc("/activity", s.getActivity).Methods("GET")
 	api.HandleFunc("/shortcut-auth", s.getShortcutAuth).Methods("GET")
 
