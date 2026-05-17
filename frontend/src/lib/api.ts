@@ -12,6 +12,7 @@ import type {
   Sensor,
   SensorReading,
   DiscoveryState,
+  Settings,
 } from "./types";
 
 const BASE = "/api";
@@ -144,6 +145,10 @@ export const api = {
   discoverSensors() {
     return req<DiscoveryState>("/sensors/discover");
   },
+
+  // Settings
+  getSettings() { return req<Settings>("/settings"); },
+  updateSettings(body: Settings) { return req<Settings>("/settings", { method: "PUT", body: json(body) }); },
 };
 
 export type Api = typeof api;

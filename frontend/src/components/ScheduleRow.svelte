@@ -13,6 +13,17 @@
     let { schedule }: Props = $props();
 
     const target = $derived(describeTarget(schedule.target_type, schedule.target_id, schedule.socket_id));
+    const isSolar = $derived(schedule.time_mode === "sunrise" || schedule.time_mode === "sunset");
+
+    function formatOffset(min: number): string {
+        if (!min) return "";
+        const sign = min < 0 ? "−" : "+";
+        const abs = Math.abs(min);
+        const h = Math.floor(abs / 60);
+        const m = abs % 60;
+        const parts = [h && `${h}h`, m && `${m}m`].filter(Boolean).join("");
+        return `${sign}${parts}`;
+    }
 
     async function toggleEnabled(checked: boolean) {
         try {
@@ -26,9 +37,12 @@
     }
 
     async function confirmDelete() {
+        const when = isSolar
+            ? `at ${schedule.time_mode}${formatOffset(schedule.solar_offset_minutes ?? 0)}`
+            : `at ${schedule.time}`;
         const ok = await openModal<boolean>(ConfirmModal, {
             title: "Delete schedule?",
-            message: `${schedule.action.toUpperCase()} ${target.label} at ${schedule.time}.`,
+            message: `${schedule.action.toUpperCase()} ${target.label} ${when}.`,
             confirmLabel: "Delete",
             danger: true,
         });
@@ -44,8 +58,17 @@
 </script>
 
 <div class="row">
-    <div class="time">
-        {schedule.time}
+    <div class="time" class:solar={isSolar}>
+        {#if isSolar}
+            <span class="solar-icon" aria-hidden="true">
+                <Icon name={schedule.time_mode === "sunrise" ? "sunrise" : "sunset"} size={20} />
+            </span>
+            <span class="solar-label">
+                {schedule.time_mode === "sunrise" ? "Sunrise" : "Sunset"}{#if schedule.solar_offset_minutes}<span class="solar-offset"> {formatOffset(schedule.solar_offset_minutes)}</span>{/if}
+            </span>
+        {:else}
+            {schedule.time}
+        {/if}
         {#if schedule.random_offset_minutes}
             <span class="offset">+{schedule.random_offset_minutes < 60 ? `${schedule.random_offset_minutes}m` : `${schedule.random_offset_minutes / 60}h`}</span>
         {/if}
@@ -86,6 +109,16 @@
         align-items: baseline;
         gap: 4px;
     }
+    .time.solar {
+        font-family: inherit;
+        font-size: 0.95rem;
+        align-items: center;
+        gap: 6px;
+        color: var(--text);
+    }
+    .solar-icon { display: inline-flex; color: var(--primary); }
+    .solar-label { white-space: nowrap; }
+    .solar-offset { color: var(--text-muted); font-weight: 500; }
     .offset {
         font-size: 0.65rem;
         font-weight: 500;

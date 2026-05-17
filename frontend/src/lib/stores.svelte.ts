@@ -1,5 +1,5 @@
 import { api } from "./api";
-import type { Socket, Schedule, Group, Scene, Timer, RoomSummary, ToastSpec, Route, ActivityEntry, Sensor } from "./types";
+import type { Socket, Schedule, Group, Scene, Timer, RoomSummary, ToastSpec, Route, ActivityEntry, Sensor, Settings } from "./types";
 
 // Reactive global state. Svelte 5 runes ($state) make any property mutation
 // trigger downstream reactivity in components that read these values.
@@ -15,13 +15,14 @@ function createDataStore() {
     rooms: [] as RoomSummary[],
     activity: [] as ActivityEntry[],
     sensors: [] as Sensor[],
+    settings: { latitude: 0, longitude: 0 } as Settings,
     loaded: false,
     health: "unknown" as "ok" | "error" | "unknown",
   });
 
   async function refresh() {
     try {
-      const [sockets, schedules, groups, scenes, timers, rooms, activity, sensors] = await Promise.all([
+      const [sockets, schedules, groups, scenes, timers, rooms, activity, sensors, settings] = await Promise.all([
         api.listSockets(),
         api.listSchedules(),
         api.listGroups(),
@@ -30,6 +31,7 @@ function createDataStore() {
         api.listRooms(),
         api.listActivity(20),
         api.listSensors(),
+        api.getSettings(),
       ]);
       data.sockets = sockets ?? [];
       data.schedules = schedules ?? [];
@@ -39,6 +41,7 @@ function createDataStore() {
       data.rooms = rooms ?? [];
       data.activity = activity ?? [];
       data.sensors = sensors ?? [];
+      data.settings = settings ?? { latitude: 0, longitude: 0 };
       data.loaded = true;
     } catch (e) {
       toasts.error("Failed to load data", (e as Error).message);
@@ -93,7 +96,7 @@ function createToastStore() {
 }
 
 function createRouteStore() {
-  const valid: Route[] = ["dashboard", "sockets", "groups", "scenes", "schedules", "sensors"];
+  const valid: Route[] = ["dashboard", "sockets", "groups", "scenes", "schedules", "sensors", "settings"];
   const current = $state<{ route: Route }>({ route: parse() });
 
   function parse(): Route {

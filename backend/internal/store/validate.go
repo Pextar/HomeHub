@@ -14,6 +14,7 @@ func (s *Store) ValidateSchedule(sch *Schedule) error {
 	sch.TargetType = strings.ToLower(strings.TrimSpace(sch.TargetType))
 	sch.TargetID = strings.TrimSpace(sch.TargetID)
 	sch.Action = strings.ToLower(strings.TrimSpace(sch.Action))
+	sch.TimeMode = strings.ToLower(strings.TrimSpace(sch.TimeMode))
 	sch.Time = strings.TrimSpace(sch.Time)
 
 	// Backwards compat: socket_id alone implies a socket target.
@@ -60,8 +61,22 @@ func (s *Store) ValidateSchedule(sch *Schedule) error {
 		return errors.New("target_type must be socket, group, or scene")
 	}
 
-	if _, err := time.Parse("15:04", sch.Time); err != nil {
-		return errors.New("time must be in HH:MM format")
+	switch sch.TimeMode {
+	case "", ModeFixed:
+		sch.TimeMode = ModeFixed
+		sch.SolarOffsetMinutes = 0
+		if _, err := time.Parse("15:04", sch.Time); err != nil {
+			return errors.New("time must be in HH:MM format")
+		}
+	case ModeSunrise, ModeSunset:
+		// Time isn't used for solar schedules; drop any stale value so
+		// the persisted record doesn't suggest otherwise.
+		sch.Time = ""
+		if sch.SolarOffsetMinutes < -120 || sch.SolarOffsetMinutes > 120 {
+			return errors.New("solar_offset_minutes must be between -120 and 120")
+		}
+	default:
+		return errors.New("time_mode must be fixed, sunrise, or sunset")
 	}
 	for _, d := range sch.Days {
 		if d < 0 || d > 6 {
@@ -70,6 +85,18 @@ func (s *Store) ValidateSchedule(sch *Schedule) error {
 	}
 	if sch.RandomOffsetMinutes < 0 || sch.RandomOffsetMinutes > 120 {
 		return errors.New("random_offset_minutes must be between 0 and 120")
+	}
+	return nil
+}
+
+// ValidateSettings normalizes and bounds-checks the settings struct.
+func (s *Store) ValidateSettings(set *Settings) error {
+	set.LocationName = strings.TrimSpace(set.LocationName)
+	if set.Latitude < -90 || set.Latitude > 90 {
+		return errors.New("latitude must be between -90 and 90")
+	}
+	if set.Longitude < -180 || set.Longitude > 180 {
+		return errors.New("longitude must be between -180 and 180")
 	}
 	return nil
 }

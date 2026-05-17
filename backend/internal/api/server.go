@@ -105,6 +105,9 @@ func (s *Server) Handler() http.Handler {
 	api.HandleFunc("/activity", s.getActivity).Methods("GET")
 	api.HandleFunc("/shortcut-auth", s.getShortcutAuth).Methods("GET")
 
+	api.HandleFunc("/settings", s.getSettings).Methods("GET")
+	api.HandleFunc("/settings", s.updateSettings).Methods("PUT")
+
 	r.PathPrefix("/").Handler(spaHandler(s.SPADir))
 
 	cors := handlers.CORS(

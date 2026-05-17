@@ -21,17 +21,47 @@ type Socket struct {
 //
 // For backwards compatibility, schedules with socket_id set and no
 // target_type are treated as target_type="socket", target_id=socket_id.
+//
+// TimeMode picks how the trigger time is derived:
+//   - "fixed" (default): fire at the wall-clock Time ("HH:MM").
+//   - "sunrise": fire at today's sunrise + SolarOffsetMinutes.
+//   - "sunset":  fire at today's sunset + SolarOffsetMinutes.
+//
+// Sunrise/sunset modes require Settings.Latitude/Longitude to be set;
+// without a location the scheduler skips them silently.
 type Schedule struct {
-	ID                   string    `json:"id"`
-	SocketID             string    `json:"socket_id,omitempty"`
-	TargetType           string    `json:"target_type,omitempty"`
-	TargetID             string    `json:"target_id,omitempty"`
-	Action               string    `json:"action"` // "on" | "off" | "toggle" | "activate"
-	Time                 string    `json:"time"`   // "HH:MM" format
-	Days                 []int     `json:"days"`   // 0=Sun, 1=Mon, etc
-	Enabled              bool      `json:"enabled"`
-	RandomOffsetMinutes  int       `json:"random_offset_minutes,omitempty"` // fire at a random time 0..N minutes after Time
-	LastFiredAt          time.Time `json:"last_fired_at,omitempty"`
+	ID                  string    `json:"id"`
+	SocketID            string    `json:"socket_id,omitempty"`
+	TargetType          string    `json:"target_type,omitempty"`
+	TargetID            string    `json:"target_id,omitempty"`
+	Action              string    `json:"action"`              // "on" | "off" | "toggle" | "activate"
+	TimeMode            string    `json:"time_mode,omitempty"` // "fixed" | "sunrise" | "sunset" (empty == "fixed")
+	Time                string    `json:"time"`                // "HH:MM" format (used when TimeMode is "fixed")
+	SolarOffsetMinutes  int       `json:"solar_offset_minutes,omitempty"` // -120..120, used when TimeMode is sunrise/sunset
+	Days                []int     `json:"days"`                // 0=Sun, 1=Mon, etc
+	Enabled             bool      `json:"enabled"`
+	RandomOffsetMinutes int       `json:"random_offset_minutes,omitempty"` // fire at a random time 0..N minutes after the trigger time
+	LastFiredAt         time.Time `json:"last_fired_at,omitempty"`
+}
+
+// Settings holds app-wide preferences, currently just the controller's
+// location used to compute sunrise/sunset for solar-based schedules.
+// Both coordinates default to 0; sunrise/sunset schedules are inert
+// until a real location is configured.
+type Settings struct {
+	Latitude     float64 `json:"latitude"`
+	Longitude    float64 `json:"longitude"`
+	LocationName string  `json:"location_name,omitempty"` // free-form label for the UI ("Home", "Stockholm")
+}
+
+// HasLocation reports whether a real location has been configured.
+// A latitude/longitude of exactly (0, 0) is treated as "not set" — the
+// Null Island corner case is unlikely to matter for home automation.
+func (s *Settings) HasLocation() bool {
+	if s == nil {
+		return false
+	}
+	return s.Latitude != 0 || s.Longitude != 0
 }
 
 // Group is a manually curated collection of sockets that can be

@@ -14,16 +14,27 @@ import (
 )
 
 func (s *Server) getSchedules(w http.ResponseWriter, r *http.Request) {
+	now := time.Now()
 	s.Store.Mu.RLock()
 	result := make([]*store.Schedule, 0, len(s.Store.Schedules))
+	keys := make(map[string]string, len(s.Store.Schedules))
 	for _, sch := range s.Store.Schedules {
 		result = append(result, sch)
+		k, ok := sch.EffectiveHHMM(now, s.Store.Settings)
+		if !ok {
+			// Unresolvable schedules (e.g. sunrise without a configured
+			// location) sort to the end so the list still reads top-to-bottom
+			// by trigger time.
+			k = "~~"
+		}
+		keys[sch.ID] = k
 	}
 	s.Store.Mu.RUnlock()
 
 	sort.Slice(result, func(i, j int) bool {
-		if result[i].Time != result[j].Time {
-			return result[i].Time < result[j].Time
+		ki, kj := keys[result[i].ID], keys[result[j].ID]
+		if ki != kj {
+			return ki < kj
 		}
 		return result[i].ID < result[j].ID
 	})
@@ -91,6 +102,9 @@ func (s *Server) updateSchedule(w http.ResponseWriter, r *http.Request) {
 	if v := strings.TrimSpace(updates.Action); v != "" {
 		merged.Action = v
 	}
+	if v := strings.TrimSpace(updates.TimeMode); v != "" {
+		merged.TimeMode = v
+	}
 	if v := strings.TrimSpace(updates.Time); v != "" {
 		merged.Time = v
 	}
@@ -99,6 +113,7 @@ func (s *Server) updateSchedule(w http.ResponseWriter, r *http.Request) {
 	}
 	merged.Enabled = updates.Enabled
 	merged.RandomOffsetMinutes = updates.RandomOffsetMinutes
+	merged.SolarOffsetMinutes = updates.SolarOffsetMinutes
 
 	if err := s.Store.ValidateSchedule(&merged); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
