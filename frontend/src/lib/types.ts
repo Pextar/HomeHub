@@ -39,6 +39,31 @@ export interface Settings {
   hue_username?: string;
 }
 
+export interface HueLightState {
+  on: boolean;
+  bri?: number;        // 1..254
+  hue?: number;        // 0..65535
+  sat?: number;        // 0..254
+  ct?: number;         // 153..500 (mireds)
+  colormode?: string;
+  reachable: boolean;
+}
+
+export interface HueLight {
+  name: string;
+  type?: string;
+  state: HueLightState;
+}
+
+export interface HueStateUpdate {
+  on?: boolean;
+  bri?: number;
+  hue?: number;
+  sat?: number;
+  ct?: number;
+  transitiontime?: number;
+}
+
 export interface Group {
   id: string;
   name: string;

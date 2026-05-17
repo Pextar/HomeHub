@@ -8,10 +8,13 @@
     import type { Socket } from "../lib/types";
     import SocketModal from "../modals/SocketModal.svelte";
     import TimerModal from "../modals/TimerModal.svelte";
+    import HueLightModal from "../modals/HueLightModal.svelte";
     import ConfirmModal from "./ConfirmModal.svelte";
 
     interface Props { socket: Socket; }
     let { socket }: Props = $props();
+
+    const isHue = $derived(socket.protocol === "hue");
 
     // One-shot "pulse" ring whenever the socket's state flips, so a
     // remote toggle or schedule fire is visually obvious.
@@ -26,6 +29,35 @@
             return () => clearTimeout(t);
         }
     });
+
+    // --- Hue inline brightness ---
+    // Lazy-loaded on first render of a Hue card. Slider edits are
+    // debounced; we never reset back to bridge state, so a stale fetch
+    // can't clobber a fresh user drag.
+    let hueBri = $state<number | null>(null);
+    let userTouched = $state(false);
+    $effect(() => {
+        if (!isHue || hueBri !== null || userTouched) return;
+        // Fire-and-forget; ignore failures so the card still works without a bridge.
+        api.hueGetLight(socket.code).then(l => {
+            if (!userTouched && l.state.bri != null) hueBri = l.state.bri;
+        }).catch(() => {});
+    });
+
+    let briTimer: ReturnType<typeof setTimeout> | undefined;
+    function onBriInput() {
+        userTouched = true;
+        if (hueBri === null) return;
+        clearTimeout(briTimer);
+        const value = hueBri;
+        briTimer = setTimeout(async () => {
+            try {
+                await api.hueSetState(socket.code, { bri: value });
+            } catch (e) {
+                toasts.error("Brightness update failed", (e as Error).message);
+            }
+        }, 150);
+    }
 
     async function confirmDelete() {
         const ok = await openModal<boolean>(ConfirmModal, {
@@ -43,14 +75,28 @@
             toasts.error("Failed", (e as Error).message);
         }
     }
+
+    function openControls() {
+        if (!isHue) return;
+        openModal(HueLightModal, { socket });
+    }
 </script>
 
-<article class="card" class:on={socket.state} class:pulsing>
+<article class="card" class:on={socket.state} class:pulsing class:clickable={isHue}>
     <div class="head">
-        <div class="title">
-            <div class="name" title={socket.name}>{socket.name}</div>
-            <div class="meta">{socket.room || "Unassigned"}</div>
-        </div>
+        {#if isHue}
+            <button class="title-btn" onclick={openControls} title="Open lamp controls">
+                <div class="title">
+                    <div class="name" title={socket.name}>{socket.name}</div>
+                    <div class="meta">{socket.room || "Unassigned"}</div>
+                </div>
+            </button>
+        {:else}
+            <div class="title">
+                <div class="name" title={socket.name}>{socket.name}</div>
+                <div class="meta">{socket.room || "Unassigned"}</div>
+            </div>
+        {/if}
         <div class="menu">
             <button class="icon-btn" title="Set timer" aria-label="Set timer"
                 onclick={() => openModal(TimerModal, { socket })}>
@@ -73,6 +119,17 @@
             {socket.protocol || "raw"} · {socket.code}
         </span>
     </div>
+    {#if isHue}
+        <div class="bri-row" class:disabled={!socket.state}>
+            <Icon name="sun" size={14} />
+            <input type="range" min="1" max="254" step="1"
+                bind:value={hueBri}
+                oninput={onBriInput}
+                disabled={!socket.state || hueBri === null}
+                aria-label="Brightness" />
+            <span class="bri-val">{hueBri == null ? "—" : `${Math.round((hueBri / 254) * 100)}%`}</span>
+        </div>
+    {/if}
     <div class="controls">
         <button class="btn btn-success" disabled={socket.state}
             onclick={() => runAction(() => api.socketOn(socket.id), `Turned on ${socket.name}`)}>
@@ -129,6 +186,18 @@
     .meta { color: var(--text-muted); font-size: 12px; margin-top: 2px; }
     .menu { display: flex; gap: 4px; }
 
+    .title-btn {
+        all: unset;
+        cursor: pointer;
+        flex: 1;
+        min-width: 0;
+        border-radius: var(--radius-sm);
+        padding: 2px 4px;
+        margin: -2px -4px;
+    }
+    .title-btn:focus-visible { outline: 2px solid var(--accent, #60a5fa); }
+    .title-btn:hover .name { text-decoration: underline; text-decoration-color: var(--border-strong); }
+
     .status {
         display: flex; align-items: center; gap: var(--space-2);
         color: var(--text-muted); font-size: 13px;
@@ -144,6 +213,24 @@
         box-shadow: 0 0 0 4px var(--success-soft);
     }
     .card.on .state { color: var(--success); font-weight: 600; }
+
+    .bri-row {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        color: var(--text-muted);
+        font-size: 12px;
+    }
+    .bri-row.disabled { opacity: 0.45; }
+    .bri-row input[type="range"] {
+        flex: 1;
+        accent-color: var(--accent, #60a5fa);
+    }
+    .bri-val {
+        font-variant-numeric: tabular-nums;
+        min-width: 36px;
+        text-align: right;
+    }
 
     .controls {
         display: grid;

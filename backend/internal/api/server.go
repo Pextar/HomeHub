@@ -110,6 +110,8 @@ func (s *Server) Handler() http.Handler {
 
 	api.HandleFunc("/hue/pair", s.huePair).Methods("POST")
 	api.HandleFunc("/hue/lights", s.hueListLights).Methods("GET")
+	api.HandleFunc("/hue/lights/{id}", s.hueGetLight).Methods("GET")
+	api.HandleFunc("/hue/lights/{id}/state", s.hueSetLightState).Methods("PUT")
 
 	r.PathPrefix("/").Handler(spaHandler(s.SPADir))
 

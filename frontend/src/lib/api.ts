@@ -13,6 +13,8 @@ import type {
   SensorReading,
   DiscoveryState,
   Settings,
+  HueLight,
+  HueStateUpdate,
 } from "./types";
 
 const BASE = "/api";
@@ -158,7 +160,16 @@ export const api = {
     });
   },
   hueListLights() {
-    return req<Record<string, { name: string; on: boolean }>>("/hue/lights");
+    return req<Record<string, HueLight>>("/hue/lights");
+  },
+  hueGetLight(id: string) {
+    return req<HueLight>(`/hue/lights/${encodeURIComponent(id)}`);
+  },
+  hueSetState(id: string, state: HueStateUpdate) {
+    return req<void>(`/hue/lights/${encodeURIComponent(id)}/state`, {
+      method: "PUT",
+      body: json(state),
+    });
   },
 };
 
