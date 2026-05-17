@@ -1,0 +1,27 @@
+[Unit]
+Description=Matter Bridge (sidecar for rf-socket-controller)
+After=network-online.target bluetooth.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=claw
+WorkingDirectory=/home/claw/rf-socket-controller/matter-bridge
+EnvironmentFile=-/home/claw/rf-socket-controller/.env
+Environment=MATTER_BRIDGE_DATA=/home/claw/rf-socket-controller/matter-bridge/data
+ExecStart=/usr/bin/node /home/claw/rf-socket-controller/matter-bridge/dist/index.js
+Restart=on-failure
+RestartSec=5
+
+# BLE-based commissioning needs CAP_NET_RAW; the device files are owned by
+# the bluetooth group, so the service user should be in it.
+AmbientCapabilities=CAP_NET_RAW CAP_NET_ADMIN
+
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/home/claw/rf-socket-controller/matter-bridge/data
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

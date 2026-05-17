@@ -14,12 +14,15 @@
     let room     = $state(untrack(() => existing?.room     ?? ""));
     let code     = $state(untrack(() => existing?.code     ?? ""));
     let protocol = $state(untrack(() => existing?.protocol || "nexa"));
+    let pairingCode = $state("");
 
     const isEdit     = $derived(!!existing);
     const isTasmota  = $derived(protocol === "tasmota");
+    const isMatter   = $derived(protocol === "matter");
 
-    let pairing  = $state(false);
-    let probing  = $state(false);
+    let pairing      = $state(false);
+    let probing      = $state(false);
+    let commissioning = $state(false);
 
     async function pair() {
         if (pairing) return;
@@ -32,6 +35,25 @@
             toasts.error("Pairing failed", (e as Error).message);
         } finally {
             pairing = false;
+        }
+    }
+
+    async function commission() {
+        if (commissioning) return;
+        const pc = pairingCode.trim();
+        if (!pc) {
+            toasts.warn("Enter a pairing code", "Use the 11-digit manual code or the MT: QR payload printed on the device.");
+            return;
+        }
+        commissioning = true;
+        try {
+            const r = await api.matterCommission({ pairing_code: pc });
+            code = r.node_id;
+            toasts.success("Device commissioned", `Assigned node id ${r.node_id}. Save to add it as a socket.`);
+        } catch (e) {
+            toasts.error("Commissioning failed", (e as Error).message);
+        } finally {
+            commissioning = false;
         }
     }
 
@@ -56,7 +78,10 @@
     async function save() {
         const payload = { name: name.trim(), room: room.trim(), code: code.trim(), protocol };
         if (!payload.name || !payload.code) {
-            toasts.warn("Missing fields", isTasmota ? "Name and device IP are required." : "Name and RF code are required.");
+            const missing = isTasmota ? "device IP"
+                          : isMatter  ? "Matter node id (commission a device first)"
+                          : "RF code";
+            toasts.warn("Missing fields", `Name and ${missing} are required.`);
             return;
         }
         try {
@@ -81,7 +106,9 @@
         ? "Update this socket's details."
         : isTasmota
             ? "Configure a Tasmota Wi-Fi device."
-            : "Configure a new 433MHz controllable socket."}
+            : isMatter
+                ? "Commission a Matter Wi-Fi device."
+                : "Configure a new 433MHz controllable socket."}
 >
     {#snippet body()}
         <form onsubmit={(e) => { e.preventDefault(); save(); }}>
@@ -105,10 +132,15 @@
                     </select>
                 </div>
                 <div class="field">
-                    <label for="sock-code">{isTasmota ? "Device IP" : "RF code"}</label>
+                    <label for="sock-code">
+                        {isTasmota ? "Device IP" : isMatter ? "Matter node id" : "RF code"}
+                    </label>
                     <input id="sock-code" type="text" bind:value={code}
-                        placeholder={isTasmota ? "e.g. 192.168.1.50" : "e.g. 12345"}
-                        autocomplete="off" required />
+                        placeholder={isTasmota ? "e.g. 192.168.1.50"
+                                   : isMatter  ? "auto-filled after commissioning"
+                                   : "e.g. 12345"}
+                        autocomplete="off" required
+                        readonly={isMatter && !isEdit} />
                 </div>
             </div>
 
@@ -120,6 +152,22 @@
                     <div class="field-help">
                         Pings the device to confirm Tasmota is running at that IP.
                         Find the IP in your router's DHCP list or the Tasmota web UI.
+                    </div>
+                </div>
+            {:else if isMatter && !isEdit}
+                <div class="field" style="margin-top:var(--space-3)">
+                    <label for="sock-pair">Pairing code</label>
+                    <input id="sock-pair" type="text" bind:value={pairingCode}
+                        placeholder="e.g. 3496-112-0001 or MT:Y.K9..."
+                        autocomplete="off" />
+                </div>
+                <div class="field" style="margin-top:var(--space-3)">
+                    <button type="button" class="btn btn-secondary" onclick={commission} disabled={commissioning}>
+                        {commissioning ? "Commissioning…" : "Commission device"}
+                    </button>
+                    <div class="field-help">
+                        Enter the 11-digit manual code or the <code>MT:</code> QR payload printed on the
+                        device. The bridge uses BLE to onboard it to your Wi-Fi — this can take 30–60 seconds.
                     </div>
                 </div>
             {:else if !isEdit}

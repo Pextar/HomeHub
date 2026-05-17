@@ -263,11 +263,20 @@ All errors are returned as JSON:
 
 ## Protocols
 
-Supported RF protocols:
-- `nexa` - Nexa/Proove
-- `kaku` - KlikAanKlikUit (KAKU)
-- `intertechno` - Intertechno
-- `raw` - Raw codes
+A Socket's `protocol` field selects how it's controlled. The `code` field
+means different things per protocol — see below.
+
+| protocol      | transport       | `code` field                          |
+|---------------|-----------------|----------------------------------------|
+| `nexa`        | 433 MHz RF      | `houseID:unit` (e.g. `12345678:0`)     |
+| `kaku`        | 433 MHz RF      | numeric                                |
+| `intertechno` | 433 MHz RF      | numeric                                |
+| `raw`         | 433 MHz RF      | raw code                               |
+| `tasmota`     | Wi-Fi (HTTP)    | device IP (e.g. `192.168.1.50`)        |
+| `matter`      | Wi-Fi (matter.js)| Matter node id assigned at commissioning |
+
+The `matter` protocol is served via a Node.js sidecar — see
+[MATTER.md](MATTER.md) for setup and the `/api/matter/...` endpoints.
 
 ## Hardware Interface
 

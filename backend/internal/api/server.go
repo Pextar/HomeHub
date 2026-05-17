@@ -15,12 +15,14 @@ import (
 	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
 
+	"rf-socket-controller/internal/matter"
 	"rf-socket-controller/internal/store"
 )
 
 // Server wires HTTP handlers to a Store.
 type Server struct {
 	Store         *store.Store
+	Matter        *matter.Client // optional; nil-safe via Matter.Enabled()
 	AuthUser      string
 	AuthPass      string
 	SessionSecret []byte // HMAC key for cookie sessions; see LoadOrCreateSessionSecret
@@ -111,6 +113,11 @@ func (s *Server) Handler() http.Handler {
 	api.HandleFunc("/tasmota/probe", s.tasmotaProbe).Methods("GET")
 	api.HandleFunc("/tasmota/{socketId}", s.tasmotaGetState).Methods("GET")
 	api.HandleFunc("/tasmota/{socketId}/state", s.tasmotaSetState).Methods("PUT")
+
+	api.HandleFunc("/matter/devices", s.matterListDevices).Methods("GET")
+	api.HandleFunc("/matter/commission", s.matterCommission).Methods("POST")
+	api.HandleFunc("/matter/{socketId}", s.matterGetState).Methods("GET")
+	api.HandleFunc("/matter/{socketId}/state", s.matterSetState).Methods("PUT")
 
 	r.PathPrefix("/").Handler(spaHandler(s.SPADir))
 

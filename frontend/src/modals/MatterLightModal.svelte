@@ -1,0 +1,217 @@
+<script lang="ts">
+    import Modal from "../components/Modal.svelte";
+    import { closeModal } from "../lib/modal.svelte";
+    import { api } from "../lib/api";
+    import { toasts, data } from "../lib/stores.svelte";
+    import type { Socket, MatterState, MatterStateUpdate } from "../lib/types";
+    import { onMount } from "svelte";
+
+    interface Props { socket: Socket; }
+    let { socket }: Props = $props();
+
+    let state = $state<MatterState | null>(null);
+    let loading = $state(true);
+    let error = $state<string | null>(null);
+
+    let on = $state(socket.state);
+    let level = $state(100);
+    let color = $state("#ffffff");
+    let ct = $state(366);
+
+    const supportsLevel = $derived(state?.level !== undefined && state?.level !== null);
+    const supportsColor = $derived(state?.color !== undefined && state?.color !== null);
+    const supportsCT    = $derived(state?.ct    !== undefined && state?.ct    !== null);
+
+    onMount(async () => {
+        try {
+            const s = await api.matterGetState(socket.id);
+            state = s;
+            if (s.on != null)    on    = s.on;
+            if (s.level != null) level = s.level;
+            if (s.color)         color = "#" + s.color.toLowerCase();
+            if (s.ct != null)    ct    = s.ct;
+        } catch (e) {
+            error = (e as Error).message;
+        } finally {
+            loading = false;
+        }
+    });
+
+    let debounceTimer: ReturnType<typeof setTimeout> | undefined;
+    let pending: MatterStateUpdate = {};
+    function send(partial: MatterStateUpdate) {
+        pending = { ...pending, ...partial };
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(async () => {
+            const toSend = pending;
+            pending = {};
+            try {
+                await api.matterSetState(socket.id, toSend);
+            } catch (e) {
+                toasts.error("Update failed", (e as Error).message);
+            }
+        }, 120);
+    }
+
+    async function toggleOn() {
+        const target = !on;
+        on = target;
+        try {
+            if (target) await api.socketOn(socket.id);
+            else        await api.socketOff(socket.id);
+            await data.refresh();
+        } catch (e) {
+            on = !target;
+            toasts.error("Toggle failed", (e as Error).message);
+        }
+    }
+
+    function onLevelInput() { if (on) send({ level }); }
+    function onCTInput()    { if (on) send({ ct }); }
+    function onColorInput() {
+        if (on) send({ color: color.replace("#", "").toUpperCase() });
+    }
+
+    function ctGradient() {
+        return "linear-gradient(to right, #ffd6a8 0%, #fff 50%, #b4d8ff 100%)";
+    }
+</script>
+
+<Modal title={socket.name} subtitle={socket.room || "Unassigned"}>
+    {#snippet body()}
+        {#if loading}
+            <div class="note">Loading device state…</div>
+        {:else if error}
+            <div class="note error">
+                <strong>Could not reach device</strong>
+                <span>{error}</span>
+            </div>
+        {:else if state}
+            <div class="row">
+                <div class="swatch" class:dim={!on}
+                    style:background={supportsColor ? color : "var(--bg-base)"}>
+                </div>
+                <div class="meta">
+                    <div class="device-id">
+                        node {socket.code}{#if state.vendor || state.product}
+                            · {[state.vendor, state.product].filter(Boolean).join(" ")}
+                        {/if}
+                    </div>
+                    {#if !supportsLevel && !supportsColor && !supportsCT}
+                        <div class="hint">This device supports on/off only.</div>
+                    {/if}
+                    {#if !state.reachable}
+                        <div class="hint warn">Device is unreachable right now.</div>
+                    {/if}
+                </div>
+                <label class="toggle">
+                    <input type="checkbox" checked={on} onchange={toggleOn} />
+                    <span class="toggle-label">{on ? "On" : "Off"}</span>
+                </label>
+            </div>
+
+            {#if supportsLevel}
+                <div class="field">
+                    <div class="label-row">
+                        <label for="mat-level">Brightness</label>
+                        <span class="val">{level}%</span>
+                    </div>
+                    <input id="mat-level" type="range" min="1" max="100" step="1"
+                        bind:value={level} oninput={onLevelInput} disabled={!on} />
+                </div>
+            {/if}
+
+            {#if supportsCT}
+                <div class="field">
+                    <div class="label-row">
+                        <label for="mat-ct">Warmth</label>
+                        <span class="val">{Math.round(1_000_000 / ct)}K</span>
+                    </div>
+                    <input id="mat-ct" type="range" min="153" max="500" step="1"
+                        bind:value={ct} oninput={onCTInput} disabled={!on}
+                        style:background={ctGradient()} class="grad" />
+                </div>
+            {/if}
+
+            {#if supportsColor}
+                <div class="field">
+                    <label for="mat-color">Color</label>
+                    <div class="color-row">
+                        <input id="mat-color" type="color" bind:value={color}
+                            oninput={onColorInput} disabled={!on} />
+                        <span class="val mono">{color.toUpperCase()}</span>
+                    </div>
+                </div>
+            {/if}
+        {/if}
+    {/snippet}
+    {#snippet actions()}
+        <button class="btn btn-primary" onclick={() => closeModal()}>Done</button>
+    {/snippet}
+</Modal>
+
+<style>
+    .note { font-size: 13px; color: var(--text-muted); padding: var(--space-2) 0; }
+    .note.error { display: flex; flex-direction: column; gap: 4px; color: var(--error, #f87171); }
+    .row { display: flex; align-items: center; gap: var(--space-3); }
+    .swatch {
+        width: 44px; height: 44px;
+        border-radius: 50%;
+        border: 1px solid var(--border);
+        flex-shrink: 0;
+        transition: background 0.15s;
+    }
+    .swatch.dim { opacity: 0.3; }
+    .meta { flex: 1; min-width: 0; }
+    .device-id { font-size: 12px; color: var(--text-muted); font-family: ui-monospace, monospace; }
+    .hint { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+    .hint.warn { color: var(--warn, #f59e0b); }
+    .toggle { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+    .toggle-label { font-size: 13px; font-weight: 500; }
+
+    .field { display: flex; flex-direction: column; gap: 6px; }
+    .label-row { display: flex; justify-content: space-between; align-items: baseline; }
+    .field label { font-size: 13px; font-weight: 500; }
+    .val { font-size: 12px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+    .mono { font-family: ui-monospace, monospace; }
+
+    input[type="range"] {
+        width: 100%;
+        accent-color: var(--accent, #60a5fa);
+    }
+    input[type="range"]:disabled { opacity: 0.4; }
+    input[type="range"].grad {
+        appearance: none;
+        height: 14px;
+        border-radius: 7px;
+        border: 1px solid var(--border);
+        outline: none;
+    }
+    input[type="range"].grad::-webkit-slider-thumb {
+        appearance: none;
+        width: 18px; height: 18px;
+        border-radius: 50%;
+        background: #fff;
+        border: 2px solid var(--text);
+        cursor: pointer;
+        box-shadow: 0 1px 3px rgba(0,0,0,.3);
+    }
+    input[type="range"].grad::-moz-range-thumb {
+        width: 18px; height: 18px;
+        border-radius: 50%;
+        background: #fff;
+        border: 2px solid var(--text);
+        cursor: pointer;
+    }
+
+    .color-row { display: flex; align-items: center; gap: var(--space-3); }
+    input[type="color"] {
+        width: 48px; height: 36px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        padding: 2px;
+        cursor: pointer;
+        background: transparent;
+    }
+    input[type="color"]:disabled { opacity: 0.4; cursor: not-allowed; }
+</style>
