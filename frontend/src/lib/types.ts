@@ -28,6 +28,7 @@ export interface Schedule {
   enabled: boolean;
   random_offset_minutes?: number;
   last_fired_at?: string;
+  effective_time?: string;
 }
 
 export interface Settings {

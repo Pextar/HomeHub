@@ -13,31 +13,44 @@ import (
 	"rf-socket-controller/internal/store"
 )
 
+type scheduleResponse struct {
+	*store.Schedule
+	EffectiveTime string `json:"effective_time,omitempty"`
+}
+
 func (s *Server) getSchedules(w http.ResponseWriter, r *http.Request) {
 	now := time.Now()
 	s.Store.Mu.RLock()
-	result := make([]*store.Schedule, 0, len(s.Store.Schedules))
+	raw := make([]*store.Schedule, 0, len(s.Store.Schedules))
 	keys := make(map[string]string, len(s.Store.Schedules))
+	effective := make(map[string]string, len(s.Store.Schedules))
 	for _, sch := range s.Store.Schedules {
-		result = append(result, sch)
+		raw = append(raw, sch)
 		k, ok := sch.EffectiveHHMM(now, s.Store.Settings)
 		if !ok {
 			// Unresolvable schedules (e.g. sunrise without a configured
 			// location) sort to the end so the list still reads top-to-bottom
 			// by trigger time.
 			k = "~~"
+		} else {
+			effective[sch.ID] = k
 		}
 		keys[sch.ID] = k
 	}
 	s.Store.Mu.RUnlock()
 
-	sort.Slice(result, func(i, j int) bool {
-		ki, kj := keys[result[i].ID], keys[result[j].ID]
+	sort.Slice(raw, func(i, j int) bool {
+		ki, kj := keys[raw[i].ID], keys[raw[j].ID]
 		if ki != kj {
 			return ki < kj
 		}
-		return result[i].ID < result[j].ID
+		return raw[i].ID < raw[j].ID
 	})
+
+	result := make([]scheduleResponse, len(raw))
+	for i, sch := range raw {
+		result[i] = scheduleResponse{Schedule: sch, EffectiveTime: effective[sch.ID]}
+	}
 
 	writeJSON(w, http.StatusOK, result)
 }
