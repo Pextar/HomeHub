@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"rf-socket-controller/internal/api"
+	"rf-socket-controller/internal/matter"
 	"rf-socket-controller/internal/rf"
 	"rf-socket-controller/internal/rx"
 	"rf-socket-controller/internal/scheduler"
@@ -42,7 +43,17 @@ func main() {
 		log.Fatalf("failed to create data directory %q: %v", dataDir, err)
 	}
 
-	st := store.New(dataDir, &sender.Multi{RF: rf.Sender{NexaScript: nexaScriptPath()}})
+	matterClient := matter.FromEnv()
+	if matterClient.Enabled() {
+		log.Printf("Matter bridge enabled at %s", matterClient.BaseURL)
+	} else {
+		log.Printf("Matter bridge disabled — set MATTER_BRIDGE_URL to enable")
+	}
+
+	st := store.New(dataDir, &sender.Multi{
+		RF:     rf.Sender{NexaScript: nexaScriptPath()},
+		Matter: matterClient,
+	})
 	if err := st.Load(); err != nil {
 		log.Fatalf("failed to load data: %v", err)
 	}
@@ -54,6 +65,7 @@ func main() {
 
 	server := &api.Server{
 		Store:         st,
+		Matter:        matterClient,
 		AuthUser:      os.Getenv("AUTH_USER"),
 		AuthPass:      os.Getenv("AUTH_PASS"),
 		SessionSecret: secret,

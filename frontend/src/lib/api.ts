@@ -15,6 +15,8 @@ import type {
   Settings,
   TasmotaState,
   TasmotaStateUpdate,
+  MatterState,
+  MatterStateUpdate,
 } from "./types";
 
 const BASE = "/api";
@@ -164,6 +166,23 @@ export const api = {
   },
   tasmotaProbe(ip: string) {
     return req<{ status: string; ip: string }>(`/tasmota/probe?ip=${encodeURIComponent(ip)}`);
+  },
+
+  // Matter devices (via the matter-bridge sidecar)
+  matterListDevices() {
+    return req<MatterState[]>("/matter/devices");
+  },
+  matterCommission(body: { pairing_code: string }) {
+    return req<{ node_id: string }>("/matter/commission", { method: "POST", body: json(body) });
+  },
+  matterGetState(socketId: string) {
+    return req<MatterState>(`/matter/${encodeURIComponent(socketId)}`);
+  },
+  matterSetState(socketId: string, update: MatterStateUpdate) {
+    return req<void>(`/matter/${encodeURIComponent(socketId)}/state`, {
+      method: "PUT",
+      body: json(update),
+    });
   },
 };
 

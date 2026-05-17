@@ -53,6 +53,27 @@ export interface TasmotaStateUpdate {
   ct?: number;
 }
 
+// Matter device state (mirrors the matter-bridge sidecar's DeviceState).
+// Fields are undefined when the device doesn't expose that capability.
+export interface MatterState {
+  id: string;
+  name?: string;
+  vendor?: string;
+  product?: string;
+  reachable: boolean;
+  on?: boolean;
+  level?: number;   // 0..100
+  color?: string;   // RRGGBB hex
+  ct?: number;      // 153..500 mired
+}
+
+export interface MatterStateUpdate {
+  on?: boolean;
+  level?: number;
+  color?: string;
+  ct?: number;
+}
+
 export interface Group {
   id: string;
   name: string;

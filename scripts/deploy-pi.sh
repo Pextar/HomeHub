@@ -42,6 +42,30 @@ rsync -av --delete \
   "$RELEASE/frontend" \
   "$HOST:$REMOTE_DIR/"
 
+if [ -d "$RELEASE/matter-bridge" ]; then
+  echo "==> Syncing matter-bridge sources"
+  rsync -av --delete \
+    --exclude='data/' \
+    --exclude='node_modules/' \
+    --exclude='dist/' \
+    "$RELEASE/matter-bridge" \
+    "$HOST:$REMOTE_DIR/"
+
+  echo "==> Installing matter-bridge deps + building on the Pi"
+  # node + npm must be installed on the Pi (apt install nodejs npm).
+  ssh "$HOST" "cd '$REMOTE_DIR/matter-bridge' && \
+    mkdir -p data && \
+    if [ ! -d node_modules ]; then npm install --omit=dev; fi && \
+    npx tsc -p tsconfig.json"
+
+  echo "==> Installing matter-bridge systemd unit"
+  rsync -av "$RELEASE/matter-bridge.service" "$HOST:$REMOTE_DIR/matter-bridge.service"
+  ssh "$HOST" "sudo install -m 644 '$REMOTE_DIR/matter-bridge.service' /etc/systemd/system/matter-bridge.service \
+    && sudo systemctl daemon-reload \
+    && sudo systemctl enable matter-bridge \
+    && sudo systemctl restart matter-bridge"
+fi
+
 echo "==> Seeding .env (only if missing)"
 rsync -av --ignore-existing "$RELEASE/env.example" "$HOST:$REMOTE_DIR/.env"
 rsync -av                   "$RELEASE/env.example" "$HOST:$REMOTE_DIR/env.example"

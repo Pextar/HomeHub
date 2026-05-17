@@ -9,12 +9,15 @@
     import SocketModal from "../modals/SocketModal.svelte";
     import TimerModal from "../modals/TimerModal.svelte";
     import TasmotaLightModal from "../modals/TasmotaLightModal.svelte";
+    import MatterLightModal from "../modals/MatterLightModal.svelte";
     import ConfirmModal from "./ConfirmModal.svelte";
 
     interface Props { socket: Socket; }
     let { socket }: Props = $props();
 
     const isTasmota = $derived(socket.protocol === "tasmota");
+    const isMatter  = $derived(socket.protocol === "matter");
+    const isSmartLight = $derived(isTasmota || isMatter);
 
     // One-shot "pulse" ring whenever the socket's state flips.
     let prevState = untrack(() => socket.state);
@@ -29,27 +32,34 @@
         }
     });
 
-    // --- Tasmota inline brightness ---
+    // --- Inline brightness (Tasmota + Matter share this row) ---
     // Lazy-loaded; the userTouched flag prevents a stale bridge response
     // from overwriting a value the user is actively dragging.
-    let tasmotaDimmer = $state<number | null>(null);
+    let brightness = $state<number | null>(null);
     let userTouched = $state(false);
     $effect(() => {
-        if (!isTasmota || tasmotaDimmer !== null || userTouched) return;
-        api.tasmotaGetState(socket.id).then(s => {
-            if (!userTouched && s.dimmer != null) tasmotaDimmer = s.dimmer;
-        }).catch(() => {});
+        if (!isSmartLight || brightness !== null || userTouched) return;
+        if (isTasmota) {
+            api.tasmotaGetState(socket.id).then(s => {
+                if (!userTouched && s.dimmer != null) brightness = s.dimmer;
+            }).catch(() => {});
+        } else if (isMatter) {
+            api.matterGetState(socket.id).then(s => {
+                if (!userTouched && s.level != null) brightness = s.level;
+            }).catch(() => {});
+        }
     });
 
     let dimmerTimer: ReturnType<typeof setTimeout> | undefined;
     function onDimmerInput() {
         userTouched = true;
-        if (tasmotaDimmer === null) return;
-        const value = tasmotaDimmer;
+        if (brightness === null) return;
+        const value = brightness;
         clearTimeout(dimmerTimer);
         dimmerTimer = setTimeout(async () => {
             try {
-                await api.tasmotaSetState(socket.id, { dimmer: value });
+                if (isTasmota)     await api.tasmotaSetState(socket.id, { dimmer: value });
+                else if (isMatter) await api.matterSetState(socket.id,  { level: value });
             } catch (e) {
                 toasts.error("Brightness update failed", (e as Error).message);
             }
@@ -84,6 +94,14 @@
                     <div class="meta">{socket.room || "Unassigned"}</div>
                 </div>
             </button>
+        {:else if isMatter}
+            <button class="title-btn" onclick={() => openModal(MatterLightModal, { socket })}
+                title="Open device controls">
+                <div class="title">
+                    <div class="name">{socket.name}</div>
+                    <div class="meta">{socket.room || "Unassigned"}</div>
+                </div>
+            </button>
         {:else}
             <div class="title">
                 <div class="name" title={socket.name}>{socket.name}</div>
@@ -112,15 +130,15 @@
             {socket.protocol || "raw"} · {socket.code}
         </span>
     </div>
-    {#if isTasmota && tasmotaDimmer !== null}
+    {#if isSmartLight && brightness !== null}
         <div class="dim-row" class:disabled={!socket.state}>
             <Icon name="sun" size={14} />
             <input type="range" min="1" max="100" step="1"
-                bind:value={tasmotaDimmer}
+                bind:value={brightness}
                 oninput={onDimmerInput}
                 disabled={!socket.state}
                 aria-label="Brightness" />
-            <span class="dim-val">{tasmotaDimmer}%</span>
+            <span class="dim-val">{brightness}%</span>
         </div>
     {/if}
     <div class="controls">

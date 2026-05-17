@@ -1,0 +1,22 @@
+{
+  "name": "rf-socket-controller-matter-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "description": "matter.js-based controller sidecar that exposes commissioned Matter devices over a local HTTP API to the Go backend.",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node --enable-source-maps dist/index.js",
+    "dev": "tsc -w -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.19",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "@project-chip/matter-node-ble.js": "^0.12.6",
+    "@project-chip/matter-node.js": "^0.12.6",
+    "@project-chip/matter.js": "^0.12.6"
+  }
+}
