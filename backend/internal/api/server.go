@@ -108,6 +108,10 @@ func (s *Server) Handler() http.Handler {
 	api.HandleFunc("/settings", s.getSettings).Methods("GET")
 	api.HandleFunc("/settings", s.updateSettings).Methods("PUT")
 
+	api.HandleFunc("/tasmota/probe", s.tasmotaProbe).Methods("GET")
+	api.HandleFunc("/tasmota/{socketId}", s.tasmotaGetState).Methods("GET")
+	api.HandleFunc("/tasmota/{socketId}/state", s.tasmotaSetState).Methods("PUT")
+
 	r.PathPrefix("/").Handler(spaHandler(s.SPADir))
 
 	cors := handlers.CORS(

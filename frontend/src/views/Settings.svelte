@@ -6,30 +6,29 @@
 
     const v = $derived(data.value);
 
-    let latitude = $state(untrack(() => data.value.settings.latitude));
-    let longitude = $state(untrack(() => data.value.settings.longitude));
+    let latitude     = $state(untrack(() => data.value.settings.latitude));
+    let longitude    = $state(untrack(() => data.value.settings.longitude));
     let locationName = $state(untrack(() => data.value.settings.location_name ?? ""));
-    let saving = $state(false);
+    let saving       = $state(false);
 
-    // Keep local fields in sync if settings refresh in the background.
     let lastApplied = $state(untrack(() => ({
-        lat: data.value.settings.latitude,
-        lon: data.value.settings.longitude,
+        lat:  data.value.settings.latitude,
+        lon:  data.value.settings.longitude,
         name: data.value.settings.location_name ?? "",
     })));
     $effect(() => {
         const next = { lat: v.settings.latitude, lon: v.settings.longitude, name: v.settings.location_name ?? "" };
         if (next.lat !== lastApplied.lat || next.lon !== lastApplied.lon || next.name !== lastApplied.name) {
-            latitude = next.lat;
-            longitude = next.lon;
+            latitude     = next.lat;
+            longitude    = next.lon;
             locationName = next.name;
-            lastApplied = next;
+            lastApplied  = next;
         }
     });
 
     const dirty = $derived(
-        latitude !== v.settings.latitude ||
-        longitude !== v.settings.longitude ||
+        latitude     !== v.settings.latitude  ||
+        longitude    !== v.settings.longitude ||
         (locationName || "") !== (v.settings.location_name ?? "")
     );
 
@@ -38,8 +37,8 @@
         saving = true;
         try {
             await api.updateSettings({
-                latitude: Number(latitude),
-                longitude: Number(longitude),
+                latitude:      Number(latitude),
+                longitude:     Number(longitude),
                 location_name: locationName.trim() || undefined,
             });
             toasts.success("Settings saved");
@@ -58,7 +57,7 @@
         }
         navigator.geolocation.getCurrentPosition(
             (pos) => {
-                latitude = Math.round(pos.coords.latitude * 10000) / 10000;
+                latitude  = Math.round(pos.coords.latitude  * 10000) / 10000;
                 longitude = Math.round(pos.coords.longitude * 10000) / 10000;
                 toasts.info("Location filled", "Click Save to apply.");
             },
@@ -118,7 +117,7 @@
         max-width: 640px;
     }
     header h2 { margin: 0 0 4px; font-size: 1.05rem; }
-    header p { margin: 0; color: var(--text-muted); font-size: 13px; }
+    header p  { margin: 0; color: var(--text-muted); font-size: 13px; }
     form { display: flex; flex-direction: column; gap: var(--space-4); }
     .actions {
         display: flex;

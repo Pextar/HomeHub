@@ -13,6 +13,8 @@ import type {
   SensorReading,
   DiscoveryState,
   Settings,
+  TasmotaState,
+  TasmotaStateUpdate,
 } from "./types";
 
 const BASE = "/api";
@@ -149,6 +151,20 @@ export const api = {
   // Settings
   getSettings() { return req<Settings>("/settings"); },
   updateSettings(body: Settings) { return req<Settings>("/settings", { method: "PUT", body: json(body) }); },
+
+  // Tasmota Wi-Fi devices
+  tasmotaGetState(socketId: string) {
+    return req<TasmotaState>(`/tasmota/${encodeURIComponent(socketId)}`);
+  },
+  tasmotaSetState(socketId: string, update: TasmotaStateUpdate) {
+    return req<void>(`/tasmota/${encodeURIComponent(socketId)}/state`, {
+      method: "PUT",
+      body: json(update),
+    });
+  },
+  tasmotaProbe(ip: string) {
+    return req<{ status: string; ip: string }>(`/tasmota/probe?ip=${encodeURIComponent(ip)}`);
+  },
 };
 
 export type Api = typeof api;

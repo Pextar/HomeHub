@@ -46,8 +46,6 @@ type Schedule struct {
 
 // Settings holds app-wide preferences, currently just the controller's
 // location used to compute sunrise/sunset for solar-based schedules.
-// Both coordinates default to 0; sunrise/sunset schedules are inert
-// until a real location is configured.
 type Settings struct {
 	Latitude     float64 `json:"latitude"`
 	Longitude    float64 `json:"longitude"`

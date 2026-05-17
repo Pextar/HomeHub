@@ -37,6 +37,22 @@ export interface Settings {
   location_name?: string;
 }
 
+// Tasmota Wi-Fi device state. Fields are undefined when the device doesn't
+// support that capability (e.g. a plain plug has no dimmer or color).
+export interface TasmotaState {
+  on: boolean;
+  dimmer?: number;  // 1-100
+  color?: string;   // RRGGBB hex
+  ct?: number;      // 153-500 mired (500 = warm, 153 = cool)
+}
+
+export interface TasmotaStateUpdate {
+  on?: boolean;
+  dimmer?: number;
+  color?: string;
+  ct?: number;
+}
+
 export interface Group {
   id: string;
   name: string;
