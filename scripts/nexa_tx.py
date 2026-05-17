@@ -12,7 +12,9 @@ Usage:
 Environment:
     NEXA_TX_GPIO     BCM pin wired to the transmitter DATA pin   (default 27)
     NEXA_TX_CHIP     /dev/gpiochipN to open                      (default 0)
-    NEXA_TX_REPEAT   how many times the frame is repeated        (default 6)
+    NEXA_TX_REPEAT   how many times the frame is repeated        (default 8)
+    NEXA_TX_PULSE    base pulse width in microseconds            (default 260)
+    NEXA_TX_LONG     long-gap multiplier (LONG = PULSE * MULT)   (default 5)
 
 Pairing a socket: put the socket in learn mode (long-press its button
 until the indicator flashes), then send any on/off command for the
@@ -27,13 +29,13 @@ import os
 import sys
 import time
 
-import lgpio
+import lgpio  # type: ignore[import-untyped]
 
-T = 320          # base pulse width, microseconds (pilight-compatible)
-SHORT = T        # short low gap (1T)
-LONG = T * 4     # long low gap (4T)
-SYNC_LOW = 2600  # gap after the start pulse
-STOP_LOW = 10000 # gap after the 32 data bits, separating repeated frames
+T        = int(os.environ.get("NEXA_TX_PULSE", "260"))
+SHORT    = T
+LONG     = T * int(os.environ.get("NEXA_TX_LONG", "5"))
+SYNC_LOW = T * 10
+STOP_LOW = T * 40
 
 
 def build_pulses(pin, house_id, unit, on, repeat):
