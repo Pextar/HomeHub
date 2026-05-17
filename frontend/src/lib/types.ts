@@ -35,6 +35,8 @@ export interface Settings {
   latitude: number;
   longitude: number;
   location_name?: string;
+  hue_bridge_ip?: string;
+  hue_username?: string;
 }
 
 export interface Group {

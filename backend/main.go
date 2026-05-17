@@ -15,6 +15,7 @@ import (
 	"rf-socket-controller/internal/rf"
 	"rf-socket-controller/internal/rx"
 	"rf-socket-controller/internal/scheduler"
+	"rf-socket-controller/internal/sender"
 	"rf-socket-controller/internal/store"
 )
 
@@ -41,9 +42,15 @@ func main() {
 		log.Fatalf("failed to create data directory %q: %v", dataDir, err)
 	}
 
-	st := store.New(dataDir, rf.Sender{NexaScript: nexaScriptPath()})
+	// Build an empty store first so we can pass its Settings pointer into the
+	// multi-protocol sender; the pointer stays valid after Load populates it.
+	st := store.New(dataDir, nil)
 	if err := st.Load(); err != nil {
 		log.Fatalf("failed to load data: %v", err)
+	}
+	st.RF = &sender.Multi{
+		RF:       rf.Sender{NexaScript: nexaScriptPath()},
+		Settings: st.Settings,
 	}
 
 	secret, err := api.LoadOrCreateSessionSecret(dataDir)

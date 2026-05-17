@@ -108,6 +108,9 @@ func (s *Server) Handler() http.Handler {
 	api.HandleFunc("/settings", s.getSettings).Methods("GET")
 	api.HandleFunc("/settings", s.updateSettings).Methods("PUT")
 
+	api.HandleFunc("/hue/pair", s.huePair).Methods("POST")
+	api.HandleFunc("/hue/lights", s.hueListLights).Methods("GET")
+
 	r.PathPrefix("/").Handler(spaHandler(s.SPADir))
 
 	cors := handlers.CORS(

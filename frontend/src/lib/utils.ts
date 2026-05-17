@@ -9,6 +9,7 @@ export const PROTOCOLS: { value: string; label: string }[] = [
   { value: "kaku", label: "KlikAanKlikUit (KAKU)" },
   { value: "intertechno", label: "Intertechno" },
   { value: "raw", label: "Raw / custom" },
+  { value: "hue", label: "Philips Hue (Wi-Fi)" },
 ];
 
 export function formatDays(days: number[] | undefined): string {

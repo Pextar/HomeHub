@@ -6,12 +6,12 @@
 
     const v = $derived(data.value);
 
+    // --- Location ---
     let latitude = $state(untrack(() => data.value.settings.latitude));
     let longitude = $state(untrack(() => data.value.settings.longitude));
     let locationName = $state(untrack(() => data.value.settings.location_name ?? ""));
-    let saving = $state(false);
+    let savingLocation = $state(false);
 
-    // Keep local fields in sync if settings refresh in the background.
     let lastApplied = $state(untrack(() => ({
         lat: data.value.settings.latitude,
         lon: data.value.settings.longitude,
@@ -27,27 +27,29 @@
         }
     });
 
-    const dirty = $derived(
+    const locationDirty = $derived(
         latitude !== v.settings.latitude ||
         longitude !== v.settings.longitude ||
         (locationName || "") !== (v.settings.location_name ?? "")
     );
 
-    async function save() {
-        if (saving) return;
-        saving = true;
+    async function saveLocation() {
+        if (savingLocation) return;
+        savingLocation = true;
         try {
             await api.updateSettings({
                 latitude: Number(latitude),
                 longitude: Number(longitude),
                 location_name: locationName.trim() || undefined,
+                hue_bridge_ip: v.settings.hue_bridge_ip,
+                hue_username: v.settings.hue_username,
             });
             toasts.success("Settings saved");
             await data.refresh();
         } catch (e) {
             toasts.error("Save failed", (e as Error).message);
         } finally {
-            saving = false;
+            savingLocation = false;
         }
     }
 
@@ -66,6 +68,52 @@
             { enableHighAccuracy: false, timeout: 8000 },
         );
     }
+
+    // --- Hue ---
+    let hueBridgeIP = $state(untrack(() => data.value.settings.hue_bridge_ip ?? ""));
+    let pairing = $state(false);
+
+    const hueConnected = $derived(!!(v.settings.hue_bridge_ip && v.settings.hue_username));
+
+    $effect(() => {
+        const ip = v.settings.hue_bridge_ip ?? "";
+        if (ip !== hueBridgeIP && !pairing) hueBridgeIP = ip;
+    });
+
+    async function connectHue() {
+        if (pairing) return;
+        const ip = hueBridgeIP.trim();
+        if (!ip) {
+            toasts.warn("Bridge IP required", "Enter the IP address of your Hue bridge.");
+            return;
+        }
+        pairing = true;
+        try {
+            await api.huePair(ip);
+            toasts.success("Hue bridge connected", "You can now add Hue lamps as sockets.");
+            await data.refresh();
+        } catch (e) {
+            toasts.error("Pairing failed", (e as Error).message);
+        } finally {
+            pairing = false;
+        }
+    }
+
+    async function disconnectHue() {
+        try {
+            await api.updateSettings({
+                latitude: v.settings.latitude,
+                longitude: v.settings.longitude,
+                location_name: v.settings.location_name,
+                hue_bridge_ip: "",
+                hue_username: "",
+            });
+            toasts.success("Hue bridge disconnected");
+            await data.refresh();
+        } catch (e) {
+            toasts.error("Failed", (e as Error).message);
+        }
+    }
 </script>
 
 <Topbar title="Settings" subtitle="Controller configuration" />
@@ -76,7 +124,7 @@
         <p>Used to compute sunrise and sunset for solar-based schedules.</p>
     </header>
 
-    <form onsubmit={(e) => { e.preventDefault(); save(); }}>
+    <form onsubmit={(e) => { e.preventDefault(); saveLocation(); }}>
         <div class="field">
             <label for="loc-name">Label <span class="optional">(optional)</span></label>
             <input id="loc-name" type="text" bind:value={locationName} placeholder="Home" maxlength="60" />
@@ -99,11 +147,49 @@
             <button type="button" class="btn btn-ghost" onclick={useBrowserLocation}>
                 Use this device's location
             </button>
-            <button type="submit" class="btn btn-primary" disabled={!dirty || saving}>
-                {saving ? "Saving…" : "Save"}
+            <button type="submit" class="btn btn-primary" disabled={!locationDirty || savingLocation}>
+                {savingLocation ? "Saving…" : "Save"}
             </button>
         </div>
     </form>
+</section>
+
+<section class="card">
+    <header>
+        <h2>Philips Hue</h2>
+        <p>Connect your Hue bridge to control Wi-Fi lamps alongside RF sockets.</p>
+    </header>
+
+    {#if hueConnected}
+        <div class="hue-status connected">
+            <span class="dot"></span>
+            <div>
+                <strong>Connected</strong>
+                <div class="sub">{v.settings.hue_bridge_ip}</div>
+            </div>
+            <button class="btn btn-ghost btn-sm" onclick={disconnectHue}>Disconnect</button>
+        </div>
+        <p class="field-help" style="margin-top:0">
+            To add a Hue lamp, create a new socket and choose <em>Philips Hue (Wi-Fi)</em> as the protocol.
+        </p>
+    {:else}
+        <div class="field">
+            <label for="hue-ip">Bridge IP address</label>
+            <input id="hue-ip" type="text" bind:value={hueBridgeIP}
+                placeholder="e.g. 192.168.1.100" autocomplete="off" />
+            <div class="field-help">
+                Find it in the Hue app under Settings → Hue Bridges → (i).
+            </div>
+        </div>
+        <div class="actions">
+            <button class="btn btn-primary" onclick={connectHue} disabled={pairing || !hueBridgeIP.trim()}>
+                {pairing ? "Connecting…" : "Connect"}
+            </button>
+        </div>
+        <p class="field-help">
+            Press the link button on your bridge, then click Connect within 30 seconds.
+        </p>
+    {/if}
 </section>
 
 <style>
@@ -127,4 +213,25 @@
         flex-wrap: wrap;
     }
     .optional { color: var(--text-muted); font-weight: 400; font-size: 12px; }
+
+    .hue-status {
+        display: flex;
+        align-items: center;
+        gap: var(--space-3);
+        padding: var(--space-3) var(--space-4);
+        border-radius: var(--radius-sm);
+        border: 1px solid var(--border);
+        background: var(--bg-base);
+    }
+    .hue-status .btn { margin-left: auto; }
+    .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        flex-shrink: 0;
+        background: var(--color-success, #22c55e);
+    }
+    .sub { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+    .btn-sm { padding: 4px 10px; font-size: 12px; }
+    .field-help { font-size: 12px; color: var(--text-muted); }
 </style>

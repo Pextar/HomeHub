@@ -44,14 +44,16 @@ type Schedule struct {
 	LastFiredAt         time.Time `json:"last_fired_at,omitempty"`
 }
 
-// Settings holds app-wide preferences, currently just the controller's
-// location used to compute sunrise/sunset for solar-based schedules.
-// Both coordinates default to 0; sunrise/sunset schedules are inert
-// until a real location is configured.
+// Settings holds app-wide preferences: location for solar schedules and
+// optional Philips Hue bridge credentials for Wi-Fi lamp control.
 type Settings struct {
 	Latitude     float64 `json:"latitude"`
 	Longitude    float64 `json:"longitude"`
 	LocationName string  `json:"location_name,omitempty"` // free-form label for the UI ("Home", "Stockholm")
+
+	// Hue bridge — both fields must be set together to enable Hue control.
+	HueBridgeIP string `json:"hue_bridge_ip,omitempty"`
+	HueUsername  string `json:"hue_username,omitempty"`
 }
 
 // HasLocation reports whether a real location has been configured.

@@ -149,6 +149,17 @@ export const api = {
   // Settings
   getSettings() { return req<Settings>("/settings"); },
   updateSettings(body: Settings) { return req<Settings>("/settings", { method: "PUT", body: json(body) }); },
+
+  // Philips Hue
+  huePair(bridgeIP: string) {
+    return req<{ bridge_ip: string; username: string }>("/hue/pair", {
+      method: "POST",
+      body: json({ bridge_ip: bridgeIP }),
+    });
+  },
+  hueListLights() {
+    return req<Record<string, { name: string; on: boolean }>>("/hue/lights");
+  },
 };
 
 export type Api = typeof api;
