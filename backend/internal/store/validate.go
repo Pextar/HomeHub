@@ -98,11 +98,6 @@ func (s *Store) ValidateSettings(set *Settings) error {
 	if set.Longitude < -180 || set.Longitude > 180 {
 		return errors.New("longitude must be between -180 and 180")
 	}
-	set.HueBridgeIP = strings.TrimSpace(set.HueBridgeIP)
-	set.HueUsername = strings.TrimSpace(set.HueUsername)
-	if (set.HueBridgeIP == "") != (set.HueUsername == "") {
-		return errors.New("hue_bridge_ip and hue_username must both be set or both be empty")
-	}
 	return nil
 }
 

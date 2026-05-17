@@ -13,8 +13,8 @@ import type {
   SensorReading,
   DiscoveryState,
   Settings,
-  HueLight,
-  HueStateUpdate,
+  TasmotaState,
+  TasmotaStateUpdate,
 } from "./types";
 
 const BASE = "/api";
@@ -152,24 +152,18 @@ export const api = {
   getSettings() { return req<Settings>("/settings"); },
   updateSettings(body: Settings) { return req<Settings>("/settings", { method: "PUT", body: json(body) }); },
 
-  // Philips Hue
-  huePair(bridgeIP: string) {
-    return req<{ bridge_ip: string; username: string }>("/hue/pair", {
-      method: "POST",
-      body: json({ bridge_ip: bridgeIP }),
-    });
+  // Tasmota Wi-Fi devices
+  tasmotaGetState(socketId: string) {
+    return req<TasmotaState>(`/tasmota/${encodeURIComponent(socketId)}`);
   },
-  hueListLights() {
-    return req<Record<string, HueLight>>("/hue/lights");
-  },
-  hueGetLight(id: string) {
-    return req<HueLight>(`/hue/lights/${encodeURIComponent(id)}`);
-  },
-  hueSetState(id: string, state: HueStateUpdate) {
-    return req<void>(`/hue/lights/${encodeURIComponent(id)}/state`, {
+  tasmotaSetState(socketId: string, update: TasmotaStateUpdate) {
+    return req<void>(`/tasmota/${encodeURIComponent(socketId)}/state`, {
       method: "PUT",
-      body: json(state),
+      body: json(update),
     });
+  },
+  tasmotaProbe(ip: string) {
+    return req<{ status: string; ip: string }>(`/tasmota/probe?ip=${encodeURIComponent(ip)}`);
   },
 };
 

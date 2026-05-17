@@ -42,15 +42,9 @@ func main() {
 		log.Fatalf("failed to create data directory %q: %v", dataDir, err)
 	}
 
-	// Build an empty store first so we can pass its Settings pointer into the
-	// multi-protocol sender; the pointer stays valid after Load populates it.
-	st := store.New(dataDir, nil)
+	st := store.New(dataDir, &sender.Multi{RF: rf.Sender{NexaScript: nexaScriptPath()}})
 	if err := st.Load(); err != nil {
 		log.Fatalf("failed to load data: %v", err)
-	}
-	st.RF = &sender.Multi{
-		RF:       rf.Sender{NexaScript: nexaScriptPath()},
-		Settings: st.Settings,
 	}
 
 	secret, err := api.LoadOrCreateSessionSecret(dataDir)

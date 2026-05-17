@@ -8,16 +8,15 @@
     import type { Socket } from "../lib/types";
     import SocketModal from "../modals/SocketModal.svelte";
     import TimerModal from "../modals/TimerModal.svelte";
-    import HueLightModal from "../modals/HueLightModal.svelte";
+    import TasmotaLightModal from "../modals/TasmotaLightModal.svelte";
     import ConfirmModal from "./ConfirmModal.svelte";
 
     interface Props { socket: Socket; }
     let { socket }: Props = $props();
 
-    const isHue = $derived(socket.protocol === "hue");
+    const isTasmota = $derived(socket.protocol === "tasmota");
 
-    // One-shot "pulse" ring whenever the socket's state flips, so a
-    // remote toggle or schedule fire is visually obvious.
+    // One-shot "pulse" ring whenever the socket's state flips.
     let prevState = untrack(() => socket.state);
     let pulsing = $state(false);
     $effect(() => {
@@ -30,29 +29,27 @@
         }
     });
 
-    // --- Hue inline brightness ---
-    // Lazy-loaded on first render of a Hue card. Slider edits are
-    // debounced; we never reset back to bridge state, so a stale fetch
-    // can't clobber a fresh user drag.
-    let hueBri = $state<number | null>(null);
+    // --- Tasmota inline brightness ---
+    // Lazy-loaded; the userTouched flag prevents a stale bridge response
+    // from overwriting a value the user is actively dragging.
+    let tasmotaDimmer = $state<number | null>(null);
     let userTouched = $state(false);
     $effect(() => {
-        if (!isHue || hueBri !== null || userTouched) return;
-        // Fire-and-forget; ignore failures so the card still works without a bridge.
-        api.hueGetLight(socket.code).then(l => {
-            if (!userTouched && l.state.bri != null) hueBri = l.state.bri;
+        if (!isTasmota || tasmotaDimmer !== null || userTouched) return;
+        api.tasmotaGetState(socket.id).then(s => {
+            if (!userTouched && s.dimmer != null) tasmotaDimmer = s.dimmer;
         }).catch(() => {});
     });
 
-    let briTimer: ReturnType<typeof setTimeout> | undefined;
-    function onBriInput() {
+    let dimmerTimer: ReturnType<typeof setTimeout> | undefined;
+    function onDimmerInput() {
         userTouched = true;
-        if (hueBri === null) return;
-        clearTimeout(briTimer);
-        const value = hueBri;
-        briTimer = setTimeout(async () => {
+        if (tasmotaDimmer === null) return;
+        const value = tasmotaDimmer;
+        clearTimeout(dimmerTimer);
+        dimmerTimer = setTimeout(async () => {
             try {
-                await api.hueSetState(socket.code, { bri: value });
+                await api.tasmotaSetState(socket.id, { dimmer: value });
             } catch (e) {
                 toasts.error("Brightness update failed", (e as Error).message);
             }
@@ -62,7 +59,7 @@
     async function confirmDelete() {
         const ok = await openModal<boolean>(ConfirmModal, {
             title: "Delete socket?",
-            message: `“${socket.name}” and any schedules pointing to it will be removed.`,
+            message: `"${socket.name}" and any schedules pointing to it will be removed.`,
             confirmLabel: "Delete",
             danger: true,
         });
@@ -75,19 +72,15 @@
             toasts.error("Failed", (e as Error).message);
         }
     }
-
-    function openControls() {
-        if (!isHue) return;
-        openModal(HueLightModal, { socket });
-    }
 </script>
 
-<article class="card" class:on={socket.state} class:pulsing class:clickable={isHue}>
+<article class="card" class:on={socket.state} class:pulsing>
     <div class="head">
-        {#if isHue}
-            <button class="title-btn" onclick={openControls} title="Open lamp controls">
+        {#if isTasmota}
+            <button class="title-btn" onclick={() => openModal(TasmotaLightModal, { socket })}
+                title="Open device controls">
                 <div class="title">
-                    <div class="name" title={socket.name}>{socket.name}</div>
+                    <div class="name">{socket.name}</div>
                     <div class="meta">{socket.room || "Unassigned"}</div>
                 </div>
             </button>
@@ -115,19 +108,19 @@
     <div class="status">
         <span class="dot"></span>
         <span class="state">{socket.state ? "ON" : "OFF"}</span>
-        <span class="code-chip" title="RF code">
+        <span class="code-chip" title={isTasmota ? "Device IP" : "RF code"}>
             {socket.protocol || "raw"} · {socket.code}
         </span>
     </div>
-    {#if isHue}
-        <div class="bri-row" class:disabled={!socket.state}>
+    {#if isTasmota && tasmotaDimmer !== null}
+        <div class="dim-row" class:disabled={!socket.state}>
             <Icon name="sun" size={14} />
-            <input type="range" min="1" max="254" step="1"
-                bind:value={hueBri}
-                oninput={onBriInput}
-                disabled={!socket.state || hueBri === null}
+            <input type="range" min="1" max="100" step="1"
+                bind:value={tasmotaDimmer}
+                oninput={onDimmerInput}
+                disabled={!socket.state}
                 aria-label="Brightness" />
-            <span class="bri-val">{hueBri == null ? "—" : `${Math.round((hueBri / 254) * 100)}%`}</span>
+            <span class="dim-val">{tasmotaDimmer}%</span>
         </div>
     {/if}
     <div class="controls">
@@ -163,7 +156,6 @@
     }
     .card.on { border-color: var(--success); box-shadow: inset 0 0 0 1px var(--success-soft); }
 
-    /* State-change pulse — an expanding ring that fades out. */
     .card.pulsing.on { animation: pulse-on 0.55s ease-out; }
     .card.pulsing:not(.on) { animation: pulse-off 0.55s ease-out; }
     @keyframes pulse-on {
@@ -182,7 +174,7 @@
         gap: var(--space-3);
     }
     .title { min-width: 0; }
-    .name { font-weight: 600; font-size: 1rem; line-height: 1.3; }
+    .name { font-weight: 600; font-size: 1rem; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .meta { color: var(--text-muted); font-size: 12px; margin-top: 2px; }
     .menu { display: flex; gap: 4px; }
 
@@ -208,29 +200,16 @@
         background: var(--text-faint);
         transition: background var(--t-fast), box-shadow var(--t-fast);
     }
-    .card.on .dot {
-        background: var(--success);
-        box-shadow: 0 0 0 4px var(--success-soft);
-    }
+    .card.on .dot { background: var(--success); box-shadow: 0 0 0 4px var(--success-soft); }
     .card.on .state { color: var(--success); font-weight: 600; }
 
-    .bri-row {
-        display: flex;
-        align-items: center;
-        gap: var(--space-2);
-        color: var(--text-muted);
-        font-size: 12px;
+    .dim-row {
+        display: flex; align-items: center; gap: var(--space-2);
+        color: var(--text-muted); font-size: 12px;
     }
-    .bri-row.disabled { opacity: 0.45; }
-    .bri-row input[type="range"] {
-        flex: 1;
-        accent-color: var(--accent, #60a5fa);
-    }
-    .bri-val {
-        font-variant-numeric: tabular-nums;
-        min-width: 36px;
-        text-align: right;
-    }
+    .dim-row.disabled { opacity: 0.4; }
+    .dim-row input[type="range"] { flex: 1; accent-color: var(--accent, #60a5fa); }
+    .dim-val { font-variant-numeric: tabular-nums; min-width: 32px; text-align: right; }
 
     .controls {
         display: grid;

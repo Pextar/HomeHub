@@ -35,33 +35,22 @@ export interface Settings {
   latitude: number;
   longitude: number;
   location_name?: string;
-  hue_bridge_ip?: string;
-  hue_username?: string;
 }
 
-export interface HueLightState {
+// Tasmota Wi-Fi device state. Fields are undefined when the device doesn't
+// support that capability (e.g. a plain plug has no dimmer or color).
+export interface TasmotaState {
   on: boolean;
-  bri?: number;        // 1..254
-  hue?: number;        // 0..65535
-  sat?: number;        // 0..254
-  ct?: number;         // 153..500 (mireds)
-  colormode?: string;
-  reachable: boolean;
+  dimmer?: number;  // 1-100
+  color?: string;   // RRGGBB hex
+  ct?: number;      // 153-500 mired (500 = warm, 153 = cool)
 }
 
-export interface HueLight {
-  name: string;
-  type?: string;
-  state: HueLightState;
-}
-
-export interface HueStateUpdate {
+export interface TasmotaStateUpdate {
   on?: boolean;
-  bri?: number;
-  hue?: number;
-  sat?: number;
+  dimmer?: number;
+  color?: string;
   ct?: number;
-  transitiontime?: number;
 }
 
 export interface Group {
