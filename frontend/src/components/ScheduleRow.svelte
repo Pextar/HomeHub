@@ -66,6 +66,9 @@
             <span class="solar-label">
                 {schedule.time_mode === "sunrise" ? "Sunrise" : "Sunset"}{#if schedule.solar_offset_minutes}<span class="solar-offset"> {formatOffset(schedule.solar_offset_minutes)}</span>{/if}
             </span>
+            {#if schedule.effective_time}
+                <span class="solar-time">~{schedule.effective_time}</span>
+            {/if}
         {:else}
             {schedule.time}
         {/if}
@@ -119,6 +122,12 @@
     .solar-icon { display: inline-flex; color: var(--primary); }
     .solar-label { white-space: nowrap; }
     .solar-offset { color: var(--text-muted); font-weight: 500; }
+    .solar-time {
+        font-family: var(--font-mono);
+        font-size: 0.8rem;
+        color: var(--text-muted);
+        white-space: nowrap;
+    }
     .offset {
         font-size: 0.65rem;
         font-weight: 500;
