@@ -7,7 +7,7 @@
     import { api } from "../lib/api";
     import { data, toasts } from "../lib/stores.svelte";
     import { untrack } from "svelte";
-    import type { Schedule, TargetType } from "../lib/types";
+    import type { Schedule, ScheduleTimeMode, TargetType } from "../lib/types";
 
     interface Props { existing?: Schedule | null; }
     let { existing = null }: Props = $props();
@@ -24,10 +24,25 @@
     let targetType = $state<string>(initialType);
     let targetId = $state<string>(untrack(() => existing?.target_id || existing?.socket_id || ""));
     let action = $state<string>(untrack(() => existing?.action ?? "on"));
+    let timeMode = $state<ScheduleTimeMode>(untrack(() => (existing?.time_mode as ScheduleTimeMode | undefined) ?? "fixed"));
     let time = $state(untrack(() => existing?.time || "08:00"));
+    let solarOffsetMinutes = $state<number>(untrack(() => existing?.solar_offset_minutes ?? 0));
     let days = $state<number[]>(untrack(() => [...(existing?.days ?? [])]));
     let enabled = $state(untrack(() => existing ? existing.enabled : true));
     let randomOffsetMinutes = $state<number>(untrack(() => existing?.random_offset_minutes ?? 0));
+
+    const hasLocation = $derived(v.settings.latitude !== 0 || v.settings.longitude !== 0);
+    // Pretty offset label: "at sunrise", "30 min before sunset", "1h 30m after sunrise".
+    const solarOffsetLabel = $derived.by(() => {
+        const m = solarOffsetMinutes;
+        const event = timeMode === "sunrise" ? "sunrise" : "sunset";
+        if (m === 0) return `At ${event}`;
+        const abs = Math.abs(m);
+        const h = Math.floor(abs / 60);
+        const mins = abs % 60;
+        const parts = [h && `${h}h`, mins && `${mins}m`].filter(Boolean).join(" ");
+        return `${parts} ${m < 0 ? "before" : "after"} ${event}`;
+    });
 
     // Available targets for the current type, plus reset of selection /
     // action when switching type.
@@ -51,7 +66,11 @@
             target_type: targetType as TargetType,
             target_id: targetId,
             action: action as Schedule["action"],
-            time,
+            time_mode: timeMode,
+            // Send the time field unconditionally — the backend ignores it
+            // for solar modes but the payload's TimeMode reflects the user's choice.
+            time: timeMode === "fixed" ? time : "",
+            solar_offset_minutes: timeMode === "fixed" ? 0 : solarOffsetMinutes,
             days,
             enabled,
             random_offset_minutes: randomOffsetMinutes,
@@ -113,10 +132,43 @@
                 </div>
             </div>
             <div class="field" style="margin-top:var(--space-4)">
-                <label for="sched-time">Time</label>
-                <input id="sched-time" type="time" bind:value={time} required />
-                <div class="field-help">24-hour HH:MM in the server's local time.</div>
+                <span class="field-label">When</span>
+                <Segmented
+                    name="sched-time-mode"
+                    bind:value={timeMode}
+                    options={[
+                        { value: "fixed",   label: "Fixed time" },
+                        { value: "sunrise", label: "Sunrise" },
+                        { value: "sunset",  label: "Sunset" },
+                    ]}
+                />
             </div>
+            {#if timeMode === "fixed"}
+                <div class="field" style="margin-top:var(--space-4)">
+                    <label for="sched-time">Time</label>
+                    <input id="sched-time" type="time" bind:value={time} required />
+                    <div class="field-help">24-hour HH:MM in the server's local time.</div>
+                </div>
+            {:else}
+                <div class="field" style="margin-top:var(--space-4)">
+                    <label for="sched-solar-offset">Offset</label>
+                    <input
+                        id="sched-solar-offset"
+                        type="range"
+                        min="-120" max="120" step="5"
+                        bind:value={solarOffsetMinutes}
+                    />
+                    <div class="solar-summary">{solarOffsetLabel}</div>
+                    {#if !hasLocation}
+                        <div class="field-help warn">
+                            Set the controller's latitude/longitude in Settings — without a location,
+                            this schedule cannot fire.
+                        </div>
+                    {:else}
+                        <div class="field-help">Drag to pick how far before (−) or after (+) the event to fire.</div>
+                    {/if}
+                </div>
+            {/if}
             <div class="field" style="margin-top:var(--space-4)">
                 <span class="field-label">Days</span>
                 <DayPicker bind:days={days} />
@@ -148,3 +200,14 @@
         </button>
     {/snippet}
 </Modal>
+
+<style>
+    .solar-summary {
+        margin-top: 6px;
+        font-weight: 600;
+        font-size: 0.95rem;
+    }
+    .field-help.warn {
+        color: var(--warn, var(--danger));
+    }
+</style>

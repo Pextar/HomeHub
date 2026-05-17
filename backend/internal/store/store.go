@@ -36,6 +36,7 @@ type Store struct {
 	// Readings is a rolling window of recent values per sensor id.
 	// Trimmed to ReadingsHistorySize on each append.
 	Readings  map[string][]SensorReading
+	Settings  *Settings
 	Activity  *ActivityLog
 	Discovery *Discovery
 	DataDir   string
@@ -50,6 +51,7 @@ const (
 	timersFile    = "timers.json"
 	sensorsFile   = "sensors.json"
 	readingsFile  = "readings.json"
+	settingsFile  = "settings.json"
 
 	// ReadingsHistorySize caps how many readings are kept per sensor.
 	// At one sample per minute that's ~16 hours; at one per five minutes
@@ -68,6 +70,7 @@ func New(dataDir string, rf RFSender) *Store {
 		Timers:    make(map[string]*Timer),
 		Sensors:   make(map[string]*Sensor),
 		Readings:  make(map[string][]SensorReading),
+		Settings:  &Settings{},
 		Activity:  NewActivityLog(200),
 		Discovery: &Discovery{Candidates: make(map[string]*DiscoveryCandidate)},
 		DataDir:   dataDir,
@@ -99,6 +102,12 @@ func (s *Store) Load() error {
 	}
 	if err := readJSON(filepath.Join(s.DataDir, readingsFile), &s.Readings); err != nil {
 		return fmt.Errorf("loading readings: %w", err)
+	}
+	if err := readJSON(filepath.Join(s.DataDir, settingsFile), &s.Settings); err != nil {
+		return fmt.Errorf("loading settings: %w", err)
+	}
+	if s.Settings == nil {
+		s.Settings = &Settings{}
 	}
 	if s.Sockets == nil {
 		s.Sockets = make(map[string]*Socket)
@@ -150,6 +159,9 @@ func (s *Store) Save() error {
 	}
 	if err := writeJSON(filepath.Join(s.DataDir, sensorsFile), s.Sensors); err != nil {
 		return fmt.Errorf("saving sensors: %w", err)
+	}
+	if err := writeJSON(filepath.Join(s.DataDir, settingsFile), s.Settings); err != nil {
+		return fmt.Errorf("saving settings: %w", err)
 	}
 	return nil
 }

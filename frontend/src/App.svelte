@@ -10,6 +10,7 @@
     import Groups from "./views/Groups.svelte";
     import Scenes from "./views/Scenes.svelte";
     import Sensors from "./views/Sensors.svelte";
+    import Settings from "./views/Settings.svelte";
     import { data, route, toasts } from "./lib/stores.svelte";
     import { fly } from "svelte/transition";
     import { cubicOut } from "svelte/easing";
@@ -69,6 +70,7 @@
         scenes: Scenes,
         schedules: Schedules,
         sensors: Sensors,
+        settings: Settings,
     };
     const Current = $derived(views[route.current]);
 </script>

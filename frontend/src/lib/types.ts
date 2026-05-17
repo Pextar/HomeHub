@@ -11,17 +11,29 @@ export type TargetType = "socket" | "group" | "scene";
 export type SocketAction = "on" | "off" | "toggle";
 export type SceneActionKind = "on" | "off";
 
+// "fixed" fires at the wall-clock `time`. "sunrise"/"sunset" fire at the
+// sun event plus `solar_offset_minutes` (negative = before, positive = after).
+export type ScheduleTimeMode = "fixed" | "sunrise" | "sunset";
+
 export interface Schedule {
   id: string;
   socket_id?: string;
   target_type?: TargetType;
   target_id?: string;
   action: SocketAction | "activate";
+  time_mode?: ScheduleTimeMode;
   time: string;
+  solar_offset_minutes?: number;
   days: number[];
   enabled: boolean;
   random_offset_minutes?: number;
   last_fired_at?: string;
+}
+
+export interface Settings {
+  latitude: number;
+  longitude: number;
+  location_name?: string;
 }
 
 export interface Group {
@@ -62,7 +74,7 @@ export interface BulkResult {
   failures: { socket_id: string; error: string }[];
 }
 
-export type Route = "dashboard" | "sockets" | "groups" | "scenes" | "schedules" | "sensors";
+export type Route = "dashboard" | "sockets" | "groups" | "scenes" | "schedules" | "sensors" | "settings";
 
 export type SensorKind = "temperature" | "humidity" | "motion" | "light" | "power" | "custom";
 

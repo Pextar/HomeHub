@@ -63,7 +63,8 @@ func Run(ctx context.Context, st *store.Store) {
 				// Either way, skip the base-time check this tick.
 				continue
 			}
-			if s.Time != hhmm {
+			triggerHHMM, ok := s.EffectiveHHMM(now, st.Settings)
+			if !ok || triggerHHMM != hhmm {
 				continue
 			}
 			if !dayMatches(s.Days, weekday) {

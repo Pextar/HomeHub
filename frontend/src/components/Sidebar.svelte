@@ -34,6 +34,7 @@
         { route: "scenes",    icon: "scenes",    label: "Scenes" },
         { route: "groups",    icon: "groups",    label: "Groups" },
         { route: "schedules", icon: "clock",     label: "Schedules" },
+        { route: "settings",  icon: "settings",  label: "Settings" },
     ];
     const primary = items.slice(0, PRIMARY_COUNT);
     const overflow = items.slice(PRIMARY_COUNT);
