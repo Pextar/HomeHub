@@ -28,8 +28,8 @@
     // the desktop sidebar.
     const PRIMARY_COUNT = 4;
     const items: NavItem[] = [
-        { route: "dashboard", icon: "dashboard", label: "Dashboard" },
-        { route: "sockets",   icon: "socket",    label: "Sockets" },
+        { route: "dashboard", icon: "home",      label: "Dashboard" },
+        { route: "sockets",   icon: "socket",    label: "Devices" },
         { route: "sensors",   icon: "sensor",    label: "Sensors" },
         { route: "schedules", icon: "clock",     label: "Schedules" },
         { route: "scenes",    icon: "scenes",    label: "Scenes" },
@@ -71,11 +71,11 @@
 <aside class="sidebar" aria-label="Primary">
     <div class="brand">
         <div class="mark" aria-hidden="true">
-            <Icon name="bolt" size={22} />
+            <Icon name="bolt" size={20} />
         </div>
         <div>
-            <div class="name">RF Sockets</div>
-            <div class="sub">Controller</div>
+            <div class="name">HomeHub</div>
+            <div class="sub">Smart Home</div>
         </div>
     </div>
 
@@ -208,12 +208,21 @@
     .mark {
         width: 36px; height: 36px;
         border-radius: var(--radius-md);
-        background: linear-gradient(135deg, var(--primary), #7b2cbf);
+        background: var(--gradient-brand);
         display: grid; place-items: center;
         color: #fff;
+        box-shadow: 0 4px 12px var(--primary-glow);
+        flex-shrink: 0;
     }
-    .name { font-weight: 700; letter-spacing: -0.01em; }
-    .sub { font-size: 12px; color: var(--text-muted); }
+    .name {
+        font-weight: 800;
+        letter-spacing: -0.02em;
+        background: var(--gradient-brand);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+    }
+    .sub { font-size: 12px; color: var(--text-faint); }
 
     .nav { display: flex; flex-direction: column; gap: 2px; }
     .nav-mobile { display: none; }
@@ -234,9 +243,10 @@
     }
     .nav-item:hover { background: var(--surface-hover); color: var(--text); }
     .nav-item[aria-current="page"] {
-        background: var(--surface);
-        color: var(--text);
+        background: var(--primary-soft);
+        color: var(--primary);
         font-weight: 600;
+        box-shadow: inset 3px 0 0 var(--primary);
     }
     .nav-item[aria-current="page"] :global(svg) { color: var(--primary); }
 
@@ -274,11 +284,20 @@
         width: 8px; height: 8px; border-radius: 50%;
         background: var(--text-faint);
         flex-shrink: 0;
+        transition: background var(--t-med), box-shadow var(--t-med);
     }
-    .dot[data-state="ok"] { background: var(--success); box-shadow: 0 0 0 3px var(--success-soft); }
+    .dot[data-state="ok"] {
+        background: var(--success);
+        box-shadow: 0 0 0 3px var(--success-soft);
+        animation: pulse-dot 2.5s ease-in-out infinite;
+    }
     .dot[data-state="error"] { background: var(--danger); box-shadow: 0 0 0 3px var(--danger-soft); }
+    @keyframes pulse-dot {
+        0%, 100% { box-shadow: 0 0 0 3px var(--success-soft); }
+        50%       { box-shadow: 0 0 0 5px var(--success-soft); }
+    }
 
-    /* ---------- Mobile bottom nav ---------- */
+    /* ---------- Mobile bottom nav — iOS tab bar ---------- */
     @media (max-width: 900px) {
         .sidebar {
             position: fixed;
@@ -288,12 +307,17 @@
             flex-direction: row;
             align-items: stretch;
             border-right: none;
-            border-top: 1px solid var(--border);
+            /* Frosted-glass iOS tab bar */
+            background: var(--bg-bar);
+            backdrop-filter: saturate(180%) blur(24px);
+            -webkit-backdrop-filter: saturate(180%) blur(24px);
+            /* iOS hairline separator — no heavy shadow */
+            border-top: 0.5px solid var(--separator);
+            box-shadow: none;
             padding: 0;
             padding-bottom: env(safe-area-inset-bottom);
             z-index: 100;
             gap: 0;
-            box-shadow: 0 -2px 12px rgba(0, 0, 0, 0.06);
         }
         .brand { display: none; }
         .footer { display: none; }
@@ -304,26 +328,33 @@
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            gap: 4px;
+            gap: 3px;
             padding: 8px 4px;
             border-radius: 0;
-            font-size: 11px;
-            min-height: 56px;
-            color: var(--text-muted);
+            font-size: 10px;    /* iOS tab label size */
+            min-height: 49px;   /* iOS standard tab bar height */
+            color: var(--text-faint);
             text-align: center;
             width: auto;
         }
+        /* Scale up icons slightly in the tab bar */
+        .nav-mobile .nav-item :global(svg) { width: 24px; height: 24px; }
+        /* iOS: active = tint color only, no indicator line */
         .nav-mobile .nav-item[aria-current="page"] {
             background: transparent;
             color: var(--primary);
+            box-shadow: none;
         }
         .nav-mobile .nav-item[aria-current="page"] :global(svg) {
             color: var(--primary);
         }
         .nav-mobile .nav-label {
             line-height: 1;
-            font-weight: 500;
-            letter-spacing: 0.01em;
+            font-weight: 400;       /* iOS uses regular weight for tab labels */
+            letter-spacing: 0;
+        }
+        .nav-mobile .nav-item[aria-current="page"] .nav-label {
+            font-weight: 500;       /* Slightly heavier on active — subtle cue */
         }
     }
 
@@ -342,8 +373,10 @@
     }
     .drawer {
         width: 100%;
-        background: var(--bg-elevated);
-        border-top: 1px solid var(--border);
+        background: var(--bg-bar);
+        backdrop-filter: saturate(180%) blur(24px);
+        -webkit-backdrop-filter: saturate(180%) blur(24px);
+        border-top: 0.5px solid var(--separator);
         border-top-left-radius: var(--radius-xl);
         border-top-right-radius: var(--radius-xl);
         padding: var(--space-3) var(--space-4)
@@ -354,8 +387,8 @@
         box-shadow: var(--shadow-lg);
     }
     .drawer-handle {
-        width: 38px;
-        height: 4px;
+        width: 36px;
+        height: 5px;
         border-radius: 999px;
         background: var(--border-strong);
         margin: 4px auto var(--space-2);

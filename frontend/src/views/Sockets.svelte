@@ -42,21 +42,21 @@
     const sortedRooms = $derived([...groups.keys()].sort((a, b) => a.localeCompare(b)));
 </script>
 
-<Topbar title="Sockets" subtitle="{v.sockets.length} configured">
+<Topbar title="Devices" subtitle="{v.sockets.length} configured · RF, Wi-Fi &amp; Matter">
     {#snippet actions()}
-        <button class="btn btn-primary" onclick={() => openModal(SocketModal, {})}>Add socket</button>
+        <button class="btn btn-primary" onclick={() => openModal(SocketModal, {})}>Add device</button>
     {/snippet}
 </Topbar>
 
 {#if v.sockets.length === 0}
-    <EmptyState icon="socket" title="No sockets yet" message="Add your first 433MHz socket to get started.">
-        <button class="btn btn-primary" onclick={() => openModal(SocketModal, {})}>Add socket</button>
+    <EmptyState icon="socket" title="No devices yet" message="Add your first device — RF, Tasmota, or Matter.">
+        <button class="btn btn-primary" onclick={() => openModal(SocketModal, {})}>Add device</button>
     </EmptyState>
 {:else}
     <div class="toolbar">
         <div class="search">
             <Icon name="search" size={16} />
-            <input type="search" placeholder="Search sockets…" bind:value={search} aria-label="Search sockets" />
+            <input type="search" placeholder="Search devices…" bind:value={search} aria-label="Search devices" />
         </div>
         <select bind:value={roomFilter} aria-label="Filter by room" class="room-filter">
             <option value="">All rooms</option>
@@ -76,7 +76,7 @@
                 animate:flip={{ duration: dur(280), easing: cubicOut }}
                 in:fade={{ duration: dur(180) }}>
                 <div class="room-header">
-                    <h3>{room} · {items.length} sockets · {onCount} on</h3>
+                    <h3>{room} · {items.length} device{items.length === 1 ? "" : "s"} · {onCount} on</h3>
                     <div class="room-actions">
                         <button class="btn btn-ghost"
                             onclick={() => runAction(() => api.roomOn(room), `${room} on`)}>All on</button>

@@ -68,7 +68,7 @@
 
     async function confirmDelete() {
         const ok = await openModal<boolean>(ConfirmModal, {
-            title: "Delete socket?",
+            title: "Delete device?",
             message: `"${socket.name}" and any schedules pointing to it will be removed.`,
             confirmLabel: "Delete",
             danger: true,
@@ -76,7 +76,7 @@
         if (!ok) return;
         try {
             await api.deleteSocket(socket.id);
-            toasts.success("Socket deleted", socket.name);
+            toasts.success("Device deleted", socket.name);
             await data.refresh();
         } catch (e) {
             toasts.error("Failed", (e as Error).message);
@@ -126,8 +126,10 @@
     <div class="status">
         <span class="dot"></span>
         <span class="state">{socket.state ? "ON" : "OFF"}</span>
-        <span class="code-chip" title={isTasmota ? "Device IP" : "RF code"}>
-            {socket.protocol || "raw"} · {socket.code}
+        <span class="code-chip"
+            data-proto={isTasmota ? "tasmota" : isMatter ? "matter" : "rf"}
+            title={isTasmota ? "Tasmota device IP" : isMatter ? "Matter device" : "RF code"}>
+            {socket.protocol || "rf"} · {socket.code}
         </span>
     </div>
     {#if isSmartLight && brightness !== null}
@@ -220,6 +222,22 @@
     }
     .card.on .dot { background: var(--success); box-shadow: 0 0 0 4px var(--success-soft); }
     .card.on .state { color: var(--success); font-weight: 600; }
+
+    .code-chip[data-proto="tasmota"] {
+        color: var(--accent-wifi);
+        border-color: var(--accent-wifi-soft);
+        background: var(--accent-wifi-soft);
+    }
+    .code-chip[data-proto="matter"] {
+        color: var(--accent-matter);
+        border-color: var(--accent-matter-soft);
+        background: var(--accent-matter-soft);
+    }
+    .code-chip[data-proto="rf"] {
+        color: var(--accent-rf);
+        border-color: var(--accent-rf-soft);
+        background: var(--accent-rf-soft);
+    }
 
     .dim-row {
         display: flex; align-items: center; gap: var(--space-2);
