@@ -17,6 +17,9 @@
     --t-fast: 120ms ease;
     --t-med: 200ms ease;
 
+    /* iOS-like spring easing — subtle bounce for interactive press feedback */
+    --spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+
     --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px;
     --space-5: 20px; --space-6: 24px; --space-8: 32px; --space-10: 40px;
 }
@@ -29,6 +32,10 @@
     --surface-hover: rgba(255, 255, 255, 0.08);
     --border: rgba(255, 255, 255, 0.08);
     --border-strong: rgba(255, 255, 255, 0.16);
+    /* Frosted-glass surface for tab bar, bottom sheets, and overlays */
+    --bg-bar: rgba(18, 18, 30, 0.82);
+    /* iOS-style hairline separator (subtler than --border) */
+    --separator: rgba(210, 210, 215, 0.1);
 
     --text: #e2e4f0;
     --text-muted: #8b8fac;
@@ -70,6 +77,8 @@
     --surface-hover: #eef0f8;
     --border: #e0e3ef;
     --border-strong: #c4c9dd;
+    --bg-bar: rgba(244, 245, 251, 0.82);
+    --separator: rgba(60, 60, 67, 0.12);
 
     --text: #1a1b2e;
     --text-muted: #5c607a;
@@ -160,13 +169,16 @@ a { color: inherit; text-decoration: none; }
 @media (hover: hover) {
     .btn:hover { transform: translateY(-1px); }
 }
-.btn:active { transform: translateY(1px); }
+/* iOS-style press: scale-squish instead of translate */
+.btn:active { transform: scale(0.97); transition-duration: 80ms; }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
 .btn-primary {
     --btn-bg: var(--primary);
     --btn-fg: var(--primary-fg);
     --btn-bd: transparent;
     font-weight: 600;
+    /* More rounded than secondary buttons — iOS prominent-button style */
+    border-radius: var(--radius-xl);
 }
 .btn-primary:hover { background: var(--primary-hover); box-shadow: 0 4px 14px var(--primary-glow); }
 .btn-secondary { --btn-bd: var(--border-strong); }

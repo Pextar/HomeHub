@@ -297,7 +297,7 @@
         50%       { box-shadow: 0 0 0 5px var(--success-soft); }
     }
 
-    /* ---------- Mobile bottom nav ---------- */
+    /* ---------- Mobile bottom nav — iOS tab bar ---------- */
     @media (max-width: 900px) {
         .sidebar {
             position: fixed;
@@ -307,12 +307,17 @@
             flex-direction: row;
             align-items: stretch;
             border-right: none;
-            border-top: 1px solid var(--border);
+            /* Frosted-glass iOS tab bar */
+            background: var(--bg-bar);
+            backdrop-filter: saturate(180%) blur(24px);
+            -webkit-backdrop-filter: saturate(180%) blur(24px);
+            /* iOS hairline separator — no heavy shadow */
+            border-top: 0.5px solid var(--separator);
+            box-shadow: none;
             padding: 0;
             padding-bottom: env(safe-area-inset-bottom);
             z-index: 100;
             gap: 0;
-            box-shadow: 0 -2px 12px rgba(0, 0, 0, 0.06);
         }
         .brand { display: none; }
         .footer { display: none; }
@@ -323,27 +328,33 @@
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            gap: 4px;
+            gap: 3px;
             padding: 8px 4px;
             border-radius: 0;
-            font-size: 11px;
-            min-height: 56px;
-            color: var(--text-muted);
+            font-size: 10px;    /* iOS tab label size */
+            min-height: 49px;   /* iOS standard tab bar height */
+            color: var(--text-faint);
             text-align: center;
             width: auto;
         }
+        /* Scale up icons slightly in the tab bar */
+        .nav-mobile .nav-item :global(svg) { width: 24px; height: 24px; }
+        /* iOS: active = tint color only, no indicator line */
         .nav-mobile .nav-item[aria-current="page"] {
             background: transparent;
             color: var(--primary);
-            box-shadow: inset 0 2px 0 var(--primary);
+            box-shadow: none;
         }
         .nav-mobile .nav-item[aria-current="page"] :global(svg) {
             color: var(--primary);
         }
         .nav-mobile .nav-label {
             line-height: 1;
-            font-weight: 500;
-            letter-spacing: 0.01em;
+            font-weight: 400;       /* iOS uses regular weight for tab labels */
+            letter-spacing: 0;
+        }
+        .nav-mobile .nav-item[aria-current="page"] .nav-label {
+            font-weight: 500;       /* Slightly heavier on active — subtle cue */
         }
     }
 
@@ -362,8 +373,10 @@
     }
     .drawer {
         width: 100%;
-        background: var(--bg-elevated);
-        border-top: 1px solid var(--border);
+        background: var(--bg-bar);
+        backdrop-filter: saturate(180%) blur(24px);
+        -webkit-backdrop-filter: saturate(180%) blur(24px);
+        border-top: 0.5px solid var(--separator);
         border-top-left-radius: var(--radius-xl);
         border-top-right-radius: var(--radius-xl);
         padding: var(--space-3) var(--space-4)
@@ -374,8 +387,8 @@
         box-shadow: var(--shadow-lg);
     }
     .drawer-handle {
-        width: 38px;
-        height: 4px;
+        width: 36px;
+        height: 5px;
         border-radius: 999px;
         background: var(--border-strong);
         margin: 4px auto var(--space-2);
