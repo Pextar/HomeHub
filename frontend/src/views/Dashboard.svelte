@@ -338,8 +338,7 @@
                             <li class="sched-row">
                                 <span class="action-pill" data-action={s.action}>{s.action}</span>
                                 <span class="sched-target">{getTargetLabel(s)}</span>
-                                <span class="sched-time">{formatScheduleTime(s)}</span>
-                                <span class="sched-days">{formatDays(s.days)}</span>
+                                <span class="sched-meta">{formatScheduleTime(s)} &middot; {formatDays(s.days)}</span>
                             </li>
                         {/each}
                     </ul>
@@ -521,25 +520,36 @@
 
 <style>
     /* ── Stat cards ─────────────────────────────────── */
+
+    /* Mobile-first: always 2 columns. At ≥640 px go to 4. */
     .stats {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-        gap: var(--space-4);
+        grid-template-columns: 1fr 1fr;
+        gap: var(--space-3);
     }
+    @media (min-width: 640px) {
+        .stats { grid-template-columns: repeat(4, 1fr); gap: var(--space-4); }
+    }
+
     .stat {
         all: unset;
         box-sizing: border-box;
         background: var(--bg-elevated);
         border: 1px solid var(--border);
         border-radius: var(--radius-lg);
-        padding: var(--space-4) var(--space-5);
+        /* Mobile: tighter padding so the card fits in ~165 px */
+        padding: var(--space-3);
+        gap: var(--space-2);
         display: flex;
         align-items: center;
-        gap: var(--space-4);
         cursor: pointer;
         width: 100%;
+        min-height: 68px; /* comfortable tap target height */
         transition: border-color var(--t-fast), box-shadow var(--t-fast), transform var(--t-fast);
         position: relative;
+    }
+    @media (min-width: 640px) {
+        .stat { padding: var(--space-4) var(--space-5); gap: var(--space-4); }
     }
     @media (hover: hover) {
         .stat:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); }
@@ -553,10 +563,14 @@
     .stat.selected[data-tone="warn"]    { border-color: var(--warn);    box-shadow: 0 0 0 3px var(--warn-soft);    }
 
     .ico {
-        width: 40px; height: 40px;
-        border-radius: var(--radius-md);
+        /* Mobile: 32 px icon box */
+        width: 32px; height: 32px;
+        border-radius: var(--radius-sm);
         display: grid; place-items: center;
         flex-shrink: 0;
+    }
+    @media (min-width: 640px) {
+        .ico { width: 40px; height: 40px; border-radius: var(--radius-md); }
     }
     .ico[data-tone="primary"] { background: var(--primary-soft); color: var(--primary); }
     .ico[data-tone="success"] { background: var(--success-soft); color: var(--success); }
@@ -564,14 +578,30 @@
     .ico[data-tone="warn"]    { background: var(--warn-soft);    color: var(--warn);    }
 
     .stat-text { flex: 1; min-width: 0; text-align: left; }
-    .value { font-size: 1.5rem; font-weight: 700; line-height: 1; }
-    .label { color: var(--text-muted); font-size: 13px; margin-top: 4px; }
+    .value { font-size: 1.25rem; font-weight: 700; line-height: 1; }
+    @media (min-width: 640px) { .value { font-size: 1.5rem; } }
 
+    .label {
+        color: var(--text-muted);
+        font-size: 11px;
+        margin-top: 3px;
+        /* Prevent "Groups & scenes" from overflowing a ~70 px column */
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    @media (min-width: 640px) { .label { font-size: 13px; margin-top: 4px; } }
+
+    /* Caret: pinned to top-right corner on mobile so it doesn't steal
+       horizontal space from the text. Inline on desktop. */
     .caret {
-        margin-left: auto;
+        position: absolute;
+        top: 10px; right: 10px;
         color: var(--text-faint);
         transition: transform var(--t-med), color var(--t-fast);
-        flex-shrink: 0;
+    }
+    @media (min-width: 640px) {
+        .caret { position: static; margin-left: auto; flex-shrink: 0; }
     }
     .caret.open { transform: rotate(180deg); color: var(--text-muted); }
 
@@ -608,14 +638,19 @@
     .dico[data-tone="warn"]    { background: var(--warn-soft);    color: var(--warn);    }
     .dt { font-weight: 600; font-size: 0.875rem; }
 
-    /* body */
+    /* body — scrolls internally; caps at 50 vh on mobile so the rest of
+       the page remains reachable without the panel dominating the screen */
     .db {
-        padding: var(--space-4) var(--space-5);
+        padding: var(--space-3) var(--space-4);
         display: flex;
         flex-direction: column;
-        gap: var(--space-4);
-        max-height: 340px;
+        gap: var(--space-3);
+        max-height: min(340px, 50vh);
         overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+    @media (min-width: 640px) {
+        .db { padding: var(--space-4) var(--space-5); gap: var(--space-4); max-height: 340px; }
     }
 
     /* footer */
@@ -692,34 +727,53 @@
     }
 
     /* ── Schedules panel ───────────────────── */
-    .sched-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+    .sched-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+    /* flex-wrap lets sched-meta fall to the next line on narrow screens */
     .sched-row {
         display: flex;
         align-items: center;
-        gap: var(--space-3);
-        padding: 6px 8px;
+        flex-wrap: wrap;
+        gap: var(--space-2);
+        padding: 8px;
         border-radius: var(--radius-sm);
         background: var(--surface);
         font-size: 13px;
-        flex-wrap: wrap;
     }
     .action-pill {
         font-size: 10px;
         font-weight: 700;
         text-transform: uppercase;
         letter-spacing: 0.06em;
-        padding: 2px 7px;
+        padding: 3px 7px;
         border-radius: 999px;
         background: var(--surface-hover);
         color: var(--text-muted);
+        white-space: nowrap;
         flex-shrink: 0;
     }
     .action-pill[data-action="on"]       { background: var(--success-soft); color: var(--success); }
     .action-pill[data-action="off"]      { background: var(--danger-soft);  color: var(--danger);  }
     .action-pill[data-action="activate"] { background: var(--info-soft);    color: var(--info);    }
-    .sched-target { flex: 1; font-weight: 500; min-width: 80px; }
-    .sched-time { color: var(--text-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
-    .sched-days { color: var(--text-faint); font-size: 11px; white-space: nowrap; }
+    /* Target grows to fill row; meta wraps below when there's no room */
+    .sched-target {
+        flex: 1;
+        min-width: 90px;
+        font-weight: 500;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    /* Combined "18:00 · Weekdays" — always wraps as a unit */
+    .sched-meta {
+        width: 100%; /* force onto its own line */
+        color: var(--text-muted);
+        font-size: 11px;
+        font-variant-numeric: tabular-nums;
+        padding-left: calc(var(--space-2) + 28px); /* align under target */
+    }
+    @media (min-width: 640px) {
+        .sched-meta { width: auto; padding-left: 0; font-size: 12px; white-space: nowrap; }
+    }
 
     /* ── Automations panel ─────────────────── */
     .auto-section { display: flex; flex-direction: column; gap: 4px; }
@@ -743,13 +797,19 @@
         font-size: 13px;
     }
     .auto-info { min-width: 0; flex: 1; }
-    .auto-name { font-weight: 500; display: block; }
+    .auto-name {
+        font-weight: 500;
+        display: block;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
     .auto-sub { color: var(--text-faint); font-size: 11px; }
     .auto-on { color: var(--success); }
-    .auto-btns { display: flex; gap: var(--space-1); }
+    .auto-btns { display: flex; gap: var(--space-1); flex-shrink: 0; }
 
-    /* xs button variant */
-    :global(.btn-xs) { padding: 4px 10px; font-size: 12px; }
+    /* xs button: min-height 36 px so it meets a comfortable touch target */
+    :global(.btn-xs) { padding: 6px 12px; font-size: 12px; min-height: 36px; }
 
     /* ── Empty state inside panel ──────────── */
     .dempty {
