@@ -65,27 +65,27 @@
     }
 </script>
 
-<Topbar title="Dashboard" subtitle="Overview of your RF sockets">
+<Topbar title="Dashboard" subtitle="Your connected home">
     {#snippet actions()}
-        <button class="btn btn-primary" onclick={() => openModal(SocketModal, {})}>Add socket</button>
+        <button class="btn btn-primary" onclick={() => openModal(SocketModal, {})}>Add device</button>
     {/snippet}
 </Topbar>
 
 <div class="stats">
     <div class="stat" in:fly={{ y: 14, duration: dur(280), delay: stagger(0, 60), easing: cubicOut }}>
-        <div class="ico" data-tone="primary"><Icon name="bolt" size={20} /></div>
-        <div><div class="value">{Math.round(totalT.current)}</div><div class="label">Total sockets</div></div>
+        <div class="ico" data-tone="primary"><Icon name="home" size={20} /></div>
+        <div><div class="value">{Math.round(totalT.current)}</div><div class="label">Devices</div></div>
     </div>
     <div class="stat" in:fly={{ y: 14, duration: dur(280), delay: stagger(1, 60), easing: cubicOut }}>
-        <div class="ico" data-tone="success"><Icon name="check" size={20} /></div>
-        <div><div class="value">{Math.round(onT.current)}</div><div class="label">Currently on</div></div>
+        <div class="ico" data-tone="success"><Icon name="bolt" size={20} /></div>
+        <div><div class="value">{Math.round(onT.current)}</div><div class="label">Active now</div></div>
     </div>
     <div class="stat" in:fly={{ y: 14, duration: dur(280), delay: stagger(2, 60), easing: cubicOut }}>
         <div class="ico" data-tone="info"><Icon name="clock" size={20} /></div>
-        <div><div class="value">{Math.round(schedT.current)}</div><div class="label">Active schedules</div></div>
+        <div><div class="value">{Math.round(schedT.current)}</div><div class="label">Schedules</div></div>
     </div>
     <div class="stat" in:fly={{ y: 14, duration: dur(280), delay: stagger(3, 60), easing: cubicOut }}>
-        <div class="ico" data-tone="warn"><Icon name="groups" size={20} /></div>
+        <div class="ico" data-tone="warn"><Icon name="scenes" size={20} /></div>
         <div><div class="value">{Math.round(gsT.current)}</div><div class="label">Groups &amp; scenes</div></div>
     </div>
 </div>
@@ -93,10 +93,10 @@
 <section class="card">
     <div class="card-header"><h2>Quick actions</h2></div>
     <div class="quick">
-        <button class="btn btn-secondary" onclick={allOn}>Turn all on</button>
-        <button class="btn btn-secondary" onclick={allOff}>Turn all off</button>
-        <button class="btn btn-ghost" onclick={() => openModal(ShortcutsModal, {})}>iOS Shortcuts</button>
-        <button class="btn btn-ghost" onclick={() => data.refresh()}>Refresh</button>
+        <button class="btn btn-success" onclick={allOn}>All on</button>
+        <button class="btn btn-danger"  onclick={allOff}>All off</button>
+        <button class="btn btn-ghost"   onclick={() => openModal(ShortcutsModal, {})}>iOS Shortcuts</button>
+        <button class="btn btn-ghost"   onclick={() => data.refresh()}>Refresh</button>
     </div>
 </section>
 
@@ -214,10 +214,10 @@
         border-radius: var(--radius-md);
         display: grid; place-items: center;
     }
-    .ico[data-tone="primary"] { background: var(--info-soft);    color: var(--info);    }
-    .ico[data-tone="success"] { background: var(--success-soft); color: var(--success); }
-    .ico[data-tone="info"]    { background: var(--info-soft);    color: var(--info);    }
-    .ico[data-tone="warn"]    { background: var(--warn-soft);    color: var(--warn);    }
+    .ico[data-tone="primary"] { background: var(--primary-soft);  color: var(--primary); }
+    .ico[data-tone="success"] { background: var(--success-soft);  color: var(--success); }
+    .ico[data-tone="info"]    { background: var(--info-soft);     color: var(--info);    }
+    .ico[data-tone="warn"]    { background: var(--warn-soft);     color: var(--warn);    }
     .value { font-size: 1.5rem; font-weight: 700; line-height: 1; }
     .label { color: var(--text-muted); font-size: 13px; margin-top: 4px; }
 

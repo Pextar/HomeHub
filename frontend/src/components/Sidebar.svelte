@@ -28,8 +28,8 @@
     // the desktop sidebar.
     const PRIMARY_COUNT = 4;
     const items: NavItem[] = [
-        { route: "dashboard", icon: "dashboard", label: "Dashboard" },
-        { route: "sockets",   icon: "socket",    label: "Sockets" },
+        { route: "dashboard", icon: "home",      label: "Dashboard" },
+        { route: "sockets",   icon: "socket",    label: "Devices" },
         { route: "sensors",   icon: "sensor",    label: "Sensors" },
         { route: "schedules", icon: "clock",     label: "Schedules" },
         { route: "scenes",    icon: "scenes",    label: "Scenes" },
@@ -71,11 +71,11 @@
 <aside class="sidebar" aria-label="Primary">
     <div class="brand">
         <div class="mark" aria-hidden="true">
-            <Icon name="bolt" size={22} />
+            <Icon name="bolt" size={20} />
         </div>
         <div>
-            <div class="name">RF Sockets</div>
-            <div class="sub">Controller</div>
+            <div class="name">HomeHub</div>
+            <div class="sub">Smart Home</div>
         </div>
     </div>
 
@@ -208,12 +208,21 @@
     .mark {
         width: 36px; height: 36px;
         border-radius: var(--radius-md);
-        background: linear-gradient(135deg, var(--primary), #7b2cbf);
+        background: var(--gradient-brand);
         display: grid; place-items: center;
         color: #fff;
+        box-shadow: 0 4px 12px var(--primary-glow);
+        flex-shrink: 0;
     }
-    .name { font-weight: 700; letter-spacing: -0.01em; }
-    .sub { font-size: 12px; color: var(--text-muted); }
+    .name {
+        font-weight: 800;
+        letter-spacing: -0.02em;
+        background: var(--gradient-brand);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+    }
+    .sub { font-size: 12px; color: var(--text-faint); }
 
     .nav { display: flex; flex-direction: column; gap: 2px; }
     .nav-mobile { display: none; }
@@ -234,9 +243,10 @@
     }
     .nav-item:hover { background: var(--surface-hover); color: var(--text); }
     .nav-item[aria-current="page"] {
-        background: var(--surface);
-        color: var(--text);
+        background: var(--primary-soft);
+        color: var(--primary);
         font-weight: 600;
+        box-shadow: inset 3px 0 0 var(--primary);
     }
     .nav-item[aria-current="page"] :global(svg) { color: var(--primary); }
 
@@ -274,9 +284,18 @@
         width: 8px; height: 8px; border-radius: 50%;
         background: var(--text-faint);
         flex-shrink: 0;
+        transition: background var(--t-med), box-shadow var(--t-med);
     }
-    .dot[data-state="ok"] { background: var(--success); box-shadow: 0 0 0 3px var(--success-soft); }
+    .dot[data-state="ok"] {
+        background: var(--success);
+        box-shadow: 0 0 0 3px var(--success-soft);
+        animation: pulse-dot 2.5s ease-in-out infinite;
+    }
     .dot[data-state="error"] { background: var(--danger); box-shadow: 0 0 0 3px var(--danger-soft); }
+    @keyframes pulse-dot {
+        0%, 100% { box-shadow: 0 0 0 3px var(--success-soft); }
+        50%       { box-shadow: 0 0 0 5px var(--success-soft); }
+    }
 
     /* ---------- Mobile bottom nav ---------- */
     @media (max-width: 900px) {
@@ -316,6 +335,7 @@
         .nav-mobile .nav-item[aria-current="page"] {
             background: transparent;
             color: var(--primary);
+            box-shadow: inset 0 2px 0 var(--primary);
         }
         .nav-mobile .nav-item[aria-current="page"] :global(svg) {
             color: var(--primary);
