@@ -424,6 +424,28 @@
     </div>
 </section>
 
+{#if v.groups.length > 0}
+<section class="card">
+    <div class="card-header"><h2>Groups</h2></div>
+    <div class="group-list">
+        {#each v.groups as g, i (g.id)}
+            <div class="group-row"
+                animate:flip={{ duration: dur(280), easing: cubicOut }}
+                in:fly={{ y: 8, duration: dur(220), delay: stagger(i), easing: cubicOut }}>
+                <span class="group-name">{g.name}</span>
+                <span class="group-meta">{g.socket_ids.length} socket{g.socket_ids.length === 1 ? '' : 's'}</span>
+                <div class="group-actions">
+                    <button class="btn btn-success"
+                        onclick={() => runAction(() => api.groupAction(g.id, 'on'), `${g.name} on`)}>On</button>
+                    <button class="btn btn-danger"
+                        onclick={() => runAction(() => api.groupAction(g.id, 'off'), `${g.name} off`)}>Off</button>
+                </div>
+            </div>
+        {/each}
+    </div>
+</section>
+{/if}
+
 <section class="card">
     <div class="card-header">
         <h2>Scenes</h2>
@@ -825,6 +847,18 @@
 
     /* ── Rest of dashboard ─────────────────────────── */
     .quick { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+    .group-list { display: flex; flex-direction: column; gap: var(--space-2); }
+    .group-row {
+        display: flex;
+        align-items: center;
+        gap: var(--space-3);
+        padding: var(--space-2) var(--space-3);
+        background: var(--surface);
+        border-radius: var(--radius-sm);
+    }
+    .group-name { font-weight: 500; flex: 1; }
+    .group-meta { color: var(--text-muted); font-size: 13px; }
+    .group-actions { display: flex; gap: var(--space-2); }
     .scenes {
         display: grid;
         grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));

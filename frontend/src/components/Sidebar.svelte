@@ -32,8 +32,8 @@
         { route: "sockets",   icon: "socket",    label: "Devices" },
         { route: "sensors",   icon: "sensor",    label: "Sensors" },
         { route: "schedules", icon: "clock",     label: "Schedules" },
-        { route: "scenes",    icon: "scenes",    label: "Scenes" },
         { route: "groups",    icon: "groups",    label: "Groups" },
+        { route: "scenes",    icon: "scenes",    label: "Scenes" },
         { route: "settings",  icon: "settings",  label: "Settings" },
     ];
     const primary = items.slice(0, PRIMARY_COUNT);
