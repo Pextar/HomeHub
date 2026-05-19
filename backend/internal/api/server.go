@@ -27,11 +27,19 @@ type Server struct {
 	AuthPass      string
 	SessionSecret []byte // HMAC key for cookie sessions; see LoadOrCreateSessionSecret
 	SPADir        string // path to the built Svelte app (e.g. "./frontend/dist")
+
+	// In-flight Matter commission jobs. Created lazily in Handler() so
+	// callers don't need to initialise it. Background commission runs
+	// outlive the originating HTTP request; the frontend polls for status.
+	matterJobs *commissionJobs
 }
 
 // Handler returns the configured router with logging, optional basic
 // auth, the API routes, the SPA fallback and CORS — in that order.
 func (s *Server) Handler() http.Handler {
+	if s.matterJobs == nil {
+		s.matterJobs = newCommissionJobs()
+	}
 	r := mux.NewRouter()
 	r.Use(loggingMiddleware)
 
@@ -65,6 +73,7 @@ func (s *Server) Handler() http.Handler {
 	api.HandleFunc("/sockets/{id}/on", s.turnOn).Methods("POST")
 	api.HandleFunc("/sockets/{id}/off", s.turnOff).Methods("POST")
 	api.HandleFunc("/sockets/{id}/timer", s.createSocketTimer).Methods("POST")
+	api.HandleFunc("/sockets/{id}/favorite", s.toggleFavorite).Methods("POST")
 
 	api.HandleFunc("/rooms", s.getRooms).Methods("GET")
 	api.HandleFunc("/rooms/{room}/on", s.roomSetState(true)).Methods("POST")
@@ -116,6 +125,7 @@ func (s *Server) Handler() http.Handler {
 
 	api.HandleFunc("/matter/devices", s.matterListDevices).Methods("GET")
 	api.HandleFunc("/matter/commission", s.matterCommission).Methods("POST")
+	api.HandleFunc("/matter/commission/jobs/{id}", s.matterCommissionJob).Methods("GET")
 	api.HandleFunc("/matter/{socketId}", s.matterGetState).Methods("GET")
 	api.HandleFunc("/matter/{socketId}/state", s.matterSetState).Methods("PUT")
 

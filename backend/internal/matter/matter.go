@@ -11,6 +11,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -18,9 +19,13 @@ import (
 	"time"
 )
 
-// DefaultTimeout caps how long we wait for the bridge. Matter operations
-// can be slow on first reach (mDNS resolution, CASE session) so this is
-// noticeably more generous than the Tasmota timeout.
+// DefaultTimeout caps how long we wait for the bridge on read/write
+// operations. Matter is slow on first reach (mDNS resolution, CASE
+// session) so this is noticeably more generous than the Tasmota timeout.
+//
+// Commissioning needs much longer (BLE discovery + Wi-Fi onboarding can
+// run 30–60s easily); callers there pass a wider context — the http.Client
+// itself has no deadline so context is the single source of truth.
 const DefaultTimeout = 15 * time.Second
 
 // State mirrors the bridge's DeviceState. Fields are nil/empty when the
@@ -63,7 +68,10 @@ func FromEnv() *Client {
 	if u == "" {
 		u = "http://127.0.0.1:8765"
 	}
-	return &Client{BaseURL: strings.TrimRight(u, "/"), HTTP: &http.Client{Timeout: DefaultTimeout}}
+	// No client-level timeout — every call passes its own context deadline.
+	// A client timeout would silently override the longer commissioning
+	// deadline (90s) and abort BLE onboarding mid-handshake.
+	return &Client{BaseURL: strings.TrimRight(u, "/"), HTTP: &http.Client{}}
 }
 
 // Enabled reports whether the client has a base URL to call. Callers can
@@ -127,7 +135,11 @@ func (c *Client) do(ctx context.Context, method, path string, in, out any) error
 	if !c.Enabled() {
 		return fmt.Errorf("matter bridge is not configured (set MATTER_BRIDGE_URL)")
 	}
-	var body *bytes.Reader
+	// Body must be passed as an untyped nil io.Reader when absent — passing
+	// a typed-nil *bytes.Reader makes the body interface non-nil, and
+	// http.NewRequestWithContext's *bytes.Reader fast-path then calls .Len()
+	// on the nil pointer and panics.
+	var body io.Reader
 	if in != nil {
 		buf, err := json.Marshal(in)
 		if err != nil {
@@ -135,8 +147,7 @@ func (c *Client) do(ctx context.Context, method, path string, in, out any) error
 		}
 		body = bytes.NewReader(buf)
 	}
-	var reqBody = func() *bytes.Reader { return body }
-	req, err := http.NewRequestWithContext(ctx, method, c.BaseURL+path, nilReader(reqBody))
+	req, err := http.NewRequestWithContext(ctx, method, c.BaseURL+path, body)
 	if err != nil {
 		return fmt.Errorf("matter: build request: %w", err)
 	}
@@ -145,7 +156,7 @@ func (c *Client) do(ctx context.Context, method, path string, in, out any) error
 	}
 	client := c.HTTP
 	if client == nil {
-		client = &http.Client{Timeout: DefaultTimeout}
+		client = &http.Client{}
 	}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -171,12 +182,3 @@ func (c *Client) do(ctx context.Context, method, path string, in, out any) error
 	return nil
 }
 
-// nilReader returns an io.Reader-or-nil from a *bytes.Reader getter so
-// http.NewRequest doesn't treat a typed-nil as a non-nil body.
-func nilReader(get func() *bytes.Reader) *bytes.Reader {
-	r := get()
-	if r == nil {
-		return nil
-	}
-	return r
-}

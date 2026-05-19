@@ -80,12 +80,19 @@ ssh "$HOST" "sudo install -m 644 '$REMOTE_DIR/rf-controller.service' /etc/system
 echo "==> Status:"
 ssh "$HOST" "systemctl --no-pager --lines=10 status rf-controller || true"
 
+HTTP_PORT=$(ssh "$HOST" "grep -E '^PORT=' '$REMOTE_DIR/.env' 2>/dev/null | cut -d= -f2" || echo 8080)
+HTTPS_PORT=$(ssh "$HOST" "grep -E '^HTTPS_PORT=' '$REMOTE_DIR/.env' 2>/dev/null | cut -d= -f2" || true)
+
 cat <<EOF
 
 Done. The UI should be reachable at:
 
-  http://${HOST#*@}:\$(grep -E '^PORT=' '$REMOTE_DIR/.env' | cut -d= -f2 || echo 8080)
-
+  http://${HOST#*@}:${HTTP_PORT:-8080}
+${HTTPS_PORT:+  https://${HOST#*@}:$HTTPS_PORT  (self-signed cert — accept the browser warning once)
+}
 If you have not changed AUTH_PASS yet:
   ssh $HOST 'nano ~/$REMOTE_DIR/.env && sudo systemctl restart rf-controller'
+
+To enable HTTPS on an existing install (needed for QR scanning on a phone):
+  ssh $HOST "echo 'HTTPS_PORT=8443' >> ~/$REMOTE_DIR/.env && sudo systemctl restart rf-controller"
 EOF

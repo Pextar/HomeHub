@@ -3,7 +3,9 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"log"
 	"net/http"
+	"time"
 
 	"github.com/gorilla/mux"
 
@@ -31,8 +33,14 @@ func (s *Server) matterListDevices(w http.ResponseWriter, r *http.Request) {
 }
 
 // matterCommission handles POST /api/matter/commission.
-// Body: { "pairing_code": "..." }. Returns the assigned node id so the
-// frontend can immediately save it as a Socket with protocol="matter".
+// Body: { "pairing_code": "..." }.
+//
+// Commissioning a Matter device takes 30–90s (BLE discovery + Wi-Fi
+// onboarding + CASE session) — far longer than the http.Server's
+// WriteTimeout and longer than iOS Safari will keep a single fetch
+// alive. We start the work in a background goroutine and return a
+// job id immediately; the frontend polls
+// /matter/commission/jobs/{id} until it reaches "done" or "error".
 func (s *Server) matterCommission(w http.ResponseWriter, r *http.Request) {
 	if !s.Matter.Enabled() {
 		writeError(w, http.StatusServiceUnavailable, "matter bridge is not configured")
@@ -49,17 +57,41 @@ func (s *Server) matterCommission(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "pairing_code is required")
 		return
 	}
-	// Commissioning can take 30s+ as we discover via BLE + bring the
-	// device onto Wi-Fi, so use a wider timeout than read/write calls.
-	ctx, cancel := context.WithTimeout(r.Context(), matter.DefaultTimeout*6)
-	defer cancel()
 
-	nodeID, err := s.Matter.Commission(ctx, body.PairingCode)
-	if err != nil {
-		writeError(w, http.StatusBadGateway, err.Error())
+	job := s.matterJobs.create()
+	pairingCode := body.PairingCode
+
+	go func() {
+		// Detached from r.Context() — the HTTP request will close almost
+		// immediately. We give the bridge a generous ceiling of its own.
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+		defer cancel()
+		nodeID, err := s.Matter.Commission(ctx, pairingCode)
+		if err != nil {
+			log.Printf("matter commission job %s failed: %v", job.ID, err)
+		} else {
+			log.Printf("matter commission job %s done: node %s", job.ID, nodeID)
+		}
+		s.matterJobs.complete(job.ID, nodeID, err)
+	}()
+
+	writeJSON(w, http.StatusAccepted, map[string]string{"job_id": job.ID})
+}
+
+// matterCommissionJob handles GET /api/matter/commission/jobs/{id}.
+// Returns the current state of an async commission attempt.
+func (s *Server) matterCommissionJob(w http.ResponseWriter, r *http.Request) {
+	if !s.Matter.Enabled() {
+		writeError(w, http.StatusServiceUnavailable, "matter bridge is not configured")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"node_id": nodeID})
+	id := mux.Vars(r)["id"]
+	job, ok := s.matterJobs.get(id)
+	if !ok {
+		writeError(w, http.StatusNotFound, "job not found (may have expired)")
+		return
+	}
+	writeJSON(w, http.StatusOK, job)
 }
 
 // matterGetState handles GET /api/matter/{socketId}.

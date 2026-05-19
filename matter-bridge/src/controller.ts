@@ -98,13 +98,18 @@ export async function startController(): Promise<MatterController> {
     async function getPaired(id: string) {
         const node = await commissioning.getNode(NodeId(BigInt(id)));
         if (!node.isConnected) {
-            // PairedNode.connect() is non-blocking; wait for initial remote sync.
+            // PairedNode.connect() is non-blocking; wait for initial remote
+            // sync — but cap it. If the device is offline, this event will
+            // never fire and we'd hang forever, eating the Go-side HTTP
+            // timeout and breaking the UI with a "Load failed" error.
             node.connect();
-            try {
-                await node.events.initializedFromRemote;
-            } catch {
-                /* timeouts surface as offline below */
-            }
+            const ready = new Promise<boolean>((resolve) => {
+                Promise.resolve(node.events.initializedFromRemote)
+                    .then(() => resolve(true))
+                    .catch(() => resolve(false));
+            });
+            const deadline = new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 4000));
+            await Promise.race([ready, deadline]);
         }
         return node;
     }
@@ -222,6 +227,13 @@ export async function startController(): Promise<MatterController> {
     };
 }
 
+function wifiNetwork(): { wifiSsid: string; wifiCredentials: string } | undefined {
+    const ssid = process.env.MATTER_BRIDGE_WIFI_SSID;
+    const pass = process.env.MATTER_BRIDGE_WIFI_PASS ?? "";
+    if (!ssid) return undefined;
+    return { wifiSsid: ssid, wifiCredentials: pass };
+}
+
 function optionsFromPairingCode(code: string): NodeCommissioningOptions {
     const trimmed = code.trim();
     let discriminator: number | undefined;
@@ -240,12 +252,25 @@ function optionsFromPairingCode(code: string): NodeCommissioningOptions {
         shortDiscriminator = decoded.shortDiscriminator;
     }
 
+    const wifi = wifiNetwork();
+    if (wifi) {
+        console.log(`[matter-bridge] commissioning with Wi-Fi SSID: ${process.env.MATTER_BRIDGE_WIFI_SSID}`);
+    } else {
+        console.warn("[matter-bridge] MATTER_BRIDGE_WIFI_SSID not set — device will not receive Wi-Fi credentials during commissioning");
+    }
+
     return {
-        commissioning: { regulatoryCountryCode: "XX" },
+        commissioning: {
+            regulatoryCountryCode: "XX",
+            ...(wifi ? { wifiNetwork: wifi } : {}),
+        },
         discovery: {
             identifierData: discriminator !== undefined
                 ? { longDiscriminator: discriminator }
                 : { shortDiscriminator: shortDiscriminator! },
+            // Explicitly request both BLE and mDNS so the controller
+            // registers 2 scanners instead of defaulting to mDNS only.
+            discoveryCapabilities: { ble: true, onIpNetwork: true },
         },
         passcode,
     };
@@ -258,8 +283,13 @@ function asString(v: unknown): string | undefined {
 }
 
 async function safeRead<T>(read: () => Promise<T> | T): Promise<T | undefined> {
+    // Each attribute read goes over the wire — bound it so one stuck
+    // cluster can't make the whole /devices/:id GET miss its HTTP deadline.
     try {
-        const v = await read();
+        const v = await Promise.race([
+            Promise.resolve(read()),
+            new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 2500)),
+        ]);
         return v as T;
     } catch {
         return undefined;

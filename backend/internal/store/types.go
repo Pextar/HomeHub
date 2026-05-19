@@ -2,14 +2,15 @@ package store
 
 import "time"
 
-// Socket represents a 433MHz controllable socket.
+// Socket represents a controllable socket / smart device.
 type Socket struct {
 	ID       string `json:"id"`
 	Name     string `json:"name"`
-	Code     string `json:"code"`     // 433MHz code (e.g., "12345")
-	Protocol string `json:"protocol"` // e.g., "nexa", "kaku", "intertechno"
+	Code     string `json:"code"`     // 433MHz code, Tasmota IP, or Matter node id
+	Protocol string `json:"protocol"` // e.g., "nexa", "kaku", "intertechno", "tasmota", "matter"
 	State    bool   `json:"state"`    // true = on, false = off
 	Room     string `json:"room"`     // room/location
+	Favorite bool   `json:"favorite,omitempty"` // pinned to dashboard
 }
 
 // Schedule represents a recurring timer for a socket, group, or scene.

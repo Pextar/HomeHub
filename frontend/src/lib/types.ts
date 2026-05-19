@@ -5,6 +5,7 @@ export interface Socket {
   protocol: string;
   state: boolean;
   room: string;
+  favorite?: boolean;
 }
 
 export type TargetType = "socket" | "group" | "scene";

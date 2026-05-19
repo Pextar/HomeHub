@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"log"
 	"net/http"
@@ -77,13 +78,46 @@ func main() {
 		port = "8080"
 	}
 
-	srv := &http.Server{
+	handler := server.Handler()
+	httpSrv := &http.Server{
 		Addr:              ":" + port,
-		Handler:           server.Handler(),
+		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      15 * time.Second,
 		IdleTimeout:       60 * time.Second,
+	}
+
+	// Optional HTTPS listener. Required if the user wants the QR scanner
+	// to work in mobile browsers — getUserMedia is blocked outside secure
+	// contexts. Enable by setting HTTPS_PORT (e.g. 8443); a self-signed
+	// cert is generated on first start and reused across restarts.
+	var httpsSrv *http.Server
+	if httpsPort := os.Getenv("HTTPS_PORT"); httpsPort != "" {
+		certPath := filepath.Join(dataDir, "tls", "cert.pem")
+		keyPath := filepath.Join(dataDir, "tls", "key.pem")
+		if p := os.Getenv("TLS_CERT_FILE"); p != "" {
+			certPath = p
+		}
+		if p := os.Getenv("TLS_KEY_FILE"); p != "" {
+			keyPath = p
+		}
+		cert, err := api.LoadOrCreateTLSCert(certPath, keyPath, nil)
+		if err != nil {
+			log.Fatalf("tls: %v", err)
+		}
+		httpsSrv = &http.Server{
+			Addr:              ":" + httpsPort,
+			Handler:           handler,
+			ReadHeaderTimeout: 5 * time.Second,
+			ReadTimeout:       15 * time.Second,
+			WriteTimeout:      15 * time.Second,
+			IdleTimeout:       60 * time.Second,
+			TLSConfig: &tls.Config{
+				Certificates: []tls.Certificate{cert},
+				MinVersion:   tls.VersionTLS12,
+			},
+		}
 	}
 
 	schedCtx, stopScheduler := context.WithCancel(context.Background())
@@ -91,11 +125,21 @@ func main() {
 	go rx.FromEnv().Run(schedCtx, st)
 
 	go func() {
-		log.Printf("RF Socket Controller listening on :%s", port)
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		log.Printf("RF Socket Controller listening on http://:%s", port)
+		if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatalf("http server: %v", err)
 		}
 	}()
+	if httpsSrv != nil {
+		go func() {
+			log.Printf("HTTPS also listening on https://:%s (self-signed)", httpsSrv.Addr[1:])
+			// ListenAndServeTLS with empty cert/key paths picks the cert
+			// from TLSConfig.Certificates that we already populated.
+			if err := httpsSrv.ListenAndServeTLS("", ""); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				log.Fatalf("https server: %v", err)
+			}
+		}()
+	}
 
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
@@ -105,8 +149,13 @@ func main() {
 	stopScheduler()
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if err := srv.Shutdown(shutdownCtx); err != nil {
+	if err := httpSrv.Shutdown(shutdownCtx); err != nil {
 		log.Printf("graceful shutdown failed: %v", err)
+	}
+	if httpsSrv != nil {
+		if err := httpsSrv.Shutdown(shutdownCtx); err != nil {
+			log.Printf("https graceful shutdown failed: %v", err)
+		}
 	}
 	log.Println("bye")
 }

@@ -1,0 +1,421 @@
+<!--
+  Guided Matter onboarding wizard.
+
+  Three steps:
+    1. Pairing code     — user scans the QR or types the manual code.
+    2. Commissioning    — bridge talks BLE → Wi-Fi (30–60s); show progress.
+    3. Name & room      — auto-fill from the device's vendor/product, let
+                          the user adjust, then save as a Socket.
+
+  The wizard owns the whole flow so the regular SocketModal stays clean.
+-->
+<script lang="ts">
+    import Modal from "../components/Modal.svelte";
+    import Icon from "../components/Icon.svelte";
+    import QRScanner from "../components/QRScanner.svelte";
+    import { closeModal } from "../lib/modal.svelte";
+    import { api } from "../lib/api";
+    import { toasts, data } from "../lib/stores.svelte";
+
+    type Step = "input" | "commissioning" | "details";
+    type InputMode = "scan" | "manual";
+
+    let step      = $state<Step>("input");
+    let inputMode = $state<InputMode>("scan");
+    let pairingCode = $state("");
+    let scannerError = $state<string | null>(null);
+
+    // Commissioning step state
+    let progress    = $state(0);              // 0..1, animated
+    let progressTimer: ReturnType<typeof setInterval> | null = null;
+    let commissionError = $state<string | null>(null);
+
+    // Details step state
+    let nodeId      = $state("");
+    let suggestedName = $state("");
+    let name        = $state("");
+    let room        = $state("");
+    let vendor      = $state("");
+    let product     = $state("");
+    let saving      = $state(false);
+
+    function onScanned(text: string) {
+        pairingCode = text.trim();
+        startCommission();
+    }
+    function onScanError(message: string) {
+        // Show the error in the scan tab — don't auto-switch; let the user
+        // decide to switch to manual if they prefer.
+        scannerError = message;
+    }
+
+    // Format 11-digit Matter manual codes as DDDD-DDD-DDDD while typing.
+    // MT:… QR payloads are left as-is.
+    function onCodeInput(e: Event) {
+        const raw = (e.target as HTMLInputElement).value;
+        if (raw.toUpperCase().startsWith("MT:")) {
+            pairingCode = raw;
+            return;
+        }
+        const digits = raw.replace(/[^0-9]/g, "").slice(0, 11);
+        if (digits.length > 7) {
+            pairingCode = digits.slice(0, 4) + "-" + digits.slice(4, 7) + "-" + digits.slice(7);
+        } else if (digits.length > 4) {
+            pairingCode = digits.slice(0, 4) + "-" + digits.slice(4);
+        } else {
+            pairingCode = digits;
+        }
+    }
+
+    function looksLikePairingCode(code: string): boolean {
+        const trimmed = code.trim();
+        if (trimmed.toUpperCase().startsWith("MT:")) return true;
+        const digits = trimmed.replace(/[^0-9]/g, "");
+        // Matter manual codes are 11 digits; the longer form (with vendor/
+        // product appendix) is 21 digits.
+        return digits.length === 11 || digits.length === 21;
+    }
+
+    async function startCommission() {
+        const code = pairingCode.trim();
+        if (!code) {
+            toasts.warn("Enter a pairing code",
+                "Scan the QR or type the 11- or 21-digit code printed on the device.");
+            return;
+        }
+        if (!looksLikePairingCode(code)) {
+            toasts.warn("That doesn't look right",
+                "Expecting an 11- or 21-digit manual code, or an MT:… QR payload.");
+            return;
+        }
+        step = "commissioning";
+        commissionError = null;
+        // Slow climb up to ~90% over the expected commissioning window so
+        // the user has something to look at. We jump to 100% on success.
+        progress = 0;
+        progressTimer = setInterval(() => {
+            if (progress < 0.9) progress = Math.min(0.9, progress + 0.015);
+        }, 800);
+
+        let jobId: string;
+        try {
+            const r = await api.matterCommission({ pairing_code: code });
+            jobId = r.job_id;
+        } catch (e) {
+            stopProgress();
+            commissionError = (e as Error).message;
+            return;
+        }
+
+        // Poll the job status until the bridge finishes (or errors). The
+        // POST above returns immediately so the long-running commission
+        // outlives the original fetch — Safari's "Load failed" timeout
+        // can't kill us anymore.
+        try {
+            const job = await pollJob(jobId);
+            if (job.status === "error") {
+                stopProgress();
+                commissionError = job.error || "Commissioning failed";
+                return;
+            }
+            nodeId = job.node_id || "";
+            progress = 1;
+            // Pull the device's name / vendor so we can pre-fill the next step.
+            try {
+                const state = await api.matterGetState(nodeId);
+                vendor = state.vendor || "";
+                product = state.product || "";
+                suggestedName = state.name || state.product || "";
+                name = suggestedName;
+            } catch {
+                /* non-fatal — user can name it themselves */
+            }
+            stopProgress();
+            step = "details";
+        } catch (e) {
+            stopProgress();
+            commissionError = (e as Error).message;
+        }
+    }
+
+    async function pollJob(jobId: string) {
+        // Hard cap of ~3 minutes (~90 polls × 2s) — matches the backend's
+        // own commission ceiling. Safe to be a bit longer than the server
+        // since the polling fetches themselves are short.
+        for (let i = 0; i < 90; i++) {
+            await sleep(2000);
+            const j = await api.matterCommissionJob(jobId);
+            if (j.status !== "pending") return j;
+        }
+        throw new Error("Commissioning timed out after 3 minutes");
+    }
+
+    function sleep(ms: number) {
+        return new Promise<void>((r) => setTimeout(r, ms));
+    }
+
+    function stopProgress() {
+        if (progressTimer) { clearInterval(progressTimer); progressTimer = null; }
+    }
+
+    function tryAgain() {
+        commissionError = null;
+        step = "input";
+    }
+
+    async function save() {
+        const payload = {
+            name: name.trim(),
+            room: room.trim(),
+            code: nodeId,
+            protocol: "matter",
+        };
+        if (!payload.name) {
+            toasts.warn("Name is required", "Give the device a name so you can find it later.");
+            return;
+        }
+        saving = true;
+        try {
+            await api.createSocket(payload);
+            toasts.success("Device added", payload.name);
+            closeModal();
+            await data.refresh();
+        } catch (e) {
+            toasts.error("Save failed", (e as Error).message);
+        } finally {
+            saving = false;
+        }
+    }
+</script>
+
+<Modal
+    title="Set up Matter device"
+    subtitle={step === "input"        ? "Step 1 of 3 · Pairing code"
+            : step === "commissioning" ? "Step 2 of 3 · Onboarding"
+            :                            "Step 3 of 3 · Name & room"}
+>
+    {#snippet body()}
+        {#if step === "input"}
+            <div class="tabs" role="tablist">
+                <button class="tab" class:active={inputMode === "scan"}
+                    role="tab" aria-selected={inputMode === "scan"}
+                    onclick={() => { inputMode = "scan"; scannerError = null; }}>
+                    <Icon name="qrcode" size={16} /> Scan QR
+                </button>
+                <button class="tab" class:active={inputMode === "manual"}
+                    role="tab" aria-selected={inputMode === "manual"}
+                    onclick={() => { inputMode = "manual"; }}>
+                    <Icon name="keyboard" size={16} /> Enter manually
+                </button>
+            </div>
+
+            {#if inputMode === "scan"}
+                <!-- QRScanner handles its own error display now; we still show
+                     an inline hint if camera failed so user knows to switch. -->
+                <QRScanner onDecoded={onScanned} onError={onScanError} />
+                {#if scannerError}
+                    <div class="camera-fallback-hint">
+                        Camera didn't work? <button class="link-btn"
+                            onclick={() => { inputMode = "manual"; }}>Enter code manually</button>
+                    </div>
+                {:else}
+                    <div class="field-help">
+                        Scan the QR code on the device or its box — it starts with <code>MT:</code>.
+                    </div>
+                {/if}
+            {:else}
+                <div class="field">
+                    <label for="mat-pair">Pairing code</label>
+                    <input id="mat-pair" type="text" inputmode="numeric"
+                        value={pairingCode}
+                        oninput={onCodeInput}
+                        placeholder="3496-112-0001"
+                        autocomplete="off"
+                        autocorrect="off"
+                        autocapitalize="off"
+                        spellcheck={false} />
+                    <div class="field-help">
+                        Type the 11-digit code printed on the device (dashes are added
+                        automatically). Or paste the full <code>MT:…</code> QR payload.
+                    </div>
+                </div>
+            {/if}
+        {:else if step === "commissioning"}
+            {#if commissionError}
+                <div class="note error">
+                    <strong>Commissioning failed</strong>
+                    <span>{commissionError}</span>
+                    <span class="hint">
+                        Common causes: the device isn't in pairing mode (reset it),
+                        Bluetooth isn't available on the bridge, the Wi-Fi credentials
+                        aren't set on the bridge yet, or the device is out of range.
+                    </span>
+                </div>
+            {:else}
+                <div class="commissioning">
+                    <div class="spinner" aria-hidden="true"></div>
+                    <div class="title">Pairing with your device…</div>
+                    <div class="hint">
+                        This usually takes 30–60 seconds. The bridge talks to the
+                        device over Bluetooth, hands it your Wi-Fi credentials,
+                        and confirms it joined the network.
+                    </div>
+                    <div class="progress">
+                        <div class="bar" style:width="{Math.round(progress * 100)}%"></div>
+                    </div>
+                </div>
+            {/if}
+        {:else if step === "details"}
+            <div class="note success">
+                <strong>Device commissioned</strong>
+                <span>
+                    Assigned node id <code>{nodeId}</code>{#if vendor || product}
+                        · {[vendor, product].filter(Boolean).join(" ")}
+                    {/if}
+                </span>
+            </div>
+            <div class="field">
+                <label for="mat-name">Name</label>
+                <input id="mat-name" type="text" bind:value={name}
+                    placeholder={suggestedName || "e.g. Living room lamp"}
+                    autocomplete="off" required />
+            </div>
+            <div class="field">
+                <label for="mat-room">Room <span class="opt">(optional)</span></label>
+                <input id="mat-room" type="text" bind:value={room}
+                    placeholder="e.g. Living room" autocomplete="off"
+                    list="mat-room-list" />
+                <datalist id="mat-room-list">
+                    {#each data.value.rooms as r (r.name)}
+                        <option value={r.name}></option>
+                    {/each}
+                </datalist>
+            </div>
+        {/if}
+    {/snippet}
+    {#snippet actions()}
+        {#if step === "input"}
+            <button class="btn btn-ghost" onclick={() => closeModal()}>Cancel</button>
+            {#if inputMode === "manual"}
+                <button class="btn btn-primary" onclick={startCommission}>Commission</button>
+            {/if}
+        {:else if step === "commissioning"}
+            {#if commissionError}
+                <button class="btn btn-ghost" onclick={() => closeModal()}>Cancel</button>
+                <button class="btn btn-primary" onclick={tryAgain}>Try again</button>
+            {:else}
+                <button class="btn btn-ghost" disabled>Working…</button>
+            {/if}
+        {:else if step === "details"}
+            <button class="btn btn-ghost" onclick={() => closeModal()}>Skip</button>
+            <button class="btn btn-primary" onclick={save} disabled={saving}>
+                {saving ? "Saving…" : "Add device"}
+            </button>
+        {/if}
+    {/snippet}
+</Modal>
+
+<style>
+    .tabs {
+        display: flex;
+        gap: 2px;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        padding: 4px;
+    }
+    .tab {
+        flex: 1;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        padding: 8px 12px;
+        border: 0;
+        background: transparent;
+        color: var(--text-muted);
+        font-size: 13px;
+        font-weight: 500;
+        cursor: pointer;
+        border-radius: calc(var(--radius-md) - 2px);
+        transition: background 0.12s, color 0.12s;
+    }
+    .tab:hover { color: var(--text); }
+    .tab.active {
+        background: var(--bg-elevated);
+        color: var(--text);
+        box-shadow: var(--shadow-sm);
+    }
+
+    .note {
+        display: flex; flex-direction: column; gap: 4px;
+        padding: var(--space-3) var(--space-4);
+        border-radius: var(--radius-md);
+        border: 1px solid var(--border);
+        background: var(--surface);
+        font-size: 13px;
+    }
+    .note.error  { border-color: var(--error, #f87171); color: var(--error, #f87171); }
+    .note.success { border-color: var(--success, #34d399); }
+    .note .hint { color: var(--text-muted); font-size: 12px; }
+    .note code { font-family: ui-monospace, monospace; font-size: 12px; }
+
+    .commissioning {
+        display: flex; flex-direction: column; align-items: center;
+        gap: var(--space-3);
+        padding: var(--space-6) var(--space-4);
+        text-align: center;
+    }
+    .commissioning .title { font-weight: 600; font-size: 15px; }
+    .commissioning .hint  { color: var(--text-muted); font-size: 13px; max-width: 360px; }
+    .progress {
+        width: 100%; max-width: 320px;
+        height: 6px;
+        border-radius: 999px;
+        background: var(--surface);
+        overflow: hidden;
+        border: 1px solid var(--border);
+    }
+    .bar {
+        height: 100%;
+        background: var(--accent, #60a5fa);
+        transition: width 0.6s ease;
+    }
+
+    .spinner {
+        width: 32px; height: 32px;
+        border: 3px solid var(--border);
+        border-top-color: var(--accent, #60a5fa);
+        border-radius: 50%;
+        animation: spin 0.9s linear infinite;
+    }
+    @keyframes spin {
+        from { transform: rotate(0deg); }
+        to   { transform: rotate(360deg); }
+    }
+
+    .field-help {
+        font-size: 12px;
+        color: var(--text-muted);
+        margin-top: 4px;
+    }
+    .field-help code { font-family: ui-monospace, monospace; }
+    .opt { color: var(--text-muted); font-weight: 400; font-size: 12px; }
+
+    .camera-fallback-hint {
+        font-size: 13px;
+        color: var(--text-muted);
+        text-align: center;
+        margin-top: 4px;
+    }
+    .link-btn {
+        background: none;
+        border: none;
+        padding: 0;
+        color: var(--accent, #60a5fa);
+        font-size: inherit;
+        cursor: pointer;
+        text-decoration: underline;
+        text-underline-offset: 2px;
+    }
+</style>

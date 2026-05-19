@@ -118,6 +118,26 @@ func (s *Server) updateSocket(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, socket)
 }
 
+// toggleFavorite flips the socket's `favorite` flag. Used by the dashboard
+// star button — keeps the toggle as one round-trip without forcing the UI
+// to send a full PUT payload.
+func (s *Server) toggleFavorite(w http.ResponseWriter, r *http.Request) {
+	id := mux.Vars(r)["id"]
+	s.Store.Mu.Lock()
+	defer s.Store.Mu.Unlock()
+	socket, ok := s.Store.Sockets[id]
+	if !ok {
+		writeError(w, http.StatusNotFound, "socket not found")
+		return
+	}
+	socket.Favorite = !socket.Favorite
+	if err := s.Store.Save(); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, socket)
+}
+
 func (s *Server) deleteSocket(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
 

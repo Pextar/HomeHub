@@ -29,6 +29,12 @@ Set `MATTER_BRIDGE_PORT` to change the port (default `8765`) and
 (default `./data`). The data directory must be writable and persisted
 across restarts — losing it means every device has to be re-commissioned.
 
+**Wi-Fi credentials are required for commissioning Wi-Fi Matter devices.**
+Set `MATTER_BRIDGE_WIFI_SSID` and `MATTER_BRIDGE_WIFI_PASS` in `.env` (or
+the environment) before attempting to commission. Without them the device
+won't know which network to join and commissioning will fail after BLE
+discovery succeeds.
+
 ## HTTP API
 
 | Method | Path                  | Body / Notes                                       |

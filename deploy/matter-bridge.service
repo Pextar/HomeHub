@@ -14,7 +14,10 @@ Restart=on-failure
 RestartSec=5
 
 # BLE-based commissioning needs CAP_NET_RAW; the device files are owned by
-# the bluetooth group, so the service user should be in it.
+# the bluetooth group, so the service user must be in it:
+#   sudo usermod -aG bluetooth claw
+# Also give node raw BLE access (one-time, survives restarts):
+#   sudo setcap cap_net_raw+eip $(readlink -f $(which node))
 AmbientCapabilities=CAP_NET_RAW CAP_NET_ADMIN
 
 NoNewPrivileges=true

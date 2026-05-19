@@ -4,6 +4,7 @@
     import RoomCard from "../components/RoomCard.svelte";
     import SceneTile from "../components/SceneTile.svelte";
     import SensorCard from "../components/SensorCard.svelte";
+    import SocketCard from "../components/SocketCard.svelte";
     import TimerRow from "../components/TimerRow.svelte";
     import { route } from "../lib/stores.svelte";
     import { api } from "../lib/api";
@@ -22,6 +23,7 @@
     import { dur, stagger } from "../lib/motion";
 
     const v = $derived(data.value);
+    const favoriteSockets = $derived(v.sockets.filter(s => s.favorite));
     const totalSockets    = $derived(v.sockets.length);
     const onSockets       = $derived(v.sockets.filter(s => s.state).length);
     const enabledSchedules = $derived(v.schedules.filter(s => s.enabled).length);
@@ -423,6 +425,27 @@
         <button class="btn btn-ghost"   onclick={() => data.refresh()}>Refresh</button>
     </div>
 </section>
+
+{#if favoriteSockets.length > 0}
+<section class="card">
+    <div class="card-header">
+        <h2>
+            <Icon name="star" size={16} />
+            Favorites
+        </h2>
+        <span class="header-meta">{favoriteSockets.length}</span>
+    </div>
+    <div class="favorites">
+        {#each favoriteSockets as socket, i (socket.id)}
+            <div class="favorite-item"
+                animate:flip={{ duration: dur(280), easing: cubicOut }}
+                in:scale={{ start: 0.95, opacity: 0, duration: dur(220), delay: stagger(i), easing: cubicOut }}>
+                <SocketCard {socket} />
+            </div>
+        {/each}
+    </div>
+</section>
+{/if}
 
 {#if v.groups.length > 0}
 <section class="card">
@@ -877,8 +900,41 @@
     .sensor-item > :global(.card) { flex: 1; }
     .rooms {
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+        /* 2 columns on phones — compact pills keep the section short.
+           Wider screens get more columns automatically. */
+        grid-template-columns: repeat(2, 1fr);
+        gap: var(--space-2);
+    }
+    @media (min-width: 560px) {
+        .rooms {
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: var(--space-3);
+        }
+    }
+
+    /* Favorites grid: same layout as the regular sockets view */
+    .favorites {
+        display: grid;
+        grid-template-columns: 1fr;
         gap: var(--space-3);
+    }
+    @media (min-width: 600px) {
+        .favorites { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+    }
+    .favorite-item { display: flex; }
+    .favorite-item > :global(.card) { flex: 1; }
+    .header-meta {
+        font-size: 12px;
+        color: var(--text-muted);
+        background: var(--surface);
+        padding: 2px 8px;
+        border-radius: 999px;
+        font-variant-numeric: tabular-nums;
+    }
+    .card-header h2 {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
     }
     .scene-item, .room-item { display: flex; }
     .scene-item > :global(*), .room-item > :global(.card) { flex: 1; }

@@ -77,6 +77,7 @@ export const api = {
   socketOn(id: string) { return req<Socket>(`/sockets/${encodeURIComponent(id)}/on`, { method: "POST" }); },
   socketOff(id: string) { return req<Socket>(`/sockets/${encodeURIComponent(id)}/off`, { method: "POST" }); },
   socketToggle(id: string) { return req<Socket>(`/sockets/${encodeURIComponent(id)}/toggle`, { method: "POST" }); },
+  socketToggleFavorite(id: string) { return req<Socket>(`/sockets/${encodeURIComponent(id)}/favorite`, { method: "POST" }); },
   socketTimer(id: string, body: { action: SocketAction; in_seconds: number; note?: string }) {
     return req<Timer>(`/sockets/${encodeURIComponent(id)}/timer`, { method: "POST", body: json(body) });
   },
@@ -172,8 +173,22 @@ export const api = {
   matterListDevices() {
     return req<MatterState[]>("/matter/devices");
   },
+  // Commissioning is asynchronous because the bridge can take 30–90s
+  // (BLE discovery + Wi-Fi onboarding) — far longer than iOS Safari is
+  // willing to keep a single fetch alive. The POST returns immediately
+  // with a job id; poll matterCommissionJob until status != "pending".
   matterCommission(body: { pairing_code: string }) {
-    return req<{ node_id: string }>("/matter/commission", { method: "POST", body: json(body) });
+    return req<{ job_id: string }>("/matter/commission", { method: "POST", body: json(body) });
+  },
+  matterCommissionJob(jobId: string) {
+    return req<{
+      id: string;
+      status: "pending" | "done" | "error";
+      node_id?: string;
+      error?: string;
+      started_at: string;
+      ended_at?: string;
+    }>(`/matter/commission/jobs/${encodeURIComponent(jobId)}`);
   },
   matterGetState(socketId: string) {
     return req<MatterState>(`/matter/${encodeURIComponent(socketId)}`);

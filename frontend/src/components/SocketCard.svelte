@@ -34,18 +34,23 @@
 
     // --- Inline brightness (Tasmota + Matter share this row) ---
     // Lazy-loaded; the userTouched flag prevents a stale bridge response
-    // from overwriting a value the user is actively dragging.
+    // from overwriting a value the user is actively dragging. We also
+    // remember the current color (Matter) so the slider track can be tinted
+    // to match the bulb — makes a wall of cards much easier to scan.
     let brightness = $state<number | null>(null);
+    let tintColor = $state<string | null>(null);
     let userTouched = $state(false);
     $effect(() => {
         if (!isSmartLight || brightness !== null || userTouched) return;
         if (isTasmota) {
             api.tasmotaGetState(socket.id).then(s => {
                 if (!userTouched && s.dimmer != null) brightness = s.dimmer;
+                if (s.color) tintColor = "#" + s.color.toLowerCase();
             }).catch(() => {});
         } else if (isMatter) {
             api.matterGetState(socket.id).then(s => {
                 if (!userTouched && s.level != null) brightness = s.level;
+                if (s.color) tintColor = "#" + s.color.toLowerCase();
             }).catch(() => {});
         }
     });
@@ -64,6 +69,15 @@
                 toasts.error("Brightness update failed", (e as Error).message);
             }
         }, 150);
+    }
+
+    async function toggleFavorite() {
+        try {
+            await api.socketToggleFavorite(socket.id);
+            await data.refresh();
+        } catch (e) {
+            toasts.error("Failed", (e as Error).message);
+        }
     }
 
     async function confirmDelete() {
@@ -109,6 +123,13 @@
             </div>
         {/if}
         <div class="menu">
+            <button class="icon-btn fav-btn" class:fav={socket.favorite}
+                title={socket.favorite ? "Remove from favorites" : "Add to favorites"}
+                aria-label={socket.favorite ? "Remove from favorites" : "Add to favorites"}
+                aria-pressed={socket.favorite}
+                onclick={toggleFavorite}>
+                <Icon name={socket.favorite ? "star" : "starOutline"} size={16} />
+            </button>
             <button class="icon-btn" title="Set timer" aria-label="Set timer"
                 onclick={() => openModal(TimerModal, { socket })}>
                 <Icon name="timer" size={16} />
@@ -132,15 +153,16 @@
             {socket.protocol || "rf"} · {socket.code}
         </span>
     </div>
-    {#if isSmartLight && brightness !== null}
-        <div class="dim-row" class:disabled={!socket.state}>
+    {#if isSmartLight}
+        <div class="dim-row" class:disabled={!socket.state} class:loading={brightness === null}>
             <Icon name="sun" size={14} />
             <input type="range" min="1" max="100" step="1"
-                bind:value={brightness}
-                oninput={onDimmerInput}
-                disabled={!socket.state}
-                aria-label="Brightness" />
-            <span class="dim-val">{brightness}%</span>
+                value={brightness ?? 50}
+                oninput={(e) => { brightness = +(e.currentTarget as HTMLInputElement).value; onDimmerInput(); }}
+                disabled={!socket.state || brightness === null}
+                aria-label="Brightness"
+                style:--tint={tintColor || "var(--accent, #60a5fa)"} />
+            <span class="dim-val">{brightness === null ? "—" : brightness + "%"}</span>
         </div>
     {/if}
     <div class="controls">
@@ -197,6 +219,8 @@
     .name { font-weight: 600; font-size: 1rem; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .meta { color: var(--text-muted); font-size: 12px; margin-top: 2px; }
     .menu { display: flex; gap: 4px; }
+    .fav-btn.fav { color: #f5c518; }
+    .fav-btn.fav:hover { color: #fbbf24; }
 
     .title-btn {
         all: unset;
@@ -242,10 +266,41 @@
     .dim-row {
         display: flex; align-items: center; gap: var(--space-2);
         color: var(--text-muted); font-size: 12px;
+        padding: 4px 0;
     }
     .dim-row.disabled { opacity: 0.4; }
-    .dim-row input[type="range"] { flex: 1; accent-color: var(--accent, #60a5fa); }
-    .dim-val { font-variant-numeric: tabular-nums; min-width: 32px; text-align: right; }
+    .dim-row.loading { opacity: 0.5; }
+    .dim-row input[type="range"] {
+        flex: 1;
+        appearance: none;
+        height: 8px;
+        border-radius: 4px;
+        background: linear-gradient(to right,
+            color-mix(in srgb, var(--tint) 65%, transparent),
+            var(--tint));
+        outline: none;
+        border: 1px solid var(--border);
+        cursor: pointer;
+    }
+    .dim-row input[type="range"]:disabled { cursor: not-allowed; }
+    .dim-row input[type="range"]::-webkit-slider-thumb {
+        appearance: none;
+        width: 16px; height: 16px;
+        border-radius: 50%;
+        background: #fff;
+        border: 2px solid rgba(0,0,0,0.3);
+        cursor: pointer;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+    }
+    .dim-row input[type="range"]::-moz-range-thumb {
+        width: 16px; height: 16px;
+        border-radius: 50%;
+        background: #fff;
+        border: 2px solid rgba(0,0,0,0.3);
+        cursor: pointer;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+    }
+    .dim-val { font-variant-numeric: tabular-nums; min-width: 36px; text-align: right; }
 
     .controls {
         display: grid;

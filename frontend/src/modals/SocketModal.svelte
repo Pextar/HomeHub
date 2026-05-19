@@ -1,11 +1,12 @@
 <script lang="ts">
     import Modal from "../components/Modal.svelte";
-    import { closeModal } from "../lib/modal.svelte";
+    import { closeModal, openModal } from "../lib/modal.svelte";
     import { api } from "../lib/api";
     import { toasts, data } from "../lib/stores.svelte";
     import { PROTOCOLS } from "../lib/utils";
     import { untrack } from "svelte";
     import type { Socket } from "../lib/types";
+    import MatterCommissionModal from "./MatterCommissionModal.svelte";
 
     interface Props { existing?: Socket | null; }
     let { existing = null }: Props = $props();
@@ -14,7 +15,6 @@
     let room     = $state(untrack(() => existing?.room     ?? ""));
     let code     = $state(untrack(() => existing?.code     ?? ""));
     let protocol = $state(untrack(() => existing?.protocol || "nexa"));
-    let pairingCode = $state("");
 
     const isEdit     = $derived(!!existing);
     const isTasmota  = $derived(protocol === "tasmota");
@@ -22,7 +22,6 @@
 
     let pairing      = $state(false);
     let probing      = $state(false);
-    let commissioning = $state(false);
 
     async function pair() {
         if (pairing) return;
@@ -38,23 +37,12 @@
         }
     }
 
-    async function commission() {
-        if (commissioning) return;
-        const pc = pairingCode.trim();
-        if (!pc) {
-            toasts.warn("Enter a pairing code", "Use the 11-digit manual code or the MT: QR payload printed on the device.");
-            return;
-        }
-        commissioning = true;
-        try {
-            const r = await api.matterCommission({ pairing_code: pc });
-            code = r.node_id;
-            toasts.success("Device commissioned", `Assigned node id ${r.node_id}. Save to add it as a socket.`);
-        } catch (e) {
-            toasts.error("Commissioning failed", (e as Error).message);
-        } finally {
-            commissioning = false;
-        }
+    function startMatterSetup() {
+        // Hand off to the dedicated wizard. It owns the whole flow
+        // (scan/paste → commission → name/room → save), so we close
+        // this generic Add Socket modal first to avoid stacking.
+        closeModal();
+        openModal(MatterCommissionModal, {});
     }
 
     async function testConnection() {
@@ -111,92 +99,130 @@
                 : "Configure a new 433MHz controllable socket."}
 >
     {#snippet body()}
-        <form onsubmit={(e) => { e.preventDefault(); save(); }}>
+        {#if isMatter && !isEdit}
+            <!-- Matter onboarding lives in its own wizard. Show only a
+                 protocol picker + a clear hand-off so users aren't asked
+                 for fields the wizard will collect itself. -->
             <div class="field">
-                <label for="sock-name">Name</label>
-                <input id="sock-name" type="text" bind:value={name}
-                    placeholder="e.g. Living room lamp" autocomplete="off" required />
-            </div>
-            <div class="field" style="margin-top:var(--space-4)">
-                <label for="sock-room">Room <span class="opt">(optional)</span></label>
-                <input id="sock-room" type="text" bind:value={room}
-                    placeholder="e.g. Living room" autocomplete="off"
-                    list="sock-room-list" />
-                <datalist id="sock-room-list">
-                    {#each data.value.rooms as r (r.name)}
-                        <option value={r.name}></option>
+                <label for="sock-proto">Protocol</label>
+                <select id="sock-proto" bind:value={protocol}>
+                    {#each PROTOCOLS as p}
+                        <option value={p.value}>{p.label}</option>
                     {/each}
-                </datalist>
+                </select>
             </div>
-            <div class="field-row" style="margin-top:var(--space-4)">
+            <div class="matter-lead">
+                <h3>Matter Wi-Fi device</h3>
+                <p>
+                    Matter devices use a one-time onboarding flow over Bluetooth.
+                    We'll scan the QR code (or accept the manual pairing code), commission
+                    the device onto your Wi-Fi, then add it here — all in one step.
+                </p>
+                <button type="button" class="btn btn-primary" onclick={startMatterSetup}>
+                    Start Matter setup
+                </button>
+                <p class="hint">Takes about 30–60 seconds once you start.</p>
+            </div>
+        {:else}
+            <form onsubmit={(e) => { e.preventDefault(); save(); }}>
                 <div class="field">
-                    <label for="sock-proto">Protocol</label>
-                    <select id="sock-proto" bind:value={protocol}>
-                        {#each PROTOCOLS as p}
-                            <option value={p.value}>{p.label}</option>
+                    <label for="sock-name">Name</label>
+                    <input id="sock-name" type="text" bind:value={name}
+                        placeholder="e.g. Living room lamp" autocomplete="off" required />
+                </div>
+                <div class="field" style="margin-top:var(--space-4)">
+                    <label for="sock-room">Room <span class="opt">(optional)</span></label>
+                    <input id="sock-room" type="text" bind:value={room}
+                        placeholder="e.g. Living room" autocomplete="off"
+                        list="sock-room-list" />
+                    <datalist id="sock-room-list">
+                        {#each data.value.rooms as r (r.name)}
+                            <option value={r.name}></option>
                         {/each}
-                    </select>
+                    </datalist>
                 </div>
-                <div class="field">
-                    <label for="sock-code">
-                        {isTasmota ? "Device IP" : isMatter ? "Matter node id" : "RF code"}
-                    </label>
-                    <input id="sock-code" type="text" bind:value={code}
-                        placeholder={isTasmota ? "e.g. 192.168.1.50"
-                                   : isMatter  ? "auto-filled after commissioning"
-                                   : "e.g. 12345"}
-                        autocomplete="off" required
-                        readonly={isMatter && !isEdit} />
+                <div class="field-row" style="margin-top:var(--space-4)">
+                    <div class="field">
+                        <label for="sock-proto">Protocol</label>
+                        <select id="sock-proto" bind:value={protocol}>
+                            {#each PROTOCOLS as p}
+                                <option value={p.value}>{p.label}</option>
+                            {/each}
+                        </select>
+                    </div>
+                    <div class="field">
+                        <label for="sock-code">
+                            {isTasmota ? "Device IP" : isMatter ? "Matter node id" : "RF code"}
+                        </label>
+                        <input id="sock-code" type="text" bind:value={code}
+                            placeholder={isTasmota ? "e.g. 192.168.1.50"
+                                       : isMatter  ? "node id from commissioning"
+                                       : "e.g. 12345"}
+                            autocomplete="off" required />
+                    </div>
                 </div>
-            </div>
 
-            {#if isTasmota}
-                <div class="field" style="margin-top:var(--space-3)">
-                    <button type="button" class="btn btn-secondary" onclick={testConnection} disabled={probing}>
-                        {probing ? "Testing…" : "Test connection"}
-                    </button>
-                    <div class="field-help">
-                        Pings the device to confirm Tasmota is running at that IP.
-                        Find the IP in your router's DHCP list or the Tasmota web UI.
+                {#if isTasmota}
+                    <div class="field" style="margin-top:var(--space-3)">
+                        <button type="button" class="btn btn-secondary" onclick={testConnection} disabled={probing}>
+                            {probing ? "Testing…" : "Test connection"}
+                        </button>
+                        <div class="field-help">
+                            Pings the device to confirm Tasmota is running at that IP.
+                            Find the IP in your router's DHCP list or the Tasmota web UI.
+                        </div>
                     </div>
-                </div>
-            {:else if isMatter && !isEdit}
-                <div class="field" style="margin-top:var(--space-3)">
-                    <label for="sock-pair">Pairing code</label>
-                    <input id="sock-pair" type="text" bind:value={pairingCode}
-                        placeholder="e.g. 3496-112-0001 or MT:Y.K9..."
-                        autocomplete="off" />
-                </div>
-                <div class="field" style="margin-top:var(--space-3)">
-                    <button type="button" class="btn btn-secondary" onclick={commission} disabled={commissioning}>
-                        {commissioning ? "Commissioning…" : "Commission device"}
-                    </button>
-                    <div class="field-help">
-                        Enter the 11-digit manual code or the <code>MT:</code> QR payload printed on the
-                        device. The bridge uses BLE to onboard it to your Wi-Fi — this can take 30–60 seconds.
+                {:else if !isEdit}
+                    <div class="field" style="margin-top:var(--space-3)">
+                        <button type="button" class="btn btn-secondary" onclick={pair} disabled={pairing}>
+                            {pairing ? "Sending…" : "Pair with socket"}
+                        </button>
+                        <div class="field-help">
+                            Long-press the button on your socket until its indicator flashes,
+                            then tap Pair. I'll pick a random code and broadcast it.
+                        </div>
                     </div>
-                </div>
-            {:else if !isEdit}
-                <div class="field" style="margin-top:var(--space-3)">
-                    <button type="button" class="btn btn-secondary" onclick={pair} disabled={pairing}>
-                        {pairing ? "Sending…" : "Pair with socket"}
-                    </button>
-                    <div class="field-help">
-                        Long-press the button on your socket until its indicator flashes,
-                        then tap Pair. I'll pick a random code and broadcast it.
-                    </div>
-                </div>
-            {/if}
-        </form>
+                {/if}
+            </form>
+        {/if}
     {/snippet}
     {#snippet actions()}
-        <button class="btn btn-ghost" onclick={() => closeModal()}>Cancel</button>
-        <button class="btn btn-primary" onclick={save}>
-            {isEdit ? "Save" : "Add socket"}
-        </button>
+        {#if isMatter && !isEdit}
+            <button class="btn btn-ghost" onclick={() => closeModal()}>Cancel</button>
+        {:else}
+            <button class="btn btn-ghost" onclick={() => closeModal()}>Cancel</button>
+            <button class="btn btn-primary" onclick={save}>
+                {isEdit ? "Save" : "Add socket"}
+            </button>
+        {/if}
     {/snippet}
 </Modal>
 
 <style>
     .opt { color: var(--text-muted); font-weight: 400; font-size: 12px; }
+
+    .matter-lead {
+        margin-top: var(--space-4);
+        padding: var(--space-4);
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-2);
+        align-items: flex-start;
+    }
+    .matter-lead h3 {
+        font-size: 14px;
+        font-weight: 600;
+    }
+    .matter-lead p {
+        font-size: 13px;
+        color: var(--text-muted);
+        margin: 0;
+    }
+    .matter-lead .hint {
+        font-size: 12px;
+        color: var(--text-faint);
+    }
 </style>
