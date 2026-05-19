@@ -333,7 +333,7 @@
             border-radius: 0;
             font-size: 10px;    /* iOS tab label size */
             min-height: 49px;   /* iOS standard tab bar height */
-            color: var(--text-faint);
+            color: var(--text-muted);
             text-align: center;
             width: auto;
         }
