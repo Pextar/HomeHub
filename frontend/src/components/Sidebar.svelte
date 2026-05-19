@@ -7,6 +7,7 @@
   import { fly, fade } from "svelte/transition";
   import { cubicOut } from "svelte/easing";
   import { dur } from "../lib/motion";
+  import { lockBodyScroll, unlockBodyScroll } from "../lib/scroll-lock";
   import type { Route } from "../lib/types";
 
   async function signOut() {
@@ -50,6 +51,15 @@
   // don't leave the backdrop visible over the incoming view.
   let skipTransition = $state(false);
 
+  // Body scroll lock — acquired while the drawer is open so the page
+  // underneath can't scroll on iOS overscroll.
+  $effect(() => {
+    if (moreOpen) {
+      lockBodyScroll();
+      return () => unlockBodyScroll();
+    }
+  });
+
   function closeDrawerInstant() {
     skipTransition = true;
     moreOpen = false;
@@ -75,28 +85,78 @@
   // highlight the "More" tab so the user knows where they are.
   const moreActive = $derived(overflow.some((i) => i.route === route.current));
 
-  // Drag-to-dismiss for the More drawer
+  // ── Drag-to-dismiss for the More drawer ─────────────────────────────
+  // Two entry points:
+  //   - The handle row: always drags (touch-action: none).
+  //   - The drawer surface itself: drags only after the gesture clears an
+  //     intent threshold, so taps on drawer items still register as clicks.
   let drawerDragY = $state(0);
   let drawerDragging = $state(false);
   let drawerDismissing = $state(false);
+  let drawerPending = false;
   let drawerDragStartY = 0;
+  let drawerDragStartX = 0;
 
-  function onDrawerPointerDown(e: PointerEvent) {
-    if (drawerDismissing) return;
+  function startDrawerDrag(e: PointerEvent, target: HTMLElement) {
     drawerDragging = true;
     drawerDragStartY = e.clientY;
+    drawerDragStartX = e.clientX;
     drawerDragY = 0;
-    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    try { target.setPointerCapture(e.pointerId); } catch { /* not capturable */ }
+  }
+
+  // Handle row — always drags.
+  function onHandlePointerDown(e: PointerEvent) {
+    if (drawerDismissing) return;
+    startDrawerDrag(e, e.currentTarget as HTMLElement);
     e.preventDefault();
   }
-  function onDrawerPointerMove(e: PointerEvent) {
+  function onHandlePointerMove(e: PointerEvent) {
     if (!drawerDragging) return;
     drawerDragY = Math.max(0, e.clientY - drawerDragStartY);
   }
-  function onDrawerPointerUp() {
+  function onHandlePointerUp() { finishDrawerDrag(); }
+  function onHandlePointerCancel() { cancelDrawerDrag(); }
+
+  // Drawer surface — drags after intent threshold; otherwise allows clicks.
+  function onSurfacePointerDown(e: PointerEvent) {
+    if (drawerDismissing) return;
+    if (e.pointerType === "mouse") return; // surface drag is touch only
+    drawerPending = true;
+    drawerDragStartY = e.clientY;
+    drawerDragStartX = e.clientX;
+  }
+  function onSurfacePointerMove(e: PointerEvent) {
+    if (drawerDragging) {
+      drawerDragY = Math.max(0, e.clientY - drawerDragStartY);
+      e.preventDefault();
+      return;
+    }
+    if (!drawerPending) return;
+    const dy = e.clientY - drawerDragStartY;
+    const dx = e.clientX - drawerDragStartX;
+    if (dy > 8 && dy > Math.abs(dx)) {
+      drawerPending = false;
+      startDrawerDrag(e, e.currentTarget as HTMLElement);
+      drawerDragY = dy;
+      e.preventDefault();
+    } else if (dy < -4 || Math.abs(dx) > 12) {
+      drawerPending = false;
+    }
+  }
+  function onSurfacePointerUp() {
+    drawerPending = false;
+    if (drawerDragging) finishDrawerDrag();
+  }
+  function onSurfacePointerCancel() {
+    drawerPending = false;
+    if (drawerDragging) cancelDrawerDrag();
+  }
+
+  function finishDrawerDrag() {
     if (!drawerDragging) return;
     drawerDragging = false;
-    if (drawerDragY > 80) {
+    if (drawerDragY > 90) {
       drawerDismissing = true;
       drawerDragY = 600;
       setTimeout(() => {
@@ -108,7 +168,7 @@
       requestAnimationFrame(() => { drawerDragY = 0; });
     }
   }
-  function onDrawerPointerCancel() {
+  function cancelDrawerDrag() {
     if (!drawerDragging) return;
     drawerDragging = false;
     requestAnimationFrame(() => { drawerDragY = 0; });
@@ -207,19 +267,28 @@
   >
     <div
       class="drawer"
+      class:dragging={drawerDragging}
       role="menu"
+      tabindex="-1"
       aria-label="More options"
       style:transform={drawerDragY > 0 ? `translateY(${drawerDragY}px)` : ''}
       style:opacity={drawerDragY > 0 ? Math.max(0.4, 1 - drawerDragY / 300) : undefined}
       style:transition={drawerDragging ? 'none' : drawerDragY > 0 ? 'transform 0.22s ease-in, opacity 0.22s ease-in' : 'transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)'}
       in:fly={{ y: 24, duration: dur(220), easing: cubicOut }}
       out:fly={skipTransition || drawerDismissing ? { y: 0, duration: 0 } : { y: 24, duration: dur(220) }}
+      onpointerdown={onSurfacePointerDown}
+      onpointermove={onSurfacePointerMove}
+      onpointerup={onSurfacePointerUp}
+      onpointercancel={onSurfacePointerCancel}
     >
-      <div class="drawer-handle" aria-hidden="true"
-        onpointerdown={onDrawerPointerDown}
-        onpointermove={onDrawerPointerMove}
-        onpointerup={onDrawerPointerUp}
-        onpointercancel={onDrawerPointerCancel}></div>
+      <div class="drawer-handle-zone"
+        role="presentation"
+        onpointerdown={onHandlePointerDown}
+        onpointermove={onHandlePointerMove}
+        onpointerup={onHandlePointerUp}
+        onpointercancel={onHandlePointerCancel}>
+        <div class="drawer-handle" aria-hidden="true"></div>
+      </div>
 
       <div class="drawer-section" aria-label="Sections">
         {#each overflow as item (item.route)}
@@ -498,6 +567,8 @@
     display: flex;
     align-items: flex-end;
     justify-content: center;
+    /* Don't let any overscroll bubble out to the page underneath. */
+    overscroll-behavior: contain;
   }
   :global([data-theme="light"]) .drawer-root {
     background: rgba(20, 24, 38, 0.35);
@@ -510,26 +581,36 @@
     border-top: 0.5px solid var(--separator);
     border-top-left-radius: var(--radius-xl);
     border-top-right-radius: var(--radius-xl);
-    padding: var(--space-3) var(--space-4)
+    padding: 0 var(--space-4)
       calc(var(--space-4) + 56px + env(safe-area-inset-bottom));
     display: flex;
     flex-direction: column;
     gap: var(--space-2);
     box-shadow: var(--shadow-lg);
+    /* The drawer surface itself gets pointer events so a downward swipe
+       anywhere on it can dismiss; touch-action: pan-y keeps native
+       horizontal gestures (back-swipe) out of our way. */
+    touch-action: pan-y;
   }
+  .drawer.dragging { cursor: grabbing; }
+  .drawer-handle-zone {
+    /* Generous tap area around the pill — the whole strip is grabbable. */
+    width: 100%;
+    padding: var(--space-3) 0 var(--space-2);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    touch-action: none;
+    cursor: grab;
+  }
+  .drawer-handle-zone:active { cursor: grabbing; }
   .drawer-handle {
-    width: 36px;
+    width: 40px;
     height: 5px;
     border-radius: 999px;
     background: var(--border-strong);
-    margin: 4px auto var(--space-2);
-    align-self: center;
-    touch-action: none;
-    cursor: grab;
-    padding: 12px 32px;
-    box-sizing: content-box;
+    pointer-events: none;
   }
-  .drawer-handle:active { cursor: grabbing; }
   .drawer-section {
     display: flex;
     flex-direction: column;
