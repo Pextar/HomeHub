@@ -66,6 +66,45 @@
   // highlight the "More" tab so the user knows where they are.
   const moreActive = $derived(overflow.some((i) => i.route === route.current));
 
+  // Drag-to-dismiss for the More drawer
+  let drawerDragY = $state(0);
+  let drawerDragging = $state(false);
+  let drawerDismissing = $state(false);
+  let drawerDragStartY = 0;
+
+  function onDrawerPointerDown(e: PointerEvent) {
+    if (drawerDismissing) return;
+    drawerDragging = true;
+    drawerDragStartY = e.clientY;
+    drawerDragY = 0;
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    e.preventDefault();
+  }
+  function onDrawerPointerMove(e: PointerEvent) {
+    if (!drawerDragging) return;
+    drawerDragY = Math.max(0, e.clientY - drawerDragStartY);
+  }
+  function onDrawerPointerUp() {
+    if (!drawerDragging) return;
+    drawerDragging = false;
+    if (drawerDragY > 80) {
+      drawerDismissing = true;
+      drawerDragY = 600;
+      setTimeout(() => {
+        moreOpen = false;
+        drawerDragY = 0;
+        drawerDismissing = false;
+      }, 220);
+    } else {
+      requestAnimationFrame(() => { drawerDragY = 0; });
+    }
+  }
+  function onDrawerPointerCancel() {
+    if (!drawerDragging) return;
+    drawerDragging = false;
+    requestAnimationFrame(() => { drawerDragY = 0; });
+  }
+
   const healthLabel = $derived(
     data.value.health === "ok"
       ? "Connected"
@@ -160,9 +199,17 @@
       class="drawer"
       role="menu"
       aria-label="More options"
-      transition:fly={{ y: 24, duration: dur(220), easing: cubicOut }}
+      style:transform={drawerDragY > 0 ? `translateY(${drawerDragY}px)` : ''}
+      style:opacity={drawerDragY > 0 ? Math.max(0.4, 1 - drawerDragY / 300) : undefined}
+      style:transition={drawerDragging ? 'none' : drawerDragY > 0 ? 'transform 0.22s ease-in, opacity 0.22s ease-in' : 'transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)'}
+      in:fly={{ y: 24, duration: dur(220), easing: cubicOut }}
+      out:fly={drawerDismissing ? { y: 0, duration: 0 } : { y: 24, duration: dur(220) }}
     >
-      <div class="drawer-handle" aria-hidden="true"></div>
+      <div class="drawer-handle" aria-hidden="true"
+        onpointerdown={onDrawerPointerDown}
+        onpointermove={onDrawerPointerMove}
+        onpointerup={onDrawerPointerUp}
+        onpointercancel={onDrawerPointerCancel}></div>
 
       <div class="drawer-section" aria-label="Sections">
         {#each overflow as item (item.route)}
@@ -171,6 +218,7 @@
             class="drawer-item"
             role="menuitem"
             aria-current={route.current === item.route ? "page" : undefined}
+            onclick={() => (moreOpen = false)}
           >
             <span class="drawer-icon"><Icon name={item.icon} size={20} /></span>
             <span class="drawer-label">{item.label}</span>
@@ -465,7 +513,13 @@
     border-radius: 999px;
     background: var(--border-strong);
     margin: 4px auto var(--space-2);
+    align-self: center;
+    touch-action: none;
+    cursor: grab;
+    padding: 12px 32px;
+    box-sizing: content-box;
   }
+  .drawer-handle:active { cursor: grabbing; }
   .drawer-section {
     display: flex;
     flex-direction: column;

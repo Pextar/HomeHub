@@ -257,6 +257,50 @@
         document.body.style.overflow = "hidden";
         return () => { document.body.style.overflow = prev; };
     });
+
+    // ── Drag-to-dismiss (mobile bottom sheet handle) ─────────────────
+    let dragY = $state(0);
+    let dragging = $state(false);
+    let panelDismissing = $state(false);
+    let dragStartY = 0;
+
+    function onHandlePointerDown(e: PointerEvent) {
+        if (panelDismissing) return;
+        dragging = true;
+        dragStartY = e.clientY;
+        dragY = 0;
+        (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+        e.preventDefault();
+    }
+
+    function onHandlePointerMove(e: PointerEvent) {
+        if (!dragging) return;
+        dragY = Math.max(0, e.clientY - dragStartY);
+    }
+
+    function onHandlePointerUp() {
+        if (!dragging) return;
+        dragging = false;
+        if (dragY > 80) {
+            panelDismissing = true;
+            dragY = 600;
+            setTimeout(() => {
+                selectedRoom = null;
+                dragY = 0;
+                panelDismissing = false;
+            }, 220);
+        } else {
+            // Let Svelte flush the transition property change before resetting
+            // dragY so the spring-back CSS transition actually fires.
+            requestAnimationFrame(() => { dragY = 0; });
+        }
+    }
+
+    function onHandlePointerCancel() {
+        if (!dragging) return;
+        dragging = false;
+        requestAnimationFrame(() => { dragY = 0; });
+    }
 </script>
 
 <Topbar title="Floor plan" subtitle="Your home at a glance">
@@ -356,10 +400,17 @@
             role="dialog"
             aria-label={selectedCell.name}
             aria-modal="true"
+            style:transform={dragY > 0 ? `translateY(${dragY}px)` : ''}
+            style:opacity={dragY > 0 ? Math.max(0.4, 1 - dragY / 300) : undefined}
+            style:transition={dragging ? 'none' : panelDismissing ? 'transform 0.22s ease-in, opacity 0.22s ease-in' : 'transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)'}
             in:fly={{ y: 32, duration: dur(260), easing: cubicOut }}
-            out:fly={{ y: 32, duration: dur(180) }}>
+            out:fly={panelDismissing ? { y: 0, duration: 0 } : { y: 32, duration: dur(180) }}>
 
-            <div class="sheet-handle" aria-hidden="true"></div>
+            <div class="sheet-handle" aria-hidden="true"
+                onpointerdown={onHandlePointerDown}
+                onpointermove={onHandlePointerMove}
+                onpointerup={onHandlePointerUp}
+                onpointercancel={onHandlePointerCancel}></div>
 
             <div class="panel-head">
                 {#if editing}
@@ -444,8 +495,8 @@
                         Delete room
                     </button>
                 {:else}
-                    <button class="btn btn-success btn-xs" onclick={() => roomAllOn(selectedCell!)}>All on</button>
-                    <button class="btn btn-danger btn-xs" onclick={() => roomAllOff(selectedCell!)}>All off</button>
+                    <button class="btn btn-success btn-xs" onclick={() => { selectedRoom = null; roomAllOn(selectedCell!); }}>All on</button>
+                    <button class="btn btn-danger btn-xs" onclick={() => { selectedRoom = null; roomAllOff(selectedCell!); }}>All off</button>
                 {/if}
             </div>
         </div>
@@ -705,7 +756,14 @@
             background: var(--border-strong);
             margin: 8px auto 4px;
             flex-shrink: 0;
+            touch-action: none;
+            cursor: grab;
+            /* Larger touch target without changing visual size */
+            padding: 12px 32px;
+            margin-inline: auto;
+            box-sizing: content-box;
         }
+        .sheet-handle:active { cursor: grabbing; }
     }
 
     /* ── Panel (control + edit) ───────────────────────── */
