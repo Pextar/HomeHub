@@ -14,7 +14,7 @@
     let error = $state<string | null>(null);
 
     // Local optimistic values — populated once we get device state.
-    let on = $state(socket.state);
+    let on = $state(false);
     let dimmer = $state(100);
     let color = $state("#ffffff");
     let ct = $state(366);  // mireds, mid-range default

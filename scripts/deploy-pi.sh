@@ -55,8 +55,8 @@ if [ -d "$RELEASE/matter-bridge" ]; then
   # node + npm must be installed on the Pi (apt install nodejs npm).
   ssh "$HOST" "cd '$REMOTE_DIR/matter-bridge' && \
     mkdir -p data && \
-    if [ ! -d node_modules ]; then npm install --omit=dev; fi && \
-    npx tsc -p tsconfig.json"
+    npm install && \
+    npm run build"
 
   echo "==> Installing matter-bridge systemd unit"
   rsync -av "$RELEASE/matter-bridge.service" "$HOST:$REMOTE_DIR/matter-bridge.service"

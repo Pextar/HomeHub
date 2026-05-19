@@ -13,7 +13,7 @@
     let loading = $state(true);
     let error = $state<string | null>(null);
 
-    let on = $state(socket.state);
+    let on = $state(false);
     let level = $state(100);
     let color = $state("#ffffff");
     let ct = $state(366);
