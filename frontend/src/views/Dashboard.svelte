@@ -937,7 +937,7 @@
         gap: 6px;
     }
     .scene-item, .room-item { display: flex; }
-    .scene-item > :global(*), .room-item > :global(.card) { flex: 1; }
+    .scene-item > :global(*), .room-item > :global(.room) { flex: 1; }
 
     .activity { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
     .event {
