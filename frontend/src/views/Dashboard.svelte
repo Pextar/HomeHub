@@ -900,9 +900,10 @@
     .sensor-item > :global(.card) { flex: 1; }
     .rooms {
         display: grid;
-        /* 2 columns on phones — compact pills keep the section short.
-           Wider screens get more columns automatically. */
-        grid-template-columns: repeat(2, 1fr);
+        /* minmax(0, 1fr) instead of bare 1fr so tracks can't grow past
+           their share — bare 1fr is minmax(auto, 1fr) which lets grid
+           items' min-content size push tracks wider than the viewport. */
+        grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: var(--space-2);
     }
     @media (min-width: 560px) {
@@ -936,8 +937,8 @@
         align-items: center;
         gap: 6px;
     }
-    .scene-item, .room-item { display: flex; }
-    .scene-item > :global(*), .room-item > :global(.room) { flex: 1; }
+    .scene-item, .room-item { display: flex; min-width: 0; }
+    .scene-item > :global(*), .room-item > :global(.room) { flex: 1; min-width: 0; }
 
     .activity { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
     .event {

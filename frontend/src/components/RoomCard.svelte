@@ -53,6 +53,7 @@
         align-items: center;
         gap: var(--space-2);
         min-height: 56px;
+        min-width: 0;
         transition: border-color var(--t-fast), background var(--t-fast);
     }
     .room.on {
