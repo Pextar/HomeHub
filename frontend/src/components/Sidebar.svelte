@@ -37,6 +37,7 @@
     { route: "sockets", icon: "socket", label: "Devices" },
     { route: "groups", icon: "groups", label: "Groups" },
     { route: "schedules", icon: "clock", label: "Schedules" },
+    { route: "floorplan", icon: "map", label: "Floor plan" },
     { route: "sensors", icon: "sensor", label: "Sensors" },
     { route: "scenes", icon: "scenes", label: "Scenes" },
     { route: "settings", icon: "settings", label: "Settings" },

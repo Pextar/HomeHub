@@ -9,7 +9,7 @@
     interface Props { socket: Socket; }
     let { socket }: Props = $props();
 
-    let state = $state<TasmotaState | null>(null);
+    let deviceState = $state<TasmotaState | null>(null);
     let loading = $state(true);
     let error = $state<string | null>(null);
 
@@ -19,14 +19,14 @@
     let color = $state("#ffffff");
     let ct = $state(366);  // mireds, mid-range default
 
-    const supportsDimmer = $derived(state?.dimmer !== undefined && state?.dimmer !== null);
-    const supportsColor  = $derived(state?.color  !== undefined && state?.color  !== null);
-    const supportsCT     = $derived(state?.ct     !== undefined && state?.ct     !== null);
+    const supportsDimmer = $derived(deviceState?.dimmer !== undefined && deviceState?.dimmer !== null);
+    const supportsColor  = $derived(deviceState?.color  !== undefined && deviceState?.color  !== null);
+    const supportsCT     = $derived(deviceState?.ct     !== undefined && deviceState?.ct     !== null);
 
     onMount(async () => {
         try {
             const s = await api.tasmotaGetState(socket.id);
-            state = s;
+            deviceState = s;
             on = s.on;
             if (s.dimmer != null) dimmer = s.dimmer;
             if (s.color)          color  = "#" + s.color.toLowerCase();
@@ -90,7 +90,7 @@
                 <strong>Could not reach device</strong>
                 <span>{error}</span>
             </div>
-        {:else if state}
+        {:else if deviceState}
             <div class="row">
                 <div class="swatch" class:dim={!on}
                     style:background={supportsColor ? color : "var(--bg-base)"}>

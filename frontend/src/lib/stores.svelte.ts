@@ -96,7 +96,7 @@ function createToastStore() {
 }
 
 function createRouteStore() {
-  const valid: Route[] = ["dashboard", "sockets", "groups", "scenes", "schedules", "sensors", "settings"];
+  const valid: Route[] = ["dashboard", "floorplan", "sockets", "groups", "scenes", "schedules", "sensors", "settings"];
   const current = $state<{ route: Route }>({ route: parse() });
 
   function parse(): Route {

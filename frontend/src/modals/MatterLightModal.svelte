@@ -9,7 +9,7 @@
     interface Props { socket: Socket; }
     let { socket }: Props = $props();
 
-    let state = $state<MatterState | null>(null);
+    let deviceState = $state<MatterState | null>(null);
     let loading = $state(true);
     let error = $state<string | null>(null);
 
@@ -18,14 +18,14 @@
     let color = $state("#ffffff");
     let ct = $state(366);
 
-    const supportsLevel = $derived(state?.level !== undefined && state?.level !== null);
-    const supportsColor = $derived(state?.color !== undefined && state?.color !== null);
-    const supportsCT    = $derived(state?.ct    !== undefined && state?.ct    !== null);
+    const supportsLevel = $derived(deviceState?.level !== undefined && deviceState?.level !== null);
+    const supportsColor = $derived(deviceState?.color !== undefined && deviceState?.color !== null);
+    const supportsCT    = $derived(deviceState?.ct    !== undefined && deviceState?.ct    !== null);
 
     onMount(async () => {
         try {
             const s = await api.matterGetState(socket.id);
-            state = s;
+            deviceState = s;
             if (s.on != null)    on    = s.on;
             if (s.level != null) level = s.level;
             if (s.color)         color = "#" + s.color.toLowerCase();
@@ -86,21 +86,21 @@
                 <strong>Could not reach device</strong>
                 <span>{error}</span>
             </div>
-        {:else if state}
+        {:else if deviceState}
             <div class="row">
                 <div class="swatch" class:dim={!on}
                     style:background={supportsColor ? color : "var(--bg-base)"}>
                 </div>
                 <div class="meta">
                     <div class="device-id">
-                        node {socket.code}{#if state.vendor || state.product}
-                            · {[state.vendor, state.product].filter(Boolean).join(" ")}
+                        node {socket.code}{#if deviceState.vendor || deviceState.product}
+                            · {[deviceState.vendor, deviceState.product].filter(Boolean).join(" ")}
                         {/if}
                     </div>
                     {#if !supportsLevel && !supportsColor && !supportsCT}
                         <div class="hint">This device supports on/off only.</div>
                     {/if}
-                    {#if !state.reachable}
+                    {#if !deviceState.reachable}
                         <div class="hint warn">Device is unreachable right now.</div>
                     {/if}
                 </div>

@@ -5,6 +5,7 @@
     import ModalRoot from "./components/ModalRoot.svelte";
     import LoginGate from "./components/LoginGate.svelte";
     import Dashboard from "./views/Dashboard.svelte";
+    import FloorPlan from "./views/FloorPlan.svelte";
     import Sockets from "./views/Sockets.svelte";
     import Schedules from "./views/Schedules.svelte";
     import Groups from "./views/Groups.svelte";
@@ -65,6 +66,7 @@
 
     const views: Record<Route, any> = {
         dashboard: Dashboard,
+        floorplan: FloorPlan,
         sockets: Sockets,
         groups: Groups,
         scenes: Scenes,

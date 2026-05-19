@@ -120,7 +120,13 @@
             <div class="field" style="margin-top:var(--space-4)">
                 <label for="sock-room">Room <span class="opt">(optional)</span></label>
                 <input id="sock-room" type="text" bind:value={room}
-                    placeholder="e.g. Living room" autocomplete="off" />
+                    placeholder="e.g. Living room" autocomplete="off"
+                    list="sock-room-list" />
+                <datalist id="sock-room-list">
+                    {#each data.value.rooms as r (r.name)}
+                        <option value={r.name}></option>
+                    {/each}
+                </datalist>
             </div>
             <div class="field-row" style="margin-top:var(--space-4)">
                 <div class="field">

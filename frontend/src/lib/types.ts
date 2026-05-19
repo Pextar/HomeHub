@@ -112,7 +112,7 @@ export interface BulkResult {
   failures: { socket_id: string; error: string }[];
 }
 
-export type Route = "dashboard" | "sockets" | "groups" | "scenes" | "schedules" | "sensors" | "settings";
+export type Route = "dashboard" | "floorplan" | "sockets" | "groups" | "scenes" | "schedules" | "sensors" | "settings";
 
 export type SensorKind = "temperature" | "humidity" | "motion" | "light" | "power" | "custom";
 
