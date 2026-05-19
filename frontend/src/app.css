@@ -26,20 +26,20 @@
 
 [data-theme="dark"] {
     --bg: #0d0d18;
-    --bg-elevated: #12121e;
-    --bg-raised: #1a1a2e;
+    --bg-elevated: #1a1a2e;
+    --bg-raised: #22223c;
     --surface: rgba(255, 255, 255, 0.04);
     --surface-hover: rgba(255, 255, 255, 0.08);
-    --border: rgba(255, 255, 255, 0.12);
-    --border-strong: rgba(255, 255, 255, 0.22);
+    --border: rgba(255, 255, 255, 0.16);
+    --border-strong: rgba(255, 255, 255, 0.28);
     /* Frosted-glass surface for tab bar, bottom sheets, and overlays */
     --bg-bar: rgba(18, 18, 30, 0.82);
     /* iOS-style hairline separator (subtler than --border) */
     --separator: rgba(210, 210, 215, 0.1);
 
-    --text: #e2e4f0;
-    --text-muted: #a0a4c0;
-    --text-faint: #7c81a4;
+    --text: #e8eaf4;
+    --text-muted: #bcc0d6;
+    --text-faint: #9298b8;
 
     --primary: #818cf8;
     --primary-hover: #a5b4fc;
