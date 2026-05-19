@@ -46,12 +46,21 @@
   const overflow = items.slice(PRIMARY_COUNT);
 
   let moreOpen = $state(false);
+  // When true, the drawer out-transitions are instant so nav-item taps
+  // don't leave the backdrop visible over the incoming view.
+  let skipTransition = $state(false);
+
+  function closeDrawerInstant() {
+    skipTransition = true;
+    moreOpen = false;
+    requestAnimationFrame(() => { skipTransition = false; });
+  }
 
   // Auto-close the drawer whenever navigation happens.
   $effect(() => {
     // Reading route.current registers the dependency.
     route.current;
-    moreOpen = false;
+    closeDrawerInstant();
   });
 
   function toggleTheme() {
@@ -193,7 +202,8 @@
     onclick={(e) => {
       if (e.target === e.currentTarget) moreOpen = false;
     }}
-    transition:fade={{ duration: dur(150) }}
+    in:fade={{ duration: dur(150) }}
+    out:fade={skipTransition ? { duration: 0 } : { duration: dur(150) }}
   >
     <div
       class="drawer"
@@ -203,7 +213,7 @@
       style:opacity={drawerDragY > 0 ? Math.max(0.4, 1 - drawerDragY / 300) : undefined}
       style:transition={drawerDragging ? 'none' : drawerDragY > 0 ? 'transform 0.22s ease-in, opacity 0.22s ease-in' : 'transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)'}
       in:fly={{ y: 24, duration: dur(220), easing: cubicOut }}
-      out:fly={drawerDismissing ? { y: 0, duration: 0 } : { y: 24, duration: dur(220) }}
+      out:fly={skipTransition || drawerDismissing ? { y: 0, duration: 0 } : { y: 24, duration: dur(220) }}
     >
       <div class="drawer-handle" aria-hidden="true"
         onpointerdown={onDrawerPointerDown}
@@ -218,7 +228,7 @@
             class="drawer-item"
             role="menuitem"
             aria-current={route.current === item.route ? "page" : undefined}
-            onclick={() => (moreOpen = false)}
+            onclick={closeDrawerInstant}
           >
             <span class="drawer-icon"><Icon name={item.icon} size={20} /></span>
             <span class="drawer-label">{item.label}</span>

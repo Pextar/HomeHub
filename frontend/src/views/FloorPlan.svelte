@@ -495,8 +495,8 @@
                         Delete room
                     </button>
                 {:else}
-                    <button class="btn btn-success btn-xs" onclick={() => { selectedRoom = null; roomAllOn(selectedCell!); }}>All on</button>
-                    <button class="btn btn-danger btn-xs" onclick={() => { selectedRoom = null; roomAllOff(selectedCell!); }}>All off</button>
+                    <button class="btn btn-success btn-xs" onclick={() => { const cell = selectedCell!; selectedRoom = null; roomAllOn(cell); }}>All on</button>
+                    <button class="btn btn-danger btn-xs" onclick={() => { const cell = selectedCell!; selectedRoom = null; roomAllOff(cell); }}>All off</button>
                 {/if}
             </div>
         </div>
