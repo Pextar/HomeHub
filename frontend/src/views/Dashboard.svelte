@@ -605,7 +605,7 @@
 
     .label {
         color: var(--text-muted);
-        font-size: 11px;
+        font-size: 12px;
         margin-top: 3px;
         /* Prevent "Groups & scenes" from overflowing a ~70 px column */
         white-space: nowrap;
