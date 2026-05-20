@@ -34,8 +34,8 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 			return
 		}
 		if c, err := r.Cookie(cookieName); err == nil {
-			if username, ok := verifySession(s.SessionSecret, c.Value); ok {
-				if u := s.lookupUser(username); u != nil {
+			if id, version, ok := verifySession(s.SessionSecret, c.Value); ok {
+				if u := s.lookupUser(id); u != nil && u.TokenVersion == version {
 					next.ServeHTTP(w, r.WithContext(withUser(r.Context(), u)))
 					return
 				}
@@ -92,6 +92,21 @@ func withUser(ctx context.Context, u *store.User) context.Context {
 func currentUser(r *http.Request) *store.User {
 	u, _ := r.Context().Value(userCtxKey).(*store.User)
 	return u
+}
+
+// maxBodyBytes caps the size of request bodies so the JSON decoders
+// (notably /import) can't be made to read an unbounded payload. Oversized
+// bodies surface to handlers as a decode error, which they already map to
+// a 400.
+func maxBodyBytes(n int64) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Body != nil {
+				r.Body = http.MaxBytesReader(w, r.Body, n)
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 // loggingMiddleware logs each request's method, path, status and duration.

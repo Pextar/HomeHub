@@ -38,8 +38,6 @@ func Run(ctx context.Context, st *store.Store) {
 
 		now := time.Now()
 		stamp := now.Format("2006-01-02 15:04")
-		hhmm := now.Format("15:04")
-		weekday := int(now.Weekday())
 
 		// Collect due schedules and timers under a read lock.
 		var dueSchedules []store.Schedule
@@ -63,14 +61,7 @@ func Run(ctx context.Context, st *store.Store) {
 				// Either way, skip the base-time check this tick.
 				continue
 			}
-			triggerHHMM, ok := s.EffectiveHHMM(now, st.Settings)
-			if !ok || triggerHHMM != hhmm {
-				continue
-			}
-			if !dayMatches(s.Days, weekday) {
-				continue
-			}
-			if lastFired[s.ID] == stamp {
+			if !scheduleMatchesNow(s, now, st.Settings, lastFired[s.ID], stamp) {
 				continue
 			}
 			if s.RandomOffsetMinutes > 0 {
@@ -183,6 +174,22 @@ func targetLabel(st *store.Store, kind, id string) string {
 		}
 	}
 	return id
+}
+
+// scheduleMatchesNow reports whether s's trigger time falls in the current
+// minute on a matching weekday and it hasn't already fired this minute. It
+// does not consider the random offset or pending state — the caller layers
+// those on top. lastStamp is the "YYYY-MM-DD HH:MM" the schedule last fired
+// at; nowStamp is the same format for now.
+func scheduleMatchesNow(s *store.Schedule, now time.Time, settings *store.Settings, lastStamp, nowStamp string) bool {
+	triggerHHMM, ok := s.EffectiveHHMM(now, settings)
+	if !ok || triggerHHMM != now.Format("15:04") {
+		return false
+	}
+	if !dayMatches(s.Days, int(now.Weekday())) {
+		return false
+	}
+	return lastStamp != nowStamp
 }
 
 func dayMatches(days []int, weekday int) bool {

@@ -78,6 +78,7 @@ func main() {
 			log.Fatalf("failed to hash password: %v", err)
 		}
 		admin.PasswordHash = string(hash)
+		admin.TokenVersion++ // invalidate any sessions minted with the old password
 		if err := st.Save(); err != nil {
 			st.Mu.Unlock()
 			log.Fatalf("failed to save: %v", err)

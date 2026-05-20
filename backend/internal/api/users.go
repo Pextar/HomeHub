@@ -206,6 +206,9 @@ func (s *Server) updateUser(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "user not found")
 		return
 	}
+	// Snapshot the credentials so we can detect a change below and bump
+	// TokenVersion, which invalidates this user's existing sessions.
+	prevHash, prevCode := user.PasswordHash, user.LoginCode
 
 	if body.Username != nil {
 		name := strings.TrimSpace(*body.Username)
@@ -260,6 +263,10 @@ func (s *Server) updateUser(w http.ResponseWriter, r *http.Request) {
 		if user.LoginCode == "" || body.RegenerateCode {
 			user.LoginCode = generateLoginCode(s.Store)
 		}
+	}
+
+	if user.PasswordHash != prevHash || user.LoginCode != prevCode {
+		user.TokenVersion++
 	}
 
 	if err := s.Store.Save(); err != nil {

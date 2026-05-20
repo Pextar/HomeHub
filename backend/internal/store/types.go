@@ -59,6 +59,11 @@ type User struct {
 	Kid          bool      `json:"kid,omitempty"`           // limited users; renders the playful kid layout
 	SocketIDs    []string  `json:"socket_ids"`
 	CreatedAt    time.Time `json:"created_at"`
+	// TokenVersion is bumped whenever the user's credentials change
+	// (password or login code). Session cookies embed the version they
+	// were minted with, so changing a credential invalidates every
+	// existing session for that user.
+	TokenVersion int `json:"token_version,omitempty"`
 }
 
 // CanAccessSocket reports whether this user may see/control the given
