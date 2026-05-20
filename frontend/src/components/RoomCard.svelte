@@ -162,16 +162,17 @@
     .act-btn:active { background: var(--surface-hover); }
     .act-btn:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
 
-    /* On button: warm green — signals "turn on" at a glance */
-    .on-btn {
-        color: var(--success);
-        background: var(--success-soft);
-    }
-    .on-btn:hover { background: color-mix(in srgb, var(--success-soft) 180%, transparent); }
-
-    /* Off button: muted default, red on hover */
+    /* Both buttons neutral by default — no false "active" impression */
+    .on-btn  { color: var(--text-muted); }
     .off-btn { color: var(--text-muted); }
-    .off-btn:hover { color: var(--danger); background: var(--danger-soft); }
+
+    /* Hover feedback: green for On, red for Off */
+    .on-btn:hover  { color: var(--success); background: var(--success-soft); }
+    .off-btn:hover { color: var(--danger);  background: var(--danger-soft);  }
+
+    /* When the room has devices on, give the On button a subtle tint
+       so users can see it's the "current" state without it screaming */
+    .room.on .on-btn { color: var(--success); }
 
     @media (pointer: coarse) {
         .act-btn { min-height: 48px; font-size: 14px; }
