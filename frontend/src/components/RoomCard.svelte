@@ -1,6 +1,7 @@
 <!--
   Room card — two-part layout:
     ┌──────────────────────────┐
+    │▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓│  ← 3 px accent bar (colour from room name hash)
     │ Entré                    │
     │ 0/2 · off                │
     │ [☀ On    ] [ 🌙 Off   ] │
@@ -20,9 +21,31 @@
     const anyOn  = $derived(room.on > 0);
     const allOn  = $derived(room.on === room.sockets && room.sockets > 0);
     const allOff = $derived(room.on === 0);
+
+    // Eight vivid accent colours that work well on the dark background.
+    // A tiny djb2 hash of the room name makes each room's colour stable
+    // even if rooms are reordered or new rooms are added.
+    const ACCENTS = [
+        "#818cf8", // indigo
+        "#34d399", // emerald
+        "#fb923c", // orange
+        "#60a5fa", // sky
+        "#f472b6", // pink
+        "#c084fc", // violet
+        "#fbbf24", // amber
+        "#4ade80", // lime
+    ];
+
+    function nameHash(s: string): number {
+        let h = 5381;
+        for (let i = 0; i < s.length; i++) h = ((h << 5) + h) ^ s.charCodeAt(i);
+        return Math.abs(h);
+    }
+
+    const accent = $derived(ACCENTS[nameHash(room.name) % ACCENTS.length]);
 </script>
 
-<div class="room" class:on={anyOn}>
+<div class="room" class:on={anyOn} style="--room-accent: {accent}">
     <div class="body">
         <div class="name" title={room.name}>{room.name}</div>
         <div class="meta">
@@ -54,6 +77,19 @@
         overflow: hidden;          /* clip button radius at card edge */
         transition: border-color var(--t-fast), box-shadow var(--t-fast);
     }
+
+    /* Coloured top accent bar — first flex child, clipped by border-radius */
+    .room::before {
+        content: '';
+        display: block;
+        height: 3px;
+        flex-shrink: 0;
+        background: var(--room-accent, var(--primary));
+        opacity: 0.85;
+        transition: opacity var(--t-fast);
+    }
+    .room:hover::before { opacity: 1; }
+
     .room.on {
         border-color: var(--success);
         box-shadow: inset 3px 0 0 var(--success);
@@ -115,7 +151,6 @@
         min-height: 44px;
         font-size: 13px;
         font-weight: 600;
-        color: var(--text-muted);
         cursor: pointer;
         touch-action: manipulation;
         transition: background var(--t-fast), color var(--t-fast);
@@ -127,8 +162,16 @@
     .act-btn:active { background: var(--surface-hover); }
     .act-btn:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
 
-    .on-btn:hover  { color: var(--success); background: var(--success-soft); }
-    .off-btn:hover { color: var(--danger);  background: var(--danger-soft);  }
+    /* On button: warm green — signals "turn on" at a glance */
+    .on-btn {
+        color: var(--success);
+        background: var(--success-soft);
+    }
+    .on-btn:hover { background: color-mix(in srgb, var(--success-soft) 180%, transparent); }
+
+    /* Off button: muted default, red on hover */
+    .off-btn { color: var(--text-muted); }
+    .off-btn:hover { color: var(--danger); background: var(--danger-soft); }
 
     @media (pointer: coarse) {
         .act-btn { min-height: 48px; font-size: 14px; }
