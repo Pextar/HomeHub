@@ -45,6 +45,59 @@
         try { localStorage.setItem(DRAFT_KEY, JSON.stringify(draftRooms)); } catch {}
     });
 
+    // ── Per-room emoji "identity" — cosmetic, client-only, keyed by name.
+    // Gives every room a face without touching the backend (rooms are just
+    // a string on each socket). Falls back to a smart guess from the name.
+    const EMOJI_KEY = "floorplan.roomEmoji";
+    function loadEmoji(): Record<string, string> {
+        try {
+            const raw = localStorage.getItem(EMOJI_KEY);
+            return raw ? JSON.parse(raw) : {};
+        } catch { return {}; }
+    }
+    let roomEmoji = $state<Record<string, string>>(loadEmoji());
+    $effect(() => {
+        try { localStorage.setItem(EMOJI_KEY, JSON.stringify(roomEmoji)); } catch {}
+    });
+
+    function guessEmoji(name: string): string {
+        const n = name.toLowerCase();
+        if (/living|lounge|family/.test(n)) return "🛋️";
+        if (/kitchen|cook/.test(n)) return "🍳";
+        if (/bed|master/.test(n)) return "🛏️";
+        if (/bath|shower|toilet|wc|washroom/.test(n)) return "🛁";
+        if (/office|study|work|desk/.test(n)) return "💻";
+        if (/kid|child|nursery|play/.test(n)) return "🧸";
+        if (/dining|dinner/.test(n)) return "🍽️";
+        if (/garage|car/.test(n)) return "🚗";
+        if (/garden|yard|patio|outdoor|balcon/.test(n)) return "🌿";
+        if (/hall|entry|foyer|corridor|stair/.test(n)) return "🚪";
+        if (/tv|media|cinema|theat/.test(n)) return "📺";
+        if (/laundry|utility/.test(n)) return "🧺";
+        if (/gym|fitness/.test(n)) return "🏋️";
+        return "💡";
+    }
+    function emojiFor(name: string): string {
+        return roomEmoji[name] || guessEmoji(name);
+    }
+
+    const SUGGESTIONS: { name: string; emoji: string }[] = [
+        { name: "Living Room", emoji: "🛋️" },
+        { name: "Kitchen", emoji: "🍳" },
+        { name: "Bedroom", emoji: "🛏️" },
+        { name: "Bathroom", emoji: "🛁" },
+        { name: "Office", emoji: "💻" },
+        { name: "Kids' Room", emoji: "🧸" },
+        { name: "Dining", emoji: "🍽️" },
+        { name: "Garage", emoji: "🚗" },
+        { name: "Garden", emoji: "🌿" },
+        { name: "Hallway", emoji: "🚪" },
+    ];
+    const EMOJI_CHOICES = [
+        "💡","🛋️","🍳","🛏️","🛁","💻","🧸","🍽️","🚗",
+        "🌿","🚪","📺","🧺","🪴","🎮","📚","🎵","🏋️",
+    ];
+
     const realCells = $derived.by(() => {
         const map = new Map<string, Socket[]>();
         for (const s of v.sockets) {
@@ -119,18 +172,58 @@
         await data.refresh();
     }
 
-    // ── Edit actions ─────────────────────────────────────────────────
-    function uniqueDraftName(): string {
-        const existing = new Set(cells.map(c => c.name.toLowerCase()));
-        let i = 1;
-        while (existing.has(`new room ${i}`.toLowerCase())) i++;
-        return `New room ${i}`;
+    // ── Create-room flow ─────────────────────────────────────────────
+    // A dedicated step: name it, pick a vibe, then create. Replaces the old
+    // "auto-named draft + disguised rename field" that left people unsure
+    // what to do.
+    let creating = $state(false);
+    let newRoomName = $state("");
+    let newRoomEmoji = $state("");
+    let createInput = $state<HTMLInputElement>();
+
+    // Focus the name field as soon as the create sheet opens.
+    $effect(() => {
+        if (creating && createInput) createInput.focus();
+    });
+
+    function startCreate() {
+        if (!editing) editing = true;
+        selectedRoom = null;
+        newRoomName = "";
+        newRoomEmoji = "";
+        creating = true;
+    }
+    function cancelCreate() { creating = false; }
+    function applySuggestion(s: { name: string; emoji: string }) {
+        newRoomName = s.name;
+        newRoomEmoji = s.emoji;
+    }
+    const createEmoji = $derived(newRoomEmoji || (newRoomName.trim() ? guessEmoji(newRoomName) : "💡"));
+
+    function confirmCreate() {
+        const name = newRoomName.trim();
+        if (!name) {
+            toasts.warn("Name your room", "Type a name or tap a quick pick.");
+            createInput?.focus();
+            return;
+        }
+        if (cells.some(c => c.name.toLowerCase() === name.toLowerCase())) {
+            toasts.error("Name in use", `A room called "${name}" already exists.`);
+            return;
+        }
+        draftRooms = [...draftRooms, name];
+        roomEmoji = { ...roomEmoji, [name]: createEmoji };
+        creating = false;
+        selectedRoom = name;
     }
 
-    function addRoom() {
-        const name = uniqueDraftName();
-        draftRooms = [...draftRooms, name];
-        selectedRoom = name;
+    // ── Edit actions ─────────────────────────────────────────────────
+    let emojiPickerOpen = $state(false);
+    // Reset the inline emoji picker whenever the selected room changes.
+    $effect(() => { selectedRoom; emojiPickerOpen = false; });
+    function setRoomEmoji(name: string, emoji: string) {
+        roomEmoji = { ...roomEmoji, [name]: emoji };
+        emojiPickerOpen = false;
     }
 
     // Rename a room. For real rooms, bulk-update every socket that lives
@@ -147,6 +240,12 @@
 
         const cell = cells.find(c => c.name === oldName);
         if (!cell) return;
+
+        // Carry the room's emoji over to its new name.
+        if (roomEmoji[oldName]) {
+            const { [oldName]: moved, ...rest } = roomEmoji;
+            roomEmoji = { ...rest, [newName]: moved };
+        }
 
         if (cell.isDraft) {
             draftRooms = draftRooms.map(n => n === oldName ? newName : n);
@@ -176,6 +275,12 @@
             danger: true,
         });
         if (!ok) return;
+
+        // Forget the room's emoji either way.
+        if (roomEmoji[cell.name]) {
+            const { [cell.name]: _gone, ...rest } = roomEmoji;
+            roomEmoji = rest;
+        }
 
         if (cell.isDraft) {
             draftRooms = draftRooms.filter(n => n !== cell.name);
@@ -250,7 +355,7 @@
     // Lock the page behind the sheet on mobile so the floor plan doesn't
     // scroll under it. No-op on desktop where the panel sits inline.
     $effect(() => {
-        if (!selectedRoom) return;
+        if (!selectedRoom && !creating) return;
         if (typeof window === "undefined") return;
         if (!window.matchMedia("(max-width: 900px)").matches) return;
         const prev = document.body.style.overflow;
@@ -303,6 +408,12 @@
     }
 </script>
 
+<svelte:window onkeydown={(e) => {
+    if (e.key !== "Escape") return;
+    if (creating) cancelCreate();
+    else if (selectedRoom) selectedRoom = null;
+}} />
+
 <Topbar title="Floor plan" subtitle="Your home at a glance">
     {#snippet actions()}
         <button class="btn" class:btn-primary={editing} class:btn-ghost={!editing}
@@ -335,9 +446,10 @@
 <!-- ── Floor plan grid ──────────────────────────────────────────── -->
 {#if cells.length === 0 && !editing}
     <div class="empty">
-        <Icon name="map" size={32} />
-        <p>No rooms yet</p>
-        <span>Tap <strong>Edit</strong> above to start laying out your home.</span>
+        <div class="empty-emoji" aria-hidden="true">🏠</div>
+        <p>Let's map your home</p>
+        <span>Create a room for each space, then drop your devices in. Give each one a name and a vibe.</span>
+        <button class="btn btn-primary" onclick={startCreate}>Create your first room</button>
     </div>
 {:else}
     <div class="house" class:editing>
@@ -356,7 +468,10 @@
                     in:fly={{ y: 12, duration: dur(260), delay: stagger(i, 40), easing: cubicOut }}
                 >
                     <div class="room-head">
-                        <span class="room-name">{cell.name}</span>
+                        <span class="room-title">
+                            <span class="room-emoji" aria-hidden="true">{emojiFor(cell.name)}</span>
+                            <span class="room-name">{cell.name}</span>
+                        </span>
                         {#if editing}
                             <span class="edit-badge" aria-hidden="true">
                                 <Icon name="edit" size={11} />
@@ -378,11 +493,11 @@
             {/each}
 
             {#if editing}
-                <button class="room add-tile" onclick={addRoom}
-                    aria-label="Add room"
+                <button class="room add-tile" onclick={startCreate}
+                    aria-label="Create a new room"
                     in:fly={{ y: 12, duration: dur(220), easing: cubicOut }}>
                     <Icon name="plus" size={20} />
-                    <span>Add room</span>
+                    <span>New room</span>
                 </button>
             {/if}
         </div>
@@ -415,13 +530,30 @@
             <div class="panel-head">
                 {#if editing}
                     <div class="ph-left">
-                        <input class="rename-input"
-                            type="text"
-                            value={selectedCell.name}
-                            aria-label="Room name"
-                            onblur={(e) => renameRoom(selectedCell!.name, (e.target as HTMLInputElement).value)}
-                            onkeydown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
-                        />
+                        <div class="name-row">
+                            <button class="room-emoji-btn"
+                                class:open={emojiPickerOpen}
+                                onclick={() => emojiPickerOpen = !emojiPickerOpen}
+                                aria-label="Change room icon"
+                                aria-expanded={emojiPickerOpen}>{emojiFor(selectedCell.name)}</button>
+                            <input class="rename-input"
+                                type="text"
+                                value={selectedCell.name}
+                                aria-label="Room name"
+                                onblur={(e) => renameRoom(selectedCell!.name, (e.target as HTMLInputElement).value)}
+                                onkeydown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                            />
+                        </div>
+                        {#if emojiPickerOpen}
+                            <div class="emoji-grid inline" transition:fly={{ y: -6, duration: dur(140), easing: cubicOut }}>
+                                {#each EMOJI_CHOICES as e (e)}
+                                    <button type="button" class="emoji-cell"
+                                        class:active={emojiFor(selectedCell.name) === e}
+                                        onclick={() => setRoomEmoji(selectedCell!.name, e)}
+                                        aria-label={`Use ${e}`}>{e}</button>
+                                {/each}
+                            </div>
+                        {/if}
                         <span class="ph-sub">
                             {selectedCell.isDraft
                                 ? "Empty room — add a device to save it"
@@ -430,7 +562,10 @@
                     </div>
                 {:else}
                     <div class="ph-left">
-                        <span class="ph-name">{selectedCell.name}</span>
+                        <span class="ph-name">
+                            <span class="ph-emoji" aria-hidden="true">{emojiFor(selectedCell.name)}</span>
+                            {selectedCell.name}
+                        </span>
                         <span class="ph-sub">{selectedCell.on} of {selectedCell.total} on</span>
                     </div>
                 {/if}
@@ -498,6 +633,77 @@
                     <button class="btn btn-success btn-xs" onclick={() => { const cell = selectedCell!; selectedRoom = null; roomAllOn(cell); }}>All on</button>
                     <button class="btn btn-danger btn-xs" onclick={() => { const cell = selectedCell!; selectedRoom = null; roomAllOff(cell); }}>All off</button>
                 {/if}
+            </div>
+        </div>
+    </div>
+{/if}
+
+<!-- ── Create-room sheet ────────────────────────────────────────── -->
+{#if creating}
+    <div class="sheet-root"
+        role="presentation"
+        onclick={(e) => { if (e.target === e.currentTarget) cancelCreate(); }}
+        in:fade={{ duration: dur(140) }}
+        out:fade={{ duration: dur(120) }}>
+        <div class="panel create-panel"
+            role="dialog"
+            aria-label="New room"
+            aria-modal="true"
+            in:fly={{ y: 32, duration: dur(260), easing: cubicOut }}
+            out:fly={{ y: 32, duration: dur(180) }}>
+
+            <div class="sheet-handle" aria-hidden="true"></div>
+
+            <div class="panel-head">
+                <div class="ph-left">
+                    <span class="ph-name">New room</span>
+                    <span class="ph-sub">Name it and give it a vibe</span>
+                </div>
+                <button class="icon-btn" onclick={cancelCreate} aria-label="Close">
+                    <Icon name="close" size={16} />
+                </button>
+            </div>
+
+            <div class="panel-body create-body">
+                <div class="create-preview">
+                    <span class="create-emoji" aria-hidden="true">{createEmoji}</span>
+                    <input class="create-name"
+                        type="text"
+                        bind:this={createInput}
+                        bind:value={newRoomName}
+                        placeholder="Room name"
+                        aria-label="Room name"
+                        onkeydown={(e) => { if (e.key === "Enter") confirmCreate(); }} />
+                </div>
+
+                <div class="create-label">Quick picks</div>
+                <div class="suggest-row">
+                    {#each SUGGESTIONS as s (s.name)}
+                        <button type="button" class="suggest-chip"
+                            class:active={newRoomName.trim().toLowerCase() === s.name.toLowerCase()}
+                            onclick={() => applySuggestion(s)}>
+                            <span aria-hidden="true">{s.emoji}</span>
+                            {s.name}
+                        </button>
+                    {/each}
+                </div>
+
+                <div class="create-label">Icon</div>
+                <div class="emoji-grid">
+                    {#each EMOJI_CHOICES as e (e)}
+                        <button type="button" class="emoji-cell"
+                            class:active={createEmoji === e}
+                            onclick={() => newRoomEmoji = e}
+                            aria-label={`Use ${e}`}>{e}</button>
+                    {/each}
+                </div>
+            </div>
+
+            <div class="panel-foot">
+                <button class="btn btn-ghost btn-xs" onclick={cancelCreate}>Cancel</button>
+                <button class="btn btn-primary btn-xs create-go" onclick={confirmCreate}>
+                    Create room
+                </button>
             </div>
         </div>
     </div>
@@ -960,4 +1166,125 @@
 
     /* Socket rows inside the panel — comfortable minimum height on mobile */
     .socket-row { min-height: 44px; }
+
+    /* ── Room emoji identity ──────────────────────────── */
+    .room-title {
+        display: flex; align-items: center; gap: 5px;
+        min-width: 0; flex: 1;
+    }
+    .room-emoji { font-size: 15px; line-height: 1; flex-shrink: 0; }
+    .ph-emoji { margin-right: 4px; }
+
+    /* ── Empty state CTA ──────────────────────────────── */
+    .empty-emoji { font-size: 44px; line-height: 1; }
+    .empty .btn-primary { margin-top: var(--space-3); }
+
+    /* ── Create-room sheet ────────────────────────────── */
+    .create-body { gap: var(--space-4); padding: var(--space-4) var(--space-5) var(--space-5); }
+
+    /* Big live preview: emoji + the name you're typing */
+    .create-preview {
+        display: flex; align-items: center; gap: var(--space-3);
+        padding: var(--space-3);
+        border-radius: var(--radius-md);
+        background: var(--surface);
+        border: 1px solid var(--border);
+    }
+    .create-emoji {
+        font-size: 34px; line-height: 1; flex-shrink: 0;
+        width: 56px; height: 56px;
+        display: grid; place-items: center;
+        border-radius: var(--radius-md);
+        background: var(--bg-elevated);
+        box-shadow: var(--shadow-sm);
+    }
+    .create-name {
+        all: unset;
+        flex: 1; min-width: 0;
+        font-size: 1.25rem; font-weight: 700; letter-spacing: -0.01em;
+        padding: 6px 4px;
+        border-bottom: 2px solid transparent;
+    }
+    .create-name::placeholder { color: var(--text-faint); font-weight: 600; }
+    .create-name:focus { border-bottom-color: var(--primary); }
+
+    .create-label {
+        font-size: 11px; font-weight: 700;
+        text-transform: uppercase; letter-spacing: 0.06em;
+        color: var(--text-muted);
+        margin-bottom: calc(var(--space-2) * -1);
+    }
+
+    .suggest-row { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+    .suggest-chip {
+        display: inline-flex; align-items: center; gap: 6px;
+        padding: 8px 12px;
+        border-radius: 999px;
+        border: 1px solid var(--border);
+        background: var(--surface);
+        color: var(--text);
+        font: inherit; font-size: 13px; font-weight: 600;
+        cursor: pointer;
+        transition: background var(--t-fast), border-color var(--t-fast),
+                    transform var(--t-fast);
+    }
+    .suggest-chip:hover { background: var(--surface-hover); border-color: var(--border-strong); }
+    .suggest-chip:active { transform: scale(0.96); }
+    .suggest-chip.active {
+        background: var(--primary-soft);
+        border-color: var(--primary);
+        color: var(--primary);
+    }
+
+    .emoji-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(44px, 1fr));
+        gap: var(--space-2);
+    }
+    .emoji-grid.inline {
+        margin-top: var(--space-2);
+        grid-template-columns: repeat(auto-fill, minmax(40px, 1fr));
+    }
+    .emoji-cell {
+        aspect-ratio: 1;
+        display: grid; place-items: center;
+        font-size: 22px; line-height: 1;
+        border-radius: var(--radius-md);
+        border: 1px solid var(--border);
+        background: var(--surface);
+        cursor: pointer;
+        transition: background var(--t-fast), border-color var(--t-fast),
+                    transform var(--t-fast);
+    }
+    .emoji-cell:hover { background: var(--surface-hover); }
+    .emoji-cell:active { transform: scale(0.92); }
+    .emoji-cell.active {
+        border-color: var(--primary);
+        box-shadow: 0 0 0 2px var(--primary-glow);
+        background: var(--primary-soft);
+    }
+
+    .create-go { flex: 1; }
+
+    /* Editable emoji button beside the rename field */
+    .name-row { display: flex; align-items: center; gap: var(--space-2); }
+    .room-emoji-btn {
+        flex-shrink: 0;
+        width: 40px; height: 40px;
+        display: grid; place-items: center;
+        font-size: 22px; line-height: 1;
+        border-radius: var(--radius-md);
+        border: 1px solid var(--border);
+        background: var(--surface);
+        cursor: pointer;
+        transition: background var(--t-fast), border-color var(--t-fast);
+    }
+    .room-emoji-btn:hover { background: var(--surface-hover); }
+    .room-emoji-btn.open { border-color: var(--primary); background: var(--primary-soft); }
+
+    @media (max-width: 600px) {
+        .create-name { font-size: 1.25rem; }
+        .suggest-chip { padding: 10px 14px; font-size: 14px; }
+        .room-emoji-btn { width: 44px; height: 44px; }
+    }
 </style>
