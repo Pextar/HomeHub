@@ -7,8 +7,8 @@
     import { data, toasts } from "../lib/stores.svelte";
     import { api } from "../lib/api";
     import { runAction } from "../lib/utils";
-    import { fly, fade } from "svelte/transition";
-    import { cubicOut } from "svelte/easing";
+    import { fly, fade, scale } from "svelte/transition";
+    import { cubicOut, backOut } from "svelte/easing";
     import { dur, stagger } from "../lib/motion";
     import type { Socket } from "../lib/types";
 
@@ -390,7 +390,11 @@
             panelDismissing = true;
             dragY = 600;
             setTimeout(() => {
-                selectedRoom = null;
+                // The room panel and the create sheet are never open at the
+                // same time, so one shared drag controller dismisses whichever
+                // is showing.
+                if (creating) creating = false;
+                else selectedRoom = null;
                 dragY = 0;
                 panelDismissing = false;
             }, 220);
@@ -467,6 +471,7 @@
                     aria-label={`${cell.name}, ${cell.on} of ${cell.total} on`}
                     in:fly={{ y: 12, duration: dur(260), delay: stagger(i, 40), easing: cubicOut }}
                 >
+                    <span class="room-watermark" aria-hidden="true">{emojiFor(cell.name)}</span>
                     <div class="room-head">
                         <span class="room-title">
                             <span class="room-emoji" aria-hidden="true">{emojiFor(cell.name)}</span>
@@ -649,10 +654,17 @@
             role="dialog"
             aria-label="New room"
             aria-modal="true"
+            style:transform={dragY > 0 ? `translateY(${dragY}px)` : ''}
+            style:opacity={dragY > 0 ? Math.max(0.4, 1 - dragY / 300) : undefined}
+            style:transition={dragging ? 'none' : panelDismissing ? 'transform 0.22s ease-in, opacity 0.22s ease-in' : 'transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)'}
             in:fly={{ y: 32, duration: dur(260), easing: cubicOut }}
-            out:fly={{ y: 32, duration: dur(180) }}>
+            out:fly={panelDismissing ? { y: 0, duration: 0 } : { y: 32, duration: dur(180) }}>
 
-            <div class="sheet-handle" aria-hidden="true"></div>
+            <div class="sheet-handle" aria-hidden="true"
+                onpointerdown={onHandlePointerDown}
+                onpointermove={onHandlePointerMove}
+                onpointerup={onHandlePointerUp}
+                onpointercancel={onHandlePointerCancel}></div>
 
             <div class="panel-head">
                 <div class="ph-left">
@@ -666,7 +678,10 @@
 
             <div class="panel-body create-body">
                 <div class="create-preview">
-                    <span class="create-emoji" aria-hidden="true">{createEmoji}</span>
+                    {#key createEmoji}
+                        <span class="create-emoji" aria-hidden="true"
+                            in:scale={{ duration: dur(260), start: 0.5, easing: backOut }}>{createEmoji}</span>
+                    {/key}
                     <input class="create-name"
                         type="text"
                         bind:this={createInput}
@@ -1286,5 +1301,70 @@
         .create-name { font-size: 1.25rem; }
         .suggest-chip { padding: 10px 14px; font-size: 14px; }
         .room-emoji-btn { width: 44px; height: 44px; }
+    }
+
+    /* ── Out-of-the-box flair ─────────────────────────── */
+
+    /* Giant faint emoji watermark behind each tile's content. */
+    .room-watermark {
+        position: absolute;
+        right: -8px;
+        bottom: -12px;
+        font-size: 58px;
+        line-height: 1;
+        opacity: 0.1;
+        transform: rotate(-8deg);
+        pointer-events: none;
+        z-index: 0;
+        transition: opacity var(--t-med), transform var(--t-med);
+    }
+    .room.lit .room-watermark {
+        opacity: calc(0.12 + var(--warmth, 0) * 0.24);
+        transform: rotate(-8deg) scale(1.06);
+    }
+    .room.selected .room-watermark { opacity: 0.22; }
+    /* Keep the real content above the watermark. */
+    .room-head, .dots { position: relative; z-index: 1; }
+
+    /* Lit rooms get a warm halo that scales with how much is on. */
+    .room.lit {
+        box-shadow:
+            0 0 0 1px rgba(251, 191, 36, calc(var(--warmth, 0) * 0.28)),
+            0 10px 26px -14px rgba(251, 191, 36, calc(var(--warmth, 0) * 0.7));
+    }
+    /* Selection cue always wins over the lit halo. */
+    .room.selected {
+        box-shadow: 0 0 0 3px var(--primary-glow);
+    }
+
+    /* House-pulse hero: a breathing amber aura when anything is on. */
+    .pulse { position: relative; overflow: hidden; }
+    .pulse::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        z-index: 0;
+        background: radial-gradient(120% 160% at 10% 50%,
+            rgba(251, 191, 36, 0.18), transparent 55%);
+        opacity: 0;
+        transition: opacity var(--t-med);
+        pointer-events: none;
+    }
+    .pulse[data-active="true"]::before {
+        opacity: 1;
+        animation: aura-breathe 4.5s ease-in-out infinite;
+    }
+    @keyframes aura-breathe {
+        0%, 100% { opacity: 0.6; transform: scale(1); }
+        50%      { opacity: 1;   transform: scale(1.04); }
+    }
+    .pulse-num, .pulse-text { position: relative; z-index: 1; }
+    .pulse[data-active="true"] .pulse-num .big {
+        text-shadow: 0 0 18px rgba(251, 191, 36, 0.45);
+    }
+
+    /* Honour reduced-motion: drop the ambient animation. */
+    @media (prefers-reduced-motion: reduce) {
+        .pulse[data-active="true"]::before { animation: none; }
     }
 </style>
