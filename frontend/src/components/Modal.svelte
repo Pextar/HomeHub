@@ -184,6 +184,7 @@
              gesture for scroll before we get pointermove. -->
         <div
             class="head"
+            role="none"
             onpointerdown={onHeadPointerDown}
             onpointermove={onHeadPointerMove}
             onpointerup={onHeadPointerUp}
@@ -201,6 +202,7 @@
         {#if body}
             <div
                 class="body"
+                role="none"
                 bind:this={bodyEl}
                 onpointerdown={onBodyPointerDown}
                 onpointermove={onBodyPointerMove}
@@ -308,7 +310,6 @@
                visual padding too much. */
             padding-top: var(--space-1);
         }
-        .head.dragging,
         .dialog.dragging .head { cursor: grabbing; }
 
         /* Pill — purely visual on mobile, the head wrapper handles input. */

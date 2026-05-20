@@ -138,7 +138,7 @@
 
 {#if confirmExit}
     <div class="exit-backdrop" transition:fade={{ duration: 200 }} onclick={() => confirmExit = false} role="presentation">
-        <div class="exit-card" onclick={(e) => e.stopPropagation()} in:scale={{ duration: 300, easing: backOut, start: 0.7 }} role="dialog">
+        <div class="exit-card" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()} in:scale={{ duration: 300, easing: backOut, start: 0.7 }} role="dialog" tabindex="-1">
             <div class="exit-emoji">👋</div>
             <p class="exit-q">Time to go?</p>
             <div class="exit-btns">
