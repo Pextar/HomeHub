@@ -164,6 +164,8 @@ export interface Sensor {
   protocol: string;
   field?: string;
   room?: string;
+  alert_min?: number;
+  alert_max?: number;
   last_value?: number;
   last_reading_at?: string;
 }

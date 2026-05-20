@@ -67,7 +67,7 @@
     <div class="screen">
         <form class="card" onsubmit={submit}>
             <div class="head">
-                <h1>RF Sockets</h1>
+                <h1>HomeHub</h1>
                 <p class="sub">{mode === "code" ? "Enter your login code" : "Sign in as admin"}</p>
             </div>
 

@@ -15,8 +15,8 @@ export default defineConfig({
       registerType: "prompt",
       includeAssets: ["pwa-icon.svg"],
       manifest: {
-        name: "RF Socket Controller",
-        short_name: "RF Sockets",
+        name: "HomeHub",
+        short_name: "HomeHub",
         description: "Control 433MHz RF sockets from anywhere",
         theme_color: "#0b1020",
         background_color: "#0b1020",

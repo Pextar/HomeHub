@@ -141,6 +141,31 @@ func (s *Server) updateSchedule(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, existing)
 }
 
+// setAllSchedules flips every schedule's Enabled flag to the given value in
+// one shot — the backend of the UI's "vacation mode" switch. Returns how
+// many schedules ended up changed.
+func (s *Server) setAllSchedules(enabled bool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		s.Store.Mu.Lock()
+		defer s.Store.Mu.Unlock()
+
+		changed := 0
+		for _, sch := range s.Store.Schedules {
+			if sch.Enabled != enabled {
+				sch.Enabled = enabled
+				changed++
+			}
+		}
+		if changed > 0 {
+			if err := s.Store.Save(); err != nil {
+				writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
+				return
+			}
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{"enabled": enabled, "changed": changed})
+	}
+}
+
 func (s *Server) deleteSchedule(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
 

@@ -1,4 +1,5 @@
-import type { Group, Scene, Schedule, Socket, Timer } from "./types";
+import type { Group, Scene, Schedule, Socket, Timer, SocketAction } from "./types";
+import { api } from "./api";
 import { data, toasts } from "./stores.svelte";
 
 export const DAY_SHORT = ["S", "M", "T", "W", "T", "F", "S"];
@@ -72,6 +73,22 @@ export function formatCountdown(when: Date | string): string {
   return `${h}h ${m % 60}m`;
 }
 
+// Format a past Date as a short "time ago" string ("just now", "5m ago",
+// "3h ago", "2d ago"). Returns "" for falsy input.
+export function formatAgo(when: string | undefined): string {
+  if (!when) return "";
+  const ms = Date.now() - new Date(when).getTime();
+  if (ms < 0) return "just now";
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return "just now";
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.floor(h / 24);
+  return `${d}d ago`;
+}
+
 // Wraps an async action, refreshes data, and shows a toast on failure.
 export async function runAction(
   fn: () => Promise<unknown>,
@@ -83,6 +100,29 @@ export async function runAction(
     await data.refresh();
     return true;
   } catch (e) {
+    toasts.error("Action failed", (e as Error).message);
+    return false;
+  }
+}
+
+// Toggle/turn a single socket on or off with an optimistic flip. The store
+// updates instantly, the API response is merged in when it lands, and a
+// failure rolls the state back — all without a full data refresh.
+export async function socketAction(socket: Socket, action: SocketAction, successMessage?: string): Promise<boolean> {
+  const prev = socket.state;
+  const next = action === "toggle" ? !prev : action === "on";
+  data.applySocket({ ...socket, state: next });
+  try {
+    const updated = action === "on"
+      ? await api.socketOn(socket.id)
+      : action === "off"
+        ? await api.socketOff(socket.id)
+        : await api.socketToggle(socket.id);
+    data.applySocket(updated);
+    if (successMessage) toasts.success(successMessage);
+    return true;
+  } catch (e) {
+    data.applySocket({ ...socket, state: prev });
     toasts.error("Action failed", (e as Error).message);
     return false;
   }

@@ -1,8 +1,8 @@
 <script lang="ts">
     import Icon from "./Icon.svelte";
-    import { untrack } from "svelte";
+    import { untrack, onMount } from "svelte";
     import { api } from "../lib/api";
-    import { runAction } from "../lib/utils";
+    import { socketAction } from "../lib/utils";
     import { openModal } from "../lib/modal.svelte";
     import { toasts, data } from "../lib/stores.svelte";
     import type { Socket } from "../lib/types";
@@ -40,8 +40,25 @@
     let brightness = $state<number | null>(null);
     let tintColor = $state<string | null>(null);
     let userTouched = $state(false);
+
+    // Only hit the bridge once the card scrolls into view — a wall of smart
+    // lights would otherwise fire a burst of requests on mount.
+    let cardEl = $state<HTMLElement>();
+    let visible = $state(false);
+    onMount(() => {
+        if (!cardEl) return;
+        const io = new IntersectionObserver((entries) => {
+            if (entries.some(e => e.isIntersecting)) {
+                visible = true;
+                io.disconnect();
+            }
+        }, { rootMargin: "100px" });
+        io.observe(cardEl);
+        return () => io.disconnect();
+    });
+
     $effect(() => {
-        if (!isSmartLight || brightness !== null || userTouched) return;
+        if (!visible || !isSmartLight || brightness !== null || userTouched) return;
         if (isTasmota) {
             api.tasmotaGetState(socket.id).then(s => {
                 if (!userTouched && s.dimmer != null) brightness = s.dimmer;
@@ -98,7 +115,7 @@
     }
 </script>
 
-<article class="card" class:on={socket.state} class:pulsing>
+<article class="card" class:on={socket.state} class:pulsing bind:this={cardEl}>
     <div class="head">
         {#if isTasmota}
             <button class="title-btn" onclick={() => openModal(TasmotaLightModal, { socket })}
@@ -150,6 +167,7 @@
         <span class="code-chip"
             data-proto={isTasmota ? "tasmota" : isMatter ? "matter" : "rf"}
             title={isTasmota ? "Tasmota device IP" : isMatter ? "Matter device" : "RF code"}>
+            <Icon name={isTasmota ? "wifi" : isMatter ? "devices" : "radio"} size={12} />
             {socket.protocol || "rf"} · {socket.code}
         </span>
     </div>
@@ -167,15 +185,15 @@
     {/if}
     <div class="controls">
         <button class="btn btn-success" disabled={socket.state}
-            onclick={() => runAction(() => api.socketOn(socket.id), `Turned on ${socket.name}`)}>
+            onclick={() => socketAction(socket, "on")}>
             On
         </button>
         <button class="btn btn-danger" disabled={!socket.state}
-            onclick={() => runAction(() => api.socketOff(socket.id), `Turned off ${socket.name}`)}>
+            onclick={() => socketAction(socket, "off")}>
             Off
         </button>
         <button class="btn"
-            onclick={() => runAction(() => api.socketToggle(socket.id), `Toggled ${socket.name}`)}>
+            onclick={() => socketAction(socket, "toggle")}>
             Toggle
         </button>
     </div>

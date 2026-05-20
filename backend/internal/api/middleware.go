@@ -111,3 +111,13 @@ func (s *statusWriter) WriteHeader(code int) {
 	s.status = code
 	s.ResponseWriter.WriteHeader(code)
 }
+
+// Flush forwards to the underlying writer so streaming responses (SSE on
+// /api/events) keep working through the logging wrapper. Embedding the
+// ResponseWriter interface alone wouldn't promote Flush, since it isn't
+// part of http.ResponseWriter's method set.
+func (s *statusWriter) Flush() {
+	if f, ok := s.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}

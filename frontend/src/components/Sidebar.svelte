@@ -3,7 +3,7 @@
   import ConfirmModal from "./ConfirmModal.svelte";
   import { route, theme, data, session } from "../lib/stores.svelte";
   import { api } from "../lib/api";
-  import { openModal } from "../lib/modal.svelte";
+  import { openModal, modalStack } from "../lib/modal.svelte";
   import { fly, fade } from "svelte/transition";
   import { cubicOut } from "svelte/easing";
   import { dur } from "../lib/motion";
@@ -82,6 +82,22 @@
 
   function onKey(e: KeyboardEvent) {
     if (e.key === "Escape" && moreOpen) moreOpen = false;
+    if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+    // Don't hijack keys while typing or with a modal open.
+    if (modalStack().length > 0) return;
+    const el = e.target as HTMLElement | null;
+    if (el && (el.isContentEditable ||
+        ["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName))) return;
+
+    // Digit keys jump to the matching nav item (1 = first tab, …). The list
+    // is already filtered to the profile's allowed routes, so non-admins can
+    // only reach what they're permitted to see.
+    if (/^[1-9]$/.test(e.key)) {
+      const item = items[Number(e.key) - 1];
+      if (item) { route.go(item.route); e.preventDefault(); }
+      return;
+    }
+    if (e.key === "t") { toggleTheme(); e.preventDefault(); }
   }
 
   // True when the active route is one of the overflow items — used to
@@ -202,7 +218,7 @@
   <!-- Desktop: full list. Mobile: only the primary slice (the rest live in
          the More drawer). -->
   <nav class="nav nav-desktop" aria-label="Sections">
-    {#each items as item (item.route)}
+    {#each items as item, i (item.route)}
       <a
         href="#/{item.route}"
         class="nav-item"
@@ -210,6 +226,7 @@
       >
         <Icon name={item.icon} size={18} />
         <span class="nav-label">{item.label}</span>
+        {#if i < 9}<kbd class="nav-key" aria-hidden="true">{i + 1}</kbd>{/if}
       </a>
     {/each}
   </nav>
@@ -425,6 +442,21 @@
   .nav-item[aria-current="page"] :global(svg) {
     color: var(--primary);
   }
+  .nav-key {
+    margin-left: auto;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    line-height: 1;
+    padding: 2px 5px;
+    border-radius: 4px;
+    color: var(--text-faint);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    opacity: 0;
+    transition: opacity var(--t-fast);
+  }
+  .sidebar:hover .nav-key { opacity: 1; }
+  .nav-item[aria-current="page"] .nav-key { opacity: 1; color: var(--primary); }
 
   .footer {
     margin-top: auto;

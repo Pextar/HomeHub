@@ -2,7 +2,8 @@
     import Topbar from "../components/Topbar.svelte";
     import EmptyState from "../components/EmptyState.svelte";
     import ScheduleRow from "../components/ScheduleRow.svelte";
-    import { data } from "../lib/stores.svelte";
+    import { api } from "../lib/api";
+    import { data, toasts } from "../lib/stores.svelte";
     import { openModal } from "../lib/modal.svelte";
     import ScheduleModal from "../modals/ScheduleModal.svelte";
     import { fly, scale } from "svelte/transition";
@@ -11,10 +12,34 @@
     import { dur, stagger } from "../lib/motion";
 
     const v = $derived(data.value);
+    const anyEnabled = $derived(v.schedules.some(s => s.enabled));
+    let pausing = $state(false);
+
+    // "Vacation mode": flip every schedule off (or back on) in one call.
+    async function toggleAll() {
+        if (pausing) return;
+        pausing = true;
+        const enable = !anyEnabled;
+        try {
+            const r = await api.setAllSchedules(enable);
+            toasts.success(enable ? "Schedules resumed" : "Schedules paused",
+                `${r.changed} schedule${r.changed === 1 ? "" : "s"} ${enable ? "enabled" : "disabled"}.`);
+            await data.refresh();
+        } catch (e) {
+            toasts.error("Failed", (e as Error).message);
+        } finally {
+            pausing = false;
+        }
+    }
 </script>
 
 <Topbar title="Schedules" subtitle="{v.schedules.length} configured">
     {#snippet actions()}
+        {#if v.schedules.length > 0}
+            <button class="btn btn-ghost" onclick={toggleAll} disabled={pausing}>
+                {anyEnabled ? "Pause all" : "Resume all"}
+            </button>
+        {/if}
         <button class="btn btn-primary" onclick={() => openModal(ScheduleModal, {})}>Add schedule</button>
     {/snippet}
 </Topbar>

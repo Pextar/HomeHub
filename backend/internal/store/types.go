@@ -150,6 +150,10 @@ type Sensor struct {
 	Protocol      string     `json:"protocol"` // decoder/source label
 	Field         string     `json:"field,omitempty"`
 	Room          string     `json:"room,omitempty"`
+	// Optional alert thresholds. When set, the UI flags the sensor whenever
+	// its latest reading falls below AlertMin or above AlertMax.
+	AlertMin      *float64   `json:"alert_min,omitempty"`
+	AlertMax      *float64   `json:"alert_max,omitempty"`
 	LastValue     *float64   `json:"last_value,omitempty"`
 	LastReadingAt *time.Time `json:"last_reading_at,omitempty"`
 }

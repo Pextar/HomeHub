@@ -9,12 +9,11 @@
     import { route } from "../lib/stores.svelte";
     import { api } from "../lib/api";
     import { data, toasts } from "../lib/stores.svelte";
-    import { runAction } from "../lib/utils";
+    import { runAction, formatDays, socketAction } from "../lib/utils";
     import { openModal } from "../lib/modal.svelte";
     import SocketModal from "../modals/SocketModal.svelte";
     import SceneModal from "../modals/SceneModal.svelte";
     import ConfirmModal from "../components/ConfirmModal.svelte";
-    import ShortcutsModal from "../modals/ShortcutsModal.svelte";
     import type { Schedule } from "../lib/types";
     import { Tween } from "svelte/motion";
     import { fly, scale } from "svelte/transition";
@@ -74,16 +73,6 @@
 
     // Schedules panel data
     const enabledSchedulesList = $derived(v.schedules.filter(s => s.enabled));
-
-    const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-
-    function formatDays(days: number[]): string {
-        if (!days?.length) return "–";
-        if (days.length === 7) return "Every day";
-        if (days.length === 5 && !days.includes(0) && !days.includes(6)) return "Weekdays";
-        if (days.length === 2 && days.includes(0) && days.includes(6)) return "Weekends";
-        return [...days].sort((a, b) => a - b).map(d => DAY_NAMES[d] ?? "?").join(" · ");
-    }
 
     function formatScheduleTime(s: Schedule): string {
         if (!s.time_mode || s.time_mode === "fixed") return s.time ?? "";
@@ -312,7 +301,7 @@
                                 <span class="dev-name">{s.name}</span>
                                 {#if s.room}<span class="room-chip">{s.room}</span>{/if}
                                 <button class="btn btn-danger btn-xs"
-                                    onclick={() => runAction(() => api.socketOff(s.id), `Turned off ${s.name}`)}>
+                                    onclick={() => socketAction(s, "off")}>
                                     Off
                                 </button>
                             </li>
@@ -421,8 +410,6 @@
     <div class="quick">
         <button class="btn btn-success" onclick={allOn}>All on</button>
         <button class="btn btn-danger"  onclick={allOff}>All off</button>
-        <button class="btn btn-ghost"   onclick={() => openModal(ShortcutsModal, {})}>iOS Shortcuts</button>
-        <button class="btn btn-ghost"   onclick={() => data.refresh()}>Refresh</button>
     </div>
 </section>
 

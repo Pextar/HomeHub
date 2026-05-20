@@ -108,6 +108,9 @@ export const api = {
   // Schedules
   listSchedules() { return req<Schedule[]>("/schedules"); },
   createSchedule(body: Partial<Schedule>) { return req<Schedule>("/schedules", { method: "POST", body: json(body) }); },
+  setAllSchedules(enabled: boolean) {
+    return req<{ enabled: boolean; changed: number }>(`/schedules/all/${enabled ? "enable" : "disable"}`, { method: "POST" });
+  },
   updateSchedule(id: string, body: Partial<Schedule>) { return req<Schedule>(`/schedules/${encodeURIComponent(id)}`, { method: "PUT", body: json(body) }); },
   deleteSchedule(id: string) { return req<void>(`/schedules/${encodeURIComponent(id)}`, { method: "DELETE" }); },
 
@@ -170,6 +173,13 @@ export const api = {
   // Settings
   getSettings() { return req<Settings>("/settings"); },
   updateSettings(body: Settings) { return req<Settings>("/settings", { method: "PUT", body: json(body) }); },
+
+  // Config backup. Export hits a download endpoint directly (see Settings.svelte);
+  // import posts a parsed bundle back.
+  importConfig(bundle: unknown) {
+    return req<{ sockets: number; schedules: number; groups: number; scenes: number; sensors: number }>(
+      "/import", { method: "POST", body: json(bundle) });
+  },
 
   // Tasmota Wi-Fi devices
   tasmotaGetState(socketId: string) {

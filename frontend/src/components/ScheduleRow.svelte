@@ -2,7 +2,7 @@
     import Icon from "./Icon.svelte";
     import Switch from "./Switch.svelte";
     import { api } from "../lib/api";
-    import { describeTarget, formatDays } from "../lib/utils";
+    import { describeTarget, formatDays, formatAgo } from "../lib/utils";
     import { openModal } from "../lib/modal.svelte";
     import { toasts, data } from "../lib/stores.svelte";
     import type { Schedule } from "../lib/types";
@@ -78,7 +78,10 @@
     </div>
     <div class="info">
         <div class="target">{target.kind}: {target.label}</div>
-        <div class="meta">{target.sub} · {formatDays(schedule.days)}</div>
+        <div class="meta">
+            {target.sub} · {formatDays(schedule.days)}
+            {#if schedule.last_fired_at}<span class="last-fired">· fired {formatAgo(schedule.last_fired_at)}</span>{/if}
+        </div>
     </div>
     <span class="action" data-action={schedule.action}>{schedule.action}</span>
     <Switch checked={schedule.enabled} onChange={toggleEnabled} ariaLabel="Enable schedule" />
@@ -140,6 +143,7 @@
     .info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
     .target { font-weight: 500; }
     .meta { color: var(--text-muted); font-size: 12px; }
+    .last-fired { color: var(--text-faint); }
     .action {
         padding: 2px 10px;
         border-radius: 999px;

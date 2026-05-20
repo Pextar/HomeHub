@@ -40,6 +40,15 @@
     const lastFormatted = $derived(formatValue(sensor.last_value));
     const lastAgo = $derived(sensor.last_reading_at ? agoString(sensor.last_reading_at) : "no data yet");
 
+    // An alert fires when the latest reading crosses a configured threshold.
+    const alert = $derived.by(() => {
+        const v = sensor.last_value;
+        if (v === undefined || v === null) return null;
+        if (sensor.alert_min !== undefined && v < sensor.alert_min) return `Below ${sensor.alert_min}${sensor.unit}`;
+        if (sensor.alert_max !== undefined && v > sensor.alert_max) return `Above ${sensor.alert_max}${sensor.unit}`;
+        return null;
+    });
+
     function toneForKind(kind: string): "warn" | "info" | "success" | "danger" | "primary" {
         switch (kind) {
             case "temperature": return "warn";
@@ -79,13 +88,18 @@
     }
 </script>
 
-<div class="card sensor" class:compact data-tone={tone}>
+<div class="card sensor" class:compact class:alerting={alert} data-tone={tone}>
     <div class="header">
         <div class="ico"><Icon name={iconName} size={18} /></div>
         <div class="title-wrap">
             <div class="title">{sensor.name}</div>
             <div class="sub">{sensor.room || sensor.kind}</div>
         </div>
+        {#if alert}
+            <span class="alert-badge" title={alert}>
+                <Icon name="bolt" size={12} /> Alert
+            </span>
+        {/if}
         {#if !compact}
             <button class="icon-btn" aria-label="Edit sensor"
                 onclick={() => openModal(SensorModal, { existing: sensor })}>
@@ -189,4 +203,24 @@
 
     .sensor.compact { padding: var(--space-3); gap: var(--space-2); }
     .sensor.compact .num { font-size: 1.5rem; }
+
+    .sensor.alerting {
+        border-color: var(--danger);
+        box-shadow: inset 0 0 0 1px var(--danger-soft);
+    }
+    .sensor.alerting .num { color: var(--danger); }
+    .alert-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 11px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--danger);
+        background: var(--danger-soft);
+        padding: 3px 8px;
+        border-radius: 999px;
+        flex-shrink: 0;
+    }
 </style>

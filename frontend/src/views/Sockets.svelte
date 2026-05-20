@@ -3,6 +3,7 @@
     import Icon from "../components/Icon.svelte";
     import SocketCard from "../components/SocketCard.svelte";
     import EmptyState from "../components/EmptyState.svelte";
+    import Segmented from "../components/Segmented.svelte";
     import { api } from "../lib/api";
     import { data, toasts } from "../lib/stores.svelte";
     import { groupSocketsByRoom, runAction } from "../lib/utils";
@@ -17,6 +18,7 @@
 
     let search = $state("");
     let roomFilter = $state("");
+    let statusFilter = $state("all");
 
     const allRooms = $derived(
         [...new Set(v.sockets.map(s => s.room || "Unassigned"))].sort()
@@ -35,6 +37,8 @@
         if (roomFilter) {
             list = list.filter(s => (s.room || "Unassigned") === roomFilter);
         }
+        if (statusFilter === "on")  list = list.filter(s => s.state);
+        if (statusFilter === "off") list = list.filter(s => !s.state);
         return list;
     });
 
@@ -64,13 +68,23 @@
                 <option value={r}>{r}</option>
             {/each}
         </select>
+        <Segmented
+            name="socket-status"
+            bind:value={statusFilter}
+            options={[
+                { value: "all", label: "All" },
+                { value: "on",  label: "On" },
+                { value: "off", label: "Off" },
+            ]}
+        />
     </div>
 
     {#if filtered.length === 0}
         <EmptyState compact title="No matches" message="Try a different search or clear the filters." />
     {:else}
         {#each sortedRooms as room (room)}
-            {@const items = groups.get(room) ?? []}
+            {@const items = [...(groups.get(room) ?? [])].sort((a, b) =>
+                a.state === b.state ? a.name.localeCompare(b.name) : a.state ? -1 : 1)}
             {@const onCount = items.filter(s => s.state).length}
             <section class="room-section"
                 animate:flip={{ duration: dur(280), easing: cubicOut }}

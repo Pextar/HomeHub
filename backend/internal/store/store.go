@@ -43,6 +43,12 @@ type Store struct {
 	Discovery *Discovery
 	DataDir   string
 	RF        RFSender
+
+	// OnChange, if set, is invoked whenever a socket's state changes via
+	// ApplyState (manual control, scheduler, or timer). It must be cheap and
+	// non-blocking — it runs while Mu is held. Used to push live updates to
+	// connected clients over SSE.
+	OnChange func()
 }
 
 const (

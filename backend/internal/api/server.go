@@ -32,6 +32,10 @@ type Server struct {
 	// callers don't need to initialise it. Background commission runs
 	// outlive the originating HTTP request; the frontend polls for status.
 	matterJobs *commissionJobs
+
+	// events fans live "something changed" signals out to SSE clients.
+	// Created lazily in Handler().
+	events *sseHub
 }
 
 // Handler returns the configured router with logging, optional basic
@@ -40,6 +44,13 @@ func (s *Server) Handler() http.Handler {
 	if s.matterJobs == nil {
 		s.matterJobs = newCommissionJobs()
 	}
+	if s.events == nil {
+		s.events = newSSEHub()
+	}
+	// Push a live signal to connected clients whenever a socket's state
+	// changes — including scheduler- and timer-driven changes, since those
+	// also flow through Store.ApplyState.
+	s.Store.OnChange = s.events.broadcast
 	r := mux.NewRouter()
 	r.Use(loggingMiddleware)
 
@@ -62,6 +73,7 @@ func (s *Server) Handler() http.Handler {
 		api.Use(s.authMiddleware)
 	}
 	api.HandleFunc("/health", s.getHealth).Methods("GET")
+	api.HandleFunc("/events", s.handleEvents).Methods("GET")
 
 	api.HandleFunc("/me", s.getMe).Methods("GET")
 	api.HandleFunc("/users", s.requireAdmin(s.listUsers)).Methods("GET")
@@ -94,6 +106,8 @@ func (s *Server) Handler() http.Handler {
 	// settings management never reaches them.
 	api.HandleFunc("/schedules", s.requireAdmin(s.getSchedules)).Methods("GET")
 	api.HandleFunc("/schedules", s.requireAdmin(s.createSchedule)).Methods("POST")
+	api.HandleFunc("/schedules/all/enable", s.requireAdmin(s.setAllSchedules(true))).Methods("POST")
+	api.HandleFunc("/schedules/all/disable", s.requireAdmin(s.setAllSchedules(false))).Methods("POST")
 	api.HandleFunc("/schedules/{id}", s.requireAdmin(s.updateSchedule)).Methods("PUT")
 	api.HandleFunc("/schedules/{id}", s.requireAdmin(s.deleteSchedule)).Methods("DELETE")
 
@@ -131,6 +145,9 @@ func (s *Server) Handler() http.Handler {
 
 	api.HandleFunc("/settings", s.getSettings).Methods("GET")
 	api.HandleFunc("/settings", s.requireAdmin(s.updateSettings)).Methods("PUT")
+
+	api.HandleFunc("/export", s.requireAdmin(s.exportConfig)).Methods("GET")
+	api.HandleFunc("/import", s.requireAdmin(s.importConfig)).Methods("POST")
 
 	api.HandleFunc("/tasmota/probe", s.requireAdmin(s.tasmotaProbe)).Methods("GET")
 	api.HandleFunc("/tasmota/{socketId}", s.tasmotaGetState).Methods("GET")

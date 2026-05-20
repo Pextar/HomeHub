@@ -3,6 +3,9 @@
     import { untrack } from "svelte";
     import { api } from "../lib/api";
     import { data, toasts } from "../lib/stores.svelte";
+    import { openModal } from "../lib/modal.svelte";
+    import ShortcutsModal from "../modals/ShortcutsModal.svelte";
+    import ConfirmModal from "../components/ConfirmModal.svelte";
 
     const v = $derived(data.value);
 
@@ -47,6 +50,47 @@
             toasts.error("Save failed", (e as Error).message);
         } finally {
             saving = false;
+        }
+    }
+
+    let importing = $state(false);
+    let fileInput = $state<HTMLInputElement>();
+
+    // Export streams a download straight from the API (cookie-authenticated,
+    // same-origin) — a plain anchor click is all that's needed.
+    function exportConfig() {
+        const a = document.createElement("a");
+        a.href = "/api/export";
+        a.download = "";
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+    }
+
+    async function onImportFile(e: Event) {
+        const input = e.currentTarget as HTMLInputElement;
+        const file = input.files?.[0];
+        input.value = ""; // allow re-importing the same file
+        if (!file) return;
+
+        const ok = await openModal<boolean>(ConfirmModal, {
+            title: "Restore from backup?",
+            message: "This replaces your devices, schedules, groups, scenes and sensors with the contents of the file. Profiles are not affected.",
+            confirmLabel: "Restore",
+            danger: true,
+        });
+        if (!ok) return;
+
+        importing = true;
+        try {
+            const bundle = JSON.parse(await file.text());
+            const r = await api.importConfig(bundle);
+            toasts.success("Backup restored", `${r.sockets} devices, ${r.schedules} schedules, ${r.scenes} scenes.`);
+            await data.refresh();
+        } catch (e) {
+            toasts.error("Import failed", (e as Error).message);
+        } finally {
+            importing = false;
         }
     }
 
@@ -103,6 +147,40 @@
             </button>
         </div>
     </form>
+</section>
+
+<section class="card">
+    <header>
+        <h2>Integrations</h2>
+        <p>Control your devices from outside the app.</p>
+    </header>
+    <div class="actions" style="justify-content:flex-start">
+        <button type="button" class="btn btn-ghost" onclick={() => openModal(ShortcutsModal, {})}>
+            iOS Shortcuts
+        </button>
+    </div>
+</section>
+
+<section class="card">
+    <header>
+        <h2>Backup &amp; restore</h2>
+        <p>Export your full configuration to a file, or restore it from one. Profiles and passwords are never included.</p>
+    </header>
+    <div class="actions" style="justify-content:flex-start">
+        <button type="button" class="btn btn-ghost" onclick={exportConfig}>
+            Export backup
+        </button>
+        <button type="button" class="btn btn-ghost" onclick={() => fileInput?.click()} disabled={importing}>
+            {importing ? "Restoring…" : "Restore backup"}
+        </button>
+        <input
+            bind:this={fileInput}
+            type="file"
+            accept="application/json,.json"
+            onchange={onImportFile}
+            hidden
+        />
+    </div>
 </section>
 
 <style>

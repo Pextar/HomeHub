@@ -94,6 +94,9 @@ func (s *Server) updateSensor(w http.ResponseWriter, r *http.Request) {
 	// Field and Room are allowed to be cleared, so always overwrite.
 	merged.Field = strings.TrimSpace(updates.Field)
 	merged.Room = strings.TrimSpace(updates.Room)
+	// Thresholds are pointers — nil means "clear it", so always overwrite.
+	merged.AlertMin = updates.AlertMin
+	merged.AlertMax = updates.AlertMax
 
 	if err := s.Store.ValidateSensor(&merged); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())

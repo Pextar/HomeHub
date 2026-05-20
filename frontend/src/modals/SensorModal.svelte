@@ -23,6 +23,9 @@
     let protocol = $state(untrack(() => existing?.protocol ?? prefill?.protocol ?? "rtl_433"));
     let field = $state(untrack(() => existing?.field ?? prefill?.field ?? defaultField(existing?.kind ?? "temperature")));
     let room = $state(untrack(() => existing?.room ?? ""));
+    // Empty string = no threshold. Stored as numbers (or omitted) on save.
+    let alertMin = $state(untrack(() => existing?.alert_min ?? ""));
+    let alertMax = $state(untrack(() => existing?.alert_max ?? ""));
 
     // When the user changes kind, reset unit + field to their defaults
     // for that kind. They can still edit afterwards.
@@ -58,7 +61,11 @@
     async function save() {
         if (!name.trim()) { toasts.warn("Missing name", "Give the sensor a name."); return; }
         if (!code.trim()) { toasts.warn("Missing code", "Sensors need a 433MHz code to listen for."); return; }
-        const payload: Partial<Sensor> = { name, kind, unit, code, protocol, field, room };
+        const payload: Partial<Sensor> = {
+            name, kind, unit, code, protocol, field, room,
+            alert_min: alertMin === "" ? undefined : Number(alertMin),
+            alert_max: alertMax === "" ? undefined : Number(alertMax),
+        };
         try {
             if (existing) {
                 await api.updateSensor(existing.id, payload);
@@ -147,6 +154,20 @@
                 <label for="sensor-room">Room</label>
                 <input id="sensor-room" type="text" bind:value={room} placeholder="Kitchen" />
             </div>
+
+            <div class="field-row" style="margin-top:var(--space-4)">
+                <div class="field">
+                    <label for="sensor-min">Alert below {#if unit}<span class="unit-hint">({unit})</span>{/if}</label>
+                    <input id="sensor-min" type="number" step="any" bind:value={alertMin} placeholder="—" />
+                </div>
+                <div class="field">
+                    <label for="sensor-max">Alert above {#if unit}<span class="unit-hint">({unit})</span>{/if}</label>
+                    <input id="sensor-max" type="number" step="any" bind:value={alertMax} placeholder="—" />
+                </div>
+            </div>
+            <div class="field-help" style="margin-top:calc(var(--space-2) * -1)">
+                The sensor is flagged when its latest reading crosses either limit. Leave blank to disable.
+            </div>
         </form>
     {/snippet}
     {#snippet actions()}
@@ -162,4 +183,5 @@
 
 <style>
     .danger { color: var(--danger); }
+    .unit-hint { color: var(--text-faint); font-weight: 400; }
 </style>

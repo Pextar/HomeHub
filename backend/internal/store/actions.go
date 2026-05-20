@@ -16,6 +16,9 @@ func (s *Store) ApplyState(socket *Socket, target *bool) error {
 		socket.State = previous
 		return err
 	}
+	if socket.State != previous && s.OnChange != nil {
+		s.OnChange()
+	}
 	return nil
 }
 

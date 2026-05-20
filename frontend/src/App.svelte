@@ -63,8 +63,27 @@
         await session.load();
         data.refresh();
         data.pingHealth();
+        // Polling is the backstop; SSE pushes updates instantly when a socket
+        // changes (manual, scheduler, timer — or a physical remote).
         window.setInterval(() => data.refresh(), 30_000);
         window.setInterval(() => data.pingHealth(), 30_000);
+        connectEvents();
+    }
+
+    // Live updates via Server-Sent Events. The browser auto-reconnects on
+    // error, so we just (re)attach handlers. Refreshes are debounced so a
+    // burst of changes (e.g. "all off") collapses into a single fetch.
+    let refreshTimer: ReturnType<typeof setTimeout> | undefined;
+    function connectEvents() {
+        try {
+            const es = new EventSource("/api/events");
+            es.addEventListener("changed", () => {
+                clearTimeout(refreshTimer);
+                refreshTimer = setTimeout(() => data.refresh(), 250);
+            });
+        } catch {
+            // EventSource unavailable — the polling interval still covers us.
+        }
     }
 
     const views: Record<Route, any> = {

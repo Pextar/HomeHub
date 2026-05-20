@@ -35,7 +35,7 @@ function createDataStore() {
           api.listGroups(),
           api.listScenes(),
           api.listTimers(),
-          api.listActivity(20),
+          api.listActivity(50),
           api.listSensors(),
           api.getSettings(),
         ]);
@@ -62,10 +62,18 @@ function createDataStore() {
     }
   }
 
+  // Merge a single updated socket (returned by an action endpoint) into the
+  // store in place, avoiding a full refresh of every collection.
+  function applySocket(updated: Socket) {
+    const i = data.sockets.findIndex(s => s.id === updated.id);
+    if (i >= 0) data.sockets[i] = updated;
+  }
+
   return {
     get value() { return data; },
     refresh,
     pingHealth,
+    applySocket,
     socketById: (id: string) => data.sockets.find(s => s.id === id),
     groupById:  (id: string) => data.groups.find(g => g.id === id),
     sceneById:  (id: string) => data.scenes.find(s => s.id === id),

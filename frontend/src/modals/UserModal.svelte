@@ -157,7 +157,9 @@
                                         <div>{s.name}</div>
                                         <div class="field-help">{s.room || "Unassigned"}</div>
                                     </div>
-                                    <span class="meta">{s.code}</span>
+                                    <span class="meta" data-proto={s.protocol === "tasmota" ? "tasmota" : s.protocol === "matter" ? "matter" : "rf"}>
+                                        {s.protocol === "tasmota" ? "Wi-Fi" : s.protocol === "matter" ? "Matter" : "RF"}
+                                    </span>
                                 </label>
                             {/each}
                         </div>
@@ -243,5 +245,16 @@
     }
     .picker-row:hover { background: var(--surface-hover); }
     .picker-row input { width: auto; padding: 0; }
-    .meta { color: var(--text-muted); font-size: 12px; margin-left: auto; }
+    .meta {
+        color: var(--text-muted);
+        font-size: 11px;
+        font-weight: 600;
+        margin-left: auto;
+        padding: 2px 8px;
+        border-radius: 999px;
+        background: var(--surface-hover);
+    }
+    .meta[data-proto="rf"]      { color: var(--accent-rf);     background: var(--accent-rf-soft); }
+    .meta[data-proto="tasmota"] { color: var(--accent-wifi);   background: var(--accent-wifi-soft); }
+    .meta[data-proto="matter"]  { color: var(--accent-matter); background: var(--accent-matter-soft); }
 </style>
