@@ -352,12 +352,11 @@
         await moveSocketToRoom(sock, target);
     }
 
-    // Lock the page behind the sheet on mobile so the floor plan doesn't
-    // scroll under it. No-op on desktop where the panel sits inline.
+    // Lock the page behind the sheet/dialog so the floor plan doesn't scroll
+    // under it — on both the mobile bottom sheet and the desktop modal.
     $effect(() => {
         if (!selectedRoom && !creating) return;
         if (typeof window === "undefined") return;
-        if (!window.matchMedia("(max-width: 900px)").matches) return;
         const prev = document.body.style.overflow;
         document.body.style.overflow = "hidden";
         return () => { document.body.style.overflow = prev; };
@@ -945,21 +944,32 @@
     .empty span { font-size: 13px; max-width: 280px; }
 
     /* ── Sheet wrapper ────────────────────────────────── */
-    /* Desktop: a plain wrapper — the panel sits inline.
-       Mobile: full-viewport backdrop, panel docked to the bottom as a sheet. */
-    .sheet-root { display: contents; }
+    /* Desktop: a centered modal dialog over a dimmed backdrop.
+       Mobile: full-viewport backdrop with the panel docked to the bottom. */
+    .sheet-root {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: var(--space-6);
+        background: rgba(8, 11, 22, 0.5);
+        backdrop-filter: blur(4px);
+        -webkit-backdrop-filter: blur(4px);
+        z-index: 120;
+        overscroll-behavior: contain;
+    }
+    :global([data-theme="light"]) .sheet-root {
+        background: rgba(20, 24, 38, 0.40);
+    }
 
     @media (max-width: 900px) {
         .sheet-root {
-            display: flex;
-            position: fixed;
-            inset: 0;
+            align-items: flex-end;
+            padding: 0;
             background: rgba(8, 11, 22, 0.45);
             backdrop-filter: blur(3px);
             -webkit-backdrop-filter: blur(3px);
-            align-items: flex-end;
-            justify-content: center;
-            z-index: 120;
         }
         :global([data-theme="light"]) .sheet-root {
             background: rgba(20, 24, 38, 0.30);
@@ -989,21 +999,25 @@
 
     /* ── Panel (control + edit) ───────────────────────── */
     .panel {
+        width: 100%;
+        max-width: 460px;
+        max-height: min(82vh, 760px);
         background: var(--bg-elevated);
         border: 1px solid var(--border);
         border-radius: var(--radius-lg);
         overflow: hidden;
-        box-shadow: inset 4px 0 0 var(--primary);
+        box-shadow: var(--shadow-lg), inset 4px 0 0 var(--primary);
         display: flex;
         flex-direction: column;
         min-height: 0;
     }
-    .panel.edit { box-shadow: inset 4px 0 0 var(--warn); }
+    .panel.edit { box-shadow: var(--shadow-lg), inset 4px 0 0 var(--warn); }
 
     /* Mobile: dock as a sheet, rounded top corners, frosted look */
     @media (max-width: 900px) {
         .panel {
             width: 100%;
+            max-width: none;
             max-height: 85vh;
             border-radius: var(--radius-xl) var(--radius-xl) 0 0;
             background: var(--bg-bar);
