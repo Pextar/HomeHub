@@ -16,11 +16,14 @@
 
     const v = $derived(data.value);
 
-    function chipsFor(g: typeof v.groups[number]) {
-        return g.socket_ids.map(id => {
-            const s = data.socketById(id);
-            return { text: s ? s.name : `(missing: ${id})`, tone: "" as "" };
-        });
+    function groupStats(g: typeof v.groups[number]) {
+        const sockets = g.socket_ids.map(id => data.socketById(id));
+        const onCount = sockets.filter(s => s?.state).length;
+        const chips = sockets.map((s, i) => ({
+            text: s ? s.name : `(missing: ${g.socket_ids[i]})`,
+            tone: s ? (s.state ? "on" as const : "off" as const) : "" as const,
+        }));
+        return { onCount, chips };
     }
 
     async function confirmDelete(g: typeof v.groups[number]) {
@@ -53,14 +56,15 @@
 {:else}
     <div class="list">
         {#each v.groups as g, i (g.id)}
+            {@const stats = groupStats(g)}
             <div
                 animate:flip={{ duration: dur(280), easing: cubicOut }}
                 in:fly={{ y: 12, duration: dur(240), delay: stagger(i), easing: cubicOut }}
                 out:scale={{ start: 0.97, opacity: 0, duration: dur(160) }}>
             <EntityCard
                 name={g.name}
-                meta="{g.socket_ids.length} socket{g.socket_ids.length === 1 ? '' : 's'}"
-                chips={chipsFor(g)}
+                meta="{g.socket_ids.length} socket{g.socket_ids.length === 1 ? '' : 's'}{stats.onCount > 0 ? ` · ${stats.onCount} on` : ''}"
+                chips={stats.chips}
             >
                 {#snippet actions()}
                     <button class="btn btn-success"

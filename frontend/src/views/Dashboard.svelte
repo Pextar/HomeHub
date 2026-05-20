@@ -101,6 +101,17 @@
         }))
     );
 
+    // Live room on-counts derived from socket state so RoomCards stay in sync
+    // with optimistic toggles (rather than waiting for the next server refresh).
+    const liveRooms = $derived.by(() => {
+        const onByRoom = new Map<string, number>();
+        for (const s of v.sockets) {
+            const r = s.room || "Unassigned";
+            onByRoom.set(r, (onByRoom.get(r) ?? 0) + (s.state ? 1 : 0));
+        }
+        return v.rooms.map(r => ({ ...r, on: onByRoom.get(r.name) ?? 0 }));
+    });
+
     // ── Bulk actions ───────────────────────────────────────────────────────
     async function allOn() {
         const ok = await openModal<boolean>(ConfirmModal, {
@@ -434,16 +445,21 @@
 </section>
 {/if}
 
-{#if v.groups.length > 0}
+{#if groupsWithState.length > 0}
 <section class="card">
     <div class="card-header"><h2><span class="section-ico" data-tone="info"><Icon name="devices" size={15} /></span>Groups</h2></div>
     <div class="group-list">
-        {#each v.groups as g, i (g.id)}
+        {#each groupsWithState as g, i (g.id)}
             <div class="group-row"
                 animate:flip={{ duration: dur(280), easing: cubicOut }}
                 in:fly={{ y: 8, duration: dur(220), delay: stagger(i), easing: cubicOut }}>
-                <span class="group-name">{g.name}</span>
-                <span class="group-meta">{g.socket_ids.length} socket{g.socket_ids.length === 1 ? '' : 's'}</span>
+                <div class="group-info">
+                    <span class="group-name">{g.name}</span>
+                    <span class="group-meta">
+                        {g.socket_ids.length} socket{g.socket_ids.length === 1 ? '' : 's'}
+                        {#if g.on > 0}<span class="group-on">· {g.on} on</span>{/if}
+                    </span>
+                </div>
                 <div class="group-actions">
                     <button class="btn btn-success"
                         onclick={() => runAction(() => api.groupAction(g.id, 'on'), `${g.name} on`)}>On</button>
@@ -512,11 +528,11 @@
 
 <section class="card">
     <div class="card-header"><h2><span class="section-ico" data-tone="primary"><Icon name="home" size={15} /></span>Rooms</h2></div>
-    {#if v.rooms.length === 0}
+    {#if liveRooms.length === 0}
         <p class="field-help">No rooms yet. Create devices and assign rooms to them.</p>
     {:else}
         <div class="rooms">
-            {#each v.rooms as room, i (room.name)}
+            {#each liveRooms as room, i (room.name)}
                 <div class="room-item"
                     animate:flip={{ duration: dur(280), easing: cubicOut }}
                     in:scale={{ start: 0.95, opacity: 0, duration: dur(220), delay: stagger(i), easing: cubicOut }}>
@@ -876,9 +892,11 @@
     @media (pointer: coarse) {
         .group-row { padding: var(--space-3); min-height: 60px; border-radius: var(--radius-md); }
     }
-    .group-name { font-weight: 500; flex: 1; }
-    .group-meta { color: var(--text-muted); font-size: 13px; }
-    .group-actions { display: flex; gap: var(--space-2); }
+    .group-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+    .group-name { font-weight: 500; }
+    .group-meta { color: var(--text-muted); font-size: 12px; }
+    .group-on { color: var(--success); font-weight: 600; }
+    .group-actions { display: flex; gap: var(--space-2); flex-shrink: 0; }
     .scenes {
         display: grid;
         grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
