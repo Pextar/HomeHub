@@ -6,6 +6,7 @@
     import { sortedSockets } from "../lib/utils";
     import { copyText } from "../lib/clipboard";
     import { untrack } from "svelte";
+    import Icon from "../components/Icon.svelte";
     import type { User } from "../lib/types";
 
     interface Props { existing?: User | null; }
@@ -23,6 +24,7 @@
     let loginCode = $state(untrack(() => existing?.login_code ?? ""));
     let regenerate = $state(false);
     let saving = $state(false);
+    let showPassword = $state(false);
 
     function toggle(id: string) {
         if (selected.has(id)) selected.delete(id);
@@ -107,8 +109,14 @@
             {#if admin}
                 <div class="field" style="margin-top:var(--space-4)">
                     <label for="usr-pass">Password {#if isEdit}<span class="field-help-inline">(leave blank to keep current)</span>{/if}</label>
-                    <input id="usr-pass" type="password" bind:value={password}
-                        autocomplete="new-password" placeholder={isEdit ? "••••••••" : ""} />
+                    <div class="pass-wrap">
+                        <input id="usr-pass" type={showPassword ? "text" : "password"} bind:value={password}
+                            autocomplete="new-password" placeholder={isEdit ? "••••••••" : ""} />
+                        <button type="button" class="show-btn" onclick={() => showPassword = !showPassword}
+                            aria-label={showPassword ? "Hide password" : "Show password"}>
+                            <Icon name={showPassword ? "eyeOff" : "eye"} size={18} />
+                        </button>
+                    </div>
                 </div>
             {:else if isEdit && loginCode}
                 <div class="field" style="margin-top:var(--space-4)">
@@ -178,6 +186,23 @@
     .admin-row input { width: auto; padding: 0; margin-top: 2px; }
     .kid-row { padding-top: var(--space-2); }
     .field-help-inline { color: var(--text-muted); font-weight: 400; font-size: 12px; }
+    .pass-wrap { position: relative; }
+    .pass-wrap input { padding-right: 40px; }
+    .show-btn {
+        position: absolute;
+        right: 8px;
+        top: 50%;
+        transform: translateY(-50%);
+        background: none;
+        border: none;
+        padding: 4px;
+        cursor: pointer;
+        color: var(--text-muted);
+        display: grid;
+        place-items: center;
+        border-radius: var(--radius-sm);
+    }
+    .show-btn:hover { color: var(--text); }
     .code-box {
         display: flex;
         align-items: center;

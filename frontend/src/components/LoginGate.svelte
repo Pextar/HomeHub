@@ -51,7 +51,9 @@
             phase = "authed";
             onAuthed?.();
         } catch (e) {
-            error = (e instanceof ApiError ? e.message : "Sign in failed");
+            error = mode === "code"
+                ? "Try again! Ask a grown-up if you need help."
+                : (e instanceof ApiError ? e.message : "Sign in failed");
             phase = "needs-login";
         }
     }

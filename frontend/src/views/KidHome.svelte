@@ -11,6 +11,7 @@
     // sockets just flip on/off on tap.
     const isSmart = (lamp: Socket) => lamp.protocol === "matter" || lamp.protocol === "tasmota";
     let active = $state<Socket | null>(null);
+    let confirmExit = $state(false);
 
     function onTap(lamp: Socket) {
         if (isSmart(lamp)) {
@@ -27,7 +28,8 @@
     const lamps = $derived(data.value.sockets);
 
     // ── Welcome splash + confetti ───────────────────────────────────────
-    let showWelcome = $state(true);
+    const GREETED_KEY = "kid-greeted";
+    let showWelcome = $state(!sessionStorage.getItem(GREETED_KEY));
     const COLORS = ["#ff5d8f", "#ffd23f", "#3ddc97", "#4d9bff", "#b15dff", "#ff8c42"];
     const confetti = Array.from({ length: 70 }, (_, i) => ({
         id: i,
@@ -40,6 +42,8 @@
     }));
 
     onMount(() => {
+        if (!showWelcome) return;
+        sessionStorage.setItem(GREETED_KEY, "1");
         const t = setTimeout(() => (showWelcome = false), 2600);
         return () => clearTimeout(t);
     });
@@ -70,6 +74,7 @@
 
     async function signOut() {
         try { await api.logout(); } catch { /* ignore */ }
+        sessionStorage.removeItem(GREETED_KEY);
         window.location.reload();
     }
 
@@ -99,7 +104,7 @@
 <div class="kid">
     <header class="kid-head">
         <h2>{name}'s lamps</h2>
-        <button class="signout" onclick={signOut} aria-label="Sign out">👋 Bye</button>
+        <button class="signout" onclick={() => confirmExit = true} aria-label="Sign out">👋 Bye</button>
     </header>
 
     {#if lamps.length === 0}
@@ -129,6 +134,19 @@
 
 {#if active}
     <KidLampPanel socket={active} onClose={() => (active = null)} />
+{/if}
+
+{#if confirmExit}
+    <div class="exit-backdrop" transition:fade={{ duration: 200 }} onclick={() => confirmExit = false} role="presentation">
+        <div class="exit-card" onclick={(e) => e.stopPropagation()} in:scale={{ duration: 300, easing: backOut, start: 0.7 }} role="dialog">
+            <div class="exit-emoji">👋</div>
+            <p class="exit-q">Time to go?</p>
+            <div class="exit-btns">
+                <button class="exit-btn stay" onclick={() => confirmExit = false}>Stay!</button>
+                <button class="exit-btn leave" onclick={signOut}>Bye bye</button>
+            </div>
+        </div>
+    </div>
 {/if}
 
 <style>
@@ -297,4 +315,44 @@
         .confetti span { display: none; }
         .greeting .wave { animation: none; }
     }
+
+    /* ── Exit confirmation ── */
+    .exit-backdrop {
+        position: fixed;
+        inset: 0;
+        z-index: 300;
+        background: rgba(0, 0, 0, 0.55);
+        display: grid;
+        place-items: center;
+        padding: var(--space-5);
+    }
+    .exit-card {
+        background: var(--bg-elevated);
+        border-radius: var(--radius-xl);
+        padding: var(--space-7) var(--space-6);
+        text-align: center;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: var(--space-4);
+        max-width: 320px;
+        width: 100%;
+        box-shadow: 0 24px 64px rgba(0,0,0,0.35);
+    }
+    .exit-emoji { font-size: 4rem; line-height: 1; }
+    .exit-q { font-size: 1.75rem; font-weight: 900; letter-spacing: -0.02em; }
+    .exit-btns { display: flex; gap: var(--space-3); width: 100%; }
+    .exit-btn {
+        flex: 1;
+        padding: 16px;
+        font-size: 1.1rem;
+        font-weight: 800;
+        border: none;
+        border-radius: var(--radius-lg);
+        cursor: pointer;
+        transition: transform 0.15s ease;
+    }
+    .exit-btn:active { transform: scale(0.95); }
+    .exit-btn.stay { background: var(--primary); color: white; }
+    .exit-btn.leave { background: var(--surface-hover); color: var(--text-muted); }
 </style>

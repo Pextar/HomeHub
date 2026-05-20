@@ -197,7 +197,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusUnauthorized, "invalid credentials")
 			return
 		}
-		setSessionCookie(w, s.SessionSecret, user.Username)
+		setSessionCookie(w, s.SessionSecret, user.ID)
 		writeJSON(w, http.StatusOK, map[string]string{"username": user.Username})
 		return
 	}

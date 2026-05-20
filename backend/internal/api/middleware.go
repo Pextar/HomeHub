@@ -51,11 +51,11 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// lookupUser returns the stored user with the given username, or nil.
-func (s *Server) lookupUser(username string) *store.User {
+// lookupUser returns the stored user with the given ID, or nil.
+func (s *Server) lookupUser(id string) *store.User {
 	s.Store.Mu.RLock()
 	defer s.Store.Mu.RUnlock()
-	return s.Store.UserByUsername(username)
+	return s.Store.UserByID(id)
 }
 
 // verifyCredentials returns the user if username/password match a stored

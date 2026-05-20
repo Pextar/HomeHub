@@ -179,6 +179,11 @@ func (s *Store) Save() error {
 	return nil
 }
 
+// UserByID returns the user with the given ID, or nil. Caller must hold Mu.
+func (s *Store) UserByID(id string) *User {
+	return s.Users[id]
+}
+
 // UserByUsername returns the user with the given (case-insensitive)
 // username, or nil. Caller must hold Mu.
 func (s *Store) UserByUsername(username string) *User {
