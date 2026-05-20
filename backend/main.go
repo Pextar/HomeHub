@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"flag"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -11,6 +13,8 @@ import (
 	"path/filepath"
 	"syscall"
 	"time"
+
+	"golang.org/x/crypto/bcrypt"
 
 	"rf-socket-controller/internal/api"
 	"rf-socket-controller/internal/matter"
@@ -39,9 +43,48 @@ func nexaScriptPath() string {
 }
 
 func main() {
+	resetAdmin := flag.Bool("reset-admin", false, "reset the first admin's password from AUTH_PASS and exit")
+	flag.Parse()
+
 	dataDir := "./data"
 	if err := os.MkdirAll(dataDir, 0755); err != nil {
 		log.Fatalf("failed to create data directory %q: %v", dataDir, err)
+	}
+
+	if *resetAdmin {
+		newPass := os.Getenv("AUTH_PASS")
+		if newPass == "" {
+			log.Fatal("AUTH_PASS is not set — export it before running --reset-admin")
+		}
+		st := store.New(dataDir, nil)
+		if err := st.Load(); err != nil {
+			log.Fatalf("failed to load data: %v", err)
+		}
+		st.Mu.Lock()
+		var admin *store.User
+		for _, u := range st.Users {
+			if u.Admin {
+				admin = u
+				break
+			}
+		}
+		if admin == nil {
+			st.Mu.Unlock()
+			log.Fatal("no admin user found — delete data/users.json and restart to re-seed from AUTH_USER/AUTH_PASS")
+		}
+		hash, err := bcrypt.GenerateFromPassword([]byte(newPass), bcrypt.DefaultCost)
+		if err != nil {
+			st.Mu.Unlock()
+			log.Fatalf("failed to hash password: %v", err)
+		}
+		admin.PasswordHash = string(hash)
+		if err := st.Save(); err != nil {
+			st.Mu.Unlock()
+			log.Fatalf("failed to save: %v", err)
+		}
+		st.Mu.Unlock()
+		fmt.Printf("Password reset for admin %q — you can now log in with the new AUTH_PASS.\n", admin.Username)
+		return
 	}
 
 	matterClient := matter.FromEnv()
