@@ -124,6 +124,8 @@ body {
     background: var(--bg);
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
+    /* Suppress the gray flash iOS shows on tapped elements */
+    -webkit-tap-highlight-color: transparent;
 }
 h1, h2, h3, h4 { margin: 0; font-weight: 600; letter-spacing: -0.01em; }
 h1 { font-size: 1.5rem; }
@@ -161,6 +163,8 @@ a { color: inherit; text-decoration: none; }
     color: var(--btn-fg);
     cursor: pointer;
     font-weight: 500;
+    /* Removes 300ms tap delay and prevents double-tap zoom on mobile */
+    touch-action: manipulation;
     transition: background var(--t-fast), border-color var(--t-fast),
         color var(--t-fast), transform var(--t-fast), box-shadow var(--t-fast);
     white-space: nowrap;
@@ -202,10 +206,24 @@ a { color: inherit; text-decoration: none; }
     border-radius: var(--radius-sm);
     color: var(--text-muted);
     cursor: pointer;
+    touch-action: manipulation;
     transition: background var(--t-fast), color var(--t-fast);
 }
 .icon-btn:hover { background: var(--surface-hover); color: var(--text); }
+.icon-btn:active { background: var(--surface-hover); transform: scale(0.92); transition-duration: 60ms; }
 .icon-btn.danger:hover { background: var(--danger-soft); color: var(--danger); }
+/* iOS: meet the 44×44 minimum touch target — keep the visual size at 32×32
+   but expand the interactive area with a transparent pseudo-element. */
+@media (pointer: coarse) {
+    .icon-btn {
+        position: relative;
+    }
+    .icon-btn::after {
+        content: '';
+        position: absolute;
+        inset: -6px;
+    }
+}
 
 /* ---------- Form controls ---------- */
 select, input[type="text"], input[type="time"], input[type="number"],
@@ -301,8 +319,13 @@ select:focus-visible, input:focus-visible, textarea:focus-visible {
     /* Larger touch targets for form controls (aim for ~44px) */
     select, input[type="text"], input[type="time"], input[type="number"],
     input[type="search"], input[type="password"], textarea {
-        padding: 11px 12px;
+        padding: 12px 14px;
+        font-size: 16px; /* Prevents iOS auto-zoom on focus */
     }
+
+    /* Taller buttons on touch screens */
+    .btn { min-height: 44px; padding: 10px 16px; }
+    .btn-primary { padding: 12px 20px; }
 }
 
 /* Reduced motion */

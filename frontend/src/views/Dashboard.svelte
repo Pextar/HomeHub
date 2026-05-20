@@ -857,6 +857,12 @@
 
     /* ── Rest of dashboard ─────────────────────────── */
     .quick { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+    @media (pointer: coarse) {
+        /* Full-width, prominent quick-action buttons on touch screens */
+        .quick { flex-direction: column; }
+        .quick :global(.btn) { width: 100%; justify-content: center; min-height: 52px; font-size: 16px; font-weight: 700; }
+    }
+
     .group-list { display: flex; flex-direction: column; gap: var(--space-2); }
     .group-row {
         display: flex;
@@ -865,14 +871,22 @@
         padding: var(--space-2) var(--space-3);
         background: var(--surface);
         border-radius: var(--radius-sm);
+        min-height: 48px;
+    }
+    @media (pointer: coarse) {
+        .group-row { padding: var(--space-3); min-height: 60px; border-radius: var(--radius-md); }
     }
     .group-name { font-weight: 500; flex: 1; }
     .group-meta { color: var(--text-muted); font-size: 13px; }
     .group-actions { display: flex; gap: var(--space-2); }
     .scenes {
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+        grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
         gap: var(--space-3);
+    }
+    @media (pointer: coarse) {
+        /* On phones: scenes stack single-column for easy tapping */
+        .scenes { grid-template-columns: 1fr 1fr; gap: var(--space-2); }
     }
     .timers { display: flex; flex-direction: column; gap: var(--space-2); }
     .sensors {
@@ -948,6 +962,7 @@
         border-radius: 999px;
         background: var(--bg-elevated);
         border: 1px solid var(--border);
+        white-space: nowrap;
     }
     .src[data-source="schedule"] { color: var(--info); }
     .src[data-source="timer"]    { color: var(--warn); }
@@ -965,5 +980,26 @@
     .act[data-action="activate"] { color: var(--info); }
     .label { color: var(--text); }
     .err { color: var(--danger); font-size: 12px; margin-top: 2px; }
-    .when { color: var(--text-faint); font-size: 12px; font-variant-numeric: tabular-nums; }
+    .when { color: var(--text-faint); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+    /* Mobile activity log: stack source+time on one line, label below */
+    @media (pointer: coarse) {
+        .event {
+            grid-template-columns: 1fr auto;
+            grid-template-rows: auto auto;
+            row-gap: 4px;
+            padding: 10px 12px;
+        }
+        .src {
+            grid-column: 1; grid-row: 1;
+            justify-self: start;
+        }
+        .when {
+            grid-column: 2; grid-row: 1;
+            align-self: center;
+        }
+        .info {
+            grid-column: 1 / -1; grid-row: 2;
+        }
+    }
 </style>

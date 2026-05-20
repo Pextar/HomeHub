@@ -41,4 +41,9 @@
         }
         .subtitle { font-size: 12px; }
     }
+
+    /* On phones, align title top and button bottom so they don't fight */
+    @media (pointer: coarse) {
+        .topbar { align-items: flex-end; padding-bottom: var(--space-1); }
+    }
 </style>

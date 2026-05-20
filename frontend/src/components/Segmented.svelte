@@ -52,7 +52,9 @@
         color: var(--text-muted);
         font-weight: 500;
         font-size: 13px;
+        touch-action: manipulation;
         transition: background var(--t-fast), color var(--t-fast);
+        user-select: none;
     }
     .segmented input:checked + label {
         background: var(--bg-elevated);
@@ -60,4 +62,9 @@
         box-shadow: var(--shadow-sm);
     }
     .segmented label.disabled { opacity: 0.4; cursor: not-allowed; }
+    /* Touch: taller labels */
+    @media (pointer: coarse) {
+        .segmented { padding: 4px; }
+        .segmented label { padding: 9px 16px; font-size: 14px; }
+    }
 </style>

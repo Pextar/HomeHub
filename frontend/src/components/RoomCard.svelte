@@ -1,11 +1,10 @@
 <!--
-  Compact room card. Two-row layout on every breakpoint:
+  Compact room card. Two-row layout:
     [name (full width)           ]
     ["n/m on" meta] [On] [Off]
 
-  Name gets the full card width on the top row so it has maximum room
-  before truncating. Meta + actions share the bottom row.
-  Designed to fit two-up on phones without dominating the dashboard.
+  On mobile, the on/off buttons grow to 44 px tall to hit the iOS HIG
+  minimum touch target, and the card itself has a coarser active state.
 -->
 <script lang="ts">
     import Icon from "./Icon.svelte";
@@ -30,11 +29,11 @@
             <span class="status">{allOn ? "all on" : anyOn ? "on" : "off"}</span>
         </div>
         <div class="actions">
-            <button class="icon-btn on-btn" title="Turn all on" aria-label="Turn all on"
+            <button class="act-btn on-btn" title="Turn all on" aria-label="Turn all on"
                 onclick={() => runAction(() => api.roomOn(room.name), `${room.name} on`)}>
                 <Icon name="sun" size={16} />
             </button>
-            <button class="icon-btn off-btn" title="Turn all off" aria-label="Turn all off"
+            <button class="act-btn off-btn" title="Turn all off" aria-label="Turn all off"
                 onclick={() => runAction(() => api.roomOff(room.name), `${room.name} off`)}>
                 <Icon name="moon" size={16} />
             </button>
@@ -47,11 +46,10 @@
         background: var(--surface);
         border: 1px solid var(--border);
         border-radius: var(--radius-md);
-        padding: var(--space-2) var(--space-3);
+        padding: var(--space-3);
         display: flex;
         flex-direction: column;
-        gap: var(--space-1);
-        min-height: 56px;
+        gap: var(--space-2);
         min-width: 0;
         transition: border-color var(--t-fast), background var(--t-fast);
     }
@@ -103,7 +101,9 @@
         gap: 4px;
         flex-shrink: 0;
     }
-    .icon-btn {
+
+    /* Base — 34 px visible, same as before */
+    .act-btn {
         all: unset;
         display: grid;
         place-items: center;
@@ -113,11 +113,23 @@
         color: var(--text-muted);
         background: var(--bg-elevated);
         border: 1px solid var(--border);
-        transition: background 0.15s, color 0.15s, border-color 0.15s;
+        touch-action: manipulation;
+        transition: background 0.15s, color 0.15s, border-color 0.15s, transform 0.1s;
     }
-    .icon-btn:hover { color: var(--text); border-color: var(--border-strong); }
-    .icon-btn:focus-visible { outline: 2px solid var(--accent, #60a5fa); outline-offset: 1px; }
-    .icon-btn:active { transform: scale(0.94); }
-    .on-btn:hover  { color: var(--success); border-color: var(--success); }
-    .off-btn:hover { color: var(--danger);  border-color: var(--danger);  }
+    .act-btn:hover { color: var(--text); border-color: var(--border-strong); }
+    .act-btn:active { transform: scale(0.90); }
+    .act-btn:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+    .on-btn:hover  { color: var(--success); border-color: var(--success); background: var(--success-soft); }
+    .off-btn:hover { color: var(--danger);  border-color: var(--danger);  background: var(--danger-soft); }
+
+    /* Touch screens: expand to 44 × 44 minimum target */
+    @media (pointer: coarse) {
+        .room { padding: var(--space-3) var(--space-3); }
+        .name { font-size: 15px; }
+        .act-btn {
+            width: 44px; height: 44px;
+            border-radius: var(--radius-md);
+        }
+        .meta { font-size: 12px; }
+    }
 </style>

@@ -58,6 +58,7 @@
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
+    min-height: 60px;
   }
   .action {
     padding: 2px 10px;

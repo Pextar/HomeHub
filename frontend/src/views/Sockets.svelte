@@ -146,9 +146,13 @@
     .room-filter { max-width: 200px; }
 
     @media (max-width: 600px) {
-        .toolbar { flex-direction: column; align-items: stretch; }
+        .toolbar { flex-direction: column; align-items: stretch; gap: var(--space-2); }
         .search { min-width: 0; }
         .room-filter { max-width: none; }
+    }
+    /* Touch: ensure search row is 44px tall */
+    @media (pointer: coarse) {
+        .search input { padding: 12px 0; font-size: 16px; }
     }
 
     .room-section { display: flex; flex-direction: column; gap: var(--space-3); }
@@ -164,10 +168,18 @@
         letter-spacing: 0.06em;
     }
     .room-actions { display: flex; gap: var(--space-2); }
+    @media (pointer: coarse) {
+        .room-header { padding: var(--space-1) 0; }
+        .room-actions :global(.btn) { min-height: 40px; }
+    }
     .grid {
         display: grid;
         grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
         gap: var(--space-4);
+    }
+    /* On small phones, single-column is more comfortable */
+    @media (max-width: 480px) {
+        .grid { grid-template-columns: 1fr; gap: var(--space-3); }
     }
     .grid-item { display: flex; }
     .grid-item > :global(.card) { flex: 1; }

@@ -262,7 +262,14 @@
         display: flex; align-items: flex-start; justify-content: space-between;
         gap: var(--space-3);
     }
-    .head .icon-btn { font-size: 18px; }
+    /* Close button — always at least 44×44 on touch screens */
+    .head .icon-btn {
+        font-size: 18px;
+        touch-action: manipulation;
+    }
+    @media (pointer: coarse) {
+        .head .icon-btn { width: 44px; height: 44px; font-size: 20px; }
+    }
     .subtitle { color: var(--text-muted); font-size: 13px; margin-top: 4px; }
 
     .body {

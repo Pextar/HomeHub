@@ -28,31 +28,43 @@
 <style>
     .switch {
         position: relative;
-        display: inline-block;
-        width: 36px;
-        height: 20px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        /* Visual toggle is 44×26 — slightly larger than before but still compact */
+        width: 44px;
+        height: 26px;
         flex-shrink: 0;
+        /* Expand touch target to iOS HIG 44×44 minimum without breaking layout */
+        cursor: pointer;
+        touch-action: manipulation;
     }
-    .switch input { opacity: 0; width: 0; height: 0; }
+    .switch::after {
+        content: '';
+        position: absolute;
+        inset: -9px -8px; /* extra tappable padding */
+    }
+    .switch input { opacity: 0; width: 0; height: 0; position: absolute; }
     .track {
         position: absolute; inset: 0;
         background: var(--border-strong);
         border-radius: 999px;
-        transition: background var(--t-fast);
-        cursor: pointer;
+        transition: background var(--t-fast), box-shadow var(--t-fast);
+        pointer-events: none;
     }
     .track::after {
         content: "";
         position: absolute;
-        width: 16px; height: 16px;
+        width: 20px; height: 20px;
         background: #fff;
         border-radius: 50%;
-        top: 2px; left: 2px;
+        top: 3px; left: 3px;
         transition: transform var(--t-fast);
-        box-shadow: 0 1px 2px rgba(0,0,0,0.2);
+        box-shadow: 0 1px 3px rgba(0,0,0,0.25);
     }
     .switch input:checked + .track { background: var(--success); }
-    .switch input:checked + .track::after { transform: translateX(16px); }
+    .switch input:checked + .track::after { transform: translateX(18px); }
     .switch input:focus-visible + .track { box-shadow: var(--focus-ring); }
     .switch input:disabled + .track { opacity: 0.5; cursor: not-allowed; }
+    .switch:active .track { box-shadow: 0 0 0 4px var(--primary-glow); }
 </style>

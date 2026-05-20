@@ -11,6 +11,8 @@
     import TasmotaLightModal from "../modals/TasmotaLightModal.svelte";
     import MatterLightModal from "../modals/MatterLightModal.svelte";
     import ConfirmModal from "./ConfirmModal.svelte";
+    import { scale } from "svelte/transition";
+    import { cubicOut } from "svelte/easing";
 
     interface Props { socket: Socket; }
     let { socket }: Props = $props();
@@ -113,6 +115,26 @@
             toasts.error("Failed", (e as Error).message);
         }
     }
+
+    // ── Overflow menu (mobile ⋯ button) ────────────────────────────────────
+    let moreOpen = $state(false);
+    let moreWrapEl = $state<HTMLElement>();
+
+    // Close the overflow menu when the user taps anywhere outside the card.
+    $effect(() => {
+        if (!moreOpen) return;
+        function onDocClick(e: MouseEvent) {
+            if (!moreWrapEl?.closest("article")?.contains(e.target as Node)) {
+                moreOpen = false;
+            }
+        }
+        document.addEventListener("click", onDocClick, true);
+        return () => document.removeEventListener("click", onDocClick, true);
+    });
+
+    function openTimer()  { moreOpen = false; openModal(TimerModal, { socket }); }
+    function openEdit()   { moreOpen = false; openModal(SocketModal, { existing: socket }); }
+    function openDelete() { moreOpen = false; confirmDelete(); }
 </script>
 
 <article class="card" class:on={socket.state} class:pulsing bind:this={cardEl}>
@@ -139,28 +161,70 @@
                 <div class="meta">{socket.room || "Unassigned"}</div>
             </div>
         {/if}
-        <div class="menu">
-            <button class="icon-btn fav-btn" class:fav={socket.favorite}
+
+        <div class="menu" bind:this={moreWrapEl}>
+            <!-- ── Desktop: all four icons ── -->
+            <button class="icon-btn fav-btn desktop-action" class:fav={socket.favorite}
                 title={socket.favorite ? "Remove from favorites" : "Add to favorites"}
                 aria-label={socket.favorite ? "Remove from favorites" : "Add to favorites"}
                 aria-pressed={socket.favorite}
                 onclick={toggleFavorite}>
                 <Icon name={socket.favorite ? "star" : "starOutline"} size={16} />
             </button>
-            <button class="icon-btn" title="Set timer" aria-label="Set timer"
+            <button class="icon-btn desktop-action" title="Set timer" aria-label="Set timer"
                 onclick={() => openModal(TimerModal, { socket })}>
                 <Icon name="timer" size={16} />
             </button>
-            <button class="icon-btn" title="Edit" aria-label="Edit"
+            <button class="icon-btn desktop-action" title="Edit" aria-label="Edit"
                 onclick={() => openModal(SocketModal, { existing: socket })}>
                 <Icon name="edit" size={16} />
             </button>
-            <button class="icon-btn danger" title="Delete" aria-label="Delete"
+            <button class="icon-btn danger desktop-action" title="Delete" aria-label="Delete"
                 onclick={confirmDelete}>
                 <Icon name="trash" size={16} />
             </button>
+
+            <!-- ── Mobile: favorite + ⋯ only ── -->
+            <button class="icon-btn fav-btn mobile-action" class:fav={socket.favorite}
+                aria-label={socket.favorite ? "Remove from favorites" : "Add to favorites"}
+                aria-pressed={socket.favorite}
+                onclick={toggleFavorite}>
+                <Icon name={socket.favorite ? "star" : "starOutline"} size={18} />
+            </button>
+            <button class="icon-btn mobile-action more-btn"
+                class:open={moreOpen}
+                aria-label="More options"
+                aria-expanded={moreOpen}
+                aria-haspopup="menu"
+                onclick={(e) => { e.stopPropagation(); moreOpen = !moreOpen; }}>
+                <Icon name="more" size={18} />
+            </button>
         </div>
     </div>
+
+    <!-- ── Mobile overflow action list ── -->
+    {#if moreOpen}
+        <div class="overflow-menu" role="menu"
+            in:scale={{ start: 0.95, duration: 140, easing: cubicOut, opacity: 0 }}
+            out:scale={{ start: 0.95, duration: 100, easing: cubicOut, opacity: 0 }}>
+            <button class="overflow-item" role="menuitem"
+                onclick={openTimer}>
+                <Icon name="timer" size={16} />
+                <span>Set timer</span>
+            </button>
+            <button class="overflow-item" role="menuitem"
+                onclick={openEdit}>
+                <Icon name="edit" size={16} />
+                <span>Edit device</span>
+            </button>
+            <button class="overflow-item danger" role="menuitem"
+                onclick={openDelete}>
+                <Icon name="trash" size={16} />
+                <span>Delete</span>
+            </button>
+        </div>
+    {/if}
+
     <div class="status">
         <span class="dot"></span>
         <span class="state">{socket.state ? "ON" : "OFF"}</span>
@@ -233,12 +297,53 @@
         justify-content: space-between;
         gap: var(--space-3);
     }
-    .title { min-width: 0; }
+    .title { min-width: 0; flex: 1; }
     .name { font-weight: 600; font-size: 1rem; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .meta { color: var(--text-muted); font-size: 12px; margin-top: 2px; }
-    .menu { display: flex; gap: 4px; }
+    .menu { display: flex; gap: 4px; flex-shrink: 0; }
     .fav-btn.fav { color: #f5c518; }
     .fav-btn.fav:hover { color: #fbbf24; }
+
+    /* Desktop shows all 4 icons; mobile shows just fav + ⋯ */
+    .mobile-action { display: none; }
+    .desktop-action { display: grid; }
+
+    /* Active/open state for the ⋯ button */
+    .more-btn.open { background: var(--surface-hover); color: var(--text); }
+
+    /* ── Overflow action list ── */
+    .overflow-menu {
+        display: none; /* hidden on desktop — shown only on mobile */
+        flex-direction: column;
+        background: var(--bg-raised);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        overflow: hidden;
+        /* Subtle left accent matching the card tone */
+        box-shadow: inset 3px 0 0 var(--primary);
+    }
+    .overflow-item {
+        display: flex;
+        align-items: center;
+        gap: var(--space-3);
+        padding: 14px var(--space-4);
+        background: transparent;
+        border: none;
+        border-bottom: 1px solid var(--border);
+        cursor: pointer;
+        font: inherit;
+        font-size: 15px;
+        color: var(--text);
+        text-align: left;
+        min-height: 52px;
+        touch-action: manipulation;
+        transition: background var(--t-fast);
+    }
+    .overflow-item:last-child { border-bottom: none; }
+    .overflow-item :global(svg) { color: var(--text-muted); flex-shrink: 0; }
+    .overflow-item:active { background: var(--surface-hover); }
+    .overflow-item.danger { color: var(--danger); }
+    .overflow-item.danger :global(svg) { color: var(--danger); }
 
     .title-btn {
         all: unset;
@@ -324,5 +429,30 @@
         display: grid;
         grid-template-columns: 1fr 1fr 1fr;
         gap: var(--space-2);
+    }
+
+    /* ── Mobile layout ── */
+    @media (pointer: coarse) {
+        /* Swap icon sets */
+        .desktop-action { display: none; }
+        .mobile-action  { display: grid; }
+
+        /* Show the overflow menu on mobile */
+        .overflow-menu { display: flex; }
+
+        /* Bigger name text — easier to scan a list of cards */
+        .name { font-size: 1.05rem; }
+
+        /* Taller control buttons — full 44px tap targets */
+        .controls { gap: var(--space-2); }
+        .controls :global(.btn) { min-height: 48px; font-size: 15px; font-weight: 600; }
+
+        /* Slightly bigger range thumb */
+        .dim-row input[type="range"]::-webkit-slider-thumb {
+            width: 22px; height: 22px;
+        }
+        .dim-row input[type="range"]::-moz-range-thumb {
+            width: 22px; height: 22px;
+        }
     }
 </style>

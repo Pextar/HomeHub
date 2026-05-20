@@ -26,17 +26,26 @@
         flex-direction: column;
         gap: var(--space-2);
         cursor: pointer;
+        touch-action: manipulation;
         transition: border-color var(--t-fast), background var(--t-fast),
             transform var(--t-fast), box-shadow var(--t-fast);
         text-align: left;
         font: inherit;
         color: inherit;
+        width: 100%;
+        min-height: 72px;
     }
     .tile:hover { border-color: var(--border-strong); background: var(--surface-hover); }
     @media (hover: hover) {
         .tile:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); }
     }
-    .tile:active { transform: translateY(0); }
-    .name { font-weight: 600; }
+    .tile:active { transform: scale(0.97); background: var(--surface-hover); transition-duration: 80ms; }
+    .name { font-weight: 600; font-size: 15px; }
     .meta { color: var(--text-muted); font-size: 12px; }
+
+    /* Touch: taller tiles, slightly larger text */
+    @media (pointer: coarse) {
+        .tile { min-height: 80px; padding: var(--space-4) var(--space-4); }
+        .name { font-size: 16px; }
+    }
 </style>

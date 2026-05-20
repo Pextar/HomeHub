@@ -151,8 +151,17 @@
         color: var(--text-muted);
         font-size: 13px;
         cursor: pointer;
-        padding: 4px;
+        padding: 12px 4px; /* generous vertical padding = easy to tap */
         text-align: center;
+        touch-action: manipulation;
     }
     .switch-mode:hover { color: var(--text); text-decoration: underline; }
+
+    /* On phones, open the card to full width and anchor it toward the top
+       (above the keyboard, which rises from the bottom). */
+    @media (max-width: 480px) {
+        .screen { align-items: flex-start; padding-top: max(env(safe-area-inset-top), var(--space-8)); }
+        .card { border-radius: var(--radius-xl); padding: var(--space-6) var(--space-5); }
+        .card h1 { font-size: 1.5rem; font-weight: 800; }
+    }
 </style>
