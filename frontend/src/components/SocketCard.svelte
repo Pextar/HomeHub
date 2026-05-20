@@ -230,9 +230,10 @@
         <span class="state">{socket.state ? "ON" : "OFF"}</span>
         <span class="code-chip"
             data-proto={isTasmota ? "tasmota" : isMatter ? "matter" : "rf"}
-            title={isTasmota ? "Tasmota device IP" : isMatter ? "Matter device" : "RF code"}>
+            title={`${socket.protocol || "rf"} · ${socket.code}`}>
             <Icon name={isTasmota ? "wifi" : isMatter ? "devices" : "radio"} size={12} />
-            {socket.protocol || "rf"} · {socket.code}
+            <span class="proto-label">{isTasmota ? "Wi-Fi" : isMatter ? "Matter" : "RF"}</span>
+            <span class="proto-code"> · {socket.code}</span>
         </span>
     </div>
     {#if isSmartLight}
@@ -429,6 +430,11 @@
         display: grid;
         grid-template-columns: 1fr 1fr 1fr;
         gap: var(--space-2);
+    }
+
+    /* Hide the long code ID on touch screens — just show the protocol label */
+    @media (pointer: coarse) {
+        .proto-code { display: none; }
     }
 
     /* ── Mobile layout ── */
