@@ -43,54 +43,75 @@ func LoadOrCreateSessionSecret(dataDir string) ([]byte, error) {
 	return b, nil
 }
 
-func signSession(secret []byte, username string, expires time.Time) string {
-	payload := fmt.Sprintf("%s:%d", username, expires.Unix())
+func signSession(secret []byte, id string, version int, expires time.Time) string {
+	payload := fmt.Sprintf("%s:%d:%d", id, version, expires.Unix())
 	mac := hmac.New(sha256.New, secret)
 	mac.Write([]byte(payload))
 	sig := base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 	return payload + ":" + sig
 }
 
-func verifySession(secret []byte, value string) (string, bool) {
-	parts := strings.SplitN(value, ":", 3)
-	if len(parts) != 3 {
-		return "", false
+// verifySession validates a cookie value and returns the user id and the
+// token version it was minted with. The caller must still confirm the
+// version matches the user's current TokenVersion (see authMiddleware) so
+// a credential change invalidates older cookies.
+func verifySession(secret []byte, value string) (id string, version int, ok bool) {
+	parts := strings.SplitN(value, ":", 4)
+	if len(parts) != 4 {
+		return "", 0, false
 	}
-	username, expStr, gotSig := parts[0], parts[1], parts[2]
-	payload := username + ":" + expStr
+	uid, verStr, expStr, gotSig := parts[0], parts[1], parts[2], parts[3]
+	payload := uid + ":" + verStr + ":" + expStr
 	mac := hmac.New(sha256.New, secret)
 	mac.Write([]byte(payload))
 	wantSig := base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 	if subtle.ConstantTimeCompare([]byte(gotSig), []byte(wantSig)) != 1 {
-		return "", false
+		return "", 0, false
 	}
 	exp, err := strconv.ParseInt(expStr, 10, 64)
 	if err != nil || time.Now().Unix() > exp {
-		return "", false
+		return "", 0, false
 	}
-	return username, true
+	ver, err := strconv.Atoi(verStr)
+	if err != nil {
+		return "", 0, false
+	}
+	return uid, ver, true
 }
 
-func setSessionCookie(w http.ResponseWriter, secret []byte, username string) {
+func setSessionCookie(w http.ResponseWriter, secret []byte, id string, version int, secure bool) {
 	expires := time.Now().Add(cookieTTL)
 	http.SetCookie(w, &http.Cookie{
 		Name:     cookieName,
-		Value:    signSession(secret, username, expires),
+		Value:    signSession(secret, id, version, expires),
 		Path:     "/",
 		MaxAge:   int(cookieTTL.Seconds()),
 		Expires:  expires,
 		HttpOnly: true,
+		Secure:   secure,
 		SameSite: http.SameSiteLaxMode,
 	})
 }
 
-func clearSessionCookie(w http.ResponseWriter) {
+func clearSessionCookie(w http.ResponseWriter, secure bool) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     cookieName,
 		Value:    "",
 		Path:     "/",
 		MaxAge:   -1,
 		HttpOnly: true,
+		Secure:   secure,
 		SameSite: http.SameSiteLaxMode,
 	})
+}
+
+// isSecureRequest reports whether the request reached us over TLS, either
+// directly (our own HTTPS listener) or via a reverse proxy that terminated
+// TLS and set X-Forwarded-Proto. When true we mark the session cookie
+// Secure so it never travels over plaintext HTTP.
+func isSecureRequest(r *http.Request) bool {
+	if r.TLS != nil {
+		return true
+	}
+	return strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
 }

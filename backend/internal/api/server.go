@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -18,6 +19,10 @@ import (
 	"rf-socket-controller/internal/matter"
 	"rf-socket-controller/internal/store"
 )
+
+// maxRequestBody caps API request bodies. Generous for this app's config
+// bundles yet small enough to stop a runaway upload.
+const maxRequestBody = 1 << 20 // 1 MiB
 
 // Server wires HTTP handlers to a Store.
 type Server struct {
@@ -60,6 +65,7 @@ func (s *Server) Handler() http.Handler {
 	s.Store.OnChange = s.events.broadcast
 	r := mux.NewRouter()
 	r.Use(loggingMiddleware)
+	r.Use(maxBodyBytes(maxRequestBody))
 
 	s.Store.Mu.RLock()
 	authEnabled := len(s.Store.Users) > 0
@@ -168,12 +174,50 @@ func (s *Server) Handler() http.Handler {
 
 	r.PathPrefix("/").Handler(spaHandler(s.SPADir))
 
-	cors := handlers.CORS(
-		handlers.AllowedOrigins([]string{"*"}),
+	// CORS is locked down by default: the SPA is served from the same
+	// origin as the API, so cross-origin access isn't needed. Operators who
+	// want to call the API from another origin opt specific ones in via
+	// CORS_ALLOWED_ORIGINS.
+	if cors := corsFromEnv(); cors != nil {
+		return cors(r)
+	}
+	return r
+}
+
+// corsFromEnv builds CORS middleware from CORS_ALLOWED_ORIGINS (a comma-
+// separated list). It returns nil when the var is unset, leaving the API
+// same-origin only. Explicit origins also get credentialed requests
+// enabled; a "*" entry can't, since credentials and wildcard are mutually
+// exclusive per the CORS spec.
+func corsFromEnv() func(http.Handler) http.Handler {
+	raw := strings.TrimSpace(os.Getenv("CORS_ALLOWED_ORIGINS"))
+	if raw == "" {
+		return nil
+	}
+	var origins []string
+	wildcard := false
+	for _, o := range strings.Split(raw, ",") {
+		o = strings.TrimSpace(o)
+		if o == "" {
+			continue
+		}
+		if o == "*" {
+			wildcard = true
+		}
+		origins = append(origins, o)
+	}
+	if len(origins) == 0 {
+		return nil
+	}
+	opts := []handlers.CORSOption{
+		handlers.AllowedOrigins(origins),
 		handlers.AllowedMethods([]string{"GET", "POST", "PUT", "DELETE", "OPTIONS"}),
 		handlers.AllowedHeaders([]string{"Content-Type", "Authorization"}),
-	)
-	return cors(r)
+	}
+	if !wildcard {
+		opts = append(opts, handlers.AllowCredentials())
+	}
+	return handlers.CORS(opts...)
 }
 
 // writeJSON encodes v as JSON with the given status code.
@@ -229,16 +273,16 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.logins.recordSuccess(ip)
-		setSessionCookie(w, s.SessionSecret, user.ID)
+		setSessionCookie(w, s.SessionSecret, user.ID, user.TokenVersion, isSecureRequest(r))
 		writeJSON(w, http.StatusOK, map[string]string{"username": user.Username})
 		return
 	}
-	setSessionCookie(w, s.SessionSecret, body.Username)
+	setSessionCookie(w, s.SessionSecret, body.Username, 0, isSecureRequest(r))
 	writeJSON(w, http.StatusOK, map[string]string{"username": body.Username})
 }
 
-func (s *Server) handleLogout(w http.ResponseWriter, _ *http.Request) {
-	clearSessionCookie(w)
+func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
+	clearSessionCookie(w, isSecureRequest(r))
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
