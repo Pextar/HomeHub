@@ -16,9 +16,13 @@ import (
 )
 
 func (s *Server) getSockets(w http.ResponseWriter, r *http.Request) {
+	user := currentUser(r)
 	s.Store.Mu.RLock()
 	result := make([]*store.Socket, 0, len(s.Store.Sockets))
 	for _, sock := range s.Store.Sockets {
+		if !canAccess(user, sock.ID) {
+			continue
+		}
 		result = append(result, sock)
 	}
 	s.Store.Mu.RUnlock()
@@ -69,6 +73,9 @@ func (s *Server) createSocket(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) getSocket(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
+	if !s.requireSocketAccess(w, r, id) {
+		return
+	}
 
 	s.Store.Mu.RLock()
 	socket, ok := s.Store.Sockets[id]
@@ -110,6 +117,8 @@ func (s *Server) updateSocket(w http.ResponseWriter, r *http.Request) {
 	if room := strings.TrimSpace(updates.Room); room != "" {
 		socket.Room = room
 	}
+	// Emoji is set unconditionally so an admin can also clear it.
+	socket.Emoji = strings.TrimSpace(updates.Emoji)
 
 	if err := s.Store.Save(); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
@@ -123,6 +132,9 @@ func (s *Server) updateSocket(w http.ResponseWriter, r *http.Request) {
 // to send a full PUT payload.
 func (s *Server) toggleFavorite(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
+	if !s.requireSocketAccess(w, r, id) {
+		return
+	}
 	s.Store.Mu.Lock()
 	defer s.Store.Mu.Unlock()
 	socket, ok := s.Store.Sockets[id]
@@ -161,6 +173,9 @@ func (s *Server) deleteSocket(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) setSocketState(w http.ResponseWriter, r *http.Request, target *bool) {
 	id := mux.Vars(r)["id"]
+	if !s.requireSocketAccess(w, r, id) {
+		return
+	}
 
 	s.Store.Mu.Lock()
 	defer s.Store.Mu.Unlock()
@@ -267,12 +282,16 @@ func (s *Server) turnOff(w http.ResponseWriter, r *http.Request) {
 // It returns the number of successes and a list of failures.
 func (s *Server) bulkSetState(target bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		user := currentUser(r)
 		s.Store.Mu.Lock()
 		defer s.Store.Mu.Unlock()
 
 		var ok int
 		failures := make([]map[string]string, 0)
 		for _, sock := range s.Store.Sockets {
+			if !canAccess(user, sock.ID) {
+				continue
+			}
 			if err := s.Store.ApplyState(sock, &target); err != nil {
 				failures = append(failures, map[string]string{
 					"socket_id": sock.ID,

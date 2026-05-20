@@ -1,7 +1,7 @@
 <script lang="ts">
   import Icon from "./Icon.svelte";
   import ConfirmModal from "./ConfirmModal.svelte";
-  import { route, theme, data } from "../lib/stores.svelte";
+  import { route, theme, data, session } from "../lib/stores.svelte";
   import { api } from "../lib/api";
   import { openModal } from "../lib/modal.svelte";
   import { fly, fade } from "svelte/transition";
@@ -27,24 +27,27 @@
     window.location.reload();
   }
 
-  type NavItem = { route: Route; icon: any; label: string };
+  type NavItem = { route: Route; icon: any; label: string; admin?: boolean };
 
   // First four are surfaced as primary tabs in the mobile bottom nav.
   // The rest move into the "More" drawer on mobile, but all six show in
-  // the desktop sidebar.
+  // the desktop sidebar. Items marked `admin` are hidden from non-admin
+  // profiles, who only get Dashboard + Devices.
   const PRIMARY_COUNT = 4;
-  const items: NavItem[] = [
+  const allItems: NavItem[] = [
     { route: "dashboard", icon: "home", label: "Dashboard" },
     { route: "sockets", icon: "socket", label: "Devices" },
-    { route: "groups", icon: "groups", label: "Groups" },
-    { route: "schedules", icon: "clock", label: "Schedules" },
-    { route: "floorplan", icon: "map", label: "Floor plan" },
-    { route: "sensors", icon: "sensor", label: "Sensors" },
-    { route: "scenes", icon: "scenes", label: "Scenes" },
-    { route: "settings", icon: "settings", label: "Settings" },
+    { route: "groups", icon: "groups", label: "Groups", admin: true },
+    { route: "schedules", icon: "clock", label: "Schedules", admin: true },
+    { route: "floorplan", icon: "map", label: "Floor plan", admin: true },
+    { route: "sensors", icon: "sensor", label: "Sensors", admin: true },
+    { route: "scenes", icon: "scenes", label: "Scenes", admin: true },
+    { route: "users", icon: "user", label: "Profiles", admin: true },
+    { route: "settings", icon: "settings", label: "Settings", admin: true },
   ];
-  const primary = items.slice(0, PRIMARY_COUNT);
-  const overflow = items.slice(PRIMARY_COUNT);
+  const items = $derived(allItems.filter((i) => session.isAdmin || !i.admin));
+  const primary = $derived(items.slice(0, PRIMARY_COUNT));
+  const overflow = $derived(items.slice(PRIMARY_COUNT));
 
   let moreOpen = $state(false);
   // When true, the drawer out-transitions are instant so nav-item taps
@@ -235,6 +238,13 @@
   </nav>
 
   <div class="footer">
+    {#if session.user?.username}
+      <div class="profile" title={session.user.username}>
+        <Icon name={session.user.admin ? "settings" : "socket"} size={14} />
+        <span class="profile-name">{session.user.username}</span>
+        {#if session.user.admin}<span class="profile-tag">Admin</span>{/if}
+      </div>
+    {/if}
     <button
       class="theme-toggle"
       aria-label="Toggle theme"
@@ -423,6 +433,33 @@
     gap: var(--space-3);
     padding-top: var(--space-4);
     border-top: 1px solid var(--border);
+  }
+  .profile {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: 0 var(--space-3) var(--space-1);
+    color: var(--text-muted);
+    font-size: 13px;
+    min-width: 0;
+  }
+  .profile-name {
+    font-weight: 600;
+    color: var(--text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .profile-tag {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--primary);
+    background: var(--primary-soft);
+    padding: 1px 6px;
+    border-radius: 999px;
+    flex-shrink: 0;
   }
   .theme-toggle {
     display: flex;

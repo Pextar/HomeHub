@@ -118,13 +118,31 @@ The systemd unit assumes the SSH user is `pi`; if not, edit
 `deploy/rf-controller.service` (User= and the WorkingDirectory paths)
 before `scripts/build-pi.sh`.
 
-### Authentication
+### Authentication & profiles
 
-The server reads `AUTH_USER` and `AUTH_PASS` from the environment. When
-both are set, every HTTP request requires HTTP Basic Auth — browsers
-prompt once and remember credentials for the session, and the PWA install
-keeps working. Leave both blank to disable auth (NOT recommended on
-shared networks).
+Login uses named **profiles** stored on the server (in `data/users.json`,
+passwords bcrypt-hashed). On first start, `AUTH_USER` and `AUTH_PASS` seed
+an initial **admin** profile — set them once, then manage everyone from
+the app's **Settings → Profiles**. Once any profile exists the env vars are
+ignored (they only seed an empty install). Leave both blank on a brand-new
+install to disable auth entirely (NOT recommended on shared networks).
+
+Profiles come in two kinds:
+
+- **Admin** — full access to every device and all settings, and can
+  create/edit/delete other profiles. Signs in with **username + password**.
+- **Limited** — sees and controls only the devices an admin assigns to it;
+  groups, scenes, schedules, sensors and settings are hidden. Signs in with
+  a **6-digit login code** the app generates (no password) — the admin
+  shares it from Settings → Profiles and can regenerate it anytime. Access
+  is enforced server-side, so a hidden device can't be reached by API
+  either.
+
+The login page asks for a code by default, with a "Sign in as admin" link
+that reveals the username + password form. The SPA uses a cookie session;
+scripted clients (curl, iOS Shortcuts) can still use HTTP Basic Auth with
+an admin's credentials. Login codes are short by design — they're a
+local-network convenience, not a hardened secret.
 
 ### Build on the Pi instead (alternative)
 

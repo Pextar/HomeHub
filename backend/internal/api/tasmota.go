@@ -73,6 +73,9 @@ func (s *Server) tasmotaProbe(w http.ResponseWriter, r *http.Request) {
 // tasmotaIP resolves the Tasmota device IP for a socket.
 func (s *Server) tasmotaIP(w http.ResponseWriter, r *http.Request) (string, bool) {
 	id := mux.Vars(r)["socketId"]
+	if !s.requireSocketAccess(w, r, id) {
+		return "", false
+	}
 	s.Store.Mu.RLock()
 	sock, ok := s.Store.Sockets[id]
 	var ip string

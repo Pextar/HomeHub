@@ -73,6 +73,12 @@ func main() {
 		SPADir:        "./frontend/dist",
 	}
 
+	// Seed an admin from AUTH_USER/AUTH_PASS on first run (no-op once any
+	// user exists). Keeps legacy single-credential setups working.
+	if err := server.Bootstrap(); err != nil {
+		log.Fatalf("failed to bootstrap admin user: %v", err)
+	}
+
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"

@@ -1,5 +1,5 @@
 import { api } from "./api";
-import type { Socket, Schedule, Group, Scene, Timer, RoomSummary, ToastSpec, Route, ActivityEntry, Sensor, Settings } from "./types";
+import type { Socket, Schedule, Group, Scene, Timer, RoomSummary, ToastSpec, Route, ActivityEntry, Sensor, Settings, User } from "./types";
 
 // Reactive global state. Svelte 5 runes ($state) make any property mutation
 // trigger downstream reactivity in components that read these values.
@@ -22,26 +22,31 @@ function createDataStore() {
 
   async function refresh() {
     try {
-      const [sockets, schedules, groups, scenes, timers, rooms, activity, sensors, settings] = await Promise.all([
-        api.listSockets(),
-        api.listSchedules(),
-        api.listGroups(),
-        api.listScenes(),
-        api.listTimers(),
-        api.listRooms(),
-        api.listActivity(20),
-        api.listSensors(),
-        api.getSettings(),
-      ]);
+      // Sockets and rooms are visible to every profile (filtered server-side
+      // to the caller's allowed set). The rest are admin-only — fetching them
+      // as a non-admin would 401/403, so we skip them entirely.
+      const [sockets, rooms] = await Promise.all([api.listSockets(), api.listRooms()]);
       data.sockets = sockets ?? [];
-      data.schedules = schedules ?? [];
-      data.groups = groups ?? [];
-      data.scenes = scenes ?? [];
-      data.timers = timers ?? [];
       data.rooms = rooms ?? [];
-      data.activity = activity ?? [];
-      data.sensors = sensors ?? [];
-      data.settings = settings ?? { latitude: 0, longitude: 0 };
+
+      if (session.isAdmin) {
+        const [schedules, groups, scenes, timers, activity, sensors, settings] = await Promise.all([
+          api.listSchedules(),
+          api.listGroups(),
+          api.listScenes(),
+          api.listTimers(),
+          api.listActivity(20),
+          api.listSensors(),
+          api.getSettings(),
+        ]);
+        data.schedules = schedules ?? [];
+        data.groups = groups ?? [];
+        data.scenes = scenes ?? [];
+        data.timers = timers ?? [];
+        data.activity = activity ?? [];
+        data.sensors = sensors ?? [];
+        data.settings = settings ?? { latitude: 0, longitude: 0 };
+      }
       data.loaded = true;
     } catch (e) {
       toasts.error("Failed to load data", (e as Error).message);
@@ -96,7 +101,7 @@ function createToastStore() {
 }
 
 function createRouteStore() {
-  const valid: Route[] = ["dashboard", "floorplan", "sockets", "groups", "scenes", "schedules", "sensors", "settings"];
+  const valid: Route[] = ["dashboard", "floorplan", "sockets", "groups", "scenes", "schedules", "sensors", "users", "settings"];
   const current = $state<{ route: Route }>({ route: parse() });
 
   function parse(): Route {
@@ -137,6 +142,31 @@ function createThemeStore() {
   };
 }
 
+// Current login profile. Loaded once after auth; drives which sockets are
+// visible and whether admin-only UI (Groups, Scenes, Settings, …) shows.
+function createSessionStore() {
+  const s = $state<{ user: User | null; loaded: boolean }>({ user: null, loaded: false });
+
+  async function load() {
+    try {
+      s.user = await api.me();
+    } catch {
+      s.user = null;
+    }
+    s.loaded = true;
+  }
+
+  return {
+    get user() { return s.user; },
+    get loaded() { return s.loaded; },
+    // Default to admin when we couldn't load a profile (e.g. server-side
+    // auth is off), so the app stays fully usable rather than locking down.
+    get isAdmin() { return s.user?.admin ?? true; },
+    load,
+  };
+}
+
+export const session = createSessionStore();
 export const data = createDataStore();
 export const toasts = createToastStore();
 export const route = createRouteStore();

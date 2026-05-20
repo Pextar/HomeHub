@@ -4,12 +4,12 @@
 package api
 
 import (
-	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gorilla/handlers"
@@ -43,11 +43,13 @@ func (s *Server) Handler() http.Handler {
 	r := mux.NewRouter()
 	r.Use(loggingMiddleware)
 
-	authEnabled := s.AuthUser != "" && s.AuthPass != ""
+	s.Store.Mu.RLock()
+	authEnabled := len(s.Store.Users) > 0
+	s.Store.Mu.RUnlock()
 	if authEnabled {
-		log.Printf("HTTP auth enabled for user %q (cookie session + basic fallback)", s.AuthUser)
+		log.Printf("HTTP auth enabled (cookie session + basic fallback)")
 	} else {
-		log.Printf("HTTP auth DISABLED — set AUTH_USER and AUTH_PASS to enable")
+		log.Printf("HTTP auth DISABLED — no users configured; set AUTH_USER and AUTH_PASS to seed an admin")
 	}
 
 	// Auth endpoints are public — the SPA needs to reach /api/login without
@@ -57,18 +59,26 @@ func (s *Server) Handler() http.Handler {
 
 	api := r.PathPrefix("/api").Subrouter()
 	if authEnabled {
-		api.Use(authMiddleware(s.AuthUser, s.AuthPass, s.SessionSecret))
+		api.Use(s.authMiddleware)
 	}
 	api.HandleFunc("/health", s.getHealth).Methods("GET")
 
+	api.HandleFunc("/me", s.getMe).Methods("GET")
+	api.HandleFunc("/users", s.requireAdmin(s.listUsers)).Methods("GET")
+	api.HandleFunc("/users", s.requireAdmin(s.createUser)).Methods("POST")
+	api.HandleFunc("/users/{id}", s.requireAdmin(s.updateUser)).Methods("PUT")
+	api.HandleFunc("/users/{id}", s.requireAdmin(s.deleteUser)).Methods("DELETE")
+
+	// Sockets: lists are filtered to the caller's allowed set, control
+	// endpoints are gated per-socket, and create/edit/delete are admin-only.
 	api.HandleFunc("/sockets", s.getSockets).Methods("GET")
-	api.HandleFunc("/sockets", s.createSocket).Methods("POST")
-	api.HandleFunc("/sockets/learn", s.learnSocket).Methods("POST")
+	api.HandleFunc("/sockets", s.requireAdmin(s.createSocket)).Methods("POST")
+	api.HandleFunc("/sockets/learn", s.requireAdmin(s.learnSocket)).Methods("POST")
 	api.HandleFunc("/sockets/all/on", s.bulkSetState(true)).Methods("POST")
 	api.HandleFunc("/sockets/all/off", s.bulkSetState(false)).Methods("POST")
 	api.HandleFunc("/sockets/{id}", s.getSocket).Methods("GET")
-	api.HandleFunc("/sockets/{id}", s.updateSocket).Methods("PUT")
-	api.HandleFunc("/sockets/{id}", s.deleteSocket).Methods("DELETE")
+	api.HandleFunc("/sockets/{id}", s.requireAdmin(s.updateSocket)).Methods("PUT")
+	api.HandleFunc("/sockets/{id}", s.requireAdmin(s.deleteSocket)).Methods("DELETE")
 	api.HandleFunc("/sockets/{id}/toggle", s.toggleSocket).Methods("POST")
 	api.HandleFunc("/sockets/{id}/on", s.turnOn).Methods("POST")
 	api.HandleFunc("/sockets/{id}/off", s.turnOff).Methods("POST")
@@ -79,53 +89,56 @@ func (s *Server) Handler() http.Handler {
 	api.HandleFunc("/rooms/{room}/on", s.roomSetState(true)).Methods("POST")
 	api.HandleFunc("/rooms/{room}/off", s.roomSetState(false)).Methods("POST")
 
-	api.HandleFunc("/schedules", s.getSchedules).Methods("GET")
-	api.HandleFunc("/schedules", s.createSchedule).Methods("POST")
-	api.HandleFunc("/schedules/{id}", s.updateSchedule).Methods("PUT")
-	api.HandleFunc("/schedules/{id}", s.deleteSchedule).Methods("DELETE")
+	// Everything below is admin-only: a non-admin's app is just their
+	// devices and the dashboard, so groups/scenes/schedules/sensors/
+	// settings management never reaches them.
+	api.HandleFunc("/schedules", s.requireAdmin(s.getSchedules)).Methods("GET")
+	api.HandleFunc("/schedules", s.requireAdmin(s.createSchedule)).Methods("POST")
+	api.HandleFunc("/schedules/{id}", s.requireAdmin(s.updateSchedule)).Methods("PUT")
+	api.HandleFunc("/schedules/{id}", s.requireAdmin(s.deleteSchedule)).Methods("DELETE")
 
-	api.HandleFunc("/groups", s.getGroups).Methods("GET")
-	api.HandleFunc("/groups", s.createGroup).Methods("POST")
-	api.HandleFunc("/groups/{id}", s.getGroup).Methods("GET")
-	api.HandleFunc("/groups/{id}", s.updateGroup).Methods("PUT")
-	api.HandleFunc("/groups/{id}", s.deleteGroup).Methods("DELETE")
-	api.HandleFunc("/groups/{id}/on", s.groupAction("on")).Methods("POST")
-	api.HandleFunc("/groups/{id}/off", s.groupAction("off")).Methods("POST")
-	api.HandleFunc("/groups/{id}/toggle", s.groupAction("toggle")).Methods("POST")
+	api.HandleFunc("/groups", s.requireAdmin(s.getGroups)).Methods("GET")
+	api.HandleFunc("/groups", s.requireAdmin(s.createGroup)).Methods("POST")
+	api.HandleFunc("/groups/{id}", s.requireAdmin(s.getGroup)).Methods("GET")
+	api.HandleFunc("/groups/{id}", s.requireAdmin(s.updateGroup)).Methods("PUT")
+	api.HandleFunc("/groups/{id}", s.requireAdmin(s.deleteGroup)).Methods("DELETE")
+	api.HandleFunc("/groups/{id}/on", s.requireAdmin(s.groupAction("on"))).Methods("POST")
+	api.HandleFunc("/groups/{id}/off", s.requireAdmin(s.groupAction("off"))).Methods("POST")
+	api.HandleFunc("/groups/{id}/toggle", s.requireAdmin(s.groupAction("toggle"))).Methods("POST")
 
-	api.HandleFunc("/scenes", s.getScenes).Methods("GET")
-	api.HandleFunc("/scenes", s.createScene).Methods("POST")
-	api.HandleFunc("/scenes/{id}", s.getScene).Methods("GET")
-	api.HandleFunc("/scenes/{id}", s.updateScene).Methods("PUT")
-	api.HandleFunc("/scenes/{id}", s.deleteScene).Methods("DELETE")
-	api.HandleFunc("/scenes/{id}/activate", s.activateScene).Methods("POST")
+	api.HandleFunc("/scenes", s.requireAdmin(s.getScenes)).Methods("GET")
+	api.HandleFunc("/scenes", s.requireAdmin(s.createScene)).Methods("POST")
+	api.HandleFunc("/scenes/{id}", s.requireAdmin(s.getScene)).Methods("GET")
+	api.HandleFunc("/scenes/{id}", s.requireAdmin(s.updateScene)).Methods("PUT")
+	api.HandleFunc("/scenes/{id}", s.requireAdmin(s.deleteScene)).Methods("DELETE")
+	api.HandleFunc("/scenes/{id}/activate", s.requireAdmin(s.activateScene)).Methods("POST")
 
-	api.HandleFunc("/timers", s.getTimers).Methods("GET")
-	api.HandleFunc("/timers", s.createTimer).Methods("POST")
-	api.HandleFunc("/timers/{id}", s.deleteTimer).Methods("DELETE")
+	api.HandleFunc("/timers", s.requireAdmin(s.getTimers)).Methods("GET")
+	api.HandleFunc("/timers", s.requireAdmin(s.createTimer)).Methods("POST")
+	api.HandleFunc("/timers/{id}", s.requireAdmin(s.deleteTimer)).Methods("DELETE")
 
-	api.HandleFunc("/sensors", s.getSensors).Methods("GET")
-	api.HandleFunc("/sensors", s.createSensor).Methods("POST")
-	api.HandleFunc("/sensors/pair/start", s.startSensorPair).Methods("POST")
-	api.HandleFunc("/sensors/discover", s.listDiscoveryCandidates).Methods("GET")
-	api.HandleFunc("/sensors/{id}", s.updateSensor).Methods("PUT")
-	api.HandleFunc("/sensors/{id}", s.deleteSensor).Methods("DELETE")
-	api.HandleFunc("/sensors/{id}/readings", s.getSensorReadings).Methods("GET")
-	api.HandleFunc("/sensors/{id}/readings", s.postSensorReading).Methods("POST")
+	api.HandleFunc("/sensors", s.requireAdmin(s.getSensors)).Methods("GET")
+	api.HandleFunc("/sensors", s.requireAdmin(s.createSensor)).Methods("POST")
+	api.HandleFunc("/sensors/pair/start", s.requireAdmin(s.startSensorPair)).Methods("POST")
+	api.HandleFunc("/sensors/discover", s.requireAdmin(s.listDiscoveryCandidates)).Methods("GET")
+	api.HandleFunc("/sensors/{id}", s.requireAdmin(s.updateSensor)).Methods("PUT")
+	api.HandleFunc("/sensors/{id}", s.requireAdmin(s.deleteSensor)).Methods("DELETE")
+	api.HandleFunc("/sensors/{id}/readings", s.requireAdmin(s.getSensorReadings)).Methods("GET")
+	api.HandleFunc("/sensors/{id}/readings", s.requireAdmin(s.postSensorReading)).Methods("POST")
 
-	api.HandleFunc("/activity", s.getActivity).Methods("GET")
-	api.HandleFunc("/shortcut-auth", s.getShortcutAuth).Methods("GET")
+	api.HandleFunc("/activity", s.requireAdmin(s.getActivity)).Methods("GET")
+	api.HandleFunc("/shortcut-auth", s.requireAdmin(s.getShortcutAuth)).Methods("GET")
 
 	api.HandleFunc("/settings", s.getSettings).Methods("GET")
-	api.HandleFunc("/settings", s.updateSettings).Methods("PUT")
+	api.HandleFunc("/settings", s.requireAdmin(s.updateSettings)).Methods("PUT")
 
-	api.HandleFunc("/tasmota/probe", s.tasmotaProbe).Methods("GET")
+	api.HandleFunc("/tasmota/probe", s.requireAdmin(s.tasmotaProbe)).Methods("GET")
 	api.HandleFunc("/tasmota/{socketId}", s.tasmotaGetState).Methods("GET")
 	api.HandleFunc("/tasmota/{socketId}/state", s.tasmotaSetState).Methods("PUT")
 
-	api.HandleFunc("/matter/devices", s.matterListDevices).Methods("GET")
-	api.HandleFunc("/matter/commission", s.matterCommission).Methods("POST")
-	api.HandleFunc("/matter/commission/jobs/{id}", s.matterCommissionJob).Methods("GET")
+	api.HandleFunc("/matter/devices", s.requireAdmin(s.matterListDevices)).Methods("GET")
+	api.HandleFunc("/matter/commission", s.requireAdmin(s.matterCommission)).Methods("POST")
+	api.HandleFunc("/matter/commission/jobs/{id}", s.requireAdmin(s.matterCommissionJob)).Methods("GET")
 	api.HandleFunc("/matter/{socketId}", s.matterGetState).Methods("GET")
 	api.HandleFunc("/matter/{socketId}/state", s.matterSetState).Methods("PUT")
 
@@ -153,24 +166,40 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
 }
 
-// handleLogin verifies credentials and sets the session cookie. Empty
-// AUTH_USER/AUTH_PASS means "auth is off" — we still accept the call so
-// the frontend's flow works uniformly, but the cookie is meaningless.
+// handleLogin verifies credentials against the stored users and sets the
+// session cookie. When no users exist auth is off — we still accept the
+// call so the frontend's flow works uniformly, but the cookie is unused.
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
+		Code     string `json:"code"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request")
 		return
 	}
-	if s.AuthUser != "" && s.AuthPass != "" {
-		if subtle.ConstantTimeCompare([]byte(body.Username), []byte(s.AuthUser)) != 1 ||
-			subtle.ConstantTimeCompare([]byte(body.Password), []byte(s.AuthPass)) != 1 {
+
+	s.Store.Mu.RLock()
+	authEnabled := len(s.Store.Users) > 0
+	s.Store.Mu.RUnlock()
+
+	if authEnabled {
+		// A login code is the single credential for limited profiles;
+		// admins use username + password. Try whichever was supplied.
+		var user *store.User
+		if strings.TrimSpace(body.Code) != "" {
+			user = s.verifyLoginCode(body.Code)
+		} else {
+			user = s.verifyCredentials(body.Username, body.Password)
+		}
+		if user == nil {
 			writeError(w, http.StatusUnauthorized, "invalid credentials")
 			return
 		}
+		setSessionCookie(w, s.SessionSecret, user.Username)
+		writeJSON(w, http.StatusOK, map[string]string{"username": user.Username})
+		return
 	}
 	setSessionCookie(w, s.SessionSecret, body.Username)
 	writeJSON(w, http.StatusOK, map[string]string{"username": body.Username})

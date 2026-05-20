@@ -21,6 +21,7 @@ func (s *Server) roomSetState(target bool) http.HandlerFunc {
 			return
 		}
 
+		user := currentUser(r)
 		s.Store.Mu.Lock()
 		defer s.Store.Mu.Unlock()
 
@@ -28,7 +29,7 @@ func (s *Server) roomSetState(target bool) http.HandlerFunc {
 		failures := make([]map[string]string, 0)
 		var matched bool
 		for _, sock := range s.Store.Sockets {
-			if !strings.EqualFold(sock.Room, room) {
+			if !strings.EqualFold(sock.Room, room) || !canAccess(user, sock.ID) {
 				continue
 			}
 			matched = true
@@ -74,9 +75,13 @@ func (s *Server) getRooms(w http.ResponseWriter, r *http.Request) {
 		Sockets int    `json:"sockets"`
 		On      int    `json:"on"`
 	}
+	user := currentUser(r)
 	s.Store.Mu.RLock()
 	byName := make(map[string]*roomSummary)
 	for _, sock := range s.Store.Sockets {
+		if !canAccess(user, sock.ID) {
+			continue
+		}
 		name := sock.Room
 		if name == "" {
 			name = "Unassigned"

@@ -15,6 +15,10 @@
     let room     = $state(untrack(() => existing?.room     ?? ""));
     let code     = $state(untrack(() => existing?.code     ?? ""));
     let protocol = $state(untrack(() => existing?.protocol || "nexa"));
+    let emoji    = $state(untrack(() => existing?.emoji    ?? ""));
+
+    // Quick-pick set shown in kid mode. Tapping the active one clears it.
+    const EMOJI_CHOICES = ["💡", "🛏️", "🌟", "🚀", "🦕", "🐙", "🌈", "🎮", "📺", "🎄", "🔦", "🛋️"];
 
     const isEdit     = $derived(!!existing);
     const isTasmota  = $derived(protocol === "tasmota");
@@ -64,7 +68,7 @@
     }
 
     async function save() {
-        const payload = { name: name.trim(), room: room.trim(), code: code.trim(), protocol };
+        const payload = { name: name.trim(), room: room.trim(), code: code.trim(), protocol, emoji };
         if (!payload.name || !payload.code) {
             const missing = isTasmota ? "device IP"
                           : isMatter  ? "Matter node id (commission a device first)"
@@ -141,6 +145,17 @@
                         {/each}
                     </datalist>
                 </div>
+                <div class="field" style="margin-top:var(--space-4)">
+                    <span class="field-label">Icon <span class="opt">(for kid mode)</span></span>
+                    <div class="emoji-grid" role="group" aria-label="Pick an icon">
+                        {#each EMOJI_CHOICES as e}
+                            <button type="button" class="emoji-btn" class:active={emoji === e}
+                                aria-pressed={emoji === e}
+                                onclick={() => emoji = emoji === e ? "" : e}>{e}</button>
+                        {/each}
+                    </div>
+                    <div class="field-help">Shown big on this lamp's tile for kid profiles. Tap again to clear.</div>
+                </div>
                 <div class="field-row" style="margin-top:var(--space-4)">
                     <div class="field">
                         <label for="sock-proto">Protocol</label>
@@ -200,6 +215,29 @@
 
 <style>
     .opt { color: var(--text-muted); font-weight: 400; font-size: 12px; }
+    .emoji-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(44px, 1fr));
+        gap: 6px;
+    }
+    .emoji-btn {
+        font-size: 22px;
+        line-height: 1;
+        aspect-ratio: 1;
+        display: grid;
+        place-items: center;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        background: var(--surface);
+        cursor: pointer;
+        transition: transform var(--t-fast), border-color var(--t-fast), background var(--t-fast);
+    }
+    .emoji-btn:hover { background: var(--surface-hover); transform: translateY(-1px); }
+    .emoji-btn.active {
+        border-color: var(--primary);
+        background: var(--primary-soft);
+        box-shadow: 0 0 0 2px var(--primary-glow);
+    }
 
     .matter-lead {
         margin-top: var(--space-4);
