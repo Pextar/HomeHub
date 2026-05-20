@@ -144,6 +144,9 @@
     const selectedCell = $derived(cells.find(c => c.name === selectedRoom) ?? null);
 
     function pickRoom(name: string) {
+        // On desktop the grid stays clickable beside the docked panel, so a
+        // room tap also bows out of the create flow.
+        creating = false;
         selectedRoom = selectedRoom === name ? null : name;
     }
 
@@ -152,6 +155,7 @@
     function toggleEdit() {
         editing = !editing;
         selectedRoom = null;
+        creating = false;
     }
 
     // ── Control actions (normal mode) ────────────────────────────────
@@ -225,6 +229,13 @@
         roomEmoji = { ...roomEmoji, [name]: emoji };
         emojiPickerOpen = false;
     }
+
+    // Which sheet (if any) is showing. The room panel and the create sheet
+    // are mutually exclusive; on desktop one of them docks beside the grid.
+    const roomPanelOpen = $derived(
+        !!selectedCell && !creating && (editing || !selectedCell.isDraft),
+    );
+    const panelOpen = $derived(roomPanelOpen || creating);
 
     // Rename a room. For real rooms, bulk-update every socket that lives
     // there; for drafts, just update the draft entry.
@@ -352,11 +363,13 @@
         await moveSocketToRoom(sock, target);
     }
 
-    // Lock the page behind the sheet/dialog so the floor plan doesn't scroll
-    // under it — on both the mobile bottom sheet and the desktop modal.
+    // Lock the page behind the bottom sheet on mobile so the floor plan
+    // doesn't scroll under it. On desktop the panel docks inline beside the
+    // grid, so the page stays scrollable.
     $effect(() => {
         if (!selectedRoom && !creating) return;
         if (typeof window === "undefined") return;
+        if (!window.matchMedia("(max-width: 900px)").matches) return;
         const prev = document.body.style.overflow;
         document.body.style.overflow = "hidden";
         return () => { document.body.style.overflow = prev; };
@@ -446,7 +459,9 @@
     </div>
 </div>
 
-<!-- ── Floor plan grid ──────────────────────────────────────────── -->
+<!-- ── Floor plan stage: grid on the left, docked panel on the right ─ -->
+<div class="stage" class:has-panel={panelOpen}>
+<div class="stage-grid">
 {#if cells.length === 0 && !editing}
     <div class="empty">
         <div class="empty-emoji" aria-hidden="true">🏠</div>
@@ -507,9 +522,10 @@
         </div>
     </div>
 {/if}
+</div><!-- /.stage-grid -->
 
-<!-- ── Selected room panel (bottom sheet on mobile, inline on desktop) ─ -->
-{#if selectedCell && (editing || !selectedCell.isDraft)}
+<!-- ── Selected room panel (docked beside grid on desktop, sheet on mobile) ─ -->
+{#if roomPanelOpen && selectedCell}
     <div class="sheet-root"
         role="presentation"
         onclick={(e) => { if (e.target === e.currentTarget) selectedRoom = null; }}
@@ -722,6 +738,7 @@
         </div>
     </div>
 {/if}
+</div><!-- /.stage -->
 
 <!-- ── Unassigned sockets ───────────────────────────────────────── -->
 {#if unassigned.length > 0}
@@ -943,33 +960,32 @@
     .empty p { margin: 0; font-weight: 600; color: var(--text-muted); font-size: 15px; }
     .empty span { font-size: 13px; max-width: 280px; }
 
+    /* ── Stage: grid + docked panel ───────────────────── */
+    /* Desktop ≥901px: two columns — grid flexes, panel docks on the right.
+       Mobile ≤900px: single column; the panel escapes as a bottom sheet. */
+    .stage { display: flex; min-width: 0; }
+    .stage-grid { flex: 1; min-width: 0; }
+    @media (min-width: 901px) {
+        .stage { gap: var(--space-4); align-items: flex-start; }
+    }
+
     /* ── Sheet wrapper ────────────────────────────────── */
-    /* Desktop: a centered modal dialog over a dimmed backdrop.
-       Mobile: full-viewport backdrop with the panel docked to the bottom. */
-    .sheet-root {
-        position: fixed;
-        inset: 0;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        padding: var(--space-6);
-        background: rgba(8, 11, 22, 0.5);
-        backdrop-filter: blur(4px);
-        -webkit-backdrop-filter: blur(4px);
-        z-index: 120;
-        overscroll-behavior: contain;
-    }
-    :global([data-theme="light"]) .sheet-root {
-        background: rgba(20, 24, 38, 0.40);
-    }
+    /* Desktop: a transparent pass-through so the panel flows into the stage
+       as a column. Mobile: full-viewport backdrop, panel docked to bottom. */
+    .sheet-root { display: contents; }
 
     @media (max-width: 900px) {
         .sheet-root {
+            display: flex;
+            position: fixed;
+            inset: 0;
             align-items: flex-end;
-            padding: 0;
+            justify-content: center;
             background: rgba(8, 11, 22, 0.45);
             backdrop-filter: blur(3px);
             -webkit-backdrop-filter: blur(3px);
+            z-index: 120;
+            overscroll-behavior: contain;
         }
         :global([data-theme="light"]) .sheet-root {
             background: rgba(20, 24, 38, 0.30);
@@ -999,23 +1015,27 @@
 
     /* ── Panel (control + edit) ───────────────────────── */
     .panel {
-        width: 100%;
-        max-width: 460px;
-        max-height: min(82vh, 760px);
+        /* Desktop: a docked side column that sticks as you scroll the grid. */
+        width: 360px;
+        flex-shrink: 0;
+        position: sticky;
+        top: var(--space-6);
+        max-height: calc(100vh - var(--space-6) * 2);
         background: var(--bg-elevated);
         border: 1px solid var(--border);
         border-radius: var(--radius-lg);
         overflow: hidden;
-        box-shadow: var(--shadow-lg), inset 4px 0 0 var(--primary);
+        box-shadow: var(--shadow-md), inset 4px 0 0 var(--primary);
         display: flex;
         flex-direction: column;
         min-height: 0;
     }
-    .panel.edit { box-shadow: var(--shadow-lg), inset 4px 0 0 var(--warn); }
+    .panel.edit { box-shadow: var(--shadow-md), inset 4px 0 0 var(--warn); }
 
     /* Mobile: dock as a sheet, rounded top corners, frosted look */
     @media (max-width: 900px) {
         .panel {
+            position: static;
             width: 100%;
             max-width: none;
             max-height: 85vh;
