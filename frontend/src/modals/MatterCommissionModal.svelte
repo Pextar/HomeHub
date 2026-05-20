@@ -418,4 +418,9 @@
         text-decoration: underline;
         text-underline-offset: 2px;
     }
+
+    @media (pointer: coarse) {
+        .tab { padding: 12px; font-size: 15px; }
+        .link-btn { padding: 8px 4px; }
+    }
 </style>

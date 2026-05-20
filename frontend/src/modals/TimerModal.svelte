@@ -73,11 +73,10 @@
             </div>
             <div class="field" style="margin-top:var(--space-4)">
                 <label for="timer-custom">Custom</label>
-                <div style="display:flex; gap:8px; align-items:center">
+                <div class="custom-row">
                     <input id="timer-custom" type="number" min="1"
                         placeholder="Minutes"
-                        bind:value={customMins}
-                        style="max-width:160px" />
+                        bind:value={customMins} />
                     <button type="submit" class="btn btn-primary">Set custom timer</button>
                 </div>
                 <div class="field-help">Pick any number of minutes.</div>
@@ -96,4 +95,14 @@
         gap: var(--space-2);
     }
     .presets :global(.btn) { flex: 0 0 auto; }
+
+    .custom-row { display: flex; gap: 8px; align-items: center; }
+    .custom-row input { max-width: 160px; }
+
+    /* Phones: stack so the long button label never crushes the input. */
+    @media (max-width: 600px) {
+        .custom-row { flex-direction: column; align-items: stretch; }
+        .custom-row input { max-width: none; }
+        .custom-row :global(.btn) { width: 100%; }
+    }
 </style>

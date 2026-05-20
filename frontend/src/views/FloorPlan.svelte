@@ -949,6 +949,13 @@
        the global 32 px icon-btn is below Apple HIG / Material guidance. */
     @media (max-width: 600px) {
         .panel-head :global(.icon-btn) { width: 44px; height: 44px; }
+        /* 16px prevents iOS zoom-on-focus; 44px meets the touch minimum. */
+        .add-row select,
+        .move-select { font-size: 16px; min-height: 44px; }
+        .rename-input { font-size: 16px; }
+        .move-select { max-width: 160px; }
+        :global(.btn-xs) { min-height: 44px; padding: 8px 14px; }
+        .link-btn { min-height: 44px; }
     }
 
     /* Socket rows inside the panel — comfortable minimum height on mobile */

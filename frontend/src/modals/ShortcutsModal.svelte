@@ -189,4 +189,10 @@
     .howto { font-size: 13px; color: var(--text-muted); }
     .howto summary { cursor: pointer; font-weight: 600; color: var(--text); }
     .howto ol { margin: var(--space-3) 0 0; padding-left: 1.3em; display: flex; flex-direction: column; gap: 6px; line-height: 1.5; }
+
+    @media (pointer: coarse) {
+        .act-btn { padding: 10px 14px; font-size: 13px; }
+        .row { padding: 8px 0; }
+        .howto summary { padding: 8px 0; }
+    }
 </style>

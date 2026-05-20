@@ -210,4 +210,9 @@
     .field-help.warn {
         color: var(--warn, var(--danger));
     }
+
+    /* Touch screens: a taller range track is far easier to grab and drag. */
+    @media (pointer: coarse) {
+        input[type="range"] { height: 28px; }
+    }
 </style>

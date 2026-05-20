@@ -244,7 +244,12 @@
         cursor: pointer;
     }
     .picker-row:hover { background: var(--surface-hover); }
+    .picker-row:active { background: var(--surface); }
     .picker-row input { width: auto; padding: 0; }
+    @media (pointer: coarse) {
+        .picker-row { min-height: 44px; padding: 10px; }
+        .show-btn { padding: 10px; }
+    }
     .meta {
         color: var(--text-muted);
         font-size: 11px;

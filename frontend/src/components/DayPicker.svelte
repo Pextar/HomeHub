@@ -60,6 +60,7 @@
         color: var(--primary-fg);
         border-color: transparent;
     }
+    .chip:active { transform: scale(0.92); transition-duration: 60ms; }
     .presets {
         display: flex;
         gap: var(--space-2);
@@ -77,4 +78,12 @@
         transition: background var(--t-fast), color var(--t-fast);
     }
     .preset:hover { background: var(--surface-hover); color: var(--text); }
+    .preset:active { transform: scale(0.96); transition-duration: 60ms; }
+
+    /* Touch screens: meet the 44px minimum target. */
+    @media (pointer: coarse) {
+        .picker { gap: var(--space-2); }
+        .chip { width: 44px; height: 44px; font-size: 14px; }
+        .preset { padding: 10px 16px; font-size: 14px; }
+    }
 </style>

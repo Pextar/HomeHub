@@ -174,7 +174,8 @@
     .signout {
         font-size: 1rem;
         font-weight: 700;
-        padding: 10px 18px;
+        padding: 12px 20px;
+        min-height: 44px;
         border-radius: 999px;
         border: none;
         background: var(--surface-hover);

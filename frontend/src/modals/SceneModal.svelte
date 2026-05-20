@@ -116,4 +116,9 @@
         padding: 4px 10px;
         font-size: 13px;
     }
+    @media (pointer: coarse) {
+        .picker-row { min-height: 44px; padding: 10px; }
+        /* 16px stops iOS zoom-on-focus; min-height meets the touch target. */
+        .picker-row select { font-size: 16px; padding: 8px 12px; min-height: 44px; }
+    }
 </style>

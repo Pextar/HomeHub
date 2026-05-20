@@ -496,4 +496,13 @@
         text-overflow: ellipsis;
         white-space: nowrap;
     }
+
+    /* Touch screens: tabs, presets and slider thumbs need bigger targets. */
+    @media (pointer: coarse) {
+        .tab { padding: 12px 0; font-size: 15px; }
+        .preset { padding: 12px; min-height: 44px; font-size: 14px; }
+        input[type="range"] { height: 18px; }
+        input[type="range"]::-webkit-slider-thumb { width: 28px; height: 28px; }
+        input[type="range"]::-moz-range-thumb { width: 28px; height: 28px; }
+    }
 </style>
