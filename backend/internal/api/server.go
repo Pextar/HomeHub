@@ -36,6 +36,10 @@ type Server struct {
 	// events fans live "something changed" signals out to SSE clients.
 	// Created lazily in Handler().
 	events *sseHub
+
+	// logins throttles repeated failed logins per client IP. Created
+	// lazily in Handler().
+	logins *loginLimiter
 }
 
 // Handler returns the configured router with logging, optional basic
@@ -46,6 +50,9 @@ func (s *Server) Handler() http.Handler {
 	}
 	if s.events == nil {
 		s.events = newSSEHub()
+	}
+	if s.logins == nil {
+		s.logins = newLoginLimiter()
 	}
 	// Push a live signal to connected clients whenever a socket's state
 	// changes — including scheduler- and timer-driven changes, since those
@@ -202,6 +209,12 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	s.Store.Mu.RUnlock()
 
 	if authEnabled {
+		ip := clientIP(r)
+		if ok, retryAfter := s.logins.allowed(ip); !ok {
+			w.Header().Set("Retry-After", strconv.Itoa(int(retryAfter.Seconds())+1))
+			writeError(w, http.StatusTooManyRequests, "too many failed attempts — try again later")
+			return
+		}
 		// A login code is the single credential for limited profiles;
 		// admins use username + password. Try whichever was supplied.
 		var user *store.User
@@ -211,9 +224,11 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 			user = s.verifyCredentials(body.Username, body.Password)
 		}
 		if user == nil {
+			s.logins.recordFailure(ip)
 			writeError(w, http.StatusUnauthorized, "invalid credentials")
 			return
 		}
+		s.logins.recordSuccess(ip)
 		setSessionCookie(w, s.SessionSecret, user.ID)
 		writeJSON(w, http.StatusOK, map[string]string{"username": user.Username})
 		return
