@@ -211,6 +211,7 @@
         color: inherit;
     }
     .row:hover { background: var(--surface-hover); border-color: var(--primary); }
+    .row:active { transform: scale(0.99); transition: transform 60ms ease; }
     .row-main { min-width: 0; flex: 1; }
     .code { font-family: var(--font-mono, monospace); font-weight: 600; word-break: break-all; }
     .fields { font-size: 12px; color: var(--text-muted); margin-top: 2px; word-break: break-all; }

@@ -83,4 +83,18 @@
             max-width: none;
         }
     }
+
+    /* Touch screens: give the dismiss/action controls a real tap target. */
+    @media (pointer: coarse) {
+        .close {
+            min-width: 44px;
+            min-height: 44px;
+            padding: 0;
+            display: grid;
+            place-items: center;
+            font-size: 22px;
+            margin: -8px -8px -8px 0;
+        }
+        .action { min-height: 40px; padding: 8px 14px; font-size: 14px; }
+    }
 </style>

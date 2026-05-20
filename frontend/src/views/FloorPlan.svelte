@@ -7,8 +7,8 @@
     import { data, toasts } from "../lib/stores.svelte";
     import { api } from "../lib/api";
     import { runAction } from "../lib/utils";
-    import { fly, fade } from "svelte/transition";
-    import { cubicOut } from "svelte/easing";
+    import { fly, fade, scale } from "svelte/transition";
+    import { cubicOut, backOut } from "svelte/easing";
     import { dur, stagger } from "../lib/motion";
     import type { Socket } from "../lib/types";
 
@@ -44,6 +44,59 @@
     $effect(() => {
         try { localStorage.setItem(DRAFT_KEY, JSON.stringify(draftRooms)); } catch {}
     });
+
+    // ── Per-room emoji "identity" — cosmetic, client-only, keyed by name.
+    // Gives every room a face without touching the backend (rooms are just
+    // a string on each socket). Falls back to a smart guess from the name.
+    const EMOJI_KEY = "floorplan.roomEmoji";
+    function loadEmoji(): Record<string, string> {
+        try {
+            const raw = localStorage.getItem(EMOJI_KEY);
+            return raw ? JSON.parse(raw) : {};
+        } catch { return {}; }
+    }
+    let roomEmoji = $state<Record<string, string>>(loadEmoji());
+    $effect(() => {
+        try { localStorage.setItem(EMOJI_KEY, JSON.stringify(roomEmoji)); } catch {}
+    });
+
+    function guessEmoji(name: string): string {
+        const n = name.toLowerCase();
+        if (/living|lounge|family/.test(n)) return "🛋️";
+        if (/kitchen|cook/.test(n)) return "🍳";
+        if (/bed|master/.test(n)) return "🛏️";
+        if (/bath|shower|toilet|wc|washroom/.test(n)) return "🛁";
+        if (/office|study|work|desk/.test(n)) return "💻";
+        if (/kid|child|nursery|play/.test(n)) return "🧸";
+        if (/dining|dinner/.test(n)) return "🍽️";
+        if (/garage|car/.test(n)) return "🚗";
+        if (/garden|yard|patio|outdoor|balcon/.test(n)) return "🌿";
+        if (/hall|entry|foyer|corridor|stair/.test(n)) return "🚪";
+        if (/tv|media|cinema|theat/.test(n)) return "📺";
+        if (/laundry|utility/.test(n)) return "🧺";
+        if (/gym|fitness/.test(n)) return "🏋️";
+        return "💡";
+    }
+    function emojiFor(name: string): string {
+        return roomEmoji[name] || guessEmoji(name);
+    }
+
+    const SUGGESTIONS: { name: string; emoji: string }[] = [
+        { name: "Living Room", emoji: "🛋️" },
+        { name: "Kitchen", emoji: "🍳" },
+        { name: "Bedroom", emoji: "🛏️" },
+        { name: "Bathroom", emoji: "🛁" },
+        { name: "Office", emoji: "💻" },
+        { name: "Kids' Room", emoji: "🧸" },
+        { name: "Dining", emoji: "🍽️" },
+        { name: "Garage", emoji: "🚗" },
+        { name: "Garden", emoji: "🌿" },
+        { name: "Hallway", emoji: "🚪" },
+    ];
+    const EMOJI_CHOICES = [
+        "💡","🛋️","🍳","🛏️","🛁","💻","🧸","🍽️","🚗",
+        "🌿","🚪","📺","🧺","🪴","🎮","📚","🎵","🏋️",
+    ];
 
     const realCells = $derived.by(() => {
         const map = new Map<string, Socket[]>();
@@ -91,6 +144,9 @@
     const selectedCell = $derived(cells.find(c => c.name === selectedRoom) ?? null);
 
     function pickRoom(name: string) {
+        // On desktop the grid stays clickable beside the docked panel, so a
+        // room tap also bows out of the create flow.
+        creating = false;
         selectedRoom = selectedRoom === name ? null : name;
     }
 
@@ -99,6 +155,7 @@
     function toggleEdit() {
         editing = !editing;
         selectedRoom = null;
+        creating = false;
     }
 
     // ── Control actions (normal mode) ────────────────────────────────
@@ -119,19 +176,66 @@
         await data.refresh();
     }
 
-    // ── Edit actions ─────────────────────────────────────────────────
-    function uniqueDraftName(): string {
-        const existing = new Set(cells.map(c => c.name.toLowerCase()));
-        let i = 1;
-        while (existing.has(`new room ${i}`.toLowerCase())) i++;
-        return `New room ${i}`;
-    }
+    // ── Create-room flow ─────────────────────────────────────────────
+    // A dedicated step: name it, pick a vibe, then create. Replaces the old
+    // "auto-named draft + disguised rename field" that left people unsure
+    // what to do.
+    let creating = $state(false);
+    let newRoomName = $state("");
+    let newRoomEmoji = $state("");
+    let createInput = $state<HTMLInputElement>();
 
-    function addRoom() {
-        const name = uniqueDraftName();
+    // Focus the name field as soon as the create sheet opens.
+    $effect(() => {
+        if (creating && createInput) createInput.focus();
+    });
+
+    function startCreate() {
+        if (!editing) editing = true;
+        selectedRoom = null;
+        newRoomName = "";
+        newRoomEmoji = "";
+        creating = true;
+    }
+    function cancelCreate() { creating = false; }
+    function applySuggestion(s: { name: string; emoji: string }) {
+        newRoomName = s.name;
+        newRoomEmoji = s.emoji;
+    }
+    const createEmoji = $derived(newRoomEmoji || (newRoomName.trim() ? guessEmoji(newRoomName) : "💡"));
+
+    function confirmCreate() {
+        const name = newRoomName.trim();
+        if (!name) {
+            toasts.warn("Name your room", "Type a name or tap a quick pick.");
+            createInput?.focus();
+            return;
+        }
+        if (cells.some(c => c.name.toLowerCase() === name.toLowerCase())) {
+            toasts.error("Name in use", `A room called "${name}" already exists.`);
+            return;
+        }
         draftRooms = [...draftRooms, name];
+        roomEmoji = { ...roomEmoji, [name]: createEmoji };
+        creating = false;
         selectedRoom = name;
     }
+
+    // ── Edit actions ─────────────────────────────────────────────────
+    let emojiPickerOpen = $state(false);
+    // Reset the inline emoji picker whenever the selected room changes.
+    $effect(() => { selectedRoom; emojiPickerOpen = false; });
+    function setRoomEmoji(name: string, emoji: string) {
+        roomEmoji = { ...roomEmoji, [name]: emoji };
+        emojiPickerOpen = false;
+    }
+
+    // Which sheet (if any) is showing. The room panel and the create sheet
+    // are mutually exclusive; on desktop one of them docks beside the grid.
+    const roomPanelOpen = $derived(
+        !!selectedCell && !creating && (editing || !selectedCell.isDraft),
+    );
+    const panelOpen = $derived(roomPanelOpen || creating);
 
     // Rename a room. For real rooms, bulk-update every socket that lives
     // there; for drafts, just update the draft entry.
@@ -147,6 +251,12 @@
 
         const cell = cells.find(c => c.name === oldName);
         if (!cell) return;
+
+        // Carry the room's emoji over to its new name.
+        if (roomEmoji[oldName]) {
+            const { [oldName]: moved, ...rest } = roomEmoji;
+            roomEmoji = { ...rest, [newName]: moved };
+        }
 
         if (cell.isDraft) {
             draftRooms = draftRooms.map(n => n === oldName ? newName : n);
@@ -176,6 +286,12 @@
             danger: true,
         });
         if (!ok) return;
+
+        // Forget the room's emoji either way.
+        if (roomEmoji[cell.name]) {
+            const { [cell.name]: _gone, ...rest } = roomEmoji;
+            roomEmoji = rest;
+        }
 
         if (cell.isDraft) {
             draftRooms = draftRooms.filter(n => n !== cell.name);
@@ -247,10 +363,11 @@
         await moveSocketToRoom(sock, target);
     }
 
-    // Lock the page behind the sheet on mobile so the floor plan doesn't
-    // scroll under it. No-op on desktop where the panel sits inline.
+    // Lock the page behind the bottom sheet on mobile so the floor plan
+    // doesn't scroll under it. On desktop the panel docks inline beside the
+    // grid, so the page stays scrollable.
     $effect(() => {
-        if (!selectedRoom) return;
+        if (!selectedRoom && !creating) return;
         if (typeof window === "undefined") return;
         if (!window.matchMedia("(max-width: 900px)").matches) return;
         const prev = document.body.style.overflow;
@@ -285,7 +402,11 @@
             panelDismissing = true;
             dragY = 600;
             setTimeout(() => {
-                selectedRoom = null;
+                // The room panel and the create sheet are never open at the
+                // same time, so one shared drag controller dismisses whichever
+                // is showing.
+                if (creating) creating = false;
+                else selectedRoom = null;
                 dragY = 0;
                 panelDismissing = false;
             }, 220);
@@ -302,6 +423,12 @@
         requestAnimationFrame(() => { dragY = 0; });
     }
 </script>
+
+<svelte:window onkeydown={(e) => {
+    if (e.key !== "Escape") return;
+    if (creating) cancelCreate();
+    else if (selectedRoom) selectedRoom = null;
+}} />
 
 <Topbar title="Floor plan" subtitle="Your home at a glance">
     {#snippet actions()}
@@ -332,12 +459,15 @@
     </div>
 </div>
 
-<!-- ── Floor plan grid ──────────────────────────────────────────── -->
+<!-- ── Floor plan stage: grid on the left, docked panel on the right ─ -->
+<div class="stage" class:has-panel={panelOpen}>
+<div class="stage-grid">
 {#if cells.length === 0 && !editing}
     <div class="empty">
-        <Icon name="map" size={32} />
-        <p>No rooms yet</p>
-        <span>Tap <strong>Edit</strong> above to start laying out your home.</span>
+        <div class="empty-emoji" aria-hidden="true">🏠</div>
+        <p>Let's map your home</p>
+        <span>Create a room for each space, then drop your devices in. Give each one a name and a vibe.</span>
+        <button class="btn btn-primary" onclick={startCreate}>Create your first room</button>
     </div>
 {:else}
     <div class="house" class:editing>
@@ -355,8 +485,12 @@
                     aria-label={`${cell.name}, ${cell.on} of ${cell.total} on`}
                     in:fly={{ y: 12, duration: dur(260), delay: stagger(i, 40), easing: cubicOut }}
                 >
+                    <span class="room-watermark" aria-hidden="true">{emojiFor(cell.name)}</span>
                     <div class="room-head">
-                        <span class="room-name">{cell.name}</span>
+                        <span class="room-title">
+                            <span class="room-emoji" aria-hidden="true">{emojiFor(cell.name)}</span>
+                            <span class="room-name">{cell.name}</span>
+                        </span>
                         {#if editing}
                             <span class="edit-badge" aria-hidden="true">
                                 <Icon name="edit" size={11} />
@@ -378,19 +512,20 @@
             {/each}
 
             {#if editing}
-                <button class="room add-tile" onclick={addRoom}
-                    aria-label="Add room"
+                <button class="room add-tile" onclick={startCreate}
+                    aria-label="Create a new room"
                     in:fly={{ y: 12, duration: dur(220), easing: cubicOut }}>
                     <Icon name="plus" size={20} />
-                    <span>Add room</span>
+                    <span>New room</span>
                 </button>
             {/if}
         </div>
     </div>
 {/if}
+</div><!-- /.stage-grid -->
 
-<!-- ── Selected room panel (bottom sheet on mobile, inline on desktop) ─ -->
-{#if selectedCell && (editing || !selectedCell.isDraft)}
+<!-- ── Selected room panel (docked beside grid on desktop, sheet on mobile) ─ -->
+{#if roomPanelOpen && selectedCell}
     <div class="sheet-root"
         role="presentation"
         onclick={(e) => { if (e.target === e.currentTarget) selectedRoom = null; }}
@@ -415,13 +550,30 @@
             <div class="panel-head">
                 {#if editing}
                     <div class="ph-left">
-                        <input class="rename-input"
-                            type="text"
-                            value={selectedCell.name}
-                            aria-label="Room name"
-                            onblur={(e) => renameRoom(selectedCell!.name, (e.target as HTMLInputElement).value)}
-                            onkeydown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
-                        />
+                        <div class="name-row">
+                            <button class="room-emoji-btn"
+                                class:open={emojiPickerOpen}
+                                onclick={() => emojiPickerOpen = !emojiPickerOpen}
+                                aria-label="Change room icon"
+                                aria-expanded={emojiPickerOpen}>{emojiFor(selectedCell.name)}</button>
+                            <input class="rename-input"
+                                type="text"
+                                value={selectedCell.name}
+                                aria-label="Room name"
+                                onblur={(e) => renameRoom(selectedCell!.name, (e.target as HTMLInputElement).value)}
+                                onkeydown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                            />
+                        </div>
+                        {#if emojiPickerOpen}
+                            <div class="emoji-grid inline" transition:fly={{ y: -6, duration: dur(140), easing: cubicOut }}>
+                                {#each EMOJI_CHOICES as e (e)}
+                                    <button type="button" class="emoji-cell"
+                                        class:active={emojiFor(selectedCell.name) === e}
+                                        onclick={() => setRoomEmoji(selectedCell!.name, e)}
+                                        aria-label={`Use ${e}`}>{e}</button>
+                                {/each}
+                            </div>
+                        {/if}
                         <span class="ph-sub">
                             {selectedCell.isDraft
                                 ? "Empty room — add a device to save it"
@@ -430,7 +582,10 @@
                     </div>
                 {:else}
                     <div class="ph-left">
-                        <span class="ph-name">{selectedCell.name}</span>
+                        <span class="ph-name">
+                            <span class="ph-emoji" aria-hidden="true">{emojiFor(selectedCell.name)}</span>
+                            {selectedCell.name}
+                        </span>
                         <span class="ph-sub">{selectedCell.on} of {selectedCell.total} on</span>
                     </div>
                 {/if}
@@ -502,6 +657,88 @@
         </div>
     </div>
 {/if}
+
+<!-- ── Create-room sheet ────────────────────────────────────────── -->
+{#if creating}
+    <div class="sheet-root"
+        role="presentation"
+        onclick={(e) => { if (e.target === e.currentTarget) cancelCreate(); }}
+        in:fade={{ duration: dur(140) }}
+        out:fade={{ duration: dur(120) }}>
+        <div class="panel create-panel"
+            role="dialog"
+            aria-label="New room"
+            aria-modal="true"
+            style:transform={dragY > 0 ? `translateY(${dragY}px)` : ''}
+            style:opacity={dragY > 0 ? Math.max(0.4, 1 - dragY / 300) : undefined}
+            style:transition={dragging ? 'none' : panelDismissing ? 'transform 0.22s ease-in, opacity 0.22s ease-in' : 'transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)'}
+            in:fly={{ y: 32, duration: dur(260), easing: cubicOut }}
+            out:fly={panelDismissing ? { y: 0, duration: 0 } : { y: 32, duration: dur(180) }}>
+
+            <div class="sheet-handle" aria-hidden="true"
+                onpointerdown={onHandlePointerDown}
+                onpointermove={onHandlePointerMove}
+                onpointerup={onHandlePointerUp}
+                onpointercancel={onHandlePointerCancel}></div>
+
+            <div class="panel-head">
+                <div class="ph-left">
+                    <span class="ph-name">New room</span>
+                    <span class="ph-sub">Name it and give it a vibe</span>
+                </div>
+                <button class="icon-btn" onclick={cancelCreate} aria-label="Close">
+                    <Icon name="close" size={16} />
+                </button>
+            </div>
+
+            <div class="panel-body create-body">
+                <div class="create-preview">
+                    {#key createEmoji}
+                        <span class="create-emoji" aria-hidden="true"
+                            in:scale={{ duration: dur(260), start: 0.5, easing: backOut }}>{createEmoji}</span>
+                    {/key}
+                    <input class="create-name"
+                        type="text"
+                        bind:this={createInput}
+                        bind:value={newRoomName}
+                        placeholder="Room name"
+                        aria-label="Room name"
+                        onkeydown={(e) => { if (e.key === "Enter") confirmCreate(); }} />
+                </div>
+
+                <div class="create-label">Quick picks</div>
+                <div class="suggest-row">
+                    {#each SUGGESTIONS as s (s.name)}
+                        <button type="button" class="suggest-chip"
+                            class:active={newRoomName.trim().toLowerCase() === s.name.toLowerCase()}
+                            onclick={() => applySuggestion(s)}>
+                            <span aria-hidden="true">{s.emoji}</span>
+                            {s.name}
+                        </button>
+                    {/each}
+                </div>
+
+                <div class="create-label">Icon</div>
+                <div class="emoji-grid">
+                    {#each EMOJI_CHOICES as e (e)}
+                        <button type="button" class="emoji-cell"
+                            class:active={createEmoji === e}
+                            onclick={() => newRoomEmoji = e}
+                            aria-label={`Use ${e}`}>{e}</button>
+                    {/each}
+                </div>
+            </div>
+
+            <div class="panel-foot">
+                <button class="btn btn-ghost btn-xs" onclick={cancelCreate}>Cancel</button>
+                <button class="btn btn-primary btn-xs create-go" onclick={confirmCreate}>
+                    Create room
+                </button>
+            </div>
+        </div>
+    </div>
+{/if}
+</div><!-- /.stage -->
 
 <!-- ── Unassigned sockets ───────────────────────────────────────── -->
 {#if unassigned.length > 0}
@@ -723,9 +960,18 @@
     .empty p { margin: 0; font-weight: 600; color: var(--text-muted); font-size: 15px; }
     .empty span { font-size: 13px; max-width: 280px; }
 
+    /* ── Stage: grid + docked panel ───────────────────── */
+    /* Desktop ≥901px: two columns — grid flexes, panel docks on the right.
+       Mobile ≤900px: single column; the panel escapes as a bottom sheet. */
+    .stage { display: flex; min-width: 0; }
+    .stage-grid { flex: 1; min-width: 0; }
+    @media (min-width: 901px) {
+        .stage { gap: var(--space-4); align-items: flex-start; }
+    }
+
     /* ── Sheet wrapper ────────────────────────────────── */
-    /* Desktop: a plain wrapper — the panel sits inline.
-       Mobile: full-viewport backdrop, panel docked to the bottom as a sheet. */
+    /* Desktop: a transparent pass-through so the panel flows into the stage
+       as a column. Mobile: full-viewport backdrop, panel docked to bottom. */
     .sheet-root { display: contents; }
 
     @media (max-width: 900px) {
@@ -733,12 +979,13 @@
             display: flex;
             position: fixed;
             inset: 0;
+            align-items: flex-end;
+            justify-content: center;
             background: rgba(8, 11, 22, 0.45);
             backdrop-filter: blur(3px);
             -webkit-backdrop-filter: blur(3px);
-            align-items: flex-end;
-            justify-content: center;
             z-index: 120;
+            overscroll-behavior: contain;
         }
         :global([data-theme="light"]) .sheet-root {
             background: rgba(20, 24, 38, 0.30);
@@ -768,21 +1015,29 @@
 
     /* ── Panel (control + edit) ───────────────────────── */
     .panel {
+        /* Desktop: a docked side column that sticks as you scroll the grid. */
+        width: 360px;
+        flex-shrink: 0;
+        position: sticky;
+        top: var(--space-6);
+        max-height: calc(100vh - var(--space-6) * 2);
         background: var(--bg-elevated);
         border: 1px solid var(--border);
         border-radius: var(--radius-lg);
         overflow: hidden;
-        box-shadow: inset 4px 0 0 var(--primary);
+        box-shadow: var(--shadow-md), inset 4px 0 0 var(--primary);
         display: flex;
         flex-direction: column;
         min-height: 0;
     }
-    .panel.edit { box-shadow: inset 4px 0 0 var(--warn); }
+    .panel.edit { box-shadow: var(--shadow-md), inset 4px 0 0 var(--warn); }
 
     /* Mobile: dock as a sheet, rounded top corners, frosted look */
     @media (max-width: 900px) {
         .panel {
+            position: static;
             width: 100%;
+            max-width: none;
             max-height: 85vh;
             border-radius: var(--radius-xl) var(--radius-xl) 0 0;
             background: var(--bg-bar);
@@ -949,8 +1204,201 @@
        the global 32 px icon-btn is below Apple HIG / Material guidance. */
     @media (max-width: 600px) {
         .panel-head :global(.icon-btn) { width: 44px; height: 44px; }
+        /* 16px prevents iOS zoom-on-focus; 44px meets the touch minimum. */
+        .add-row select,
+        .move-select { font-size: 16px; min-height: 44px; }
+        .rename-input { font-size: 16px; }
+        .move-select { max-width: 160px; }
+        :global(.btn-xs) { min-height: 44px; padding: 8px 14px; }
+        .link-btn { min-height: 44px; }
     }
 
     /* Socket rows inside the panel — comfortable minimum height on mobile */
     .socket-row { min-height: 44px; }
+
+    /* ── Room emoji identity ──────────────────────────── */
+    .room-title {
+        display: flex; align-items: center; gap: 5px;
+        min-width: 0; flex: 1;
+    }
+    .room-emoji { font-size: 15px; line-height: 1; flex-shrink: 0; }
+    .ph-emoji { margin-right: 4px; }
+
+    /* ── Empty state CTA ──────────────────────────────── */
+    .empty-emoji { font-size: 44px; line-height: 1; }
+    .empty .btn-primary { margin-top: var(--space-3); }
+
+    /* ── Create-room sheet ────────────────────────────── */
+    .create-body { gap: var(--space-4); padding: var(--space-4) var(--space-5) var(--space-5); }
+
+    /* Big live preview: emoji + the name you're typing */
+    .create-preview {
+        display: flex; align-items: center; gap: var(--space-3);
+        padding: var(--space-3);
+        border-radius: var(--radius-md);
+        background: var(--surface);
+        border: 1px solid var(--border);
+    }
+    .create-emoji {
+        font-size: 34px; line-height: 1; flex-shrink: 0;
+        width: 56px; height: 56px;
+        display: grid; place-items: center;
+        border-radius: var(--radius-md);
+        background: var(--bg-elevated);
+        box-shadow: var(--shadow-sm);
+    }
+    .create-name {
+        all: unset;
+        flex: 1; min-width: 0;
+        font-size: 1.25rem; font-weight: 700; letter-spacing: -0.01em;
+        padding: 6px 4px;
+        border-bottom: 2px solid transparent;
+    }
+    .create-name::placeholder { color: var(--text-faint); font-weight: 600; }
+    .create-name:focus { border-bottom-color: var(--primary); }
+
+    .create-label {
+        font-size: 11px; font-weight: 700;
+        text-transform: uppercase; letter-spacing: 0.06em;
+        color: var(--text-muted);
+        margin-bottom: calc(var(--space-2) * -1);
+    }
+
+    .suggest-row { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+    .suggest-chip {
+        display: inline-flex; align-items: center; gap: 6px;
+        padding: 8px 12px;
+        border-radius: 999px;
+        border: 1px solid var(--border);
+        background: var(--surface);
+        color: var(--text);
+        font: inherit; font-size: 13px; font-weight: 600;
+        cursor: pointer;
+        transition: background var(--t-fast), border-color var(--t-fast),
+                    transform var(--t-fast);
+    }
+    .suggest-chip:hover { background: var(--surface-hover); border-color: var(--border-strong); }
+    .suggest-chip:active { transform: scale(0.96); }
+    .suggest-chip.active {
+        background: var(--primary-soft);
+        border-color: var(--primary);
+        color: var(--primary);
+    }
+
+    .emoji-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(44px, 1fr));
+        gap: var(--space-2);
+    }
+    .emoji-grid.inline {
+        margin-top: var(--space-2);
+        grid-template-columns: repeat(auto-fill, minmax(40px, 1fr));
+    }
+    .emoji-cell {
+        aspect-ratio: 1;
+        display: grid; place-items: center;
+        font-size: 22px; line-height: 1;
+        border-radius: var(--radius-md);
+        border: 1px solid var(--border);
+        background: var(--surface);
+        cursor: pointer;
+        transition: background var(--t-fast), border-color var(--t-fast),
+                    transform var(--t-fast);
+    }
+    .emoji-cell:hover { background: var(--surface-hover); }
+    .emoji-cell:active { transform: scale(0.92); }
+    .emoji-cell.active {
+        border-color: var(--primary);
+        box-shadow: 0 0 0 2px var(--primary-glow);
+        background: var(--primary-soft);
+    }
+
+    .create-go { flex: 1; }
+
+    /* Editable emoji button beside the rename field */
+    .name-row { display: flex; align-items: center; gap: var(--space-2); }
+    .room-emoji-btn {
+        flex-shrink: 0;
+        width: 40px; height: 40px;
+        display: grid; place-items: center;
+        font-size: 22px; line-height: 1;
+        border-radius: var(--radius-md);
+        border: 1px solid var(--border);
+        background: var(--surface);
+        cursor: pointer;
+        transition: background var(--t-fast), border-color var(--t-fast);
+    }
+    .room-emoji-btn:hover { background: var(--surface-hover); }
+    .room-emoji-btn.open { border-color: var(--primary); background: var(--primary-soft); }
+
+    @media (max-width: 600px) {
+        .create-name { font-size: 1.25rem; }
+        .suggest-chip { padding: 10px 14px; font-size: 14px; }
+        .room-emoji-btn { width: 44px; height: 44px; }
+    }
+
+    /* ── Out-of-the-box flair ─────────────────────────── */
+
+    /* Giant faint emoji watermark behind each tile's content. */
+    .room-watermark {
+        position: absolute;
+        right: -8px;
+        bottom: -12px;
+        font-size: 58px;
+        line-height: 1;
+        opacity: 0.1;
+        transform: rotate(-8deg);
+        pointer-events: none;
+        z-index: 0;
+        transition: opacity var(--t-med), transform var(--t-med);
+    }
+    .room.lit .room-watermark {
+        opacity: calc(0.12 + var(--warmth, 0) * 0.24);
+        transform: rotate(-8deg) scale(1.06);
+    }
+    .room.selected .room-watermark { opacity: 0.22; }
+    /* Keep the real content above the watermark. */
+    .room-head, .dots { position: relative; z-index: 1; }
+
+    /* Lit rooms get a warm halo that scales with how much is on. */
+    .room.lit {
+        box-shadow:
+            0 0 0 1px rgba(251, 191, 36, calc(var(--warmth, 0) * 0.28)),
+            0 10px 26px -14px rgba(251, 191, 36, calc(var(--warmth, 0) * 0.7));
+    }
+    /* Selection cue always wins over the lit halo. */
+    .room.selected {
+        box-shadow: 0 0 0 3px var(--primary-glow);
+    }
+
+    /* House-pulse hero: a breathing amber aura when anything is on. */
+    .pulse { position: relative; overflow: hidden; }
+    .pulse::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        z-index: 0;
+        background: radial-gradient(120% 160% at 10% 50%,
+            rgba(251, 191, 36, 0.18), transparent 55%);
+        opacity: 0;
+        transition: opacity var(--t-med);
+        pointer-events: none;
+    }
+    .pulse[data-active="true"]::before {
+        opacity: 1;
+        animation: aura-breathe 4.5s ease-in-out infinite;
+    }
+    @keyframes aura-breathe {
+        0%, 100% { opacity: 0.6; transform: scale(1); }
+        50%      { opacity: 1;   transform: scale(1.04); }
+    }
+    .pulse-num, .pulse-text { position: relative; z-index: 1; }
+    .pulse[data-active="true"] .pulse-num .big {
+        text-shadow: 0 0 18px rgba(251, 191, 36, 0.45);
+    }
+
+    /* Honour reduced-motion: drop the ambient animation. */
+    @media (prefers-reduced-motion: reduce) {
+        .pulse[data-active="true"]::before { animation: none; }
+    }
 </style>

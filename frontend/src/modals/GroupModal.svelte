@@ -99,6 +99,10 @@
         cursor: pointer;
     }
     .picker-row:hover { background: var(--surface-hover); }
+    .picker-row:active { background: var(--surface); }
     .picker-row input { width: auto; padding: 0; }
     .meta { color: var(--text-muted); font-size: 12px; margin-left: auto; }
+    @media (pointer: coarse) {
+        .picker-row { min-height: 44px; padding: 10px; }
+    }
 </style>

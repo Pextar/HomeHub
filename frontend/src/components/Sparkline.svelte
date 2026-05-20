@@ -29,7 +29,9 @@
     });
 </script>
 
-<svg viewBox="0 0 {width} {height}" width={width} height={height} aria-hidden="true" preserveAspectRatio="none">
+<!-- viewBox keeps the numeric coordinate space; the element stretches to fill
+     its container so the sparkline stays responsive on narrow screens. -->
+<svg viewBox="0 0 {width} {height}" height={height} aria-hidden="true" preserveAspectRatio="none" style="width:100%; display:block">
     {#if path.area}
         <path d={path.area} fill={stroke} opacity="0.12" />
         <path d={path.line} fill="none" stroke={stroke} stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />

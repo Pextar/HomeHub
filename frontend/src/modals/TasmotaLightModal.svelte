@@ -211,6 +211,13 @@
         cursor: pointer;
     }
 
+    /* Touch screens: bigger track + thumb so brightness/CT are easy to drag. */
+    @media (pointer: coarse) {
+        input[type="range"].grad { height: 18px; border-radius: 9px; }
+        input[type="range"].grad::-webkit-slider-thumb { width: 28px; height: 28px; }
+        input[type="range"].grad::-moz-range-thumb { width: 28px; height: 28px; }
+    }
+
     .color-row {
         display: flex; align-items: center; gap: var(--space-3);
     }
