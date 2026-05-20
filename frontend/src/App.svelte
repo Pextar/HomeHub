@@ -11,8 +11,10 @@
     import Groups from "./views/Groups.svelte";
     import Scenes from "./views/Scenes.svelte";
     import Sensors from "./views/Sensors.svelte";
+    import Users from "./views/Users.svelte";
     import Settings from "./views/Settings.svelte";
-    import { data, route, toasts } from "./lib/stores.svelte";
+    import KidHome from "./views/KidHome.svelte";
+    import { data, route, toasts, session } from "./lib/stores.svelte";
     import { fly } from "svelte/transition";
     import { cubicOut } from "svelte/easing";
     import { dur } from "./lib/motion";
@@ -52,12 +54,13 @@
         }
     });
 
-    // LoginGate calls onAuthed once it knows the user is signed in. Only
-    // then do we start the data refresh cycle.
+    // LoginGate calls onAuthed once it knows the user is signed in. Load the
+    // profile first (it decides what's visible), then start the refresh cycle.
     let started = false;
-    function onAuthed() {
+    async function onAuthed() {
         if (started) return;
         started = true;
+        await session.load();
         data.refresh();
         data.pingHealth();
         window.setInterval(() => data.refresh(), 30_000);
@@ -72,30 +75,45 @@
         scenes: Scenes,
         schedules: Schedules,
         sensors: Sensors,
+        users: Users,
         settings: Settings,
     };
-    const Current = $derived(views[route.current]);
+
+    // Routes a non-admin profile is allowed to open. Everything else is
+    // admin-only; deep-linking elsewhere bounces back to the dashboard.
+    const ADMIN_ONLY: Route[] = ["floorplan", "groups", "scenes", "schedules", "sensors", "users", "settings"];
+    const effectiveRoute = $derived(
+        !session.isAdmin && ADMIN_ONLY.includes(route.current) ? "dashboard" : route.current,
+    );
+    const Current = $derived(views[effectiveRoute]);
 </script>
 
 <LoginGate {onAuthed}>
-    <a class="skip-link" href="#main">Skip to main content</a>
+    {#if !session.loaded}
+        <div class="boot"></div>
+    {:else if session.user?.kid}
+        <KidHome />
+    {:else}
+        <a class="skip-link" href="#main">Skip to main content</a>
 
-    <div class="app">
-        <Sidebar />
-        <main id="main" class="main" tabindex="-1">
-            {#key route.current}
-                <div class="view" in:fly={{ y: 10, duration: dur(220), easing: cubicOut }}>
-                    <Current />
-                </div>
-            {/key}
-        </main>
-    </div>
+        <div class="app">
+            <Sidebar />
+            <main id="main" class="main" tabindex="-1">
+                {#key effectiveRoute}
+                    <div class="view" in:fly={{ y: 10, duration: dur(220), easing: cubicOut }}>
+                        <Current />
+                    </div>
+                {/key}
+            </main>
+        </div>
+    {/if}
 </LoginGate>
 
 <Toasts />
 <ModalRoot />
 
 <style>
+    .boot { min-height: 100vh; background: var(--bg); }
     .app {
         display: grid;
         grid-template-columns: 248px 1fr;

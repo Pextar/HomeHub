@@ -101,6 +101,9 @@ func (s *Store) CascadeDeleteSocket(socketID string) {
 		}
 		sc.Actions = out
 	}
+	for _, u := range s.Users {
+		u.SocketIDs = filterStrings(u.SocketIDs, socketID)
+	}
 }
 
 func filterStrings(in []string, drop string) []string {

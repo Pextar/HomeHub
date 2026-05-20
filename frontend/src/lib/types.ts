@@ -6,6 +6,7 @@ export interface Socket {
   state: boolean;
   room: string;
   favorite?: boolean;
+  emoji?: string; // shown big in kid mode
 }
 
 export type TargetType = "socket" | "group" | "scene";
@@ -36,6 +37,43 @@ export interface Settings {
   latitude: number;
   longitude: number;
   location_name?: string;
+}
+
+// A login profile. Non-admins only see/control the sockets in socket_ids;
+// admins ignore that list and have full access.
+export interface User {
+  id: string;
+  username: string;
+  admin: boolean;
+  // A limited profile rendered with the playful, oversized kid layout.
+  kid: boolean;
+  // Limited profiles sign in with this generated code instead of a password;
+  // empty/absent for admins.
+  login_code?: string;
+  socket_ids: string[];
+  created_at: string;
+}
+
+// Admins need a password; limited profiles (admin: false) get a code
+// generated server-side, so password is omitted for them.
+export interface UserCreate {
+  username: string;
+  password?: string;
+  admin: boolean;
+  kid?: boolean;
+  socket_ids: string[];
+}
+
+// All fields optional — only the ones present are changed. An empty/omitted
+// password leaves the existing one untouched. Set regenerate_code to issue a
+// fresh login code for a limited profile.
+export interface UserUpdate {
+  username?: string;
+  password?: string;
+  admin?: boolean;
+  kid?: boolean;
+  socket_ids?: string[];
+  regenerate_code?: boolean;
 }
 
 // Tasmota Wi-Fi device state. Fields are undefined when the device doesn't
@@ -113,7 +151,7 @@ export interface BulkResult {
   failures: { socket_id: string; error: string }[];
 }
 
-export type Route = "dashboard" | "floorplan" | "sockets" | "groups" | "scenes" | "schedules" | "sensors" | "settings";
+export type Route = "dashboard" | "floorplan" | "sockets" | "groups" | "scenes" | "schedules" | "sensors" | "users" | "settings";
 
 export type SensorKind = "temperature" | "humidity" | "motion" | "light" | "power" | "custom";
 

@@ -113,6 +113,9 @@ func (s *Server) createTimer(w http.ResponseWriter, r *http.Request) {
 // action and in_seconds (or fires_at).
 func (s *Server) createSocketTimer(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
+	if !s.requireSocketAccess(w, r, id) {
+		return
+	}
 
 	var req timerRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {

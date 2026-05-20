@@ -1,47 +1,95 @@
 package api
 
 import (
-	"crypto/subtle"
+	"context"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
-	"github.com/gorilla/mux"
+	"golang.org/x/crypto/bcrypt"
+
+	"rf-socket-controller/internal/store"
 )
 
+// ctxKey is the private type for request-context keys so values set here
+// can't collide with keys from other packages.
+type ctxKey int
+
+const userCtxKey ctxKey = iota
+
 // authMiddleware gates protected routes. It accepts either a valid signed
-// session cookie (set by /api/login) or HTTP basic auth matching the
-// configured AUTH_USER/AUTH_PASS — the latter so curl / scripted clients
-// still work without going through the login flow.
+// session cookie (set by /api/login) or HTTP basic auth matching a stored
+// user's credentials — the latter so curl / scripted clients still work
+// without going through the login flow. The authenticated *store.User is
+// stashed in the request context for handlers to read via currentUser.
 //
 // Browsers no longer get a Basic-Auth WWW-Authenticate challenge (which
 // would pop the native login dialog and bypass our cookie flow); they get
 // a plain 401 the SPA handles with its custom login form.
-func authMiddleware(user, pass string, secret []byte) mux.MiddlewareFunc {
-	expectUser := []byte(user)
-	expectPass := []byte(pass)
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.Method == http.MethodOptions {
-				next.ServeHTTP(w, r)
-				return
-			}
-			if c, err := r.Cookie(cookieName); err == nil {
-				if _, ok := verifySession(secret, c.Value); ok {
-					next.ServeHTTP(w, r)
+func (s *Server) authMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodOptions {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if c, err := r.Cookie(cookieName); err == nil {
+			if username, ok := verifySession(s.SessionSecret, c.Value); ok {
+				if u := s.lookupUser(username); u != nil {
+					next.ServeHTTP(w, r.WithContext(withUser(r.Context(), u)))
 					return
 				}
 			}
-			u, p, ok := r.BasicAuth()
-			if ok &&
-				subtle.ConstantTimeCompare([]byte(u), expectUser) == 1 &&
-				subtle.ConstantTimeCompare([]byte(p), expectPass) == 1 {
-				next.ServeHTTP(w, r)
+		}
+		if u, p, ok := r.BasicAuth(); ok {
+			if user := s.verifyCredentials(u, p); user != nil {
+				next.ServeHTTP(w, r.WithContext(withUser(r.Context(), user)))
 				return
 			}
-			writeError(w, http.StatusUnauthorized, "unauthorized")
-		})
+		}
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+	})
+}
+
+// lookupUser returns the stored user with the given username, or nil.
+func (s *Server) lookupUser(username string) *store.User {
+	s.Store.Mu.RLock()
+	defer s.Store.Mu.RUnlock()
+	return s.Store.UserByUsername(username)
+}
+
+// verifyCredentials returns the user if username/password match a stored
+// account (bcrypt), else nil. The compare runs even when no user is found
+// so the response timing doesn't leak which usernames exist. A user with
+// no password (a code-only profile) can never match this path.
+func (s *Server) verifyCredentials(username, password string) *store.User {
+	u := s.lookupUser(username)
+	hash := []byte("$2a$10$invalidinvalidinvalidinvalidinvalidinvalidinvalidinvali")
+	if u != nil && u.PasswordHash != "" {
+		hash = []byte(u.PasswordHash)
 	}
+	if bcrypt.CompareHashAndPassword(hash, []byte(password)) != nil {
+		return nil
+	}
+	return u
+}
+
+// verifyLoginCode returns the user whose login code matches, else nil.
+func (s *Server) verifyLoginCode(code string) *store.User {
+	s.Store.Mu.RLock()
+	defer s.Store.Mu.RUnlock()
+	return s.Store.UserByLoginCode(strings.TrimSpace(code))
+}
+
+func withUser(ctx context.Context, u *store.User) context.Context {
+	return context.WithValue(ctx, userCtxKey, u)
+}
+
+// currentUser returns the authenticated user attached to the request by
+// authMiddleware, or nil if the route is unauthenticated.
+func currentUser(r *http.Request) *store.User {
+	u, _ := r.Context().Value(userCtxKey).(*store.User)
+	return u
 }
 
 // loggingMiddleware logs each request's method, path, status and duration.

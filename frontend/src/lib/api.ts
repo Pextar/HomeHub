@@ -17,6 +17,9 @@ import type {
   TasmotaStateUpdate,
   MatterState,
   MatterStateUpdate,
+  User,
+  UserCreate,
+  UserUpdate,
 } from "./types";
 
 const BASE = "/api";
@@ -55,12 +58,25 @@ const json = (body: unknown) => JSON.stringify(body);
 
 export const api = {
   // Auth
-  login(body: { username: string; password: string }) {
+  // Either a login code (limited profiles) or username + password (admins).
+  login(body: { code: string } | { username: string; password: string }) {
     return req<{ username: string }>("/login", { method: "POST", body: json(body) });
   },
   logout() {
     return req<{ status: string }>("/logout", { method: "POST" });
   },
+
+  // Current profile (used to decide what UI to show and which sockets are
+  // visible). Returns a synthetic admin when server-side auth is disabled.
+  me() {
+    return req<User>("/me");
+  },
+
+  // Profiles (admin only)
+  listUsers() { return req<User[]>("/users"); },
+  createUser(body: UserCreate) { return req<User>("/users", { method: "POST", body: json(body) }); },
+  updateUser(id: string, body: UserUpdate) { return req<User>(`/users/${encodeURIComponent(id)}`, { method: "PUT", body: json(body) }); },
+  deleteUser(id: string) { return req<void>(`/users/${encodeURIComponent(id)}`, { method: "DELETE" }); },
 
   health() {
     return req<{ status: string; sockets: number; schedules: number; groups: number; scenes: number; timers: number; time: string }>("/health");

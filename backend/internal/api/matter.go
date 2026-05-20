@@ -150,6 +150,9 @@ func (s *Server) matterNodeID(w http.ResponseWriter, r *http.Request) (string, b
 		return "", false
 	}
 	id := mux.Vars(r)["socketId"]
+	if !s.requireSocketAccess(w, r, id) {
+		return "", false
+	}
 	s.Store.Mu.RLock()
 	sock, ok := s.Store.Sockets[id]
 	var code string

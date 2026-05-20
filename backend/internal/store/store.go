@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 )
 
@@ -36,6 +37,7 @@ type Store struct {
 	// Readings is a rolling window of recent values per sensor id.
 	// Trimmed to ReadingsHistorySize on each append.
 	Readings  map[string][]SensorReading
+	Users     map[string]*User
 	Settings  *Settings
 	Activity  *ActivityLog
 	Discovery *Discovery
@@ -52,6 +54,7 @@ const (
 	sensorsFile   = "sensors.json"
 	readingsFile  = "readings.json"
 	settingsFile  = "settings.json"
+	usersFile     = "users.json"
 
 	// ReadingsHistorySize caps how many readings are kept per sensor.
 	// At one sample per minute that's ~16 hours; at one per five minutes
@@ -70,6 +73,7 @@ func New(dataDir string, rf RFSender) *Store {
 		Timers:    make(map[string]*Timer),
 		Sensors:   make(map[string]*Sensor),
 		Readings:  make(map[string][]SensorReading),
+		Users:     make(map[string]*User),
 		Settings:  &Settings{},
 		Activity:  NewActivityLog(200),
 		Discovery: &Discovery{Candidates: make(map[string]*DiscoveryCandidate)},
@@ -106,8 +110,14 @@ func (s *Store) Load() error {
 	if err := readJSON(filepath.Join(s.DataDir, settingsFile), &s.Settings); err != nil {
 		return fmt.Errorf("loading settings: %w", err)
 	}
+	if err := readJSON(filepath.Join(s.DataDir, usersFile), &s.Users); err != nil {
+		return fmt.Errorf("loading users: %w", err)
+	}
 	if s.Settings == nil {
 		s.Settings = &Settings{}
+	}
+	if s.Users == nil {
+		s.Users = make(map[string]*User)
 	}
 	if s.Sockets == nil {
 		s.Sockets = make(map[string]*Socket)
@@ -163,7 +173,46 @@ func (s *Store) Save() error {
 	if err := writeJSON(filepath.Join(s.DataDir, settingsFile), s.Settings); err != nil {
 		return fmt.Errorf("saving settings: %w", err)
 	}
+	if err := writeJSON(filepath.Join(s.DataDir, usersFile), s.Users); err != nil {
+		return fmt.Errorf("saving users: %w", err)
+	}
 	return nil
+}
+
+// UserByUsername returns the user with the given (case-insensitive)
+// username, or nil. Caller must hold Mu.
+func (s *Store) UserByUsername(username string) *User {
+	for _, u := range s.Users {
+		if strings.EqualFold(u.Username, username) {
+			return u
+		}
+	}
+	return nil
+}
+
+// UserByLoginCode returns the user whose login code exactly matches, or
+// nil. An empty code never matches. Caller must hold Mu.
+func (s *Store) UserByLoginCode(code string) *User {
+	if code == "" {
+		return nil
+	}
+	for _, u := range s.Users {
+		if u.LoginCode == code {
+			return u
+		}
+	}
+	return nil
+}
+
+// AdminCount returns how many admin users exist. Caller must hold Mu.
+func (s *Store) AdminCount() int {
+	n := 0
+	for _, u := range s.Users {
+		if u.Admin {
+			n++
+		}
+	}
+	return n
 }
 
 // SaveSensors persists only the sensors and readings files. Called from

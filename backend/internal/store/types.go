@@ -11,6 +11,7 @@ type Socket struct {
 	State    bool   `json:"state"`    // true = on, false = off
 	Room     string `json:"room"`     // room/location
 	Favorite bool   `json:"favorite,omitempty"` // pinned to dashboard
+	Emoji    string `json:"emoji,omitempty"`    // shown big in kid mode; admin-picked
 }
 
 // Schedule represents a recurring timer for a socket, group, or scene.
@@ -43,6 +44,38 @@ type Schedule struct {
 	Enabled             bool      `json:"enabled"`
 	RandomOffsetMinutes int       `json:"random_offset_minutes,omitempty"` // fire at a random time 0..N minutes after the trigger time
 	LastFiredAt         time.Time `json:"last_fired_at,omitempty"`
+}
+
+// User is a login profile. Admins have unrestricted access; non-admins
+// may only see and control the sockets listed in SocketIDs. PasswordHash
+// is a bcrypt hash — it is persisted to disk but the API layer never
+// returns a raw User to clients (see api.userView).
+type User struct {
+	ID           string    `json:"id"`
+	Username     string    `json:"username"`
+	PasswordHash string    `json:"password_hash"`           // admins; empty for code-only users
+	LoginCode    string    `json:"login_code,omitempty"`    // limited users; a short numeric code, the only credential
+	Admin        bool      `json:"admin"`
+	Kid          bool      `json:"kid,omitempty"`           // limited users; renders the playful kid layout
+	SocketIDs    []string  `json:"socket_ids"`
+	CreatedAt    time.Time `json:"created_at"`
+}
+
+// CanAccessSocket reports whether this user may see/control the given
+// socket. Admins can access everything; others are limited to SocketIDs.
+func (u *User) CanAccessSocket(socketID string) bool {
+	if u == nil {
+		return false
+	}
+	if u.Admin {
+		return true
+	}
+	for _, id := range u.SocketIDs {
+		if id == socketID {
+			return true
+		}
+	}
+	return false
 }
 
 // Settings holds app-wide preferences, currently just the controller's
