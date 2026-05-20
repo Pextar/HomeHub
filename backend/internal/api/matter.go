@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -141,6 +143,25 @@ func (s *Server) matterSetState(w http.ResponseWriter, r *http.Request) {
 		s.Store.Mu.Unlock()
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// matterTransport handles GET /api/matter/transport.
+// Returns the active network transport configured for the bridge sidecar
+// ("thread", "wifi", or "none") by inspecting the bridge env vars directly.
+// The frontend uses this to label a freshly-commissioned device correctly
+// (matter-thread vs matter) and to show the right hint in the commission wizard.
+func (s *Server) matterTransport(w http.ResponseWriter, r *http.Request) {
+	if !s.Matter.Enabled() {
+		writeError(w, http.StatusServiceUnavailable, "matter bridge is not configured")
+		return
+	}
+	transport := "none"
+	if strings.TrimSpace(os.Getenv("MATTER_BRIDGE_THREAD_DATASET")) != "" {
+		transport = "thread"
+	} else if strings.TrimSpace(os.Getenv("MATTER_BRIDGE_WIFI_SSID")) != "" {
+		transport = "wifi"
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"transport": transport})
 }
 
 // matterNodeID resolves the Matter node id for a given Socket id.

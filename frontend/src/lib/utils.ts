@@ -12,6 +12,7 @@ export const PROTOCOLS: { value: string; label: string }[] = [
   { value: "raw", label: "Raw / custom" },
   { value: "tasmota", label: "Tasmota (Wi-Fi)" },
   { value: "matter", label: "Matter (Wi-Fi)" },
+  { value: "matter-thread", label: "Matter (Thread)" },
 ];
 
 export function formatDays(days: number[] | undefined): string {

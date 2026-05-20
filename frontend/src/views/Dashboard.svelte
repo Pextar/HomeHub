@@ -52,9 +52,9 @@
     }
 
     // Devices panel data
-    const rfCount     = $derived(v.sockets.filter(s => s.protocol !== "tasmota" && s.protocol !== "matter").length);
+    const rfCount     = $derived(v.sockets.filter(s => s.protocol !== "tasmota" && !s.protocol.startsWith("matter")).length);
     const wifiCount   = $derived(v.sockets.filter(s => s.protocol === "tasmota").length);
-    const matterCount = $derived(v.sockets.filter(s => s.protocol === "matter").length);
+    const matterCount = $derived(v.sockets.filter(s => s.protocol.startsWith("matter")).length);
 
     const devicesByRoom = $derived.by(() => {
         const map = new Map<string, { total: number; on: number }>();

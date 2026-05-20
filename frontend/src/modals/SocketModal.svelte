@@ -22,7 +22,8 @@
 
     const isEdit     = $derived(!!existing);
     const isTasmota  = $derived(protocol === "tasmota");
-    const isMatter   = $derived(protocol === "matter");
+    const isMatter   = $derived(protocol === "matter" || protocol === "matter-thread");
+    const isThread   = $derived(protocol === "matter-thread");
 
     let pairing      = $state(false);
     let probing      = $state(false);
@@ -98,9 +99,11 @@
         ? "Update this socket's details."
         : isTasmota
             ? "Configure a Tasmota Wi-Fi device."
-            : isMatter
-                ? "Commission a Matter Wi-Fi device."
-                : "Configure a new 433MHz controllable socket."}
+            : isThread
+                ? "Commission a Matter Thread device."
+                : isMatter
+                    ? "Commission a Matter Wi-Fi device."
+                    : "Configure a new 433MHz controllable socket."}
 >
     {#snippet body()}
         {#if isMatter && !isEdit}
@@ -116,11 +119,12 @@
                 </select>
             </div>
             <div class="matter-lead">
-                <h3>Matter Wi-Fi device</h3>
+                <h3>{isThread ? "Matter Thread device" : "Matter Wi-Fi device"}</h3>
                 <p>
                     Matter devices use a one-time onboarding flow over Bluetooth.
                     We'll scan the QR code (or accept the manual pairing code), commission
-                    the device onto your Wi-Fi, then add it here — all in one step.
+                    the device onto your {isThread ? "Thread network" : "Wi-Fi"}, then add
+                    it here — all in one step.
                 </p>
                 <button type="button" class="btn btn-primary" onclick={startMatterSetup}>
                     Start Matter setup

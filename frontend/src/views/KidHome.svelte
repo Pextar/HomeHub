@@ -9,7 +9,7 @@
 
     // Matter/Tasmota bulbs get the colour + brightness playground; plain RF
     // sockets just flip on/off on tap.
-    const isSmart = (lamp: Socket) => lamp.protocol === "matter" || lamp.protocol === "tasmota";
+    const isSmart = (lamp: Socket) => lamp.protocol.startsWith("matter") || lamp.protocol === "tasmota";
     let active = $state<Socket | null>(null);
     let confirmExit = $state(false);
 

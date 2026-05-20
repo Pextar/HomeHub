@@ -234,6 +234,53 @@ function wifiNetwork(): { wifiSsid: string; wifiCredentials: string } | undefine
     return { wifiSsid: ssid, wifiCredentials: pass };
 }
 
+function threadNetwork(): { networkName: string; operationalDataset: string } | undefined {
+    const dataset = process.env.MATTER_BRIDGE_THREAD_DATASET?.trim();
+    if (!dataset) return undefined;
+
+    // matter.js needs the Thread network name to verify the commissionee can
+    // see our Thread network. It's already encoded in the Operational Dataset
+    // TLV (type 0x03 = Network Name); we parse it automatically.
+    // Set MATTER_BRIDGE_THREAD_NETWORK_NAME to override if parsing fails.
+    const name = process.env.MATTER_BRIDGE_THREAD_NETWORK_NAME?.trim()
+        || parseThreadNetworkName(dataset);
+
+    if (!name) {
+        throw new Error(
+            "Could not determine Thread network name from MATTER_BRIDGE_THREAD_DATASET. " +
+            "Set MATTER_BRIDGE_THREAD_NETWORK_NAME explicitly.",
+        );
+    }
+    return { networkName: name, operationalDataset: dataset };
+}
+
+// Extracts the Network Name (TLV type 0x03) from a hex-encoded Thread
+// Operational Dataset. Returns an empty string if not found or on parse error.
+function parseThreadNetworkName(hexDataset: string): string {
+    try {
+        const bytes = Buffer.from(hexDataset.replace(/\s/g, ""), "hex");
+        let offset = 0;
+        while (offset + 2 <= bytes.length) {
+            const type = bytes[offset++];
+            const len  = bytes[offset++];
+            if (offset + len > bytes.length) break;
+            if (type === 0x03) {              // Network Name
+                return bytes.subarray(offset, offset + len).toString("utf8");
+            }
+            offset += len;
+        }
+    } catch { /* ignore */ }
+    return "";
+}
+
+// Returns the active network transport that will be used during commissioning.
+// Thread takes priority over Wi-Fi when both env vars are set.
+export function activeTransport(): "thread" | "wifi" | "none" {
+    if (process.env.MATTER_BRIDGE_THREAD_DATASET?.trim()) return "thread";
+    if (process.env.MATTER_BRIDGE_WIFI_SSID?.trim()) return "wifi";
+    return "none";
+}
+
 function optionsFromPairingCode(code: string): NodeCommissioningOptions {
     const trimmed = code.trim();
     let discriminator: number | undefined;
@@ -252,17 +299,24 @@ function optionsFromPairingCode(code: string): NodeCommissioningOptions {
         shortDiscriminator = decoded.shortDiscriminator;
     }
 
-    const wifi = wifiNetwork();
-    if (wifi) {
+    // Thread takes priority over Wi-Fi. Only one transport credential set is
+    // passed at a time — Matter devices join exactly one network type.
+    const thread = threadNetwork();
+    const wifi   = !thread ? wifiNetwork() : undefined;
+
+    if (thread) {
+        console.log("[matter-bridge] commissioning with Thread network (MATTER_BRIDGE_THREAD_DATASET)");
+    } else if (wifi) {
         console.log(`[matter-bridge] commissioning with Wi-Fi SSID: ${process.env.MATTER_BRIDGE_WIFI_SSID}`);
     } else {
-        console.warn("[matter-bridge] MATTER_BRIDGE_WIFI_SSID not set — device will not receive Wi-Fi credentials during commissioning");
+        console.warn("[matter-bridge] neither MATTER_BRIDGE_THREAD_DATASET nor MATTER_BRIDGE_WIFI_SSID is set — device will not receive network credentials and commissioning will stall at the network provisioning step");
     }
 
     return {
         commissioning: {
             regulatoryCountryCode: "XX",
-            ...(wifi ? { wifiNetwork: wifi } : {}),
+            ...(thread ? { threadNetwork: thread } : {}),
+            ...(wifi   ? { wifiNetwork:   wifi   } : {}),
         },
         discovery: {
             identifierData: discriminator !== undefined

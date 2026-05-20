@@ -196,6 +196,9 @@ export const api = {
   },
 
   // Matter devices (via the matter-bridge sidecar)
+  matterTransport() {
+    return req<{ transport: "thread" | "wifi" | "none" }>("/matter/transport");
+  },
   matterListDevices() {
     return req<MatterState[]>("/matter/devices");
   },

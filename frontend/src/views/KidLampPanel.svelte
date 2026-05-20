@@ -13,7 +13,7 @@
     interface Props { socket: Socket; onClose: () => void; }
     let { socket, onClose }: Props = $props();
 
-    const isMatter = $derived(socket.protocol === "matter");
+    const isMatter = $derived(socket.protocol === "matter" || socket.protocol === "matter-thread");
 
     let loading = $state(true);
     let on = $state(false);

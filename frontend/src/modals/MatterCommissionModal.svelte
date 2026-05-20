@@ -19,11 +19,21 @@
 
     type Step = "input" | "commissioning" | "details";
     type InputMode = "scan" | "manual";
+    type Transport = "thread" | "wifi" | "none";
 
     let step      = $state<Step>("input");
     let inputMode = $state<InputMode>("scan");
     let pairingCode = $state("");
     let scannerError = $state<string | null>(null);
+    let transport = $state<Transport>("none");
+
+    // Fetch the configured transport (Thread / Wi-Fi / none) on mount so we
+    // can show the right hint text and save the socket with the correct protocol.
+    $effect(() => {
+        api.matterTransport()
+            .then(r => { transport = r.transport; })
+            .catch(() => { /* non-fatal — hint text falls back to generic */ });
+    });
 
     // Commissioning step state
     let progress    = $state(0);              // 0..1, animated
@@ -168,7 +178,9 @@
             name: name.trim(),
             room: room.trim(),
             code: nodeId,
-            protocol: "matter",
+            // Save as "matter-thread" when the bridge is configured for Thread
+            // so the UI can label and badge the device correctly.
+            protocol: transport === "thread" ? "matter-thread" : "matter",
         };
         if (!payload.name) {
             toasts.warn("Name is required", "Give the device a name so you can find it later.");
@@ -247,8 +259,14 @@
                     <span>{commissionError}</span>
                     <span class="hint">
                         Common causes: the device isn't in pairing mode (reset it),
-                        Bluetooth isn't available on the bridge, the Wi-Fi credentials
-                        aren't set on the bridge yet, or the device is out of range.
+                        Bluetooth isn't available on the bridge,
+                        {#if transport === "thread"}
+                            MATTER_BRIDGE_THREAD_DATASET isn't set or the Thread
+                            Border Router (e.g. Apple TV) isn't reachable,
+                        {:else}
+                            the Wi-Fi credentials aren't set on the bridge yet,
+                        {/if}
+                        or the device is out of BLE range.
                     </span>
                 </div>
             {:else}
@@ -257,7 +275,8 @@
                     <div class="title">Pairing with your device…</div>
                     <div class="hint">
                         This usually takes 30–60 seconds. The bridge talks to the
-                        device over Bluetooth, hands it your Wi-Fi credentials,
+                        device over Bluetooth, hands it your
+                        {#if transport === "thread"}Thread network credentials{:else}Wi-Fi credentials{/if},
                         and confirms it joined the network.
                     </div>
                     <div class="progress">

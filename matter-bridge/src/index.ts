@@ -18,7 +18,7 @@
 // payload printed on the device / box.
 import http from "node:http";
 import { URL } from "node:url";
-import { startController, MatterController } from "./controller.js";
+import { startController, MatterController, activeTransport } from "./controller.js";
 
 const PORT = Number(process.env.MATTER_BRIDGE_PORT || 8765);
 const HOST = process.env.MATTER_BRIDGE_HOST || "127.0.0.1";
@@ -53,7 +53,13 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, contr
     const method = req.method || "GET";
 
     if (path === "/health" && method === "GET") {
-        writeJson(res, 200, { status: "ok", devices: controller.listIds().length });
+        writeJson(res, 200, {
+            status: "ok",
+            devices: controller.listIds().length,
+            // "thread" | "wifi" | "none" — tells the frontend which network
+            // transport credentials are configured for commissioning.
+            transport: activeTransport(),
+        });
         return;
     }
 
