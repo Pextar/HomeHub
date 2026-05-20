@@ -436,7 +436,7 @@
 
 {#if v.groups.length > 0}
 <section class="card">
-    <div class="card-header"><h2>Groups</h2></div>
+    <div class="card-header"><h2><span class="section-ico" data-tone="info"><Icon name="devices" size={15} /></span>Groups</h2></div>
     <div class="group-list">
         {#each v.groups as g, i (g.id)}
             <div class="group-row"
@@ -458,7 +458,7 @@
 
 <section class="card">
     <div class="card-header">
-        <h2>Scenes</h2>
+        <h2><span class="section-ico" data-tone="warn"><Icon name="scenes" size={15} /></span>Scenes</h2>
         <button class="btn btn-ghost" onclick={() => openModal(SceneModal, {})}>New scene</button>
     </div>
     {#if v.scenes.length === 0}
@@ -511,7 +511,7 @@
 {/if}
 
 <section class="card">
-    <div class="card-header"><h2>Rooms</h2></div>
+    <div class="card-header"><h2><span class="section-ico" data-tone="primary"><Icon name="home" size={15} /></span>Rooms</h2></div>
     {#if v.rooms.length === 0}
         <p class="field-help">No rooms yet. Create devices and assign rooms to them.</p>
     {:else}
@@ -938,6 +938,18 @@
         align-items: center;
         gap: 6px;
     }
+
+    /* Coloured icon badge in section headings */
+    .section-ico {
+        width: 24px; height: 24px;
+        border-radius: var(--radius-sm);
+        display: grid; place-items: center;
+        flex-shrink: 0;
+    }
+    .section-ico[data-tone="primary"] { background: var(--primary-soft); color: var(--primary); }
+    .section-ico[data-tone="info"]    { background: var(--info-soft);    color: var(--info);    }
+    .section-ico[data-tone="warn"]    { background: var(--warn-soft);    color: var(--warn);    }
+
     .scene-item, .room-item { display: flex; min-width: 0; }
     .scene-item > :global(*), .room-item > :global(.room) { flex: 1; min-width: 0; }
 
