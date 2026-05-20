@@ -1,12 +1,11 @@
 <!--
-  Compact room pill. Single row on every breakpoint:
-    [name | "n/m on" meta] [On] [Off]
+  Compact room card. Two-row layout on every breakpoint:
+    [name (full width)           ]
+    ["n/m on" meta] [On] [Off]
 
-  Designed to fit two-up on phones without dominating the dashboard the way
-  the previous "card with stacked buttons" layout did. The whole row also
-  acts as a "navigate to this room's devices" hint via the press state —
-  but actions are kept on dedicated buttons so accidental taps don't blast
-  power changes.
+  Name gets the full card width on the top row so it has maximum room
+  before truncating. Meta + actions share the bottom row.
+  Designed to fit two-up on phones without dominating the dashboard.
 -->
 <script lang="ts">
     import Icon from "./Icon.svelte";
@@ -22,24 +21,24 @@
 </script>
 
 <div class="room" class:on={anyOn}>
-    <div class="info">
-        <div class="name" title={room.name}>{room.name}</div>
+    <div class="name" title={room.name}>{room.name}</div>
+    <div class="bottom">
         <div class="meta">
             <span class="count" class:dim={!anyOn}>
                 {room.on}<span class="slash">/{room.sockets}</span>
             </span>
             <span class="status">{allOn ? "all on" : anyOn ? "on" : "off"}</span>
         </div>
-    </div>
-    <div class="actions">
-        <button class="icon-btn on-btn" title="Turn all on" aria-label="Turn all on"
-            onclick={() => runAction(() => api.roomOn(room.name), `${room.name} on`)}>
-            <Icon name="sun" size={16} />
-        </button>
-        <button class="icon-btn off-btn" title="Turn all off" aria-label="Turn all off"
-            onclick={() => runAction(() => api.roomOff(room.name), `${room.name} off`)}>
-            <Icon name="moon" size={16} />
-        </button>
+        <div class="actions">
+            <button class="icon-btn on-btn" title="Turn all on" aria-label="Turn all on"
+                onclick={() => runAction(() => api.roomOn(room.name), `${room.name} on`)}>
+                <Icon name="sun" size={16} />
+            </button>
+            <button class="icon-btn off-btn" title="Turn all off" aria-label="Turn all off"
+                onclick={() => runAction(() => api.roomOff(room.name), `${room.name} off`)}>
+                <Icon name="moon" size={16} />
+            </button>
+        </div>
     </div>
 </div>
 
@@ -50,8 +49,8 @@
         border-radius: var(--radius-md);
         padding: var(--space-2) var(--space-3);
         display: flex;
-        align-items: center;
-        gap: var(--space-2);
+        flex-direction: column;
+        gap: var(--space-1);
         min-height: 56px;
         min-width: 0;
         transition: border-color var(--t-fast), background var(--t-fast);
@@ -65,7 +64,6 @@
         .room.on:hover { border-color: var(--success); }
     }
 
-    .info { flex: 1; min-width: 0; }
     .name {
         font-weight: 600;
         font-size: 14px;
@@ -74,11 +72,16 @@
         text-overflow: ellipsis;
         white-space: nowrap;
     }
+    .bottom {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+    }
     .meta {
         display: flex;
         align-items: baseline;
         gap: 6px;
-        margin-top: 2px;
+        flex: 1;
         font-size: 11px;
     }
     .count {
