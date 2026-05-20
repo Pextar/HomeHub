@@ -19,10 +19,11 @@
     let on = $state(false);
     let brightness = $state(100);
     let color = $state("#FFD23F");
+    let whiteMode = $state(false);   // true when lamp is in CT / white mode
     let supportsColor = $state(false);
     let supportsLevel = $state(false);
 
-    // Big, saturated, kid-friendly colors. "white" sends a neutral CT.
+    // Big, saturated, kid-friendly colors (3×3 grid together with the white swatch).
     const SWATCHES = [
         { name: "Red",    hex: "FF4D4D" },
         { name: "Orange", hex: "FF9F1C" },
@@ -41,6 +42,7 @@
             const lvl = isMatter ? (s as any).level : (s as any).dimmer;
             if (lvl != null) { brightness = lvl; supportsLevel = true; }
             if (s.color != null) { color = "#" + s.color.toUpperCase(); supportsColor = true; }
+            else if (s.ct != null) { whiteMode = true; supportsColor = true; }
         } catch (e) {
             toasts.error("Couldn't reach the lamp", (e as Error).message);
         } finally {
@@ -80,11 +82,20 @@
     }
 
     function pickColor(hex: string) {
+        whiteMode = false;
         color = "#" + hex;
         on = true;
         socket.state = true;
         const key = isMatter ? "level" : "dimmer";
         send({ on: true, color: hex, [key]: brightness });
+    }
+
+    function pickWhite() {
+        whiteMode = true;
+        on = true;
+        socket.state = true;
+        const key = isMatter ? "level" : "dimmer";
+        send({ on: true, ct: 370, [key]: brightness });
     }
 
     function onBrightness() {
@@ -98,6 +109,11 @@
     // The big preview disc shows the chosen color, dimmed by brightness.
     const previewColor = $derived.by(() => {
         if (!on) return "var(--surface)";
+        if (whiteMode) {
+            // Warm white (~2700 K): #FFF9DC scaled by brightness
+            const k = Math.max(0.25, brightness / 100);
+            return `rgb(${Math.round(255 * k)}, ${Math.round(249 * k)}, ${Math.round(220 * k)})`;
+        }
         const h = color.replace(/^#/, "");
         const r = parseInt(h.slice(0, 2), 16);
         const g = parseInt(h.slice(2, 4), 16);
@@ -125,10 +141,16 @@
         {:else}
             {#if supportsColor}
                 <div class="swatches" role="group" aria-label="Pick a color">
+                    <button
+                        class="swatch white"
+                        class:active={on && whiteMode}
+                        aria-label="White"
+                        onclick={pickWhite}
+                    ></button>
                     {#each SWATCHES as s (s.hex)}
                         <button
                             class="swatch"
-                            class:active={on && color.toUpperCase() === "#" + s.hex}
+                            class:active={on && !whiteMode && color.toUpperCase() === "#" + s.hex}
                             style:background={"#" + s.hex}
                             aria-label={s.name}
                             onclick={() => pickColor(s.hex)}
@@ -222,7 +244,7 @@
 
     .swatches {
         display: grid;
-        grid-template-columns: repeat(4, 1fr);
+        grid-template-columns: repeat(3, 1fr);
         gap: var(--space-3);
     }
     .swatch {
@@ -236,6 +258,12 @@
     }
     .swatch:active { transform: scale(0.9); }
     .swatch.active { border-color: var(--text); transform: scale(1.08); }
+    .swatch.white {
+        background: radial-gradient(circle at 38% 38%, #ffffff, #fff8d6 55%, #ffe89a);
+        border-color: #d4c060;
+        box-shadow: inset 0 -4px 10px rgba(0,0,0,0.08), 0 4px 10px rgba(0,0,0,0.18);
+    }
+    .swatch.white.active { border-color: var(--text); }
 
     .bright {
         display: flex;
