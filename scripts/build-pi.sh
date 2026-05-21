@@ -53,6 +53,11 @@ fi
 cp "$ROOT/deploy/rf-controller.service" "$RELEASE/"
 cp "$ROOT/deploy/env.example"            "$RELEASE/"
 cp "$ROOT/scripts/nexa_tx.py"            "$RELEASE/"
+# Optional local MQTT broker (Mosquitto). deploy-pi.sh runs the setup script
+# on the Pi when SETUP_MOSQUITTO=1; both files live side by side in the
+# release so the script can find its config.
+cp "$ROOT/scripts/setup-mosquitto.sh"    "$RELEASE/"
+cp "$ROOT/deploy/mosquitto.conf"         "$RELEASE/"
 
 echo "==> Release ready:"
 ls -lh "$RELEASE"

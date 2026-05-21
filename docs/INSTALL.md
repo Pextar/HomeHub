@@ -80,6 +80,47 @@ sudo systemctl restart rf-controller
 
 Then hit **Pair** on the Sensors page in the UI and trigger your sensor.
 
+### MQTT broker (for MQTT devices & sensors)
+
+MQTT is a pub/sub protocol, so it needs a **broker** in the middle. The
+controller is an MQTT *client* — it does not embed a broker — so you either
+point it at an existing broker (Home Assistant's MQTT add-on, an existing
+Mosquitto, Zigbee2MQTT's broker) or run one on the Pi itself.
+
+To make the Pi the broker, install Mosquitto. The easiest path is to let the
+deploy script do it:
+
+```bash
+# Anonymous access on a trusted home LAN:
+SETUP_MOSQUITTO=1 scripts/deploy-pi.sh
+
+# Or with a login (recommended — devices and the controller authenticate):
+SETUP_MOSQUITTO=1 MQTT_USERNAME=ctrl MQTT_PASSWORD=secret scripts/deploy-pi.sh
+```
+
+This installs Mosquitto, writes `/etc/mosquitto/conf.d/rf-socket-controller.conf`
+(listening on `1883` for the controller on `127.0.0.1` and for LAN devices),
+optionally creates a password file, enables the `mosquitto` service, and adds
+`MQTT_BROKER_URL` (plus credentials, if any) to the controller's `.env` — so
+the controller starts using the broker on its next restart.
+
+To set it up by hand on the Pi instead, run the bundled script directly:
+
+```bash
+cd ~/rf-socket-controller
+MQTT_USERNAME=ctrl MQTT_PASSWORD=secret ENV_FILE=.env ./setup-mosquitto.sh
+sudo systemctl restart rf-controller
+```
+
+Then in the app: add a socket with protocol **MQTT** and its command topic
+(e.g. `cmnd/plug/POWER`) as the code, or a sensor with protocol `mqtt` and the
+topic to subscribe to. The socket editor's **Send test signal** button
+publishes `ON` to confirm the device reacts.
+
+> Security note: with anonymous access enabled, any device on your LAN can
+> publish to (and flip) your sockets. Prefer the `MQTT_USERNAME`/`MQTT_PASSWORD`
+> form unless your network is fully trusted.
+
 ## Software Installation
 
 ### Recommended: cross-compile from your laptop

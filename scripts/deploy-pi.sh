@@ -6,6 +6,11 @@
 #   scripts/deploy-pi.sh claw@192.168.1.42       # explicit target
 #   PI_HOST=claw@rpi.local scripts/deploy-pi.sh  # via env
 #
+# Also install a local MQTT broker (Mosquitto) on the Pi:
+#   SETUP_MOSQUITTO=1 scripts/deploy-pi.sh                              # anonymous, trusted LAN
+#   SETUP_MOSQUITTO=1 MQTT_USERNAME=ctrl MQTT_PASSWORD=secret \
+#     scripts/deploy-pi.sh                                             # with auth (recommended)
+#
 # Layout on the Pi (under the SSH user's home):
 #   ~/rf-socket-controller/
 #     rf-controller            (binary)
@@ -69,6 +74,18 @@ fi
 echo "==> Seeding .env (only if missing)"
 rsync -av --ignore-existing "$RELEASE/env.example" "$HOST:$REMOTE_DIR/.env"
 rsync -av                   "$RELEASE/env.example" "$HOST:$REMOTE_DIR/env.example"
+
+# Optional: install + configure Mosquitto on the Pi so the controller is also
+# the MQTT broker. Opt-in (SETUP_MOSQUITTO=1) so deploys that already point at
+# an external broker aren't disturbed. Pass MQTT_USERNAME/MQTT_PASSWORD to
+# require auth (recommended); omit for anonymous access on a trusted LAN.
+if [ "${SETUP_MOSQUITTO:-}" = "1" ]; then
+  echo "==> Setting up local Mosquitto broker"
+  rsync -av "$RELEASE/setup-mosquitto.sh" "$RELEASE/mosquitto.conf" "$HOST:$REMOTE_DIR/"
+  ssh "$HOST" "chmod +x '$REMOTE_DIR/setup-mosquitto.sh' && \
+    MQTT_USERNAME='${MQTT_USERNAME:-}' MQTT_PASSWORD='${MQTT_PASSWORD:-}' \
+    ENV_FILE='$REMOTE_DIR/.env' '$REMOTE_DIR/setup-mosquitto.sh'"
+fi
 
 echo "==> Installing systemd unit"
 rsync -av "$RELEASE/rf-controller.service" "$HOST:$REMOTE_DIR/rf-controller.service"

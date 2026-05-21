@@ -1,6 +1,10 @@
 [Unit]
 Description=RF Socket Controller
-After=network-online.target
+# Ordering hint only: when a local Mosquitto broker is installed (deploy with
+# SETUP_MOSQUITTO=1), start after it so the broker is ready first. This is a
+# soft After= with no Requires/Wants — the MQTT client retries and reconnects
+# on its own, so a missing or external broker is fine and won't block startup.
+After=network-online.target mosquitto.service
 Wants=network-online.target
 
 [Service]
