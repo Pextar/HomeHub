@@ -3,6 +3,8 @@
     import { onMount } from "svelte";
     import { closeModal } from "../lib/modal.svelte";
     import { lockBodyScroll, unlockBodyScroll } from "../lib/scroll-lock";
+    import { fade } from "svelte/transition";
+    import { sheet, dur } from "../lib/motion";
 
     interface Props {
         title: string;
@@ -66,7 +68,7 @@
     let pendingBody = false;
     let dragStartY = 0;
     let dragStartX = 0;
-    let dismissing = false;
+    let dismissing = $state(false);
 
     function isMobile() {
         return window.matchMedia("(max-width: 600px)").matches;
@@ -174,6 +176,8 @@
     onclick={onBackdrop}
     onkeydown={(e) => { if (e.key === "Escape") closeModal(); }}
     aria-hidden="false"
+    in:fade={{ duration: dur(180) }}
+    out:fade={{ duration: dur(200) }}
 >
     <div
         class="dialog"
@@ -187,6 +191,8 @@
         style:transform={dragY > 0 ? `translateY(${dragY}px)` : ''}
         style:opacity={dragY > 0 ? Math.max(0.4, 1 - dragY / 300) : undefined}
         style:transition={dragging ? 'none' : dragY > 0 ? 'transform 0.22s ease-in, opacity 0.22s ease-in' : 'transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)'}
+        in:sheet={{ duration: 360 }}
+        out:sheet={{ instant: dismissing, duration: 280 }}
     >
         <!-- Head doubles as the drag affordance on mobile: pill + title row.
              Touch-action: none on mobile prevents iOS from claiming the
@@ -233,12 +239,10 @@
         display: grid; place-items: center;
         z-index: 150;
         padding: var(--space-4);
-        animation: fade 0.15s ease;
         /* Prevent any overscroll from leaking to the underlying document. */
         overscroll-behavior: contain;
     }
     :global([data-theme="light"]) .root { background: rgba(20, 24, 38, 0.40); }
-    @keyframes fade { from { opacity: 0 } to { opacity: 1 } }
 
     .dialog {
         background: var(--bg-elevated);
@@ -251,13 +255,10 @@
         display: flex;
         flex-direction: column;
         overflow: hidden;
-        animation: pop 0.18s ease both;
+        /* GPU-promote so the drag transform and slide transitions stay smooth. */
+        will-change: transform;
     }
     .dialog.wide { max-width: 720px; }
-    @keyframes pop {
-        from { opacity: 0; transform: translateY(8px) scale(0.99); }
-        to { opacity: 1; transform: none; }
-    }
 
     .drag-handle { display: none; }
 
@@ -309,11 +310,6 @@
             border-bottom-left-radius: 0;
             border-bottom-right-radius: 0;
             max-height: 92vh;
-            animation-name: slide-up;
-        }
-        @keyframes slide-up {
-            from { opacity: 0; transform: translateY(40px); }
-            to   { opacity: 1; transform: none; }
         }
 
         /* The whole head bar acts as the drag handle. touch-action: none
