@@ -675,8 +675,12 @@
                         Delete room
                     </button>
                 {:else}
-                    <button class="btn btn-success btn-xs" onclick={() => { const c = panelCell; selectedRoom = null; c && roomAllOn(c); }}>All on</button>
-                    <button class="btn btn-danger btn-xs" onclick={() => { const c = panelCell; selectedRoom = null; c && roomAllOff(c); }}>All off</button>
+                    <button class="btn btn-success btn-xs"
+                        disabled={panelCell?.on === panelCell?.total}
+                        onclick={() => { const c = panelCell; selectedRoom = null; c && roomAllOn(c); }}>All on</button>
+                    <button class="btn btn-danger btn-xs"
+                        disabled={panelCell?.on === 0}
+                        onclick={() => { const c = panelCell; selectedRoom = null; c && roomAllOff(c); }}>All off</button>
                 {/if}
             </div>
         </div>
