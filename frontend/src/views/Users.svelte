@@ -98,7 +98,20 @@
 </Topbar>
 
 {#if loading}
-    <p class="muted">Loading…</p>
+    <ul class="cards" aria-hidden="true">
+        {#each Array.from({ length: 3 }) as _, i (i)}
+            <li class="card skel-card">
+                <div class="skel-top">
+                    <div class="skeleton skel-avatar"></div>
+                    <div class="skel-lines">
+                        <div class="skeleton skel-line lg"></div>
+                        <div class="skeleton skel-line sm"></div>
+                    </div>
+                </div>
+                <div class="skeleton skel-line"></div>
+            </li>
+        {/each}
+    </ul>
 {:else if sortedUsers.length === 0}
     <EmptyState
         icon="user"
@@ -159,6 +172,15 @@
 
 <style>
     .muted { color: var(--text-muted); font-size: 13px; }
+
+    /* Loading placeholders mirror the card layout to avoid a jarring swap. */
+    .skel-card { gap: var(--space-4); }
+    .skel-top { display: flex; align-items: center; gap: var(--space-3); }
+    .skel-avatar { width: 40px; height: 40px; border-radius: 50%; flex-shrink: 0; }
+    .skel-lines { flex: 1; display: flex; flex-direction: column; gap: 8px; }
+    .skel-line { height: 12px; }
+    .skel-line.lg { width: 55%; }
+    .skel-line.sm { width: 32%; }
     .cards {
         list-style: none;
         margin: 0;
