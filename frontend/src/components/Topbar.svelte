@@ -29,7 +29,11 @@
         flex-wrap: nowrap;
     }
     .title { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
-    .subtitle { color: var(--text-muted); font-size: 13px; }
+    .title h1 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .subtitle {
+        color: var(--text-muted); font-size: 13px;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
     .actions { display: flex; gap: var(--space-2); flex-shrink: 0; }
 
     /* iOS large-title feel on mobile: heavier weight, bigger size */

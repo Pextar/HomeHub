@@ -80,6 +80,17 @@
         return { line, area, points, min, max, plotW, plotH, xTicks, yTicks };
     });
 
+    // Spoken summary for screen readers — the visual chart is meaningless to
+    // them, so expose current / min / max instead of a generic label.
+    const ariaSummary = $derived.by(() => {
+        if (readings.length < 2) return "Sensor reading chart, not enough data yet";
+        const u = unit ? ` ${unit}` : "";
+        const current = readings[readings.length - 1].value;
+        return `Sensor readings. Current ${formatValue(current)}${u}, ` +
+            `range ${formatValue(chart.min)} to ${formatValue(chart.max)}${u}, ` +
+            `${readings.length} points`;
+    });
+
     function formatValue(v: number): string {
         if (Math.abs(v) >= 100) return v.toFixed(0);
         if (Math.abs(v) >= 10) return v.toFixed(1);
@@ -112,7 +123,7 @@
         <div class="empty">Not enough data yet — waiting for readings.</div>
     {:else}
         <svg viewBox="0 0 {containerWidth} {height}" width={containerWidth} height={height}
-            role="img" aria-label="Sensor reading chart"
+            role="img" aria-label={ariaSummary}
             onpointermove={pickFromEvent}
             onpointerdown={pickFromEvent}
             onpointerleave={() => hoverIndex = null}>
@@ -123,9 +134,11 @@
                 <text x={PAD_LEFT - 8} y={t.y + 4} text-anchor="end" class="axis">{t.label}</text>
             {/each}
 
-            <!-- X labels -->
+            <!-- X labels — first anchors left, last anchors right so they
+                 don't overlap the y-axis labels or clip at the chart edge. -->
             {#each chart.xTicks as t, i (i + ":" + t.label)}
-                <text x={t.x} y={height - 6} text-anchor="middle" class="axis">{t.label}</text>
+                <text x={t.x} y={height - 6} class="axis"
+                    text-anchor={i === 0 ? "start" : i === chart.xTicks.length - 1 ? "end" : "middle"}>{t.label}</text>
             {/each}
 
             <!-- Area + line -->

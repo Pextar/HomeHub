@@ -4,9 +4,10 @@
     import Switch from "../components/Switch.svelte";
     import ConfirmModal from "../components/ConfirmModal.svelte";
     import { openModal } from "../lib/modal.svelte";
+    import { lockBodyScroll, unlockBodyScroll } from "../lib/scroll-lock";
     import { data, toasts } from "../lib/stores.svelte";
     import { api } from "../lib/api";
-    import { runAction } from "../lib/utils";
+    import { socketAction } from "../lib/utils";
     import { fly, fade, scale } from "svelte/transition";
     import { cubicOut, backOut } from "svelte/easing";
     import { dur, stagger } from "../lib/motion";
@@ -159,21 +160,22 @@
     }
 
     // ── Control actions (normal mode) ────────────────────────────────
+    // Optimistic flip + rollback, matching SocketCard — the room tile lights
+    // up instantly instead of waiting for a full refetch.
     async function toggleSocket(s: Socket) {
-        await runAction(() => api.socketToggle(s.id));
+        await socketAction(s, "toggle");
     }
 
+    // Fire all the changing sockets in parallel with optimistic state, then
+    // reconcile against the server response. A serial await-loop made a
+    // multi-device room feel sluggish on mobile.
     async function roomAllOn(cell: RoomCell) {
-        for (const s of cell.sockets) {
-            if (!s.state) { try { await api.socketOn(s.id); } catch {} }
-        }
-        await data.refresh();
+        const targets = cell.sockets.filter(s => !s.state);
+        await Promise.all(targets.map(s => socketAction(s, "on")));
     }
     async function roomAllOff(cell: RoomCell) {
-        for (const s of cell.sockets) {
-            if (s.state) { try { await api.socketOff(s.id); } catch {} }
-        }
-        await data.refresh();
+        const targets = cell.sockets.filter(s => s.state);
+        await Promise.all(targets.map(s => socketAction(s, "off")));
     }
 
     // ── Create-room flow ─────────────────────────────────────────────
@@ -185,9 +187,13 @@
     let newRoomEmoji = $state("");
     let createInput = $state<HTMLInputElement>();
 
-    // Focus the name field as soon as the create sheet opens.
+    // Focus the name field when the create sheet opens — but not on touch,
+    // where summoning the keyboard immediately would cover the sheet's
+    // quick-pick options. Touch users tap the field when ready.
     $effect(() => {
-        if (creating && createInput) createInput.focus();
+        if (!creating || !createInput) return;
+        if (window.matchMedia("(pointer: coarse)").matches) return;
+        createInput.focus();
     });
 
     function startCreate() {
@@ -370,9 +376,10 @@
         if (!selectedRoom && !creating) return;
         if (typeof window === "undefined") return;
         if (!window.matchMedia("(max-width: 900px)").matches) return;
-        const prev = document.body.style.overflow;
-        document.body.style.overflow = "hidden";
-        return () => { document.body.style.overflow = prev; };
+        // iOS Safari ignores overflow:hidden on body — use the position:fixed
+        // ref-counted lock that actually stops background scroll.
+        lockBodyScroll();
+        return () => unlockBodyScroll();
     });
 
     // ── Drag-to-dismiss (mobile bottom sheet handle) ─────────────────
@@ -462,7 +469,15 @@
 <!-- ── Floor plan stage: grid on the left, docked panel on the right ─ -->
 <div class="stage" class:has-panel={panelOpen}>
 <div class="stage-grid">
-{#if cells.length === 0 && !editing}
+{#if !v.loaded && cells.length === 0}
+    <div class="house">
+        <div class="rooms">
+            {#each Array.from({ length: 4 }) as _, i (i)}
+                <div class="room skeleton-room" aria-hidden="true"></div>
+            {/each}
+        </div>
+    </div>
+{:else if cells.length === 0 && !editing}
     <div class="empty">
         <div class="empty-emoji" aria-hidden="true">🏠</div>
         <p>Let's map your home</p>
@@ -852,6 +867,23 @@
     .room[data-size="small"] { grid-column: span 2; grid-row: span 1; }
     .room[data-size="wide"]  { grid-column: span 2; grid-row: span 2; }
     .room[data-size="big"]   { grid-column: span 4; grid-row: span 2; }
+
+    /* Cold-load placeholder tiles while the first fetch resolves. */
+    .skeleton-room {
+        min-height: 96px;
+        cursor: default;
+        background: linear-gradient(90deg,
+            var(--surface) 0%, var(--surface-hover) 50%, var(--surface) 100%);
+        background-size: 200% 100%;
+        animation: fp-shimmer 1.5s linear infinite;
+    }
+    @keyframes fp-shimmer {
+        0% { background-position: 200% 0; }
+        100% { background-position: -200% 0; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+        .skeleton-room { animation: none; }
+    }
     @media (min-width: 600px) {
         .room[data-size="small"] { grid-column: span 1; grid-row: span 1; }
         .room[data-size="wide"]  { grid-column: span 2; grid-row: span 1; }

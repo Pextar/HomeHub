@@ -145,6 +145,7 @@
                         class="swatch white"
                         class:active={on && whiteMode}
                         aria-label="White"
+                        aria-pressed={on && whiteMode}
                         onclick={pickWhite}
                     ></button>
                     {#each SWATCHES as s (s.hex)}
@@ -153,6 +154,7 @@
                             class:active={on && !whiteMode && color.toUpperCase() === "#" + s.hex}
                             style:background={"#" + s.hex}
                             aria-label={s.name}
+                            aria-pressed={on && !whiteMode && color.toUpperCase() === "#" + s.hex}
                             onclick={() => pickColor(s.hex)}
                         ></button>
                     {/each}
@@ -164,7 +166,7 @@
                     <span class="sun small">☀️</span>
                     <input type="range" min="1" max="100" step="1"
                         bind:value={brightness} oninput={onBrightness}
-                        aria-label="Brightness" />
+                        aria-label="Brightness" aria-valuetext="{brightness}%" />
                     <span class="sun big">☀️</span>
                 </div>
             {/if}

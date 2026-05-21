@@ -11,6 +11,7 @@
 
     let action = $state<string>("off");
     let customMins = $state<number | null>(null);
+    let customError = $state("");
 
     const presets = [
         { label: "1 min",  seconds: 60 },
@@ -36,9 +37,10 @@
         e.preventDefault();
         const mins = customMins;
         if (!mins || mins <= 0) {
-            toasts.warn("Pick a duration", "Enter a positive number of minutes.");
+            customError = "Enter a positive number of minutes.";
             return;
         }
+        customError = "";
         fire(mins * 60, `${mins} min`);
     }
 </script>
@@ -76,9 +78,13 @@
                 <div class="custom-row">
                     <input id="timer-custom" type="number" min="1"
                         placeholder="Minutes"
-                        bind:value={customMins} />
+                        bind:value={customMins}
+                        aria-invalid={customError ? "true" : undefined}
+                        aria-describedby={customError ? "timer-custom-err" : undefined}
+                        oninput={() => customError = ""} />
                     <button type="submit" class="btn btn-primary">Set custom timer</button>
                 </div>
+                {#if customError}<div id="timer-custom-err" class="field-error">{customError}</div>{/if}
                 <div class="field-help">Pick any number of minutes.</div>
             </div>
         </form>

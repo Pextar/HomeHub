@@ -32,9 +32,18 @@
     let dialog: HTMLDivElement | undefined = $state();
     let bodyEl: HTMLDivElement | undefined = $state();
 
-    // Focus the first focusable element after mount.
+    // Focus management after mount. On touch devices, focusing the first
+    // input immediately pops the on-screen keyboard and shoves the bottom
+    // sheet up — jarring. There we focus the dialog container instead; the
+    // user taps a field when they're ready. On pointer devices we focus the
+    // first control so keyboard users can start typing right away.
     $effect(() => {
         if (!dialog) return;
+        const coarse = window.matchMedia("(pointer: coarse)").matches;
+        if (coarse) {
+            dialog.focus();
+            return;
+        }
         const focusables = dialog.querySelectorAll<HTMLElement>(
             "button, [href], input, select, textarea, [tabindex]:not([tabindex='-1'])"
         );

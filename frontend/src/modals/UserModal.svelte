@@ -25,6 +25,8 @@
     let regenerate = $state(false);
     let saving = $state(false);
     let showPassword = $state(false);
+    let errors = $state<{ name?: string; password?: string }>({});
+    const clear = (k: "name" | "password") => { if (errors[k]) errors = { ...errors, [k]: undefined }; };
 
     function toggle(id: string) {
         if (selected.has(id)) selected.delete(id);
@@ -40,11 +42,11 @@
     async function save() {
         if (saving) return;
         const name = username.trim();
-        if (!name) { toasts.warn("Missing name", "Give the profile a username."); return; }
-        if (admin && !isEdit && !password.trim()) {
-            toasts.warn("Missing password", "Admin profiles need a password.");
-            return;
-        }
+        const errs: typeof errors = {};
+        if (!name) errs.name = "Give the profile a username.";
+        if (admin && !isEdit && !password.trim()) errs.password = "Admin profiles need a password.";
+        errors = errs;
+        if (errs.name || errs.password) return;
 
         saving = true;
         try {
@@ -86,7 +88,11 @@
             <div class="field">
                 <label for="usr-name">Username</label>
                 <input id="usr-name" type="text" bind:value={username}
-                    placeholder="e.g. guest" autocomplete="off" autocapitalize="none" required />
+                    placeholder="e.g. guest" autocomplete="off" autocapitalize="none" required
+                    aria-invalid={errors.name ? "true" : undefined}
+                    aria-describedby={errors.name ? "usr-name-err" : undefined}
+                    oninput={() => clear("name")} />
+                {#if errors.name}<div id="usr-name-err" class="field-error">{errors.name}</div>{/if}
             </div>
             <label class="admin-row">
                 <input type="checkbox" bind:checked={admin} />
@@ -111,12 +117,16 @@
                     <label for="usr-pass">Password {#if isEdit}<span class="field-help-inline">(leave blank to keep current)</span>{/if}</label>
                     <div class="pass-wrap">
                         <input id="usr-pass" type={showPassword ? "text" : "password"} bind:value={password}
-                            autocomplete="new-password" placeholder={isEdit ? "••••••••" : ""} />
+                            autocomplete="new-password" placeholder={isEdit ? "••••••••" : ""}
+                            aria-invalid={errors.password ? "true" : undefined}
+                            aria-describedby={errors.password ? "usr-pass-err" : undefined}
+                            oninput={() => clear("password")} />
                         <button type="button" class="show-btn" onclick={() => showPassword = !showPassword}
                             aria-label={showPassword ? "Hide password" : "Show password"}>
                             <Icon name={showPassword ? "eyeOff" : "eye"} size={18} />
                         </button>
                     </div>
+                    {#if errors.password}<div id="usr-pass-err" class="field-error">{errors.password}</div>{/if}
                 </div>
             {:else if isEdit && loginCode}
                 <div class="field" style="margin-top:var(--space-4)">

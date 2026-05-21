@@ -149,7 +149,7 @@
     // dim the picked color by `level`; in white mode we interpolate between
     // a warm and cool tint along the mired range.
     const previewColor = $derived.by(() => {
-        if (!on) return "var(--bg-base)";
+        if (!on) return "var(--surface)";
         if (mode === "color") return tintForLevel(color, level);
         return ctToCss(ct, level);
     });
@@ -284,7 +284,7 @@
 
 <style>
     .note { font-size: 13px; color: var(--text-muted); padding: var(--space-2) 0; }
-    .note.error { display: flex; flex-direction: column; gap: 4px; color: var(--error, #f87171); }
+    .note.error { display: flex; flex-direction: column; gap: 4px; color: var(--danger); }
 
     /* --- preview row ---------------------------------------------------- */
     .preview-row {
@@ -304,7 +304,7 @@
         place-items: center;
         border-radius: 50%;
     }
-    .preview:focus-visible { outline: 2px solid var(--accent, #60a5fa); outline-offset: 4px; }
+    .preview:focus-visible { outline: 2px solid var(--primary); outline-offset: 4px; }
     .halo {
         position: absolute;
         inset: -6px;
@@ -348,14 +348,14 @@
     .device-name { font-size: 14px; font-weight: 600; color: var(--text); }
     .device-id { font-size: 12px; color: var(--text-muted); font-family: ui-monospace, monospace; }
     .hint { font-size: 12px; color: var(--text-muted); }
-    .hint.warn { color: var(--warn, #f59e0b); }
+    .hint.warn { color: var(--warn); }
 
     /* --- mode tabs ------------------------------------------------------ */
     .mode-tabs {
         display: flex;
         gap: 4px;
         padding: 4px;
-        background: var(--bg-base);
+        background: var(--surface);
         border: 1px solid var(--border);
         border-radius: var(--radius-md);
         margin-top: var(--space-4);
@@ -413,7 +413,7 @@
         height: 14px;
         border-radius: 7px;
         outline: none;
-        background: var(--bg-base);
+        background: var(--surface);
         border: 1px solid var(--border);
     }
     input[type="range"]:disabled { opacity: 0.4; }
@@ -443,7 +443,7 @@
         background: linear-gradient(
             to right,
             rgba(0,0,0,0.5),
-            var(--track-color, var(--accent, #60a5fa))
+            var(--track-color, var(--primary))
         );
         border: 1px solid rgba(0,0,0,0.15);
     }
@@ -483,7 +483,7 @@
         transition: border-color 0.15s, transform 0.15s, background 0.15s;
     }
     .preset:hover { border-color: var(--border-strong); transform: translateY(-1px); }
-    .preset:focus-visible { outline: 2px solid var(--accent, #60a5fa); outline-offset: 2px; }
+    .preset:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
     .preset:active { transform: scale(0.97); }
     .preset-dot {
         width: 14px; height: 14px; border-radius: 50%;

@@ -15,8 +15,6 @@
       from the finger.
 -->
 <script lang="ts">
-    import { onMount } from "svelte";
-
     interface Props {
         // Current color as #RRGGBB (uppercase or lowercase).
         color: string;
@@ -45,9 +43,32 @@
         s = hs.s;
     });
 
-    onMount(() => {
-        paint();
+    // Repaint whenever the canvas mounts or the size changes — a single
+    // onMount paint would leave a blank/stale wheel after a responsive resize.
+    $effect(() => {
+        // Touch `size` and `canvas` so the effect re-runs when either changes.
+        size;
+        if (canvas) paint();
     });
+
+    // Keyboard control: ←/→ adjust hue, ↑/↓ adjust saturation. Shift = fine.
+    function onKeyDown(e: KeyboardEvent) {
+        if (disabled) return;
+        const hueStep = e.shiftKey ? 2 : 8;
+        const satStep = e.shiftKey ? 0.02 : 0.06;
+        let handled = true;
+        switch (e.key) {
+            case "ArrowLeft":  h = (h - hueStep + 360) % 360; break;
+            case "ArrowRight": h = (h + hueStep) % 360; break;
+            case "ArrowUp":    s = Math.min(1, s + satStep); break;
+            case "ArrowDown":  s = Math.max(0, s - satStep); break;
+            default: handled = false;
+        }
+        if (handled) {
+            e.preventDefault();
+            onChange(rgbToHex(hsvToRgb(h, s, 1)));
+        }
+    }
 
     function paint() {
         if (!canvas) return;
@@ -180,6 +201,7 @@
     onpointermove={onPointerMove}
     onpointerup={onPointerUp}
     onpointercancel={onPointerUp}
+    onkeydown={onKeyDown}
     role="slider"
     tabindex={disabled ? -1 : 0}
     aria-label="Color"
@@ -213,7 +235,7 @@
     }
     .wheel-wrap:focus-visible {
         outline: none;
-        box-shadow: 0 8px 24px rgba(0,0,0,0.25), 0 0 0 3px var(--accent, #60a5fa);
+        box-shadow: 0 8px 24px rgba(0,0,0,0.25), var(--focus-ring);
     }
     canvas {
         display: block;

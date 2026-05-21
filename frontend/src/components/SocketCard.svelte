@@ -245,7 +245,7 @@
                 oninput={(e) => { brightness = +(e.currentTarget as HTMLInputElement).value; onDimmerInput(); }}
                 disabled={!socket.state || brightness === null}
                 aria-label="Brightness"
-                style:--tint={tintColor || "var(--accent, #60a5fa)"} />
+                style:--tint={tintColor || "var(--primary)"} />
             <span class="dim-val">{brightness === null ? "—" : brightness + "%"}</span>
         </div>
     {/if}
@@ -356,7 +356,7 @@
         padding: 2px 4px;
         margin: -2px -4px;
     }
-    .title-btn:focus-visible { outline: 2px solid var(--accent, #60a5fa); }
+    .title-btn:focus-visible { outline: 2px solid var(--primary); }
     .title-btn:hover .name { text-decoration: underline; text-decoration-color: var(--border-strong); }
 
     .status {

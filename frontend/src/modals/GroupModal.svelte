@@ -14,6 +14,8 @@
     const sockets = $derived(sortedSockets(data.value.sockets));
     let name = $state(untrack(() => existing?.name ?? ""));
     let selected = $state(untrack(() => new Set(existing?.socket_ids ?? [])));
+    let saving = $state(false);
+    let nameError = $state("");
 
     function toggle(id: string) {
         if (selected.has(id)) selected.delete(id);
@@ -22,8 +24,10 @@
     }
 
     async function save() {
+        if (saving) return;
         const payload = { name: name.trim(), socket_ids: [...selected] };
-        if (!payload.name) { toasts.warn("Missing name", "Give the group a name."); return; }
+        if (!payload.name) { nameError = "Give the group a name."; return; }
+        saving = true;
         try {
             if (existing) {
                 await api.updateGroup(existing.id, payload);
@@ -36,6 +40,8 @@
             await data.refresh();
         } catch (e) {
             toasts.error("Save failed", (e as Error).message);
+        } finally {
+            saving = false;
         }
     }
 </script>
@@ -49,7 +55,11 @@
             <div class="field">
                 <label for="grp-name">Name</label>
                 <input id="grp-name" type="text" bind:value={name}
-                    placeholder="e.g. Living room lights" autocomplete="off" required />
+                    placeholder="e.g. Living room lights" autocomplete="off" required
+                    aria-invalid={nameError ? "true" : undefined}
+                    aria-describedby={nameError ? "grp-name-err" : undefined}
+                    oninput={() => nameError = ""} />
+                {#if nameError}<div id="grp-name-err" class="field-error">{nameError}</div>{/if}
             </div>
             <div class="field" style="margin-top:var(--space-4)">
                 <span class="field-label">Members ({sockets.length} sockets)</span>
@@ -72,8 +82,8 @@
     {/snippet}
     {#snippet actions()}
         <button class="btn btn-ghost" onclick={() => closeModal()}>Cancel</button>
-        <button class="btn btn-primary" onclick={save}>
-            {isEdit ? "Save" : "Create group"}
+        <button class="btn btn-primary" onclick={save} disabled={saving}>
+            {saving ? "Saving…" : isEdit ? "Save" : "Create group"}
         </button>
     {/snippet}
 </Modal>

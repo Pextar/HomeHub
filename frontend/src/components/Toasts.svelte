@@ -8,7 +8,7 @@
 
 <div class="toasts" aria-live="polite" aria-atomic="false">
     {#each toasts.items as t (t.id)}
-        <div class="toast" data-tone={t.tone} role="status"
+        <div class="toast" data-tone={t.tone}
             animate:flip={{ duration: dur(220), easing: cubicOut }}
             in:fly={{ y: 16, duration: dur(240), easing: cubicOut }}
             out:scale={{ start: 0.9, opacity: 0, duration: dur(160) }}>

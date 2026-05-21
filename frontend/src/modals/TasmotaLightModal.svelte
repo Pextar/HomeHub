@@ -1,5 +1,6 @@
 <script lang="ts">
     import Modal from "../components/Modal.svelte";
+    import Switch from "../components/Switch.svelte";
     import { closeModal } from "../lib/modal.svelte";
     import { api } from "../lib/api";
     import { toasts, data } from "../lib/stores.svelte";
@@ -93,7 +94,7 @@
         {:else if deviceState}
             <div class="row">
                 <div class="swatch" class:dim={!on}
-                    style:background={supportsColor ? color : "var(--bg-base)"}>
+                    style:background={supportsColor ? color : "var(--surface)"}>
                 </div>
                 <div class="meta">
                     <div class="device-ip">{socket.code}</div>
@@ -101,10 +102,10 @@
                         <div class="hint">This device supports on/off only.</div>
                     {/if}
                 </div>
-                <label class="toggle">
-                    <input type="checkbox" checked={on} onchange={toggleOn} />
+                <div class="toggle">
                     <span class="toggle-label">{on ? "On" : "Off"}</span>
-                </label>
+                    <Switch checked={on} onChange={toggleOn} ariaLabel="Power" />
+                </div>
             </div>
 
             {#if supportsDimmer}
@@ -154,7 +155,7 @@
     }
     .note.error {
         display: flex; flex-direction: column; gap: 4px;
-        color: var(--error, #f87171);
+        color: var(--danger);
     }
     .row {
         display: flex; align-items: center; gap: var(--space-3);
@@ -183,7 +184,7 @@
 
     input[type="range"] {
         width: 100%;
-        accent-color: var(--accent, #60a5fa);
+        accent-color: var(--primary);
     }
     input[type="range"]:disabled { opacity: 0.4; }
 

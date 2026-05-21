@@ -30,6 +30,8 @@
     let days = $state<number[]>(untrack(() => [...(existing?.days ?? [])]));
     let enabled = $state(untrack(() => existing ? existing.enabled : true));
     let randomOffsetMinutes = $state<number>(untrack(() => existing?.random_offset_minutes ?? 0));
+    let saving = $state(false);
+    let targetError = $state("");
 
     const hasLocation = $derived(v.settings.latitude !== 0 || v.settings.longitude !== 0);
     // Pretty offset label: "at sunrise", "30 min before sunset", "1h 30m after sunrise".
@@ -61,7 +63,9 @@
     });
 
     async function save() {
-        if (!targetId) { toasts.warn("Missing target", "Pick something to schedule."); return; }
+        if (saving) return;
+        if (!targetId) { targetError = "Pick something to schedule."; return; }
+        targetError = "";
         const payload: Partial<Schedule> = {
             target_type: targetType as TargetType,
             target_id: targetId,
@@ -75,6 +79,7 @@
             enabled,
             random_offset_minutes: randomOffsetMinutes,
         };
+        saving = true;
         try {
             if (existing) {
                 await api.updateSchedule(existing.id, payload);
@@ -87,6 +92,8 @@
             await data.refresh();
         } catch (e) {
             toasts.error("Save failed", (e as Error).message);
+        } finally {
+            saving = false;
         }
     }
 </script>
@@ -112,11 +119,15 @@
             <div class="field-row" style="margin-top:var(--space-4)">
                 <div class="field">
                     <label for="sched-target">Target</label>
-                    <select id="sched-target" bind:value={targetId} required>
+                    <select id="sched-target" bind:value={targetId} required
+                        aria-invalid={targetError ? "true" : undefined}
+                        aria-describedby={targetError ? "sched-target-err" : undefined}
+                        onchange={() => targetError = ""}>
                         {#each targets as t (t.id)}
                             <option value={t.id}>{t.label}</option>
                         {/each}
                     </select>
+                    {#if targetError}<div id="sched-target-err" class="field-error">{targetError}</div>{/if}
                 </div>
                 <div class="field" style:opacity={targetType === "scene" ? 0.6 : 1}>
                     <label for="sched-action">Action</label>
@@ -157,6 +168,7 @@
                         type="range"
                         min="-120" max="120" step="5"
                         bind:value={solarOffsetMinutes}
+                        aria-valuetext={solarOffsetLabel}
                     />
                     <div class="solar-summary">{solarOffsetLabel}</div>
                     {#if !hasLocation}
@@ -195,8 +207,8 @@
     {/snippet}
     {#snippet actions()}
         <button class="btn btn-ghost" onclick={() => closeModal()}>Cancel</button>
-        <button class="btn btn-primary" onclick={save}>
-            {isEdit ? "Save" : "Add schedule"}
+        <button class="btn btn-primary" onclick={save} disabled={saving}>
+            {saving ? "Saving…" : isEdit ? "Save" : "Add schedule"}
         </button>
     {/snippet}
 </Modal>

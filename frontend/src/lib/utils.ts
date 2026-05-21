@@ -45,19 +45,19 @@ export function describeTarget(
     const s = data.socketById(tid);
     return s
       ? { kind: "Socket", label: s.name, sub: s.room || "Unassigned" }
-      : { kind: "Socket", label: `(missing socket: ${tid})`, sub: "—" };
+      : { kind: "Socket", label: "(removed device)", sub: "—" };
   }
   if (tt === "group") {
     const g = data.groupById(tid);
     return g
       ? { kind: "Group", label: g.name, sub: `${g.socket_ids.length} socket${g.socket_ids.length === 1 ? "" : "s"}` }
-      : { kind: "Group", label: `(missing group: ${tid})`, sub: "—" };
+      : { kind: "Group", label: "(removed group)", sub: "—" };
   }
   if (tt === "scene") {
     const sc = data.sceneById(tid);
     return sc
       ? { kind: "Scene", label: sc.name, sub: `${sc.actions.length} action${sc.actions.length === 1 ? "" : "s"}` }
-      : { kind: "Scene", label: `(missing scene: ${tid})`, sub: "—" };
+      : { kind: "Scene", label: "(removed scene)", sub: "—" };
   }
   return { kind: "?", label: "Unknown target", sub: "" };
 }
