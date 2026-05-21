@@ -1170,9 +1170,9 @@
     }
     .add-row select {
         flex: 1 1 160px; min-width: 0;
-        padding: 10px 12px;
+        padding: 10px 32px 10px 12px;
         border-radius: var(--radius-sm);
-        background: var(--surface);
+        background-color: var(--surface);
         border: 1px solid var(--border);
         color: var(--text);
         font: inherit;
@@ -1225,15 +1225,14 @@
     }
     .move-select {
         max-width: 140px;
-        padding: 6px 8px;
-        border-radius: var(--radius-sm);
-        background: var(--surface);
+        padding: 6px 32px 6px 10px;
+        border-radius: var(--radius-md);
+        background-color: var(--surface);
         border: 1px solid var(--border);
         color: var(--text);
         font: inherit;
         font-size: 13px;
         min-height: 36px;
-        appearance: auto;
     }
     /* On very narrow screens, drop the actions onto their own line so the
        name doesn't get crushed. */
