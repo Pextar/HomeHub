@@ -44,8 +44,19 @@
         padding: 3px;
         gap: 2px;
     }
-    .segmented input { display: none; }
+    /* Visually hidden but still focusable — `display:none` would drop the
+       radio out of the tab order and kill the focus ring. */
+    .segmented input {
+        position: absolute;
+        opacity: 0;
+        width: 0;
+        height: 0;
+        pointer-events: none;
+    }
     .segmented label {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
         padding: 6px 14px;
         border-radius: 7px;
         cursor: pointer;
@@ -61,10 +72,13 @@
         color: var(--text);
         box-shadow: var(--shadow-sm);
     }
+    .segmented input:focus-visible + label {
+        box-shadow: var(--focus-ring);
+    }
     .segmented label.disabled { opacity: 0.4; cursor: not-allowed; }
-    /* Touch: taller labels */
+    /* Touch: taller labels that meet the 44px target */
     @media (pointer: coarse) {
         .segmented { padding: 4px; }
-        .segmented label { padding: 9px 16px; font-size: 14px; }
+        .segmented label { padding: 9px 16px; font-size: 14px; min-height: 40px; }
     }
 </style>

@@ -23,8 +23,10 @@
     let perSocket = $state<Record<string, "ignore" | "on" | "off">>(
         untrack(() => Object.fromEntries(sockets.map(s => [s.id, initial.get(s.id) ?? "ignore"])))
     );
+    let saving = $state(false);
 
     async function save() {
+        if (saving) return;
         const actions = Object.entries(perSocket)
             .filter(([, v]) => v !== "ignore")
             .map(([socket_id, action]) => ({ socket_id, action: action as "on" | "off" }));
@@ -34,6 +36,7 @@
             toasts.warn("No actions", "Set at least one socket to On or Off.");
             return;
         }
+        saving = true;
         try {
             if (existing) {
                 await api.updateScene(existing.id, payload);
@@ -46,6 +49,8 @@
             await data.refresh();
         } catch (e) {
             toasts.error("Save failed", (e as Error).message);
+        } finally {
+            saving = false;
         }
     }
 </script>
@@ -85,8 +90,8 @@
     {/snippet}
     {#snippet actions()}
         <button class="btn btn-ghost" onclick={() => closeModal()}>Cancel</button>
-        <button class="btn btn-primary" onclick={save}>
-            {isEdit ? "Save" : "Create scene"}
+        <button class="btn btn-primary" onclick={save} disabled={saving}>
+            {saving ? "Saving…" : isEdit ? "Save" : "Create scene"}
         </button>
     {/snippet}
 </Modal>

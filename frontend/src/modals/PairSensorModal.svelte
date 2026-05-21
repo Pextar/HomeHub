@@ -157,10 +157,10 @@
         {/if}
     {/snippet}
     {#snippet actions()}
+        <button class="btn btn-ghost" onclick={() => closeModal()}>Close</button>
         {#if !active && !starting}
             <button class="btn btn-primary" onclick={restart}>Listen again</button>
         {/if}
-        <button class="btn btn-ghost" onclick={() => closeModal()}>Close</button>
     {/snippet}
 </Modal>
 

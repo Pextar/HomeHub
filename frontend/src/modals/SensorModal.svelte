@@ -26,6 +26,7 @@
     // Empty string = no threshold. Stored as numbers (or omitted) on save.
     let alertMin = $state(untrack(() => existing?.alert_min ?? ""));
     let alertMax = $state(untrack(() => existing?.alert_max ?? ""));
+    let saving = $state(false);
 
     // When the user changes kind, reset unit + field to their defaults
     // for that kind. They can still edit afterwards.
@@ -59,6 +60,7 @@
     }
 
     async function save() {
+        if (saving) return;
         if (!name.trim()) { toasts.warn("Missing name", "Give the sensor a name."); return; }
         if (!code.trim()) { toasts.warn("Missing code", "Sensors need a 433MHz code to listen for."); return; }
         const payload: Partial<Sensor> = {
@@ -66,6 +68,7 @@
             alert_min: alertMin === "" ? undefined : Number(alertMin),
             alert_max: alertMax === "" ? undefined : Number(alertMax),
         };
+        saving = true;
         try {
             if (existing) {
                 await api.updateSensor(existing.id, payload);
@@ -78,6 +81,8 @@
             await data.refresh();
         } catch (e) {
             toasts.error("Save failed", (e as Error).message);
+        } finally {
+            saving = false;
         }
     }
 
@@ -179,8 +184,8 @@
             <button class="btn btn-ghost danger" onclick={remove}>Delete</button>
         {/if}
         <button class="btn btn-ghost" onclick={() => closeModal()}>Cancel</button>
-        <button class="btn btn-primary" onclick={save}>
-            {isEdit ? "Save" : "Add sensor"}
+        <button class="btn btn-primary" onclick={save} disabled={saving}>
+            {saving ? "Saving…" : isEdit ? "Save" : "Add sensor"}
         </button>
     {/snippet}
 </Modal>

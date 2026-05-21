@@ -12,7 +12,7 @@
     type="button"
     onclick={() => runAction(() => api.activateScene(scene.id), `Scene activated: ${scene.name}`)}
 >
-    <div class="tile-icon">▶</div>
+    <div class="tile-icon" aria-hidden="true">▶</div>
     <div class="tile-body">
         <div class="name">{scene.name}</div>
         <div class="meta">{scene.actions.length} action{scene.actions.length === 1 ? "" : "s"}</div>

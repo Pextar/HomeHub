@@ -245,6 +245,9 @@
         margin-right: auto;
     }
     .code:hover { color: var(--primary); }
+    @media (pointer: coarse) {
+        .code { padding: 8px 0; }
+    }
     .btn-sm { padding: 4px 10px; font-size: 13px; }
     .devices { display: flex; gap: var(--space-3); align-items: baseline; }
     .dev-value { font-size: 13px; min-width: 0; }

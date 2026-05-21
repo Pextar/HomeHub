@@ -93,7 +93,7 @@
         {:else if deviceState}
             <div class="row">
                 <div class="swatch" class:dim={!on}
-                    style:background={supportsColor ? color : "var(--bg-base)"}>
+                    style:background={supportsColor ? color : "var(--surface)"}>
                 </div>
                 <div class="meta">
                     <div class="device-ip">{socket.code}</div>
@@ -154,7 +154,7 @@
     }
     .note.error {
         display: flex; flex-direction: column; gap: 4px;
-        color: var(--error, #f87171);
+        color: var(--danger);
     }
     .row {
         display: flex; align-items: center; gap: var(--space-3);
@@ -183,7 +183,7 @@
 
     input[type="range"] {
         width: 100%;
-        accent-color: var(--accent, #60a5fa);
+        accent-color: var(--primary);
     }
     input[type="range"]:disabled { opacity: 0.4; }
 

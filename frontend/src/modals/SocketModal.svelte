@@ -29,6 +29,7 @@
     let pairing      = $state(false);
     let probing      = $state(false);
     let publishing   = $state(false);
+    let saving       = $state(false);
 
     async function pair() {
         if (pairing) return;
@@ -89,6 +90,7 @@
     }
 
     async function save() {
+        if (saving) return;
         const payload = { name: name.trim(), room: room.trim(), code: code.trim(), protocol, emoji };
         if (!payload.name || !payload.code) {
             const missing = isTasmota ? "device IP"
@@ -98,6 +100,7 @@
             toasts.warn("Missing fields", `Name and ${missing} are required.`);
             return;
         }
+        saving = true;
         try {
             if (existing) {
                 await api.updateSocket(existing.id, payload);
@@ -110,6 +113,8 @@
             await data.refresh();
         } catch (e) {
             toasts.error("Save failed", (e as Error).message);
+        } finally {
+            saving = false;
         }
     }
 </script>
@@ -245,8 +250,8 @@
             <button class="btn btn-ghost" onclick={() => closeModal()}>Cancel</button>
         {:else}
             <button class="btn btn-ghost" onclick={() => closeModal()}>Cancel</button>
-            <button class="btn btn-primary" onclick={save}>
-                {isEdit ? "Save" : "Add socket"}
+            <button class="btn btn-primary" onclick={save} disabled={saving}>
+                {saving ? "Saving…" : isEdit ? "Save" : "Add socket"}
             </button>
         {/if}
     {/snippet}

@@ -259,15 +259,15 @@
     }
     .action-btn.primary {
         border-style: solid;
-        border-color: var(--accent, #60a5fa);
-        color: var(--accent, #60a5fa);
+        border-color: var(--primary);
+        color: var(--primary);
         background: var(--bg-elevated);
         font-size: 15px;
         padding: var(--space-6) var(--space-4);
     }
     .action-btn:hover, .action-btn:focus-visible {
-        border-color: var(--accent, #60a5fa);
-        color: var(--accent, #60a5fa);
+        border-color: var(--primary);
+        color: var(--primary);
     }
     .action-btn .sub {
         font-size: 12px;
@@ -324,7 +324,7 @@
     .spinner {
         width: 28px; height: 28px;
         border: 3px solid var(--border);
-        border-top-color: var(--accent, #60a5fa);
+        border-top-color: var(--primary);
         border-radius: 50%;
         animation: spin 0.9s linear infinite;
     }
@@ -333,16 +333,16 @@
     .error-box {
         display: flex; flex-direction: column; gap: 6px;
         padding: var(--space-3) var(--space-4);
-        border: 1px solid var(--error, #f87171);
+        border: 1px solid var(--danger);
         border-radius: var(--radius-md);
         font-size: 13px;
-        color: var(--error, #f87171);
+        color: var(--danger);
     }
     .error-box strong { font-weight: 600; }
     .link-btn {
         align-self: flex-start;
         background: none; border: none; padding: 0;
-        color: var(--accent, #60a5fa);
+        color: var(--primary);
         font-size: 13px;
         cursor: pointer;
         text-decoration: underline;

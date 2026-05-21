@@ -418,8 +418,8 @@
         background: var(--surface);
         font-size: 13px;
     }
-    .note.error  { border-color: var(--error, #f87171); color: var(--error, #f87171); }
-    .note.success { border-color: var(--success, #34d399); }
+    .note.error  { border-color: var(--danger); color: var(--danger); }
+    .note.success { border-color: var(--success); }
     .note .hint { color: var(--text-muted); font-size: 12px; }
     .note code { font-family: ui-monospace, monospace; font-size: 12px; }
 
@@ -441,14 +441,14 @@
     }
     .bar {
         height: 100%;
-        background: var(--accent, #60a5fa);
+        background: var(--primary);
         transition: width 0.6s ease;
     }
 
     .spinner {
         width: 32px; height: 32px;
         border: 3px solid var(--border);
-        border-top-color: var(--accent, #60a5fa);
+        border-top-color: var(--primary);
         border-radius: 50%;
         animation: spin 0.9s linear infinite;
     }
@@ -475,7 +475,7 @@
         background: none;
         border: none;
         padding: 0;
-        color: var(--accent, #60a5fa);
+        color: var(--primary);
         font-size: inherit;
         cursor: pointer;
         text-decoration: underline;

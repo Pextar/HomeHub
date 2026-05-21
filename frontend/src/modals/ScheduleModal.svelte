@@ -30,6 +30,7 @@
     let days = $state<number[]>(untrack(() => [...(existing?.days ?? [])]));
     let enabled = $state(untrack(() => existing ? existing.enabled : true));
     let randomOffsetMinutes = $state<number>(untrack(() => existing?.random_offset_minutes ?? 0));
+    let saving = $state(false);
 
     const hasLocation = $derived(v.settings.latitude !== 0 || v.settings.longitude !== 0);
     // Pretty offset label: "at sunrise", "30 min before sunset", "1h 30m after sunrise".
@@ -61,6 +62,7 @@
     });
 
     async function save() {
+        if (saving) return;
         if (!targetId) { toasts.warn("Missing target", "Pick something to schedule."); return; }
         const payload: Partial<Schedule> = {
             target_type: targetType as TargetType,
@@ -75,6 +77,7 @@
             enabled,
             random_offset_minutes: randomOffsetMinutes,
         };
+        saving = true;
         try {
             if (existing) {
                 await api.updateSchedule(existing.id, payload);
@@ -87,6 +90,8 @@
             await data.refresh();
         } catch (e) {
             toasts.error("Save failed", (e as Error).message);
+        } finally {
+            saving = false;
         }
     }
 </script>
@@ -195,8 +200,8 @@
     {/snippet}
     {#snippet actions()}
         <button class="btn btn-ghost" onclick={() => closeModal()}>Cancel</button>
-        <button class="btn btn-primary" onclick={save}>
-            {isEdit ? "Save" : "Add schedule"}
+        <button class="btn btn-primary" onclick={save} disabled={saving}>
+            {saving ? "Saving…" : isEdit ? "Save" : "Add schedule"}
         </button>
     {/snippet}
 </Modal>

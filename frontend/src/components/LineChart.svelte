@@ -123,9 +123,11 @@
                 <text x={PAD_LEFT - 8} y={t.y + 4} text-anchor="end" class="axis">{t.label}</text>
             {/each}
 
-            <!-- X labels -->
+            <!-- X labels — first anchors left, last anchors right so they
+                 don't overlap the y-axis labels or clip at the chart edge. -->
             {#each chart.xTicks as t, i (i + ":" + t.label)}
-                <text x={t.x} y={height - 6} text-anchor="middle" class="axis">{t.label}</text>
+                <text x={t.x} y={height - 6} class="axis"
+                    text-anchor={i === 0 ? "start" : i === chart.xTicks.length - 1 ? "end" : "middle"}>{t.label}</text>
             {/each}
 
             <!-- Area + line -->

@@ -13,6 +13,11 @@
 
   const target = $derived(describeTarget(timer.target_type, timer.target_id));
   const firesAt = $derived(new Date(timer.fires_at));
+  // Compact absolute time ("Tue 18:30") — the verbose locale datetime
+  // overflowed the row on narrow phones.
+  const firesAtLabel = $derived(
+    firesAt.toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit" }),
+  );
   let countdown = $state(untrack(() => formatCountdown(timer.fires_at)));
 
   // Tick the live countdown once per second.
@@ -39,8 +44,8 @@
     >{timer.action}</span
   >
   <div class="info">
-    <div>{target.kind}: {target.label}</div>
-    <div class="when">{firesAt.toLocaleString()}</div>
+    <div class="target">{target.kind}: {target.label}</div>
+    <div class="when">{firesAtLabel}</div>
   </div>
   <span class="countdown">{countdown}</span>
   <button class="icon-btn danger" aria-label="Cancel timer" onclick={cancel}>
@@ -80,6 +85,11 @@
   .info {
     min-width: 0;
   }
+  .target {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
   .when {
     color: var(--text-faint);
     font-size: 12px;
@@ -89,5 +99,7 @@
     font-family: var(--font-mono);
     font-weight: 600;
     color: var(--primary);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
   }
 </style>
