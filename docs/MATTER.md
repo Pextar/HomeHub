@@ -113,8 +113,10 @@ MATTER_BRIDGE_THREAD_DATASET=0e080000000000010000000300001235...
 # only one transport credential set is sent per commissioning.
 ```
 
-**Thread takes priority over Wi-Fi** when both env vars are set, so you can
-switch between device types by toggling which one is set.
+**Both can be set simultaneously.** When both `MATTER_BRIDGE_THREAD_DATASET`
+and `MATTER_BRIDGE_WIFI_SSID` are configured, the commission wizard shows a
+"Thread / Wi-Fi" picker so you can choose per device — no need to comment and
+uncomment env vars.
 
 ### Compatible Thread devices
 
@@ -163,9 +165,10 @@ sudo usermod -aG bluetooth <your-service-user>
 
 1. Plug in / power on the device. Most Matter devices flash on first boot to
    indicate they're in pairing mode.
-2. Make sure the correct env var is set in `.env`:
+2. Make sure the relevant env var(s) are set in `.env`:
    - Wi-Fi device → `MATTER_BRIDGE_WIFI_SSID` / `MATTER_BRIDGE_WIFI_PASS`
    - Thread device → `MATTER_BRIDGE_THREAD_DATASET`
+   - Both can coexist — the wizard will ask which to use.
 3. In the web UI tap **Add socket**, pick **Matter (Wi-Fi)** or **Matter (Thread)**,
    paste the 11-digit manual pairing code (or the `MT:` QR-code payload) printed
    on the device, and press **Commission device**.

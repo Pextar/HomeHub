@@ -50,6 +50,7 @@ func (s *Server) matterCommission(w http.ResponseWriter, r *http.Request) {
 	}
 	var body struct {
 		PairingCode string `json:"pairing_code"`
+		Transport   string `json:"transport"` // "wifi" | "thread" | "" (auto)
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
@@ -62,13 +63,14 @@ func (s *Server) matterCommission(w http.ResponseWriter, r *http.Request) {
 
 	job := s.matterJobs.create()
 	pairingCode := body.PairingCode
+	transport   := body.Transport
 
 	go func() {
 		// Detached from r.Context() — the HTTP request will close almost
 		// immediately. We give the bridge a generous ceiling of its own.
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 		defer cancel()
-		nodeID, err := s.Matter.Commission(ctx, pairingCode)
+		nodeID, err := s.Matter.Commission(ctx, pairingCode, transport)
 		if err != nil {
 			log.Printf("matter commission job %s failed: %v", job.ID, err)
 		} else {
@@ -146,22 +148,22 @@ func (s *Server) matterSetState(w http.ResponseWriter, r *http.Request) {
 }
 
 // matterTransport handles GET /api/matter/transport.
-// Returns the active network transport configured for the bridge sidecar
-// ("thread", "wifi", or "none") by inspecting the bridge env vars directly.
-// The frontend uses this to label a freshly-commissioned device correctly
-// (matter-thread vs matter) and to show the right hint in the commission wizard.
+// Returns all configured network transports as an array. Both "thread" and
+// "wifi" can appear at the same time — the commission wizard lets the user
+// pick which one to use per device.
 func (s *Server) matterTransport(w http.ResponseWriter, r *http.Request) {
 	if !s.Matter.Enabled() {
 		writeError(w, http.StatusServiceUnavailable, "matter bridge is not configured")
 		return
 	}
-	transport := "none"
+	transports := []string{}
 	if strings.TrimSpace(os.Getenv("MATTER_BRIDGE_THREAD_DATASET")) != "" {
-		transport = "thread"
-	} else if strings.TrimSpace(os.Getenv("MATTER_BRIDGE_WIFI_SSID")) != "" {
-		transport = "wifi"
+		transports = append(transports, "thread")
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"transport": transport})
+	if strings.TrimSpace(os.Getenv("MATTER_BRIDGE_WIFI_SSID")) != "" {
+		transports = append(transports, "wifi")
+	}
+	writeJSON(w, http.StatusOK, map[string][]string{"transports": transports})
 }
 
 // matterNodeID resolves the Matter node id for a given Socket id.

@@ -50,7 +50,9 @@ export interface DeviceState {
 export interface MatterController {
     listIds(): string[];
     list(): Promise<DeviceState[]>;
-    commission(pairingCode: string): Promise<string>;
+    // transport: "wifi" | "thread" — selects which credentials to use.
+    // Omit (or pass undefined) to auto-detect from what's configured.
+    commission(pairingCode: string, transport?: "wifi" | "thread"): Promise<string>;
     getState(nodeId: string): Promise<DeviceState>;
     setState(nodeId: string, update: Partial<DeviceState>): Promise<void>;
     remove(nodeId: string): Promise<void>;
@@ -210,8 +212,8 @@ export async function startController(): Promise<MatterController> {
             }
             return out;
         },
-        async commission(pairingCode: string): Promise<string> {
-            const opts = optionsFromPairingCode(pairingCode);
+        async commission(pairingCode: string, transport?: "wifi" | "thread"): Promise<string> {
+            const opts = optionsFromPairingCode(pairingCode, transport);
             const nodeId = await commissioning.commissionNode(opts);
             return key(nodeId);
         },
@@ -273,15 +275,17 @@ function parseThreadNetworkName(hexDataset: string): string {
     return "";
 }
 
-// Returns the active network transport that will be used during commissioning.
-// Thread takes priority over Wi-Fi when both env vars are set.
-export function activeTransport(): "thread" | "wifi" | "none" {
-    if (process.env.MATTER_BRIDGE_THREAD_DATASET?.trim()) return "thread";
-    if (process.env.MATTER_BRIDGE_WIFI_SSID?.trim()) return "wifi";
-    return "none";
+// Returns all network transports that have credentials configured.
+// Both "thread" and "wifi" can be returned simultaneously — the caller
+// (commission wizard) picks which one to use for each device.
+export function availableTransports(): ("thread" | "wifi")[] {
+    const result: ("thread" | "wifi")[] = [];
+    if (process.env.MATTER_BRIDGE_THREAD_DATASET?.trim()) result.push("thread");
+    if (process.env.MATTER_BRIDGE_WIFI_SSID?.trim())     result.push("wifi");
+    return result;
 }
 
-function optionsFromPairingCode(code: string): NodeCommissioningOptions {
+function optionsFromPairingCode(code: string, transport?: "wifi" | "thread"): NodeCommissioningOptions {
     const trimmed = code.trim();
     let discriminator: number | undefined;
     let shortDiscriminator: number | undefined;
@@ -299,10 +303,27 @@ function optionsFromPairingCode(code: string): NodeCommissioningOptions {
         shortDiscriminator = decoded.shortDiscriminator;
     }
 
-    // Thread takes priority over Wi-Fi. Only one transport credential set is
-    // passed at a time — Matter devices join exactly one network type.
-    const thread = threadNetwork();
-    const wifi   = !thread ? wifiNetwork() : undefined;
+    // Resolve network credentials.
+    // If transport is explicitly specified, use exactly that — error if not configured.
+    // If unspecified (legacy / direct bridge call), fall back to Thread-first auto-detect.
+    let thread: ReturnType<typeof threadNetwork> = undefined;
+    let wifi:   ReturnType<typeof wifiNetwork>   = undefined;
+
+    if (transport === "thread") {
+        thread = threadNetwork();
+        if (!thread) throw new Error(
+            "Transport \"thread\" requested but MATTER_BRIDGE_THREAD_DATASET is not set.",
+        );
+    } else if (transport === "wifi") {
+        wifi = wifiNetwork();
+        if (!wifi) throw new Error(
+            "Transport \"wifi\" requested but MATTER_BRIDGE_WIFI_SSID is not set.",
+        );
+    } else {
+        // Auto: Thread takes priority when both are configured.
+        thread = threadNetwork();
+        if (!thread) wifi = wifiNetwork();
+    }
 
     if (thread) {
         console.log("[matter-bridge] commissioning with Thread network (MATTER_BRIDGE_THREAD_DATASET)");
