@@ -166,6 +166,7 @@ func (s *Server) Handler() http.Handler {
 	api.HandleFunc("/tasmota/{socketId}", s.tasmotaGetState).Methods("GET")
 	api.HandleFunc("/tasmota/{socketId}/state", s.tasmotaSetState).Methods("PUT")
 
+	api.HandleFunc("/matter/transport", s.requireAdmin(s.matterTransport)).Methods("GET")
 	api.HandleFunc("/matter/devices", s.requireAdmin(s.matterListDevices)).Methods("GET")
 	api.HandleFunc("/matter/commission", s.requireAdmin(s.matterCommission)).Methods("POST")
 	api.HandleFunc("/matter/commission/jobs/{id}", s.requireAdmin(s.matterCommissionJob)).Methods("GET")

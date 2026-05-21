@@ -7,7 +7,7 @@ type Socket struct {
 	ID       string `json:"id"`
 	Name     string `json:"name"`
 	Code     string `json:"code"`     // 433MHz code, Tasmota IP, or Matter node id
-	Protocol string `json:"protocol"` // e.g., "nexa", "kaku", "intertechno", "tasmota", "matter"
+	Protocol string `json:"protocol"` // e.g., "nexa", "kaku", "intertechno", "tasmota", "matter", "matter-thread"
 	State    bool   `json:"state"`    // true = on, false = off
 	Room     string `json:"room"`     // room/location
 	Favorite bool   `json:"favorite,omitempty"` // pinned to dashboard

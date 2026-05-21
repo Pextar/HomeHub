@@ -18,7 +18,7 @@
 // payload printed on the device / box.
 import http from "node:http";
 import { URL } from "node:url";
-import { startController, MatterController } from "./controller.js";
+import { startController, MatterController, availableTransports } from "./controller.js";
 
 const PORT = Number(process.env.MATTER_BRIDGE_PORT || 8765);
 const HOST = process.env.MATTER_BRIDGE_HOST || "127.0.0.1";
@@ -53,7 +53,13 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, contr
     const method = req.method || "GET";
 
     if (path === "/health" && method === "GET") {
-        writeJson(res, 200, { status: "ok", devices: controller.listIds().length });
+        writeJson(res, 200, {
+            status: "ok",
+            devices: controller.listIds().length,
+            // Array of configured transports — both "thread" and "wifi" can
+            // appear simultaneously; the commission wizard lets the user pick.
+            transports: availableTransports(),
+        });
         return;
     }
 
@@ -63,10 +69,13 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, contr
     }
 
     if (path === "/commission" && method === "POST") {
-        const body = await readJson<{ pairing_code?: string }>(req);
+        const body = await readJson<{ pairing_code?: string; transport?: string }>(req);
         const code = (body?.pairing_code || "").trim();
         if (!code) { writeJson(res, 400, { error: "pairing_code is required" }); return; }
-        const nodeId = await controller.commission(code);
+        const transport = body?.transport === "thread" ? "thread"
+                        : body?.transport === "wifi"   ? "wifi"
+                        : undefined;
+        const nodeId = await controller.commission(code, transport);
         writeJson(res, 200, { node_id: nodeId });
         return;
     }

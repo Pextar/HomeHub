@@ -18,7 +18,8 @@
     let { socket }: Props = $props();
 
     const isTasmota = $derived(socket.protocol === "tasmota");
-    const isMatter  = $derived(socket.protocol === "matter");
+    const isMatter  = $derived(socket.protocol === "matter" || socket.protocol === "matter-thread");
+    const isThread  = $derived(socket.protocol === "matter-thread");
     const isSmartLight = $derived(isTasmota || isMatter);
 
     // One-shot "pulse" ring whenever the socket's state flips.
@@ -232,7 +233,7 @@
             data-proto={isTasmota ? "tasmota" : isMatter ? "matter" : "rf"}
             title={`${socket.protocol || "rf"} · ${socket.code}`}>
             <Icon name={isTasmota ? "wifi" : isMatter ? "devices" : "radio"} size={12} />
-            <span class="proto-label">{isTasmota ? "Wi-Fi" : isMatter ? "Matter" : "RF"}</span>
+            <span class="proto-label">{isTasmota ? "Wi-Fi" : isThread ? "Thread" : isMatter ? "Matter" : "RF"}</span>
             <span class="proto-code"> · {socket.code}</span>
         </span>
     </div>

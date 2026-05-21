@@ -26,7 +26,7 @@ func (m *Multi) Send(code, protocol string, state bool) error {
 		ctx, cancel := context.WithTimeout(context.Background(), tasmota.DefaultTimeout)
 		defer cancel()
 		return tasmota.Send(ctx, code, state)
-	case strings.EqualFold(protocol, "matter"):
+	case strings.EqualFold(protocol, "matter"), strings.EqualFold(protocol, "matter-thread"):
 		ctx, cancel := context.WithTimeout(context.Background(), matter.DefaultTimeout)
 		defer cancel()
 		return m.Matter.Send(ctx, code, state)

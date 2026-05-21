@@ -1,7 +1,9 @@
 # Matter Bridge
 
-A small Node.js sidecar that lets the Go backend control Matter-over-Wi-Fi
-devices (lights, plugs, etc.) without speaking the Matter protocol itself.
+A small Node.js sidecar that lets the Go backend control Matter devices —
+both **Matter over Wi-Fi** (lights, plugs) and **Matter over Thread**
+(sensors, some Eve / Aqara / Nanoleaf devices) — without speaking the
+Matter protocol itself.
 
 It wraps [matter.js](https://github.com/project-chip/matter.js)'s
 `CommissioningController` and exposes a minimal JSON HTTP API on
@@ -11,9 +13,10 @@ It wraps [matter.js](https://github.com/project-chip/matter.js)'s
 
 matter.js is the most mature open Matter implementation, but it's Node-only.
 Rather than re-implement the spec in Go, we run a small Node process next to
-the Go binary and proxy commands over loopback. The Pi has Wi-Fi and BLE
-built in, which is all Matter needs over the IP transport — no Zigbee or
-Thread radios required (Thread devices would need a separate border router).
+the Go binary and proxy commands over loopback. The Pi needs Wi-Fi and BLE
+for Wi-Fi Matter devices. For Thread devices a **Thread Border Router**
+(Apple TV 4K, HomePod mini, or an OpenThread Border Router) bridges the
+Thread mesh to the IP network — the Pi itself doesn't need a Thread radio.
 
 ## Quick start
 
@@ -29,17 +32,22 @@ Set `MATTER_BRIDGE_PORT` to change the port (default `8765`) and
 (default `./data`). The data directory must be writable and persisted
 across restarts — losing it means every device has to be re-commissioned.
 
-**Wi-Fi credentials are required for commissioning Wi-Fi Matter devices.**
-Set `MATTER_BRIDGE_WIFI_SSID` and `MATTER_BRIDGE_WIFI_PASS` in `.env` (or
-the environment) before attempting to commission. Without them the device
-won't know which network to join and commissioning will fail after BLE
-discovery succeeds.
+**Network credentials are required for commissioning.** Set exactly one of:
+
+| Device type | Env var(s) |
+|-------------|-----------|
+| **Matter over Wi-Fi** (bulbs, plugs) | `MATTER_BRIDGE_WIFI_SSID` + `MATTER_BRIDGE_WIFI_PASS` |
+| **Matter over Thread** (sensors, some Eve / Nanoleaf) | `MATTER_BRIDGE_THREAD_DATASET` (hex TLV) — the Thread network name is auto-parsed from the TLV; set `MATTER_BRIDGE_THREAD_NETWORK_NAME` to override |
+
+`MATTER_BRIDGE_THREAD_DATASET` takes priority when both are set. See
+[`docs/MATTER.md`](../docs/MATTER.md) for how to get the Thread Operational
+Dataset from an Apple TV 4K, HomePod mini, or OTBR.
 
 ## HTTP API
 
 | Method | Path                  | Body / Notes                                       |
 |--------|-----------------------|----------------------------------------------------|
-| GET    | `/health`             | `{ status, devices }`                              |
+| GET    | `/health`             | `{ status, devices, transport }`                   |
 | GET    | `/devices`            | List of `DeviceState`                              |
 | POST   | `/commission`         | `{ pairing_code }` (manual or `MT:` QR payload)    |
 | GET    | `/devices/:id`        | Live `DeviceState` (queries the device)            |
@@ -73,17 +81,20 @@ curl -X POST -H 'Content-Type: application/json' \
   http://127.0.0.1:8765/commission
 ```
 
-The bridge uses BLE to discover the device, brings it onto the Wi-Fi
-fabric, and assigns a stable node id. From then on it talks over IP only.
+The bridge uses BLE to discover the device, brings it onto the Wi-Fi or
+Thread fabric (whichever credential is configured), and assigns a stable
+node id. From then on it talks over IP only (via the Border Router for
+Thread devices).
 
 ## Hardware
 
 - Raspberry Pi with Wi-Fi and Bluetooth (Pi 3/4/5/Zero 2 all work).
 - The user running the bridge needs Bluetooth access (`bluetoothctl` works
-  → the bridge can commission). On Raspberry Pi OS this typically means
-  adding the user to the `bluetooth` group.
-- For Thread-only Matter devices (e.g. some Eve / Nanoleaf sensors) you'd
-  also need a Thread border router — out of scope here.
+  → the bridge can commission). On Raspberry Pi OS this means adding the
+  user to the `bluetooth` group.
+- For Thread Matter devices: a **Thread Border Router** on the same LAN —
+  Apple TV 4K (3rd gen 2022+), HomePod mini, or any OpenThread Border
+  Router. The Pi does **not** need a Thread radio.
 
 ## Notes
 

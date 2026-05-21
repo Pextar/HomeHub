@@ -157,8 +157,8 @@
                                         <div>{s.name}</div>
                                         <div class="field-help">{s.room || "Unassigned"}</div>
                                     </div>
-                                    <span class="meta" data-proto={s.protocol === "tasmota" ? "tasmota" : s.protocol === "matter" ? "matter" : "rf"}>
-                                        {s.protocol === "tasmota" ? "Wi-Fi" : s.protocol === "matter" ? "Matter" : "RF"}
+                                    <span class="meta" data-proto={s.protocol === "tasmota" ? "tasmota" : s.protocol.startsWith("matter") ? "matter" : "rf"}>
+                                        {s.protocol === "tasmota" ? "Wi-Fi" : s.protocol === "matter-thread" ? "Thread" : s.protocol === "matter" ? "Matter" : "RF"}
                                     </span>
                                 </label>
                             {/each}

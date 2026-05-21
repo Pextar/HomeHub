@@ -196,6 +196,10 @@ export const api = {
   },
 
   // Matter devices (via the matter-bridge sidecar)
+  matterTransport() {
+    // Returns all configured transports — both "thread" and "wifi" can appear.
+    return req<{ transports: ("thread" | "wifi")[] }>("/matter/transport");
+  },
   matterListDevices() {
     return req<MatterState[]>("/matter/devices");
   },
@@ -203,7 +207,7 @@ export const api = {
   // (BLE discovery + Wi-Fi onboarding) — far longer than iOS Safari is
   // willing to keep a single fetch alive. The POST returns immediately
   // with a job id; poll matterCommissionJob until status != "pending".
-  matterCommission(body: { pairing_code: string }) {
+  matterCommission(body: { pairing_code: string; transport?: string }) {
     return req<{ job_id: string }>("/matter/commission", { method: "POST", body: json(body) });
   },
   matterCommissionJob(jobId: string) {

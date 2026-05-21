@@ -19,11 +19,27 @@
 
     type Step = "input" | "commissioning" | "details";
     type InputMode = "scan" | "manual";
+    type Transport = "thread" | "wifi";
 
-    let step      = $state<Step>("input");
-    let inputMode = $state<InputMode>("scan");
+    let step        = $state<Step>("input");
+    let inputMode   = $state<InputMode>("scan");
     let pairingCode = $state("");
     let scannerError = $state<string | null>(null);
+
+    // Available transports fetched from the bridge on mount.
+    // Both "thread" and "wifi" can be configured simultaneously.
+    let availableTransports = $state<Transport[]>([]);
+    let transport = $state<Transport | null>(null); // null = not yet chosen
+
+    $effect(() => {
+        api.matterTransport()
+            .then(r => {
+                availableTransports = r.transports as Transport[];
+                // Auto-select when only one is configured.
+                if (r.transports.length === 1) transport = r.transports[0] as Transport;
+            })
+            .catch(() => { /* non-fatal — wizard still works, transport stays null */ });
+    });
 
     // Commissioning step state
     let progress    = $state(0);              // 0..1, animated
@@ -99,7 +115,10 @@
 
         let jobId: string;
         try {
-            const r = await api.matterCommission({ pairing_code: code });
+            const r = await api.matterCommission({
+                pairing_code: code,
+                ...(transport ? { transport } : {}),
+            });
             jobId = r.job_id;
         } catch (e) {
             stopProgress();
@@ -168,7 +187,8 @@
             name: name.trim(),
             room: room.trim(),
             code: nodeId,
-            protocol: "matter",
+            // Save as "matter-thread" or "matter" so the UI labels the device correctly.
+            protocol: transport === "thread" ? "matter-thread" : "matter",
         };
         if (!payload.name) {
             toasts.warn("Name is required", "Give the device a name so you can find it later.");
@@ -196,6 +216,26 @@
 >
     {#snippet body()}
         {#if step === "input"}
+            {#if availableTransports.length > 1}
+                <!-- Both Thread and Wi-Fi are configured — let the user pick. -->
+                <div class="field transport-pick">
+                    <span class="field-label">Network type</span>
+                    <div class="tabs" role="radiogroup">
+                        {#each availableTransports as t}
+                            <button class="tab" class:active={transport === t}
+                                role="radio" aria-checked={transport === t}
+                                onclick={() => transport = t}>
+                                <Icon name="devices" size={16} />
+                                {t === "thread" ? "Matter (Thread)" : "Matter (Wi-Fi)"}
+                            </button>
+                        {/each}
+                    </div>
+                    <div class="field-help">
+                        Choose Thread for low-power mesh devices (via your Apple TV / Border Router),
+                        or Wi-Fi for bulbs and plugs that connect directly.
+                    </div>
+                </div>
+            {/if}
             <div class="tabs" role="tablist">
                 <button class="tab" class:active={inputMode === "scan"}
                     role="tab" aria-selected={inputMode === "scan"}
@@ -212,16 +252,22 @@
             {#if inputMode === "scan"}
                 <!-- QRScanner handles its own error display now; we still show
                      an inline hint if camera failed so user knows to switch. -->
-                <QRScanner onDecoded={onScanned} onError={onScanError} />
-                {#if scannerError}
-                    <div class="camera-fallback-hint">
-                        Camera didn't work? <button class="link-btn"
-                            onclick={() => { inputMode = "manual"; }}>Enter code manually</button>
+                {#if availableTransports.length > 1 && !transport}
+                    <div class="field-help transport-warning">
+                        Select a network type above before scanning.
                     </div>
                 {:else}
-                    <div class="field-help">
-                        Scan the QR code on the device or its box — it starts with <code>MT:</code>.
-                    </div>
+                    <QRScanner onDecoded={onScanned} onError={onScanError} />
+                    {#if scannerError}
+                        <div class="camera-fallback-hint">
+                            Camera didn't work? <button class="link-btn"
+                                onclick={() => { inputMode = "manual"; }}>Enter code manually</button>
+                        </div>
+                    {:else}
+                        <div class="field-help">
+                            Scan the QR code on the device or its box — it starts with <code>MT:</code>.
+                        </div>
+                    {/if}
                 {/if}
             {:else}
                 <div class="field">
@@ -247,8 +293,14 @@
                     <span>{commissionError}</span>
                     <span class="hint">
                         Common causes: the device isn't in pairing mode (reset it),
-                        Bluetooth isn't available on the bridge, the Wi-Fi credentials
-                        aren't set on the bridge yet, or the device is out of range.
+                        Bluetooth isn't available on the bridge,
+                        {#if transport === "thread"}
+                            MATTER_BRIDGE_THREAD_DATASET isn't set or the Thread
+                            Border Router (e.g. Apple TV) isn't reachable,
+                        {:else}
+                            the Wi-Fi credentials aren't set on the bridge yet,
+                        {/if}
+                        or the device is out of BLE range.
                     </span>
                 </div>
             {:else}
@@ -257,7 +309,8 @@
                     <div class="title">Pairing with your device…</div>
                     <div class="hint">
                         This usually takes 30–60 seconds. The bridge talks to the
-                        device over Bluetooth, hands it your Wi-Fi credentials,
+                        device over Bluetooth, hands it your
+                        {#if transport === "thread"}Thread network credentials{:else}Wi-Fi credentials{/if},
                         and confirms it joined the network.
                     </div>
                     <div class="progress">
@@ -297,7 +350,10 @@
         {#if step === "input"}
             <button class="btn btn-ghost" onclick={() => closeModal()}>Cancel</button>
             {#if inputMode === "manual"}
-                <button class="btn btn-primary" onclick={startCommission}>Commission</button>
+                <button class="btn btn-primary" onclick={startCommission}
+                    disabled={availableTransports.length > 1 && !transport}>
+                    Commission
+                </button>
             {/if}
         {:else if step === "commissioning"}
             {#if commissionError}
@@ -316,6 +372,13 @@
 </Modal>
 
 <style>
+    .transport-pick { margin-bottom: var(--space-4); }
+    .transport-warning {
+        text-align: center;
+        padding: var(--space-6) 0;
+        color: var(--text-muted);
+    }
+
     .tabs {
         display: flex;
         gap: 2px;

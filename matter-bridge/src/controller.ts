@@ -50,7 +50,9 @@ export interface DeviceState {
 export interface MatterController {
     listIds(): string[];
     list(): Promise<DeviceState[]>;
-    commission(pairingCode: string): Promise<string>;
+    // transport: "wifi" | "thread" — selects which credentials to use.
+    // Omit (or pass undefined) to auto-detect from what's configured.
+    commission(pairingCode: string, transport?: "wifi" | "thread"): Promise<string>;
     getState(nodeId: string): Promise<DeviceState>;
     setState(nodeId: string, update: Partial<DeviceState>): Promise<void>;
     remove(nodeId: string): Promise<void>;
@@ -210,8 +212,8 @@ export async function startController(): Promise<MatterController> {
             }
             return out;
         },
-        async commission(pairingCode: string): Promise<string> {
-            const opts = optionsFromPairingCode(pairingCode);
+        async commission(pairingCode: string, transport?: "wifi" | "thread"): Promise<string> {
+            const opts = optionsFromPairingCode(pairingCode, transport);
             const nodeId = await commissioning.commissionNode(opts);
             return key(nodeId);
         },
@@ -234,7 +236,56 @@ function wifiNetwork(): { wifiSsid: string; wifiCredentials: string } | undefine
     return { wifiSsid: ssid, wifiCredentials: pass };
 }
 
-function optionsFromPairingCode(code: string): NodeCommissioningOptions {
+function threadNetwork(): { networkName: string; operationalDataset: string } | undefined {
+    const dataset = process.env.MATTER_BRIDGE_THREAD_DATASET?.trim();
+    if (!dataset) return undefined;
+
+    // matter.js needs the Thread network name to verify the commissionee can
+    // see our Thread network. It's already encoded in the Operational Dataset
+    // TLV (type 0x03 = Network Name); we parse it automatically.
+    // Set MATTER_BRIDGE_THREAD_NETWORK_NAME to override if parsing fails.
+    const name = process.env.MATTER_BRIDGE_THREAD_NETWORK_NAME?.trim()
+        || parseThreadNetworkName(dataset);
+
+    if (!name) {
+        throw new Error(
+            "Could not determine Thread network name from MATTER_BRIDGE_THREAD_DATASET. " +
+            "Set MATTER_BRIDGE_THREAD_NETWORK_NAME explicitly.",
+        );
+    }
+    return { networkName: name, operationalDataset: dataset };
+}
+
+// Extracts the Network Name (TLV type 0x03) from a hex-encoded Thread
+// Operational Dataset. Returns an empty string if not found or on parse error.
+function parseThreadNetworkName(hexDataset: string): string {
+    try {
+        const bytes = Buffer.from(hexDataset.replace(/\s/g, ""), "hex");
+        let offset = 0;
+        while (offset + 2 <= bytes.length) {
+            const type = bytes[offset++];
+            const len  = bytes[offset++];
+            if (offset + len > bytes.length) break;
+            if (type === 0x03) {              // Network Name
+                return bytes.subarray(offset, offset + len).toString("utf8");
+            }
+            offset += len;
+        }
+    } catch { /* ignore */ }
+    return "";
+}
+
+// Returns all network transports that have credentials configured.
+// Both "thread" and "wifi" can be returned simultaneously — the caller
+// (commission wizard) picks which one to use for each device.
+export function availableTransports(): ("thread" | "wifi")[] {
+    const result: ("thread" | "wifi")[] = [];
+    if (process.env.MATTER_BRIDGE_THREAD_DATASET?.trim()) result.push("thread");
+    if (process.env.MATTER_BRIDGE_WIFI_SSID?.trim())     result.push("wifi");
+    return result;
+}
+
+function optionsFromPairingCode(code: string, transport?: "wifi" | "thread"): NodeCommissioningOptions {
     const trimmed = code.trim();
     let discriminator: number | undefined;
     let shortDiscriminator: number | undefined;
@@ -252,17 +303,41 @@ function optionsFromPairingCode(code: string): NodeCommissioningOptions {
         shortDiscriminator = decoded.shortDiscriminator;
     }
 
-    const wifi = wifiNetwork();
-    if (wifi) {
+    // Resolve network credentials.
+    // If transport is explicitly specified, use exactly that — error if not configured.
+    // If unspecified (legacy / direct bridge call), fall back to Thread-first auto-detect.
+    let thread: ReturnType<typeof threadNetwork> = undefined;
+    let wifi:   ReturnType<typeof wifiNetwork>   = undefined;
+
+    if (transport === "thread") {
+        thread = threadNetwork();
+        if (!thread) throw new Error(
+            "Transport \"thread\" requested but MATTER_BRIDGE_THREAD_DATASET is not set.",
+        );
+    } else if (transport === "wifi") {
+        wifi = wifiNetwork();
+        if (!wifi) throw new Error(
+            "Transport \"wifi\" requested but MATTER_BRIDGE_WIFI_SSID is not set.",
+        );
+    } else {
+        // Auto: Thread takes priority when both are configured.
+        thread = threadNetwork();
+        if (!thread) wifi = wifiNetwork();
+    }
+
+    if (thread) {
+        console.log("[matter-bridge] commissioning with Thread network (MATTER_BRIDGE_THREAD_DATASET)");
+    } else if (wifi) {
         console.log(`[matter-bridge] commissioning with Wi-Fi SSID: ${process.env.MATTER_BRIDGE_WIFI_SSID}`);
     } else {
-        console.warn("[matter-bridge] MATTER_BRIDGE_WIFI_SSID not set — device will not receive Wi-Fi credentials during commissioning");
+        console.warn("[matter-bridge] neither MATTER_BRIDGE_THREAD_DATASET nor MATTER_BRIDGE_WIFI_SSID is set — device will not receive network credentials and commissioning will stall at the network provisioning step");
     }
 
     return {
         commissioning: {
             regulatoryCountryCode: "XX",
-            ...(wifi ? { wifiNetwork: wifi } : {}),
+            ...(thread ? { threadNetwork: thread } : {}),
+            ...(wifi   ? { wifiNetwork:   wifi   } : {}),
         },
         discovery: {
             identifierData: discriminator !== undefined

@@ -110,8 +110,13 @@ func (c *Client) SetState(ctx context.Context, nodeID string, update StateUpdate
 
 // Commission asks the bridge to onboard a new device using the manual or
 // "MT:" pairing code printed on it. Returns the assigned node id.
-func (c *Client) Commission(ctx context.Context, pairingCode string) (string, error) {
+// transport selects the network type ("wifi" or "thread"); empty string means
+// auto-detect (the bridge picks from what is configured, Thread-first).
+func (c *Client) Commission(ctx context.Context, pairingCode, transport string) (string, error) {
 	body := map[string]string{"pairing_code": pairingCode}
+	if transport != "" {
+		body["transport"] = transport
+	}
 	var out struct {
 		NodeID string `json:"node_id"`
 	}
