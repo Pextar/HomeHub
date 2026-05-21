@@ -55,11 +55,13 @@
     </div>
     <div class="actions">
         <button class="act-btn on-btn" aria-label="Turn {room.name} on"
+            disabled={allOn}
             onclick={() => runAction(() => api.roomOn(room.name), `${room.name} on`)}>
             <Icon name="sun" size={14} />
             <span>On</span>
         </button>
         <button class="act-btn off-btn" aria-label="Turn {room.name} off"
+            disabled={allOff}
             onclick={() => runAction(() => api.roomOff(room.name), `${room.name} off`)}>
             <Icon name="moon" size={14} />
             <span>Off</span>
@@ -161,6 +163,7 @@
     }
     .act-btn:active { background: var(--surface-hover); }
     .act-btn:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+    .act-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
     /* Both buttons neutral by default — no false "active" impression */
     .on-btn  { color: var(--text-muted); }
