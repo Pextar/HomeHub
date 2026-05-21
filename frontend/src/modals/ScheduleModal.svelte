@@ -31,6 +31,7 @@
     let enabled = $state(untrack(() => existing ? existing.enabled : true));
     let randomOffsetMinutes = $state<number>(untrack(() => existing?.random_offset_minutes ?? 0));
     let saving = $state(false);
+    let targetError = $state("");
 
     const hasLocation = $derived(v.settings.latitude !== 0 || v.settings.longitude !== 0);
     // Pretty offset label: "at sunrise", "30 min before sunset", "1h 30m after sunrise".
@@ -63,7 +64,8 @@
 
     async function save() {
         if (saving) return;
-        if (!targetId) { toasts.warn("Missing target", "Pick something to schedule."); return; }
+        if (!targetId) { targetError = "Pick something to schedule."; return; }
+        targetError = "";
         const payload: Partial<Schedule> = {
             target_type: targetType as TargetType,
             target_id: targetId,
@@ -117,11 +119,15 @@
             <div class="field-row" style="margin-top:var(--space-4)">
                 <div class="field">
                     <label for="sched-target">Target</label>
-                    <select id="sched-target" bind:value={targetId} required>
+                    <select id="sched-target" bind:value={targetId} required
+                        aria-invalid={targetError ? "true" : undefined}
+                        aria-describedby={targetError ? "sched-target-err" : undefined}
+                        onchange={() => targetError = ""}>
                         {#each targets as t (t.id)}
                             <option value={t.id}>{t.label}</option>
                         {/each}
                     </select>
+                    {#if targetError}<div id="sched-target-err" class="field-error">{targetError}</div>{/if}
                 </div>
                 <div class="field" style:opacity={targetType === "scene" ? 0.6 : 1}>
                     <label for="sched-action">Action</label>

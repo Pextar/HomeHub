@@ -25,6 +25,8 @@
     let inputMode   = $state<InputMode>("scan");
     let pairingCode = $state("");
     let scannerError = $state<string | null>(null);
+    let codeError = $state("");
+    let nameError = $state("");
 
     // Available transports fetched from the bridge on mount.
     // Both "thread" and "wifi" can be configured simultaneously.
@@ -68,6 +70,7 @@
     // Format 11-digit Matter manual codes as DDDD-DDD-DDDD while typing.
     // MT:… QR payloads are left as-is.
     function onCodeInput(e: Event) {
+        codeError = "";
         const raw = (e.target as HTMLInputElement).value;
         if (raw.toUpperCase().startsWith("MT:")) {
             pairingCode = raw;
@@ -94,16 +97,17 @@
 
     async function startCommission() {
         const code = pairingCode.trim();
-        if (!code) {
-            toasts.warn("Enter a pairing code",
-                "Scan the QR or type the 11- or 21-digit code printed on the device.");
+        if (!code || !looksLikePairingCode(code)) {
+            const msg = !code
+                ? "Type the 11- or 21-digit code printed on the device."
+                : "Expecting an 11- or 21-digit code, or an MT:… QR payload.";
+            // Manual mode has a visible input to attach the error to; a scanned
+            // payload doesn't, so fall back to a toast there.
+            if (inputMode === "manual") codeError = msg;
+            else toasts.warn("Pairing code problem", msg);
             return;
         }
-        if (!looksLikePairingCode(code)) {
-            toasts.warn("That doesn't look right",
-                "Expecting an 11- or 21-digit manual code, or an MT:… QR payload.");
-            return;
-        }
+        codeError = "";
         step = "commissioning";
         commissionError = null;
         // Slow climb up to ~90% over the expected commissioning window so
@@ -191,9 +195,10 @@
             protocol: transport === "thread" ? "matter-thread" : "matter",
         };
         if (!payload.name) {
-            toasts.warn("Name is required", "Give the device a name so you can find it later.");
+            nameError = "Give the device a name so you can find it later.";
             return;
         }
+        nameError = "";
         saving = true;
         try {
             await api.createSocket(payload);
@@ -279,7 +284,10 @@
                         autocomplete="off"
                         autocorrect="off"
                         autocapitalize="off"
-                        spellcheck={false} />
+                        spellcheck={false}
+                        aria-invalid={codeError ? "true" : undefined}
+                        aria-describedby={codeError ? "mat-pair-err" : undefined} />
+                    {#if codeError}<div id="mat-pair-err" class="field-error">{codeError}</div>{/if}
                     <div class="field-help">
                         Type the 11-digit code printed on the device (dashes are added
                         automatically). Or paste the full <code>MT:…</code> QR payload.
@@ -331,7 +339,11 @@
                 <label for="mat-name">Name</label>
                 <input id="mat-name" type="text" bind:value={name}
                     placeholder={suggestedName || "e.g. Living room lamp"}
-                    autocomplete="off" required />
+                    autocomplete="off" required
+                    aria-invalid={nameError ? "true" : undefined}
+                    aria-describedby={nameError ? "mat-name-err" : undefined}
+                    oninput={() => nameError = ""} />
+                {#if nameError}<div id="mat-name-err" class="field-error">{nameError}</div>{/if}
             </div>
             <div class="field">
                 <label for="mat-room">Room <span class="opt">(optional)</span></label>

@@ -27,6 +27,8 @@
     let alertMin = $state(untrack(() => existing?.alert_min ?? ""));
     let alertMax = $state(untrack(() => existing?.alert_max ?? ""));
     let saving = $state(false);
+    let errors = $state<{ name?: string; code?: string }>({});
+    const clear = (k: "name" | "code") => { if (errors[k]) errors = { ...errors, [k]: undefined }; };
 
     // When the user changes kind, reset unit + field to their defaults
     // for that kind. They can still edit afterwards.
@@ -61,8 +63,11 @@
 
     async function save() {
         if (saving) return;
-        if (!name.trim()) { toasts.warn("Missing name", "Give the sensor a name."); return; }
-        if (!code.trim()) { toasts.warn("Missing code", "Sensors need a 433MHz code to listen for."); return; }
+        const errs: typeof errors = {};
+        if (!name.trim()) errs.name = "Give the sensor a name.";
+        if (!code.trim()) errs.code = "Sensors need a 433MHz code to listen for.";
+        errors = errs;
+        if (errs.name || errs.code) return;
         const payload: Partial<Sensor> = {
             name, kind, unit, code, protocol, field, room,
             alert_min: alertMin === "" ? undefined : Number(alertMin),
@@ -114,7 +119,11 @@
         <form onsubmit={(e) => { e.preventDefault(); save(); }}>
             <div class="field">
                 <label for="sensor-name">Name</label>
-                <input id="sensor-name" type="text" bind:value={name} required placeholder="Living room" />
+                <input id="sensor-name" type="text" bind:value={name} required placeholder="Living room"
+                    aria-invalid={errors.name ? "true" : undefined}
+                    aria-describedby={errors.name ? "sensor-name-err" : undefined}
+                    oninput={() => clear("name")} />
+                {#if errors.name}<div id="sensor-name-err" class="field-error">{errors.name}</div>{/if}
             </div>
 
             <div class="field-row" style="margin-top:var(--space-4)">
@@ -137,7 +146,11 @@
 
             <div class="field" style="margin-top:var(--space-4)">
                 <label for="sensor-code">Code</label>
-                <input id="sensor-code" type="text" bind:value={code} required placeholder="Acurite-Tower:1234" />
+                <input id="sensor-code" type="text" bind:value={code} required placeholder="Acurite-Tower:1234"
+                    aria-invalid={errors.code ? "true" : undefined}
+                    aria-describedby={errors.code ? "sensor-code-err" : undefined}
+                    oninput={() => clear("code")} />
+                {#if errors.code}<div id="sensor-code-err" class="field-error">{errors.code}</div>{/if}
                 <div class="field-help">
                     For 433MHz this is the device identifier (with rtl_433, usually <code>model:id</code>).
                     For an MQTT sensor, set protocol to <code>mqtt</code> and use the topic to subscribe

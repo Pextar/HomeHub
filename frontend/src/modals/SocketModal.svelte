@@ -30,6 +30,8 @@
     let probing      = $state(false);
     let publishing   = $state(false);
     let saving       = $state(false);
+    let errors       = $state<{ name?: string; code?: string }>({});
+    const clear = (k: "name" | "code") => { if (errors[k]) errors = { ...errors, [k]: undefined }; };
 
     async function pair() {
         if (pairing) return;
@@ -57,7 +59,7 @@
         if (probing) return;
         const ip = code.trim();
         if (!ip) {
-            toasts.warn("Enter an IP first", "Type the device IP in the field above.");
+            errors = { ...errors, code: "Type the device IP first." };
             return;
         }
         probing = true;
@@ -75,7 +77,7 @@
         if (publishing) return;
         const topic = code.trim();
         if (!topic) {
-            toasts.warn("Enter a topic first", "Type the command topic in the field above.");
+            errors = { ...errors, code: "Type the command topic first." };
             return;
         }
         publishing = true;
@@ -92,14 +94,15 @@
     async function save() {
         if (saving) return;
         const payload = { name: name.trim(), room: room.trim(), code: code.trim(), protocol, emoji };
-        if (!payload.name || !payload.code) {
-            const missing = isTasmota ? "device IP"
-                          : isMatter  ? "Matter node id (commission a device first)"
-                          : isMqtt    ? "command topic"
-                          : "RF code";
-            toasts.warn("Missing fields", `Name and ${missing} are required.`);
-            return;
-        }
+        const codeLabel = isTasmota ? "device IP"
+                        : isMatter  ? "Matter node id"
+                        : isMqtt    ? "command topic"
+                        : "RF code";
+        const errs: typeof errors = {};
+        if (!payload.name) errs.name = "Give the device a name.";
+        if (!payload.code) errs.code = isMatter ? "Commission a device first." : `Enter the ${codeLabel}.`;
+        errors = errs;
+        if (errs.name || errs.code) return;
         saving = true;
         try {
             if (existing) {
@@ -164,7 +167,11 @@
                 <div class="field">
                     <label for="sock-name">Name</label>
                     <input id="sock-name" type="text" bind:value={name}
-                        placeholder="e.g. Living room lamp" autocomplete="off" required />
+                        placeholder="e.g. Living room lamp" autocomplete="off" required
+                        aria-invalid={errors.name ? "true" : undefined}
+                        aria-describedby={errors.name ? "sock-name-err" : undefined}
+                        oninput={() => clear("name")} />
+                    {#if errors.name}<div id="sock-name-err" class="field-error">{errors.name}</div>{/if}
                 </div>
                 <div class="field" style="margin-top:var(--space-4)">
                     <label for="sock-room">Room <span class="opt">(optional)</span></label>
@@ -206,7 +213,11 @@
                                        : isMatter  ? "node id from commissioning"
                                        : isMqtt    ? "e.g. cmnd/plug/POWER"
                                        : "e.g. 12345"}
-                            autocomplete="off" required />
+                            autocomplete="off" required
+                            aria-invalid={errors.code ? "true" : undefined}
+                            aria-describedby={errors.code ? "sock-code-err" : undefined}
+                            oninput={() => clear("code")} />
+                        {#if errors.code}<div id="sock-code-err" class="field-error">{errors.code}</div>{/if}
                     </div>
                 </div>
 

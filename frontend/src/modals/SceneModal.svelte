@@ -24,6 +24,8 @@
         untrack(() => Object.fromEntries(sockets.map(s => [s.id, initial.get(s.id) ?? "ignore"])))
     );
     let saving = $state(false);
+    let nameError = $state("");
+    let actionsError = $state("");
 
     async function save() {
         if (saving) return;
@@ -31,11 +33,9 @@
             .filter(([, v]) => v !== "ignore")
             .map(([socket_id, action]) => ({ socket_id, action: action as "on" | "off" }));
         const payload = { name: name.trim(), actions };
-        if (!payload.name) { toasts.warn("Missing name", "Give the scene a name."); return; }
-        if (actions.length === 0) {
-            toasts.warn("No actions", "Set at least one socket to On or Off.");
-            return;
-        }
+        nameError = payload.name ? "" : "Give the scene a name.";
+        actionsError = actions.length === 0 ? "Set at least one device to On or Off." : "";
+        if (nameError || actionsError) return;
         saving = true;
         try {
             if (existing) {
@@ -65,7 +65,11 @@
             <div class="field">
                 <label for="scn-name">Name</label>
                 <input id="scn-name" type="text" bind:value={name}
-                    placeholder="e.g. Movie night" autocomplete="off" required />
+                    placeholder="e.g. Movie night" autocomplete="off" required
+                    aria-invalid={nameError ? "true" : undefined}
+                    aria-describedby={nameError ? "scn-name-err" : undefined}
+                    oninput={() => nameError = ""} />
+                {#if nameError}<div id="scn-name-err" class="field-error">{nameError}</div>{/if}
             </div>
             <div class="field" style="margin-top:var(--space-4)">
                 <span class="field-label">Per-socket actions</span>
@@ -76,7 +80,8 @@
                                 <div>{s.name}</div>
                                 <div class="field-help">{s.room || "Unassigned"}</div>
                             </div>
-                            <select bind:value={perSocket[s.id]} aria-label="Action for {s.name}">
+                            <select bind:value={perSocket[s.id]} aria-label="Action for {s.name}"
+                                onchange={() => actionsError = ""}>
                                 <option value="ignore">Ignore</option>
                                 <option value="on">Turn on</option>
                                 <option value="off">Turn off</option>
@@ -84,6 +89,7 @@
                         </div>
                     {/each}
                 </div>
+                {#if actionsError}<div class="field-error">{actionsError}</div>{/if}
                 <div class="field-help">Ignored sockets are not touched when the scene runs.</div>
             </div>
         </form>
