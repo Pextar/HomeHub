@@ -42,81 +42,138 @@ MATTER_BRIDGE_WIFI_PASS=YourWiFiPassword
 
 Thread is a low-power mesh network designed for IoT. Thread devices don't join
 Wi-Fi — they form their own mesh and reach the IP network through a **Thread
-Border Router**. After commissioning the Pi speaks to them over regular IP, via
+Border Router**. After commissioning, the Pi speaks to them over regular IP via
 the Border Router.
 
 ```
-Thread device ←→ Thread mesh ←→ Border Router ←→ IP network ←→ Pi (matter.js)
+Thread device ←→ Thread mesh ←→ Border Router (Pi + dongle) ←→ IP network ←→ Pi (matter.js)
 ```
 
-**The Pi does not need a Thread radio.** It is the *controller*, not a Thread
-node. All traffic between the Pi and Thread devices flows over normal IP through
-the Border Router.
+**The Pi does not need a Thread radio for the matter.js controller role.** However,
+you do need something on your network acting as a Thread Border Router, and you
+need the **Thread Operational Dataset** from it — the ~100-byte hex credential
+that lets you commission devices onto that Thread network.
 
 ### What you need
 
-| Component | Notes |
-|-----------|-------|
-| **Thread Border Router** | Apple TV 4K (3rd gen 2022+), HomePod mini, or any OpenThread Border Router |
-| **Thread Operational Dataset** | A ~100-byte hex TLV containing the Thread network key, channel, PAN ID, etc. — fetched from the Border Router (once) |
+| Item | Notes |
+|------|-------|
+| **nRF52840 Dongle** (Nordic PCA10059) | ~$10 from Mouser, Digikey, or Nordic directly. **Get the official Nordic PCA10059** — clones exist but the pre-built firmware and guides all target this specific board. |
+| **Raspberry Pi** | The same Pi that runs rf-socket-controller is fine. It gains a second role as the Thread Border Router. |
 
-### Getting the Thread Operational Dataset
+> **Why not Apple TV or HomePod mini?**
+> Apple TV 4K and HomePod mini do act as Thread Border Routers for Apple Home,
+> but Apple provides no way to export the Operational Dataset from them to a
+> third-party controller. The nRF52840 dongle approach gives you a Thread network
+> you fully control — and Thread devices you commission via rf-socket-controller
+> will live on *your* network, not Apple's.
 
-The Operational Dataset is the credential you put in `.env`. You only need to
-do this once; existing Thread devices continue working across restarts.
+---
 
-#### From an Apple TV 4K or HomePod mini (easiest)
+### Step 1 — Flash RCP firmware onto the dongle
 
-1. Install the free **Thread** app by the Thread Group on your iPhone or iPad:
-   [App Store →](https://apps.apple.com/app/thread/id1499524355)
-2. Open the app on the same local network as your Apple TV / HomePod. It
-   auto-discovers the Border Router and shows the active Thread network.
-3. Tap **Copy Active Dataset** to copy the hex string, then paste it as
-   `MATTER_BRIDGE_THREAD_DATASET` in your `.env` file.
+The dongle needs **RCP (Radio Co-Processor) firmware** so the Pi can drive the
+Thread radio. This is a one-time step done from any computer (Windows / Mac /
+Linux).
 
-> **Note:** Apple TV 4K (3rd gen, A15, 2022 or later) and HomePod mini both
-> have a Thread radio built in and act as a Border Router automatically once
-> configured in the Apple Home app. No extra setup on the Apple device is
-> needed.
+1. Install **nRF Connect for Desktop** (free):
+   https://www.nordicsemi.com/Products/Development-tools/nRF-Connect-for-Desktop
 
-#### From an OpenThread Border Router (OTBR)
+2. Open it and install the **Programmer** app from inside it.
+
+3. Download the pre-built RCP firmware `.hex` for the nRF52840 Dongle from the
+   OpenThread nRF528xx releases page:
+   https://github.com/openthread/ot-nrf528xx/releases
+   Look for a file containing `nrf52840dongle` and `rcp` in the name.
+
+4. Put the dongle in bootloader mode: press the small **RESET button** (on the
+   side, next to the USB connector) until the red LED starts **pulsing slowly**.
+
+5. Plug the dongle into your computer. In the Programmer app, select it from the
+   device list, load the `.hex` file, and click **Write**.
+
+6. The dongle is ready. Plug it into the Pi.
+
+---
+
+### Step 2 — Run OpenThread Border Router on the Pi
+
+The easiest way is Docker. SSH into the Pi:
 
 ```sh
-# SSH into the border router, then:
+# Install Docker (skip if already installed)
+curl -fsSL https://get.docker.com | sh
+sudo usermod -aG docker $USER
+# Log out and back in so the group change takes effect.
+
+# Find the dongle's serial port (usually ttyACM0)
+ls /dev/ttyACM*
+
+# Run OTBR. Replace ttyACM0 if your port is different.
+docker run --name otbr --sysctl "net.ipv6.conf.all.disable_ipv6=0 \
+  net.ipv4.conf.all.forwarding=1 net.ipv6.conf.all.forwarding=1" \
+  -p 8080:80 --dns=127.0.0.1 --restart unless-stopped -d \
+  --volume /dev/ttyACM0:/dev/ttyACM0 \
+  --privileged openthread/otbr \
+  --radio-url spinel+hdlc+uart:///dev/ttyACM0
+```
+
+OTBR's web UI is now at `http://<pi-ip>:8080`. On first run, go there and click
+**Form** to create a new Thread network (leave all defaults or pick a name).
+Wait about 30 seconds for the network to form.
+
+> **Native install (no Docker):** If you prefer not to use Docker, follow the
+> official guide at https://openthread.io/guides/border-router/raspberry-pi —
+> it uses the same `ot-br-posix` scripts but installs as a systemd service.
+
+---
+
+### Step 3 — Get the Operational Dataset
+
+Once the Thread network is formed:
+
+```sh
+# From the Pi host (Docker):
+sudo docker exec otbr ot-ctl dataset active -x
+
+# Or if you used the native install:
 sudo ot-ctl dataset active -x
-# Copy the hex string printed.
 ```
 
-#### Via chip-tool (advanced)
-
-```sh
-# Build the Matter SDK and run:
-chip-tool pairing get-commissioner-node-id
-# Then query the Border Agent on your network (UDP 49191) — see the
-# Matter SDK docs for the full flow.
+This prints a single hex string, for example:
+```
+0e080000000000010000000300001235060004001fffe002083d3fccb9e36e2b7d0708fd9e...
 ```
 
-### Configuration
+Copy the entire string — that's your `MATTER_BRIDGE_THREAD_DATASET`.
 
-Add to your `.env`:
+---
+
+### Step 4 — Configure the bridge
+
+Add to your `.env` on the Pi:
 
 ```bash
-# Thread Operational Dataset from your Border Router (hex TLV)
+# Thread Operational Dataset from your OTBR (hex TLV)
 MATTER_BRIDGE_THREAD_DATASET=0e080000000000010000000300001235...
 
-# The Thread network name is parsed automatically from the dataset TLV.
-# Only set this if the bridge fails to start with a "Could not determine
+# The Thread network name is parsed automatically from the dataset above.
+# Only set this if the bridge refuses to start with a "Could not determine
 # Thread network name" error (shouldn't happen with a well-formed dataset).
 #MATTER_BRIDGE_THREAD_NETWORK_NAME=MyThreadNet
-
-# Do NOT also set MATTER_BRIDGE_WIFI_SSID — Thread takes priority and
-# only one transport credential set is sent per commissioning.
 ```
 
-**Both can be set simultaneously.** When both `MATTER_BRIDGE_THREAD_DATASET`
-and `MATTER_BRIDGE_WIFI_SSID` are configured, the commission wizard shows a
-"Thread / Wi-Fi" picker so you can choose per device — no need to comment and
-uncomment env vars.
+Then restart the bridge:
+
+```sh
+sudo systemctl restart matter-bridge
+```
+
+**Both Wi-Fi and Thread credentials can coexist in `.env`.** When both
+`MATTER_BRIDGE_WIFI_SSID` and `MATTER_BRIDGE_THREAD_DATASET` are set, the
+commission wizard shows a **Thread / Wi-Fi picker** so you choose per device.
+
+---
 
 ### Compatible Thread devices
 
@@ -128,7 +185,7 @@ uncomment env vars.
 
 ---
 
-## Setup on the Pi
+## Setup on the Pi (matter-bridge)
 
 The deploy script (`scripts/deploy-pi.sh`) handles this automatically; the
 manual steps if you need them:
@@ -167,7 +224,7 @@ sudo usermod -aG bluetooth <your-service-user>
    indicate they're in pairing mode.
 2. Make sure the relevant env var(s) are set in `.env`:
    - Wi-Fi device → `MATTER_BRIDGE_WIFI_SSID` / `MATTER_BRIDGE_WIFI_PASS`
-   - Thread device → `MATTER_BRIDGE_THREAD_DATASET`
+   - Thread device → `MATTER_BRIDGE_THREAD_DATASET` (and OTBR running)
    - Both can coexist — the wizard will ask which to use.
 3. In the web UI tap **Add socket**, pick **Matter (Wi-Fi)** or **Matter (Thread)**,
    paste the 11-digit manual pairing code (or the `MT:` QR-code payload) printed
@@ -190,14 +247,14 @@ fail-soft (the bridge call returns 503).
 
 ## HTTP API (proxied through the Go backend)
 
-| Method | Path                                    | Notes                                             |
-|--------|-----------------------------------------|---------------------------------------------------|
-| GET    | `/api/matter/transport`                 | Returns `{ transport: "thread"\|"wifi"\|"none" }` |
-| GET    | `/api/matter/devices`                   | List every node the bridge knows about             |
-| POST   | `/api/matter/commission`                | `{ pairing_code }`, returns `{ job_id }`           |
-| GET    | `/api/matter/commission/jobs/{id}`      | Poll commissioning job status                      |
-| GET    | `/api/matter/{socketId}`                | Live state (queries the device)                    |
-| PUT    | `/api/matter/{socketId}/state`          | `{ on?, level?, color?, ct? }`                     |
+| Method | Path                               | Notes                                                          |
+|--------|------------------------------------|----------------------------------------------------------------|
+| GET    | `/api/matter/transport`            | Returns `{ transports: ["thread","wifi"] }` (configured ones) |
+| GET    | `/api/matter/devices`              | List every node the bridge knows about                         |
+| POST   | `/api/matter/commission`           | `{ pairing_code, transport? }`, returns `{ job_id }`          |
+| GET    | `/api/matter/commission/jobs/{id}` | Poll commissioning job status                                  |
+| GET    | `/api/matter/{socketId}`           | Live state (queries the device)                                |
+| PUT    | `/api/matter/{socketId}/state`     | `{ on?, level?, color?, ct? }`                                 |
 
 The `socketId` here is the Socket's id in our store; the Socket's `code`
 field holds the Matter node id assigned at commissioning time.
@@ -213,19 +270,25 @@ field holds the Matter node id assigned at commissioning time.
 - **Commissioning times out (Wi-Fi device)** — make sure the device is in
   pairing mode, Bluetooth is available on the Pi, and `MATTER_BRIDGE_WIFI_SSID`
   is set to a 2.4 GHz network.
-- **Commissioning times out (Thread device)** — confirm the Thread Border
-  Router (Apple TV / HomePod) is online, the Operational Dataset in
-  `MATTER_BRIDGE_THREAD_DATASET` is correct, and the device is within BLE
-  range of the Pi (~5m). Re-copy the dataset from the Thread app if in doubt.
+- **Commissioning times out (Thread device)** — confirm OTBR is running
+  (`docker ps` or `systemctl status otbr`), the Operational Dataset in
+  `MATTER_BRIDGE_THREAD_DATASET` matches the active network (`ot-ctl dataset
+  active -x`), and the device is within BLE range of the Pi (~5 m).
+- **"Could not determine Thread network name"** — the dataset TLV may be
+  malformed. Re-run `ot-ctl dataset active -x` and re-paste. As a workaround
+  set `MATTER_BRIDGE_THREAD_NETWORK_NAME` to your Thread network name manually.
 - **"device does not expose OnOff"** — the device doesn't advertise an
   on/off cluster. Most Matter lights and plugs do; sensors don't.
-- **"bind EAFNOSUPPORT :::5353"** — the host has IPv6 disabled. Matter
-  requires IPv6 multicast for mDNS discovery; enable IPv6 on the Pi:
+- **"bind EAFNOSUPPORT :::5353"** — IPv6 is disabled on the host. Matter
+  requires IPv6 multicast for mDNS discovery; enable it on the Pi:
   ```sh
   sysctl -w net.ipv6.conf.all.disable_ipv6=0
   # Make permanent:
   echo "net.ipv6.conf.all.disable_ipv6=0" | sudo tee -a /etc/sysctl.conf
   ```
-- **Thread device unreachable after commissioning** — the Thread Border Router
-  may not yet have advertised a route to the new node. Wait 30–60 s and
-  retry; mDNS resolution across Thread can be slower than Wi-Fi.
+- **Thread device unreachable after commissioning** — the Border Router may
+  not yet have advertised a route to the new node. Wait 30–60 s and retry;
+  mDNS resolution across Thread can be slower than Wi-Fi.
+- **OTBR web UI unreachable at :8080** — check `docker logs otbr`. If the
+  dongle isn't found, confirm it appears as `/dev/ttyACM0` (`ls /dev/ttyACM*`)
+  and that no other process has it open.
