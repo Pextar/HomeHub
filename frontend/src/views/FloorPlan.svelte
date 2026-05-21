@@ -144,6 +144,15 @@
     let editing      = $state(false);
     const selectedCell = $derived(cells.find(c => c.name === selectedRoom) ?? null);
 
+    // Snapshot kept alive while the room panel animates out.
+    // selectedCell becomes null the instant selectedRoom is cleared, which
+    // would blank every {selectedCell.*} binding mid-flight. _panelCellMemo
+    // never resets to null (only forwards on non-null updates), so panelCell
+    // still carries real content for the full 180 ms fly-out.
+    let _panelCellMemo = $state<typeof selectedCell>(null);
+    $effect(() => { if (selectedCell !== null) _panelCellMemo = selectedCell; });
+    const panelCell = $derived(_panelCellMemo ?? selectedCell);
+
     function pickRoom(name: string) {
         // On desktop the grid stays clickable beside the docked panel, so a
         // room tap also bows out of the create flow.
@@ -344,18 +353,19 @@
 
     // For the "Add device" picker in edit mode: every socket not already
     // in the selected room. Show their current room as a hint.
+    // Uses panelCell so the list stays populated while the close animation plays.
     const addable = $derived.by(() => {
-        if (!selectedCell) return [] as Socket[];
-        return v.sockets.filter(s => (s.room?.trim() || "") !== selectedCell.name);
+        if (!panelCell) return [] as Socket[];
+        return v.sockets.filter(s => (s.room?.trim() || "") !== panelCell.name);
     });
 
     let addPick = $state("");
 
     async function performAdd() {
-        if (!selectedCell || !addPick) return;
+        if (!panelCell || !addPick) return;
         const sock = v.sockets.find(s => s.id === addPick);
         if (!sock) return;
-        await moveSocketToRoom(sock, selectedCell.name);
+        await moveSocketToRoom(sock, panelCell.name);
         addPick = "";
     }
 
@@ -540,7 +550,7 @@
 </div><!-- /.stage-grid -->
 
 <!-- ── Selected room panel (docked beside grid on desktop, sheet on mobile) ─ -->
-{#if roomPanelOpen && selectedCell}
+{#if roomPanelOpen}
     <div class="sheet-root"
         role="presentation"
         onclick={(e) => { if (e.target === e.currentTarget) selectedRoom = null; }}
@@ -548,7 +558,7 @@
         out:fade={{ duration: dur(120) }}>
         <div class="panel" class:edit={editing}
             role="dialog"
-            aria-label={selectedCell.name}
+            aria-label={panelCell?.name}
             aria-modal="true"
             style:transform={dragY > 0 ? `translateY(${dragY}px)` : ''}
             style:opacity={dragY > 0 ? Math.max(0.4, 1 - dragY / 300) : undefined}
@@ -570,12 +580,12 @@
                                 class:open={emojiPickerOpen}
                                 onclick={() => emojiPickerOpen = !emojiPickerOpen}
                                 aria-label="Change room icon"
-                                aria-expanded={emojiPickerOpen}>{emojiFor(selectedCell.name)}</button>
+                                aria-expanded={emojiPickerOpen}>{emojiFor(panelCell?.name ?? "")}</button>
                             <input class="rename-input"
                                 type="text"
-                                value={selectedCell.name}
+                                value={panelCell?.name ?? ""}
                                 aria-label="Room name"
-                                onblur={(e) => renameRoom(selectedCell!.name, (e.target as HTMLInputElement).value)}
+                                onblur={(e) => panelCell && renameRoom(panelCell.name, (e.target as HTMLInputElement).value)}
                                 onkeydown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
                             />
                         </div>
@@ -583,25 +593,25 @@
                             <div class="emoji-grid inline" transition:fly={{ y: -6, duration: dur(140), easing: cubicOut }}>
                                 {#each EMOJI_CHOICES as e (e)}
                                     <button type="button" class="emoji-cell"
-                                        class:active={emojiFor(selectedCell.name) === e}
-                                        onclick={() => setRoomEmoji(selectedCell!.name, e)}
+                                        class:active={emojiFor(panelCell?.name ?? "") === e}
+                                        onclick={() => panelCell && setRoomEmoji(panelCell.name, e)}
                                         aria-label={`Use ${e}`}>{e}</button>
                                 {/each}
                             </div>
                         {/if}
                         <span class="ph-sub">
-                            {selectedCell.isDraft
+                            {panelCell?.isDraft
                                 ? "Empty room — add a device to save it"
-                                : `${selectedCell.total} device${selectedCell.total === 1 ? "" : "s"}`}
+                                : `${panelCell?.total ?? 0} device${(panelCell?.total ?? 0) === 1 ? "" : "s"}`}
                         </span>
                     </div>
                 {:else}
                     <div class="ph-left">
                         <span class="ph-name">
-                            <span class="ph-emoji" aria-hidden="true">{emojiFor(selectedCell.name)}</span>
-                            {selectedCell.name}
+                            <span class="ph-emoji" aria-hidden="true">{emojiFor(panelCell?.name ?? "")}</span>
+                            {panelCell?.name}
                         </span>
-                        <span class="ph-sub">{selectedCell.on} of {selectedCell.total} on</span>
+                        <span class="ph-sub">{panelCell?.on ?? 0} of {panelCell?.total ?? 0} on</span>
                     </div>
                 {/if}
                 <button class="icon-btn" onclick={() => selectedRoom = null} aria-label="Close">
@@ -611,14 +621,14 @@
 
             <div class="panel-body">
                 {#if editing}
-                    {#if selectedCell.sockets.length > 0}
+                    {#if (panelCell?.sockets.length ?? 0) > 0}
                         <ul class="socket-list">
-                            {#each selectedCell.sockets as s (s.id)}
+                            {#each panelCell?.sockets ?? [] as s (s.id)}
                                 <li class="socket-row edit">
                                     <span class="socket-name">{s.name}</span>
                                     <button class="link-btn danger"
                                         onclick={() => unassignSocket(s)}
-                                        aria-label={`Remove ${s.name} from ${selectedCell!.name}`}>
+                                        aria-label={`Remove ${s.name} from ${panelCell?.name ?? ""}`}>
                                         Remove
                                     </button>
                                 </li>
@@ -645,7 +655,7 @@
                     {/if}
                 {:else}
                     <ul class="socket-list">
-                        {#each selectedCell.sockets as s (s.id)}
+                        {#each panelCell?.sockets ?? [] as s (s.id)}
                             <li class="socket-row">
                                 <span class="socket-name">{s.name}</span>
                                 <Switch
@@ -661,12 +671,12 @@
 
             <div class="panel-foot">
                 {#if editing}
-                    <button class="btn btn-danger btn-xs" onclick={() => deleteRoom(selectedCell!)}>
+                    <button class="btn btn-danger btn-xs" onclick={() => panelCell && deleteRoom(panelCell)}>
                         Delete room
                     </button>
                 {:else}
-                    <button class="btn btn-success btn-xs" onclick={() => { const cell = selectedCell!; selectedRoom = null; roomAllOn(cell); }}>All on</button>
-                    <button class="btn btn-danger btn-xs" onclick={() => { const cell = selectedCell!; selectedRoom = null; roomAllOff(cell); }}>All off</button>
+                    <button class="btn btn-success btn-xs" onclick={() => { const c = panelCell; selectedRoom = null; c && roomAllOn(c); }}>All on</button>
+                    <button class="btn btn-danger btn-xs" onclick={() => { const c = panelCell; selectedRoom = null; c && roomAllOff(c); }}>All off</button>
                 {/if}
             </div>
         </div>
