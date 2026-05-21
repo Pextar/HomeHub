@@ -1,5 +1,6 @@
 <script lang="ts">
     import Modal from "../components/Modal.svelte";
+    import Switch from "../components/Switch.svelte";
     import { closeModal } from "../lib/modal.svelte";
     import { api } from "../lib/api";
     import { toasts, data } from "../lib/stores.svelte";
@@ -101,10 +102,10 @@
                         <div class="hint">This device supports on/off only.</div>
                     {/if}
                 </div>
-                <label class="toggle">
-                    <input type="checkbox" checked={on} onchange={toggleOn} />
+                <div class="toggle">
                     <span class="toggle-label">{on ? "On" : "Off"}</span>
-                </label>
+                    <Switch checked={on} onChange={toggleOn} ariaLabel="Power" />
+                </div>
             </div>
 
             {#if supportsDimmer}

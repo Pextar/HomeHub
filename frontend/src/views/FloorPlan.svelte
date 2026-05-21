@@ -187,9 +187,13 @@
     let newRoomEmoji = $state("");
     let createInput = $state<HTMLInputElement>();
 
-    // Focus the name field as soon as the create sheet opens.
+    // Focus the name field when the create sheet opens — but not on touch,
+    // where summoning the keyboard immediately would cover the sheet's
+    // quick-pick options. Touch users tap the field when ready.
     $effect(() => {
-        if (creating && createInput) createInput.focus();
+        if (!creating || !createInput) return;
+        if (window.matchMedia("(pointer: coarse)").matches) return;
+        createInput.focus();
     });
 
     function startCreate() {

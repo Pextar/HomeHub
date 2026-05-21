@@ -94,18 +94,21 @@
         }
     }
 
+    let locating = $state(false);
     function useBrowserLocation() {
         if (!navigator.geolocation) {
             toasts.warn("Not available", "Your browser doesn't expose a location.");
             return;
         }
+        locating = true;
         navigator.geolocation.getCurrentPosition(
             (pos) => {
                 latitude  = Math.round(pos.coords.latitude  * 10000) / 10000;
                 longitude = Math.round(pos.coords.longitude * 10000) / 10000;
+                locating = false;
                 toasts.info("Location filled", "Click Save to apply.");
             },
-            (err) => toasts.error("Location denied", err.message),
+            (err) => { locating = false; toasts.error("Location denied", err.message); },
             { enableHighAccuracy: false, timeout: 8000 },
         );
     }
@@ -139,8 +142,8 @@
             </div>
         </div>
         <div class="actions">
-            <button type="button" class="btn btn-ghost" onclick={useBrowserLocation}>
-                Use this device's location
+            <button type="button" class="btn btn-ghost" onclick={useBrowserLocation} disabled={locating}>
+                {locating ? "Locating…" : "Use this device's location"}
             </button>
             <button type="submit" class="btn btn-primary" disabled={!dirty || saving}>
                 {saving ? "Saving…" : "Save"}

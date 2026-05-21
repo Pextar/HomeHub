@@ -19,8 +19,8 @@
     function groupStats(g: typeof v.groups[number]) {
         const sockets = g.socket_ids.map(id => data.socketById(id));
         const onCount = sockets.filter(s => s?.state).length;
-        const chips = sockets.map((s, i) => ({
-            text: s ? s.name : `(missing: ${g.socket_ids[i]})`,
+        const chips = sockets.map((s) => ({
+            text: s ? s.name : "(removed device)",
             tone: s ? (s.state ? "on" as const : "off" as const) : "" as const,
         }));
         return { onCount, chips };

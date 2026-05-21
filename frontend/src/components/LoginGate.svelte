@@ -18,6 +18,13 @@
     let password = $state("");
     let error = $state("");
 
+    // Focus a field as soon as it mounts (initial render and on mode switch)
+    // so the user can start typing — and on mobile the keyboard opens right
+    // away, which is what people expect on a login screen.
+    function autofocus(node: HTMLInputElement) {
+        node.focus();
+    }
+
     // On boot, probe a protected endpoint. 401 → show login. Anything else
     // (success or network error) → render the app and let it deal with it.
     onMount(async () => {
@@ -77,14 +84,15 @@
                     <input id="login-code" type="text" bind:value={code}
                         inputmode="numeric" autocomplete="one-time-code"
                         autocapitalize="none" autocorrect="off"
-                        placeholder="000000" class="code-input" required />
+                        placeholder="000000" class="code-input" required
+                        use:autofocus />
                 </div>
             {:else}
                 <div class="field">
                     <label for="login-user">Username</label>
                     <input id="login-user" type="text" bind:value={username}
                         autocomplete="username" autocapitalize="none" autocorrect="off"
-                        required />
+                        required use:autofocus />
                 </div>
                 <div class="field">
                     <label for="login-pass">Password</label>

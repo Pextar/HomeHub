@@ -53,6 +53,9 @@
   .name {
     font-weight: 600;
     font-size: 1rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .meta {
     color: var(--text-muted);
@@ -74,6 +77,10 @@
     border: 1px solid var(--border);
     font-size: 12px;
     color: var(--text-muted);
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .chip[data-tone="on"] {
     color: var(--success);

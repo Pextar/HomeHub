@@ -162,6 +162,7 @@
                         type="range"
                         min="-120" max="120" step="5"
                         bind:value={solarOffsetMinutes}
+                        aria-valuetext={solarOffsetLabel}
                     />
                     <div class="solar-summary">{solarOffsetLabel}</div>
                     {#if !hasLocation}
