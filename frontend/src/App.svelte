@@ -105,6 +105,13 @@
         !session.isAdmin && ADMIN_ONLY.includes(route.current) ? "dashboard" : route.current,
     );
     const Current = $derived(views[effectiveRoute]);
+
+    // Reset scroll position to the top whenever the user navigates to a
+    // different page, so the new view always starts at the top.
+    $effect(() => {
+        effectiveRoute;
+        window.scrollTo({ top: 0, behavior: "instant" });
+    });
 </script>
 
 <LoginGate {onAuthed}>
