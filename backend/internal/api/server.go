@@ -17,6 +17,7 @@ import (
 	"github.com/gorilla/mux"
 
 	"rf-socket-controller/internal/matter"
+	"rf-socket-controller/internal/mqtt"
 	"rf-socket-controller/internal/store"
 )
 
@@ -28,6 +29,7 @@ const maxRequestBody = 1 << 20 // 1 MiB
 type Server struct {
 	Store         *store.Store
 	Matter        *matter.Client // optional; nil-safe via Matter.Enabled()
+	MQTT          *mqtt.Client   // optional; nil-safe via MQTT.Enabled()
 	AuthUser      string
 	AuthPass      string
 	SessionSecret []byte // HMAC key for cookie sessions; see LoadOrCreateSessionSecret
@@ -172,6 +174,9 @@ func (s *Server) Handler() http.Handler {
 	api.HandleFunc("/matter/commission/jobs/{id}", s.requireAdmin(s.matterCommissionJob)).Methods("GET")
 	api.HandleFunc("/matter/{socketId}", s.matterGetState).Methods("GET")
 	api.HandleFunc("/matter/{socketId}/state", s.matterSetState).Methods("PUT")
+
+	api.HandleFunc("/mqtt/status", s.requireAdmin(s.mqttStatus)).Methods("GET")
+	api.HandleFunc("/mqtt/publish", s.requireAdmin(s.mqttPublish)).Methods("POST")
 
 	r.PathPrefix("/").Handler(spaHandler(s.SPADir))
 

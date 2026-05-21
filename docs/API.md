@@ -274,9 +274,34 @@ means different things per protocol — see below.
 | `raw`         | 433 MHz RF      | raw code                               |
 | `tasmota`     | Wi-Fi (HTTP)    | device IP (e.g. `192.168.1.50`)        |
 | `matter`      | Wi-Fi (matter.js)| Matter node id assigned at commissioning |
+| `mqtt`        | MQTT broker     | command topic (e.g. `cmnd/plug/POWER`) |
 
 The `matter` protocol is served via a Node.js sidecar — see
 [MATTER.md](MATTER.md) for setup and the `/api/matter/...` endpoints.
+
+### MQTT
+
+Set `MQTT_BROKER_URL` (and optionally `MQTT_USERNAME`/`MQTT_PASSWORD`,
+`MQTT_CLIENT_ID`, `MQTT_TLS_INSECURE`) to enable the MQTT codepaths. The
+broker connection is shared by two features:
+
+- **Control**: a socket with protocol `mqtt` publishes the literal payload
+  `ON`/`OFF` to the topic in its `code` field (QoS 1, non-retained). This
+  matches Tasmota's `cmnd/<topic>/POWER` convention and works for any device
+  that takes an `ON`/`OFF` command on a topic.
+- **Sensors**: a sensor with protocol `mqtt` subscribes to the topic in its
+  `code` field (the `+` and `#` wildcards are allowed). Incoming payloads are
+  parsed as a JSON object (read `field`, or the first numeric key when
+  `field` is empty), a bare number, or an `ON`/`OFF`-style state mapped to
+  `1`/`0`. Subscriptions are reconciled with the configured sensors every few
+  seconds and re-established automatically after a broker reconnect.
+
+MQTT endpoints (admin only):
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET  | `/api/mqtt/status`  | `{ enabled, broker?, connected? }` |
+| POST | `/api/mqtt/publish` | publish `{ topic, payload? }` (payload defaults to `ON`); used by the editor's "Send test signal" button |
 
 ## Hardware Interface
 

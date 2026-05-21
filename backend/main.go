@@ -18,6 +18,7 @@ import (
 
 	"rf-socket-controller/internal/api"
 	"rf-socket-controller/internal/matter"
+	"rf-socket-controller/internal/mqtt"
 	"rf-socket-controller/internal/rf"
 	"rf-socket-controller/internal/rx"
 	"rf-socket-controller/internal/scheduler"
@@ -95,9 +96,21 @@ func main() {
 		log.Printf("Matter bridge disabled — set MATTER_BRIDGE_URL to enable")
 	}
 
+	mqttClient := mqtt.FromEnv()
+	if mqttClient.Enabled() {
+		if err := mqttClient.Connect(); err != nil {
+			log.Printf("MQTT: initial connect to %s failed: %v (retrying in background)", mqttClient.BrokerURL, err)
+		} else {
+			log.Printf("MQTT broker connected at %s", mqttClient.BrokerURL)
+		}
+	} else {
+		log.Printf("MQTT disabled — set MQTT_BROKER_URL to enable")
+	}
+
 	st := store.New(dataDir, &sender.Multi{
 		RF:     rf.Sender{NexaScript: nexaScriptPath()},
 		Matter: matterClient,
+		MQTT:   mqttClient,
 	})
 	if err := st.Load(); err != nil {
 		log.Fatalf("failed to load data: %v", err)
@@ -111,6 +124,7 @@ func main() {
 	server := &api.Server{
 		Store:         st,
 		Matter:        matterClient,
+		MQTT:          mqttClient,
 		AuthUser:      os.Getenv("AUTH_USER"),
 		AuthPass:      os.Getenv("AUTH_PASS"),
 		SessionSecret: secret,
@@ -173,6 +187,7 @@ func main() {
 	schedCtx, stopScheduler := context.WithCancel(context.Background())
 	go scheduler.Run(schedCtx, st)
 	go rx.FromEnv().Run(schedCtx, st)
+	go mqtt.SensorListener{Client: mqttClient}.Run(schedCtx, st)
 
 	go func() {
 		log.Printf("RF Socket Controller listening on http://:%s", port)
@@ -197,6 +212,7 @@ func main() {
 	log.Println("shutting down...")
 
 	stopScheduler()
+	mqttClient.Close()
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := httpSrv.Shutdown(shutdownCtx); err != nil {

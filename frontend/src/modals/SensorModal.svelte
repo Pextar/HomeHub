@@ -133,7 +133,11 @@
             <div class="field" style="margin-top:var(--space-4)">
                 <label for="sensor-code">Code</label>
                 <input id="sensor-code" type="text" bind:value={code} required placeholder="Acurite-Tower:1234" />
-                <div class="field-help">Device identifier broadcast on 433MHz. With rtl_433 this is usually <code>model:id</code>.</div>
+                <div class="field-help">
+                    For 433MHz this is the device identifier (with rtl_433, usually <code>model:id</code>).
+                    For an MQTT sensor, set protocol to <code>mqtt</code> and use the topic to subscribe
+                    to (wildcards <code>+</code>/<code>#</code> allowed).
+                </div>
             </div>
 
             <div class="field-row" style="margin-top:var(--space-4)">

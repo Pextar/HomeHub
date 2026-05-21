@@ -1,12 +1,13 @@
 # RF Socket Controller
 
-Control 433MHz RF sockets, Tasmota Wi-Fi devices and Matter-over-Wi-Fi
-smart bulbs/plugs from a single web / installable PWA.
+Control 433MHz RF sockets, Tasmota Wi-Fi devices, Matter-over-Wi-Fi
+smart bulbs/plugs and MQTT devices from a single web / installable PWA.
 
 ## Architecture
 - **Backend**: Go REST API with GPIO/RF control
 - **Frontend**: Svelte 5 + Vite + vite-plugin-pwa (installable, works offline)
 - **Matter bridge**: Node.js sidecar (matter-bridge/) wrapping matter.js
+- **MQTT**: optional broker connection for controlling devices and ingesting sensors
 - **Hardware**: 433MHz transmitter on Raspberry Pi
 
 ## Features

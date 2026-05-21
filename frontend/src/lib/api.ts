@@ -229,6 +229,17 @@ export const api = {
       body: json(update),
     });
   },
+
+  // MQTT — control devices and ingest sensors over a broker.
+  mqttStatus() {
+    return req<{ enabled: boolean; broker?: string; connected?: boolean }>("/mqtt/status");
+  },
+  mqttPublish(body: { topic: string; payload?: string }) {
+    return req<{ status: string; topic: string }>("/mqtt/publish", {
+      method: "POST",
+      body: json(body),
+    });
+  },
 };
 
 export type Api = typeof api;

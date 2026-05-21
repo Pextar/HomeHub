@@ -24,9 +24,11 @@
     const isTasmota  = $derived(protocol === "tasmota");
     const isMatter   = $derived(protocol === "matter" || protocol === "matter-thread");
     const isThread   = $derived(protocol === "matter-thread");
+    const isMqtt     = $derived(protocol === "mqtt");
 
     let pairing      = $state(false);
     let probing      = $state(false);
+    let publishing   = $state(false);
 
     async function pair() {
         if (pairing) return;
@@ -68,11 +70,30 @@
         }
     }
 
+    async function sendTestSignal() {
+        if (publishing) return;
+        const topic = code.trim();
+        if (!topic) {
+            toasts.warn("Enter a topic first", "Type the command topic in the field above.");
+            return;
+        }
+        publishing = true;
+        try {
+            await api.mqttPublish({ topic, payload: "ON" });
+            toasts.success("Sent ON", `Published to ${topic}. Did the device react?`);
+        } catch (e) {
+            toasts.error("Publish failed", (e as Error).message);
+        } finally {
+            publishing = false;
+        }
+    }
+
     async function save() {
         const payload = { name: name.trim(), room: room.trim(), code: code.trim(), protocol, emoji };
         if (!payload.name || !payload.code) {
             const missing = isTasmota ? "device IP"
                           : isMatter  ? "Matter node id (commission a device first)"
+                          : isMqtt    ? "command topic"
                           : "RF code";
             toasts.warn("Missing fields", `Name and ${missing} are required.`);
             return;
@@ -103,7 +124,9 @@
                 ? "Commission a Matter Thread device."
                 : isMatter
                     ? "Commission a Matter Wi-Fi device."
-                    : "Configure a new 433MHz controllable socket."}
+                    : isMqtt
+                        ? "Publish on/off to an MQTT command topic."
+                        : "Configure a new 433MHz controllable socket."}
 >
     {#snippet body()}
         {#if isMatter && !isEdit}
@@ -171,11 +194,12 @@
                     </div>
                     <div class="field">
                         <label for="sock-code">
-                            {isTasmota ? "Device IP" : isMatter ? "Matter node id" : "RF code"}
+                            {isTasmota ? "Device IP" : isMatter ? "Matter node id" : isMqtt ? "Command topic" : "RF code"}
                         </label>
                         <input id="sock-code" type="text" bind:value={code}
                             placeholder={isTasmota ? "e.g. 192.168.1.50"
                                        : isMatter  ? "node id from commissioning"
+                                       : isMqtt    ? "e.g. cmnd/plug/POWER"
                                        : "e.g. 12345"}
                             autocomplete="off" required />
                     </div>
@@ -189,6 +213,17 @@
                         <div class="field-help">
                             Pings the device to confirm Tasmota is running at that IP.
                             Find the IP in your router's DHCP list or the Tasmota web UI.
+                        </div>
+                    </div>
+                {:else if isMqtt}
+                    <div class="field" style="margin-top:var(--space-3)">
+                        <button type="button" class="btn btn-secondary" onclick={sendTestSignal} disabled={publishing}>
+                            {publishing ? "Sending…" : "Send test signal"}
+                        </button>
+                        <div class="field-help">
+                            Publishes <code>ON</code> to the command topic so you can confirm the
+                            device reacts. The controller sends <code>ON</code>/<code>OFF</code> to
+                            this exact topic — e.g. <code>cmnd/plug/POWER</code> for Tasmota.
                         </div>
                     </div>
                 {:else if !isEdit}
