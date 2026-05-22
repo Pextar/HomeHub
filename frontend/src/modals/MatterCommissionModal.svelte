@@ -300,15 +300,27 @@
                     <strong>Commissioning failed</strong>
                     <span>{commissionError}</span>
                     <span class="hint">
-                        Common causes: the device isn't in pairing mode (reset it),
-                        Bluetooth isn't available on the bridge,
                         {#if transport === "thread"}
-                            MATTER_BRIDGE_THREAD_DATASET isn't set or the Thread
-                            Border Router (e.g. Apple TV) isn't reachable,
+                            The device may have already received Thread credentials
+                            and joined your mesh — it just didn't complete the final
+                            fabric handshake. <strong>Try again first</strong> — the
+                            bridge will find it over Thread/IP without needing
+                            Bluetooth again. If that still fails, factory-reset the
+                            device (usually hold the button for 10 s until it blinks)
+                            and retry. Other causes: MATTER_BRIDGE_THREAD_DATASET not
+                            set, Thread Border Router (e.g. Apple TV) not reachable,
+                            or device out of BLE range.
                         {:else}
-                            the Wi-Fi credentials aren't set on the bridge yet,
+                            The device may have already received Wi-Fi credentials
+                            and joined your network — it just didn't complete the
+                            final fabric handshake. <strong>Try again first</strong>
+                            — the bridge will find it over Wi-Fi/mDNS without needing
+                            Bluetooth again. If that still fails, factory-reset the
+                            device (usually hold the button for 10 s until it blinks)
+                            and retry. Other causes: Wi-Fi credentials not configured
+                            on the bridge, Bluetooth not available, or device out of
+                            BLE range.
                         {/if}
-                        or the device is out of BLE range.
                     </span>
                 </div>
             {:else}
