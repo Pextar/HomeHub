@@ -301,25 +301,25 @@
                     <span>{commissionError}</span>
                     <span class="hint">
                         {#if transport === "thread"}
-                            The device may have already received Thread credentials
-                            and joined your mesh — it just didn't complete the final
-                            fabric handshake. <strong>Try again first</strong> — the
-                            bridge will find it over Thread/IP without needing
-                            Bluetooth again. If that still fails, factory-reset the
-                            device (usually hold the button for 10 s until it blinks)
-                            and retry. Other causes: MATTER_BRIDGE_THREAD_DATASET not
-                            set, Thread Border Router (e.g. Apple TV) not reachable,
-                            or device out of BLE range.
+                            The device may have already joined your Thread mesh but
+                            didn't complete the fabric handshake. Its commissioning
+                            window has likely closed — <strong>open it again</strong>
+                            with a short button press (1–5 s, check your device's
+                            manual), then hit Try again. The device will stay on your
+                            network. Only factory-reset (hold ~10 s) as a last resort
+                            if short-pressing doesn't help. Other causes:
+                            MATTER_BRIDGE_THREAD_DATASET not set or Thread Border
+                            Router (e.g. Apple TV) not reachable.
                         {:else}
-                            The device may have already received Wi-Fi credentials
-                            and joined your network — it just didn't complete the
-                            final fabric handshake. <strong>Try again first</strong>
-                            — the bridge will find it over Wi-Fi/mDNS without needing
-                            Bluetooth again. If that still fails, factory-reset the
-                            device (usually hold the button for 10 s until it blinks)
-                            and retry. Other causes: Wi-Fi credentials not configured
-                            on the bridge, Bluetooth not available, or device out of
-                            BLE range.
+                            The device may have already joined your Wi-Fi but didn't
+                            complete the fabric handshake. Its commissioning window
+                            has likely closed — <strong>open it again</strong> with a
+                            short button press (1–5 s, check your device's manual),
+                            then hit Try again. The device will stay on your Wi-Fi.
+                            Only factory-reset (hold ~10 s) as a last resort if
+                            short-pressing doesn't help. Other causes: Wi-Fi
+                            credentials not configured on the bridge, or Bluetooth
+                            not available.
                         {/if}
                     </span>
                 </div>
