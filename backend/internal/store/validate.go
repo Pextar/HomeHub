@@ -225,11 +225,18 @@ func (s *Store) ValidateSocket(sock *Socket) error {
 	return nil
 }
 
-// validateNexaCode checks that code is in "houseID:unit" format with values
+// ValidateNexaCode checks that code is in "houseID:unit" format with values
 // within the protocol's 26-bit / 4-bit ranges. The same constraints are
 // enforced at transmit time by nexa_tx.py; surfacing them here produces a
 // clear error at save time instead of a confusing failure when the socket is
 // first toggled.
+//
+// Exported so the api package can call it when re-using an existing code for
+// the learnSocket "resend same code" path.
+func ValidateNexaCode(code string) error {
+	return validateNexaCode(code)
+}
+
 func validateNexaCode(code string) error {
 	parts := strings.SplitN(code, ":", 2)
 	if len(parts) != 2 {
