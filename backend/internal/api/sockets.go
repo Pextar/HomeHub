@@ -44,13 +44,8 @@ func (s *Server) createSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	socket.Name = strings.TrimSpace(socket.Name)
-	socket.Code = strings.TrimSpace(socket.Code)
-	socket.Protocol = strings.TrimSpace(socket.Protocol)
-	socket.Room = strings.TrimSpace(socket.Room)
-
-	if socket.Name == "" || socket.Code == "" {
-		writeError(w, http.StatusBadRequest, "name and code are required")
+	if err := s.Store.ValidateSocket(&socket); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -119,6 +114,13 @@ func (s *Server) updateSocket(w http.ResponseWriter, r *http.Request) {
 	}
 	// Emoji is set unconditionally so an admin can also clear it.
 	socket.Emoji = strings.TrimSpace(updates.Emoji)
+
+	// Re-validate after applying updates; catches e.g. switching an existing
+	// socket to the Nexa protocol with a code that isn't in houseID:unit form.
+	if err := s.Store.ValidateSocket(socket); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	if err := s.Store.Save(); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())

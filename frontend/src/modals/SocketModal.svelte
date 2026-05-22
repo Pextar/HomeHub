@@ -25,6 +25,7 @@
     const isMatter   = $derived(protocol === "matter" || protocol === "matter-thread");
     const isThread   = $derived(protocol === "matter-thread");
     const isMqtt     = $derived(protocol === "mqtt");
+    const isNexa     = $derived(protocol === "nexa");
 
     let pairing      = $state(false);
     let probing      = $state(false);
@@ -212,12 +213,18 @@
                             placeholder={isTasmota ? "e.g. 192.168.1.50"
                                        : isMatter  ? "node id from commissioning"
                                        : isMqtt    ? "e.g. cmnd/plug/POWER"
+                                       : isNexa    ? "e.g. 12345678:0"
                                        : "e.g. 12345"}
                             autocomplete="off" required
                             aria-invalid={errors.code ? "true" : undefined}
                             aria-describedby={errors.code ? "sock-code-err" : undefined}
                             oninput={() => clear("code")} />
                         {#if errors.code}<div id="sock-code-err" class="field-error">{errors.code}</div>{/if}
+                        {#if isNexa && !errors.code}
+                            <div class="field-help">
+                                Format: <code>houseID:unit</code> — use <strong>Pair with socket</strong> below to fill this in automatically.
+                            </div>
+                        {/if}
                     </div>
                 </div>
 
