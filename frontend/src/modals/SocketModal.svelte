@@ -25,6 +25,7 @@
     const isMatter   = $derived(protocol === "matter" || protocol === "matter-thread");
     const isThread   = $derived(protocol === "matter-thread");
     const isMqtt     = $derived(protocol === "mqtt");
+    const isNexa     = $derived(protocol === "nexa");
 
     let pairing      = $state(false);
     let probing      = $state(false);
@@ -37,9 +38,19 @@
         if (pairing) return;
         pairing = true;
         try {
-            const r = await api.learnSocket({ protocol });
+            // Pass the current code if one was already generated — the backend
+            // will resend it instead of picking a new one. This lets the user
+            // retry a stubborn socket (like Telldus 312530) without the code
+            // changing between attempts.
+            const isRetry = !!code;
+            const r = await api.learnSocket({ protocol, code: code || undefined });
             code = r.code;
-            toasts.success("Signal sent", "Did your socket click on? If not, long-press its button again and tap Pair.");
+            toasts.success(
+                "Signal sent (×2)",
+                isRetry
+                    ? "Sent the same code again. Did your socket click on this time?"
+                    : "Did your socket click on? If not, long-press its button again and tap Pair — the same code will be resent."
+            );
         } catch (e) {
             toasts.error("Pairing failed", (e as Error).message);
         } finally {
@@ -212,12 +223,18 @@
                             placeholder={isTasmota ? "e.g. 192.168.1.50"
                                        : isMatter  ? "node id from commissioning"
                                        : isMqtt    ? "e.g. cmnd/plug/POWER"
+                                       : isNexa    ? "e.g. 12345678:0"
                                        : "e.g. 12345"}
                             autocomplete="off" required
                             aria-invalid={errors.code ? "true" : undefined}
                             aria-describedby={errors.code ? "sock-code-err" : undefined}
                             oninput={() => clear("code")} />
                         {#if errors.code}<div id="sock-code-err" class="field-error">{errors.code}</div>{/if}
+                        {#if isNexa && !errors.code}
+                            <div class="field-help">
+                                Format: <code>houseID:unit</code> — use <strong>Pair with socket</strong> below to fill this in automatically.
+                            </div>
+                        {/if}
                     </div>
                 </div>
 

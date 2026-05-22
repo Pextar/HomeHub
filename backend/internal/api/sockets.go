@@ -44,13 +44,8 @@ func (s *Server) createSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	socket.Name = strings.TrimSpace(socket.Name)
-	socket.Code = strings.TrimSpace(socket.Code)
-	socket.Protocol = strings.TrimSpace(socket.Protocol)
-	socket.Room = strings.TrimSpace(socket.Room)
-
-	if socket.Name == "" || socket.Code == "" {
-		writeError(w, http.StatusBadRequest, "name and code are required")
+	if err := s.Store.ValidateSocket(&socket); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -119,6 +114,13 @@ func (s *Server) updateSocket(w http.ResponseWriter, r *http.Request) {
 	}
 	// Emoji is set unconditionally so an admin can also clear it.
 	socket.Emoji = strings.TrimSpace(updates.Emoji)
+
+	// Re-validate after applying updates; catches e.g. switching an existing
+	// socket to the Nexa protocol with a code that isn't in houseID:unit form.
+	if err := s.Store.ValidateSocket(socket); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	if err := s.Store.Save(); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
@@ -225,9 +227,16 @@ func (s *Server) setSocketState(w http.ResponseWriter, r *http.Request, target *
 // each socket gets its own random 26-bit house id, so they never
 // collide and there is no per-controller 16-unit limit. Other protocols
 // keep the legacy random 7-digit code.
+//
+// If the caller supplies a non-empty "code" field in the request body, that
+// code is re-used instead of generating a new one. This lets the user retry
+// pairing a stubborn socket (e.g. Telldus 312530) without the code changing
+// between attempts: put the socket back into learn mode, tap Pair again, and
+// the same code is broadcast so the socket can learn it on a later attempt.
 func (s *Server) learnSocket(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Protocol string `json:"protocol"`
+		Code     string `json:"code"` // optional: resend this code instead of generating a new one
 	}
 	_ = json.NewDecoder(r.Body).Decode(&body)
 	protocol := strings.TrimSpace(body.Protocol)
@@ -235,36 +244,57 @@ func (s *Server) learnSocket(w http.ResponseWriter, r *http.Request) {
 		protocol = "nexa"
 	}
 
-	s.Store.Mu.RLock()
-	used := make(map[string]bool, len(s.Store.Sockets))
-	for _, sock := range s.Store.Sockets {
-		used[sock.Code] = true
-	}
-	s.Store.Mu.RUnlock()
-
-	// 32 attempts is plenty given how wide both code spaces are.
 	var code string
-	for i := 0; i < 32; i++ {
-		var c string
+
+	if existing := strings.TrimSpace(body.Code); existing != "" {
+		// Caller wants to resend an existing code. Validate format for Nexa;
+		// other protocols accept any non-empty string.
 		if strings.EqualFold(protocol, "nexa") {
-			c = fmt.Sprintf("%d:0", rand.Intn(1<<26))
-		} else {
-			c = strconv.Itoa(1_000_000 + rand.Intn(9_000_000))
+			if err := store.ValidateNexaCode(existing); err != nil {
+				writeError(w, http.StatusBadRequest, "invalid code: "+err.Error())
+				return
+			}
 		}
-		if !used[c] {
-			code = c
-			break
+		code = existing
+	} else {
+		// Generate a fresh unused code.
+		s.Store.Mu.RLock()
+		used := make(map[string]bool, len(s.Store.Sockets))
+		for _, sock := range s.Store.Sockets {
+			used[sock.Code] = true
 		}
-	}
-	if code == "" {
-		writeError(w, http.StatusInternalServerError, "could not find an unused code")
-		return
+		s.Store.Mu.RUnlock()
+
+		// 32 attempts is plenty given how wide both code spaces are.
+		for i := 0; i < 32; i++ {
+			var c string
+			if strings.EqualFold(protocol, "nexa") {
+				c = fmt.Sprintf("%d:0", rand.Intn(1<<26))
+			} else {
+				c = strconv.Itoa(1_000_000 + rand.Intn(9_000_000))
+			}
+			if !used[c] {
+				code = c
+				break
+			}
+		}
+		if code == "" {
+			writeError(w, http.StatusInternalServerError, "could not find an unused code")
+			return
+		}
 	}
 
+	// Send the pairing signal twice with a short pause between bursts.
+	// Doubling the on-air time significantly improves reliability for sockets
+	// whose receive windows are short or whose decoders need a clean frame
+	// after the radio settles (observed with some Telldus/Proove models).
 	if err := s.Store.RF.Send(code, protocol, true); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to send learn signal: "+err.Error())
 		return
 	}
+	time.Sleep(200 * time.Millisecond)
+	_ = s.Store.RF.Send(code, protocol, true) // best-effort second burst
+
 	writeJSON(w, http.StatusOK, map[string]string{"code": code, "protocol": protocol})
 }
 

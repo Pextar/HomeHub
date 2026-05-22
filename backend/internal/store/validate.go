@@ -3,6 +3,7 @@ package store
 import (
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -197,6 +198,68 @@ func defaultUnitForKind(kind string) string {
 		return ""
 	}
 	return ""
+}
+
+// ValidateSocket normalizes and validates a socket. The Nexa/Proove protocol
+// requires the code to be in "houseID:unit" format; this is checked so that
+// malformed codes are rejected at save time rather than discovered later when
+// the first toggle command fails with a cryptic parse error.
+func (s *Store) ValidateSocket(sock *Socket) error {
+	sock.Name = strings.TrimSpace(sock.Name)
+	sock.Code = strings.TrimSpace(sock.Code)
+	sock.Protocol = strings.ToLower(strings.TrimSpace(sock.Protocol))
+	sock.Room = strings.TrimSpace(sock.Room)
+	sock.Emoji = strings.TrimSpace(sock.Emoji)
+
+	if sock.Name == "" {
+		return errors.New("name is required")
+	}
+	if sock.Code == "" {
+		return errors.New("code is required")
+	}
+	if sock.Protocol == "nexa" {
+		if err := validateNexaCode(sock.Code); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ValidateNexaCode checks that code is in "houseID:unit" format with values
+// within the protocol's 26-bit / 4-bit ranges. The same constraints are
+// enforced at transmit time by nexa_tx.py; surfacing them here produces a
+// clear error at save time instead of a confusing failure when the socket is
+// first toggled.
+//
+// Exported so the api package can call it when re-using an existing code for
+// the learnSocket "resend same code" path.
+func ValidateNexaCode(code string) error {
+	return validateNexaCode(code)
+}
+
+func validateNexaCode(code string) error {
+	parts := strings.SplitN(code, ":", 2)
+	if len(parts) != 2 {
+		return fmt.Errorf(
+			`Nexa/Proove code must be "houseID:unit", e.g. "12345678:0" — ` +
+				`use the "Pair with socket" button to generate one automatically`,
+		)
+	}
+	house, err := strconv.Atoi(parts[0])
+	if err != nil {
+		return fmt.Errorf("Nexa house ID %q must be a number", parts[0])
+	}
+	unit, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return fmt.Errorf("Nexa unit %q must be a number", parts[1])
+	}
+	if house < 0 || house >= (1<<26) {
+		return fmt.Errorf("Nexa house ID %d out of range (0–67108863)", house)
+	}
+	if unit < 0 || unit > 15 {
+		return fmt.Errorf("Nexa unit %d out of range (0–15)", unit)
+	}
+	return nil
 }
 
 // VerifyTarget checks that a target_type/target_id pair refers to an

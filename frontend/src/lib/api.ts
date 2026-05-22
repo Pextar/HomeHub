@@ -85,7 +85,7 @@ export const api = {
   // Sockets
   listSockets() { return req<Socket[]>("/sockets"); },
   createSocket(body: Partial<Socket>) { return req<Socket>("/sockets", { method: "POST", body: json(body) }); },
-  learnSocket(body: { protocol?: string } = {}) {
+  learnSocket(body: { protocol?: string; code?: string } = {}) {
     return req<{ code: string; protocol: string }>("/sockets/learn", { method: "POST", body: json(body) });
   },
   updateSocket(id: string, body: Partial<Socket>) { return req<Socket>(`/sockets/${encodeURIComponent(id)}`, { method: "PUT", body: json(body) }); },
