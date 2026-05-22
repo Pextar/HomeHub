@@ -4,9 +4,8 @@
   import { route, theme, data, session } from "../lib/stores.svelte";
   import { api } from "../lib/api";
   import { openModal, modalStack } from "../lib/modal.svelte";
-  import { fly, fade } from "svelte/transition";
-  import { cubicOut } from "svelte/easing";
-  import { dur } from "../lib/motion";
+  import { fade } from "svelte/transition";
+  import { dur, sheet } from "../lib/motion";
   import { lockBodyScroll, unlockBodyScroll } from "../lib/scroll-lock";
   import type { Route } from "../lib/types";
 
@@ -289,8 +288,8 @@
     onclick={(e) => {
       if (e.target === e.currentTarget) moreOpen = false;
     }}
-    in:fade={{ duration: dur(150) }}
-    out:fade={skipTransition ? { duration: 0 } : { duration: dur(150) }}
+    in:fade={{ duration: dur(180) }}
+    out:fade={skipTransition ? { duration: 0 } : { duration: dur(200) }}
   >
     <div
       class="drawer"
@@ -301,8 +300,8 @@
       style:transform={drawerDragY > 0 ? `translateY(${drawerDragY}px)` : ''}
       style:opacity={drawerDragY > 0 ? Math.max(0.4, 1 - drawerDragY / 300) : undefined}
       style:transition={drawerDragging ? 'none' : drawerDragY > 0 ? 'transform 0.22s ease-in, opacity 0.22s ease-in' : 'transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)'}
-      in:fly={{ y: 24, duration: dur(220), easing: cubicOut }}
-      out:fly={skipTransition || drawerDismissing ? { y: 0, duration: 0 } : { y: 24, duration: dur(220) }}
+      in:sheet={{ duration: 340, mode: "slide" }}
+      out:sheet={{ instant: skipTransition || drawerDismissing, duration: 260, mode: "slide" }}
       onpointerdown={onSurfacePointerDown}
       onpointermove={onSurfacePointerMove}
       onpointerup={onSurfacePointerUp}
@@ -606,6 +605,8 @@
     .nav-mobile .nav-item :global(svg) {
       width: 24px;
       height: 24px;
+      /* Spring easing gives the icon a subtle pop when a tab is selected. */
+      transition: transform 0.28s var(--spring);
     }
     /* iOS: active = tint color only, no indicator line */
     .nav-mobile .nav-item[aria-current="page"] {
@@ -615,6 +616,12 @@
     }
     .nav-mobile .nav-item[aria-current="page"] :global(svg) {
       color: var(--primary);
+      transform: scale(1.12);
+    }
+    /* Quick dip on press for tactile feedback. */
+    .nav-mobile .nav-item:active :global(svg) {
+      transform: scale(0.9);
+      transition-duration: 90ms;
     }
     .nav-mobile .nav-label {
       line-height: 1;
@@ -660,6 +667,7 @@
        anywhere on it can dismiss; touch-action: pan-y keeps native
        horizontal gestures (back-swipe) out of our way. */
     touch-action: pan-y;
+    will-change: transform;
   }
   .drawer.dragging { cursor: grabbing; }
   .drawer-handle-zone {

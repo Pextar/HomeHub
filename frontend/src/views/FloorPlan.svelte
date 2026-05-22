@@ -10,7 +10,7 @@
     import { socketAction } from "../lib/utils";
     import { fly, fade, scale } from "svelte/transition";
     import { cubicOut, backOut } from "svelte/easing";
-    import { dur, stagger } from "../lib/motion";
+    import { dur, stagger, sheet } from "../lib/motion";
     import type { Socket } from "../lib/types";
 
     const v = $derived(data.value);
@@ -563,8 +563,8 @@
             style:transform={dragY > 0 ? `translateY(${dragY}px)` : ''}
             style:opacity={dragY > 0 ? Math.max(0.4, 1 - dragY / 300) : undefined}
             style:transition={dragging ? 'none' : panelDismissing ? 'transform 0.22s ease-in, opacity 0.22s ease-in' : 'transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)'}
-            in:fly={{ y: 32, duration: dur(260), easing: cubicOut }}
-            out:fly={panelDismissing ? { y: 0, duration: 0 } : { y: 32, duration: dur(180) }}>
+            in:sheet={{ breakpoint: 900, duration: 320 }}
+            out:sheet={{ instant: panelDismissing, breakpoint: 900, duration: 240 }}>
 
             <div class="sheet-handle" aria-hidden="true"
                 onpointerdown={onHandlePointerDown}
@@ -701,8 +701,8 @@
             style:transform={dragY > 0 ? `translateY(${dragY}px)` : ''}
             style:opacity={dragY > 0 ? Math.max(0.4, 1 - dragY / 300) : undefined}
             style:transition={dragging ? 'none' : panelDismissing ? 'transform 0.22s ease-in, opacity 0.22s ease-in' : 'transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)'}
-            in:fly={{ y: 32, duration: dur(260), easing: cubicOut }}
-            out:fly={panelDismissing ? { y: 0, duration: 0 } : { y: 32, duration: dur(180) }}>
+            in:sheet={{ breakpoint: 900, duration: 320 }}
+            out:sheet={{ instant: panelDismissing, breakpoint: 900, duration: 240 }}>
 
             <div class="sheet-handle" aria-hidden="true"
                 onpointerdown={onHandlePointerDown}

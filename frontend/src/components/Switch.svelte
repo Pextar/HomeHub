@@ -59,7 +59,7 @@
         background: #fff;
         border-radius: 50%;
         top: 3px; left: 3px;
-        transition: transform var(--t-fast);
+        transition: transform 0.28s var(--spring);
         box-shadow: 0 1px 3px rgba(0,0,0,0.25);
     }
     .switch input:checked + .track { background: var(--success); }

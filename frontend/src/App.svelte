@@ -15,7 +15,7 @@
     import Settings from "./views/Settings.svelte";
     import KidHome from "./views/KidHome.svelte";
     import { data, route, toasts, session } from "./lib/stores.svelte";
-    import { fly } from "svelte/transition";
+    import { fly, fade } from "svelte/transition";
     import { cubicOut } from "svelte/easing";
     import { dur } from "./lib/motion";
     import type { Route } from "./lib/types";
@@ -125,11 +125,17 @@
         <div class="app">
             <Sidebar />
             <main id="main" class="main" tabindex="-1">
-                {#key effectiveRoute}
-                    <div class="view" in:fly={{ y: 10, duration: dur(220), easing: cubicOut }}>
-                        <Current />
-                    </div>
-                {/key}
+                <div class="view-stack">
+                    {#key effectiveRoute}
+                        <div
+                            class="view"
+                            in:fly={{ y: 10, duration: dur(240), easing: cubicOut }}
+                            out:fade={{ duration: dur(140) }}
+                        >
+                            <Current />
+                        </div>
+                    {/key}
+                </div>
             </main>
         </div>
     {/if}
@@ -151,7 +157,14 @@
         display: flex;
         flex-direction: column;
     }
+    /* Single-cell grid so the outgoing and incoming views overlap during a
+       route change instead of stacking and doubling the page height. */
+    .view-stack {
+        display: grid;
+        min-width: 0;
+    }
     .view {
+        grid-area: 1 / 1;
         display: flex;
         flex-direction: column;
         gap: var(--space-6);
