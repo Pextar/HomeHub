@@ -605,6 +605,8 @@
     .nav-mobile .nav-item :global(svg) {
       width: 24px;
       height: 24px;
+      /* Spring easing gives the icon a subtle pop when a tab is selected. */
+      transition: transform 0.28s var(--spring);
     }
     /* iOS: active = tint color only, no indicator line */
     .nav-mobile .nav-item[aria-current="page"] {
@@ -614,6 +616,12 @@
     }
     .nav-mobile .nav-item[aria-current="page"] :global(svg) {
       color: var(--primary);
+      transform: scale(1.12);
+    }
+    /* Quick dip on press for tactile feedback. */
+    .nav-mobile .nav-item:active :global(svg) {
+      transform: scale(0.9);
+      transition-duration: 90ms;
     }
     .nav-mobile .nav-label {
       line-height: 1;

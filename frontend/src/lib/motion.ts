@@ -37,14 +37,20 @@ export function sheet(
     duration = 340,
     instant = false,
     mode = "auto",
-  }: { duration?: number; instant?: boolean; mode?: "auto" | "slide" | "pop" } = {},
+    breakpoint = 600,
+  }: {
+    duration?: number;
+    instant?: boolean;
+    mode?: "auto" | "slide" | "pop";
+    breakpoint?: number;
+  } = {},
 ): TransitionConfig {
   if (instant || reducedMotion) return { duration: 0 };
   const slide =
     mode === "slide" ||
     (mode === "auto" &&
       typeof window !== "undefined" &&
-      window.matchMedia("(max-width: 600px)").matches);
+      window.matchMedia(`(max-width: ${breakpoint}px)`).matches);
   if (slide) {
     return {
       duration,
