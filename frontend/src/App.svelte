@@ -158,9 +158,13 @@
         flex-direction: column;
     }
     /* Single-cell grid so the outgoing and incoming views overlap during a
-       route change instead of stacking and doubling the page height. */
+       route change instead of stacking and doubling the page height.
+       minmax(0, 1fr) caps the column at available width — an implicit `auto`
+       column would size to max-content and overflow the container on narrow
+       screens when the topbar holds multiple non-shrinkable buttons. */
     .view-stack {
         display: grid;
+        grid-template-columns: minmax(0, 1fr);
         min-width: 0;
     }
     .view {

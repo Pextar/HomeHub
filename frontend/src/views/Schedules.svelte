@@ -35,11 +35,6 @@
 
 <Topbar title="Schedules" subtitle="{v.schedules.length} configured">
     {#snippet actions()}
-        {#if v.schedules.length > 0}
-            <button class="btn btn-ghost" onclick={toggleAll} disabled={pausing}>
-                {anyEnabled ? "Pause all" : "Resume all"}
-            </button>
-        {/if}
         <button class="btn btn-primary" onclick={() => openModal(ScheduleModal, {})}>Add schedule</button>
     {/snippet}
 </Topbar>
@@ -50,18 +45,29 @@
         <button class="btn btn-primary" onclick={() => openModal(ScheduleModal, {})}>Add schedule</button>
     </EmptyState>
 {:else}
-    <div class="list">
-        {#each v.schedules as s, i (s.id)}
-            <div
-                animate:flip={{ duration: dur(280), easing: cubicOut }}
-                in:fly={{ y: 12, duration: dur(240), delay: stagger(i), easing: cubicOut }}
-                out:scale={{ start: 0.97, opacity: 0, duration: dur(160) }}>
-                <ScheduleRow schedule={s} />
-            </div>
-        {/each}
+    <!-- Controls + list share a wrapper so the gap between them stays tight
+         while the view's normal gap separates this block from the topbar. -->
+    <div class="schedule-section">
+        <div class="section-controls">
+            <button class="btn btn-ghost" onclick={toggleAll} disabled={pausing}>
+                {anyEnabled ? "Pause all" : "Resume all"}
+            </button>
+        </div>
+        <div class="list">
+            {#each v.schedules as s, i (s.id)}
+                <div
+                    animate:flip={{ duration: dur(280), easing: cubicOut }}
+                    in:fly={{ y: 12, duration: dur(240), delay: stagger(i), easing: cubicOut }}
+                    out:scale={{ start: 0.97, opacity: 0, duration: dur(160) }}>
+                    <ScheduleRow schedule={s} />
+                </div>
+            {/each}
+        </div>
     </div>
 {/if}
 
 <style>
+    .schedule-section { display: flex; flex-direction: column; gap: var(--space-2); }
+    .section-controls { display: flex; justify-content: flex-end; }
     .list { display: flex; flex-direction: column; gap: var(--space-2); }
 </style>
