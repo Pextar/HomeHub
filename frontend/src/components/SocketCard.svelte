@@ -280,16 +280,23 @@
     @media (hover: hover) {
         .card:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); }
     }
-    .card.on { border-color: var(--success); box-shadow: inset 0 0 0 1px var(--success-soft); }
+    .card.on {
+        background: linear-gradient(155deg, #2b2419 0%, #221d14 60%, #1d180f 100%);
+        border-color: rgba(245, 189, 110, 0.18);
+    }
+    :global([data-theme="light"]) .card.on {
+        background: linear-gradient(155deg, #fff5e3 0%, #ffeece 100%);
+        border-color: rgba(201, 122, 31, 0.20);
+    }
 
     .card.pulsing.on { animation: pulse-on 0.55s ease-out; }
     .card.pulsing:not(.on) { animation: pulse-off 0.55s ease-out; }
     @keyframes pulse-on {
-        0%   { box-shadow: inset 0 0 0 1px var(--success-soft), 0 0 0 0 rgba(52, 211, 153, 0.55); }
-        100% { box-shadow: inset 0 0 0 1px var(--success-soft), 0 0 0 16px rgba(52, 211, 153, 0); }
+        0%   { box-shadow: 0 0 0 0 var(--on-glow); }
+        100% { box-shadow: 0 0 0 16px rgba(245, 189, 110, 0); }
     }
     @keyframes pulse-off {
-        0%   { box-shadow: 0 0 0 0 rgba(148, 163, 184, 0.45); }
+        0%   { box-shadow: 0 0 0 0 rgba(148, 163, 184, 0.35); }
         100% { box-shadow: 0 0 0 14px rgba(148, 163, 184, 0); }
     }
 
@@ -369,8 +376,8 @@
         background: var(--text-faint);
         transition: background var(--t-fast), box-shadow var(--t-fast);
     }
-    .card.on .dot { background: var(--success); box-shadow: 0 0 0 4px var(--success-soft); }
-    .card.on .state { color: var(--success); font-weight: 600; }
+    .card.on .dot { background: var(--on); box-shadow: 0 0 0 4px var(--on-soft); }
+    .card.on .state { color: var(--on); font-weight: 600; }
 
     .code-chip[data-proto="tasmota"] {
         color: var(--accent-wifi);
@@ -425,7 +432,7 @@
         cursor: pointer;
         box-shadow: 0 1px 3px rgba(0,0,0,0.3);
     }
-    .dim-val { font-variant-numeric: tabular-nums; min-width: 36px; text-align: right; }
+    .dim-val { font-family: var(--font-mono); font-variant-numeric: tabular-nums; min-width: 36px; text-align: right; }
 
     .controls {
         display: grid;

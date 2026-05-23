@@ -17,7 +17,7 @@
     {#each DAY_SHORT as label, i}
         <button
             type="button"
-            class="chip"
+            class="day-chip"
             data-selected={days.includes(i)}
             aria-pressed={days.includes(i)}
             aria-label={DAY_NAMES[i]}
@@ -40,7 +40,7 @@
         gap: 6px;
         flex-wrap: wrap;
     }
-    .chip {
+    .day-chip {
         display: inline-flex;
         align-items: center; justify-content: center;
         width: 36px; height: 36px;
@@ -83,7 +83,7 @@
     /* Touch screens: meet the 44px minimum target. */
     @media (pointer: coarse) {
         .picker { gap: var(--space-2); }
-        .chip { width: 44px; height: 44px; font-size: 14px; }
+        .day-chip { width: 44px; height: 44px; font-size: 14px; }
         .preset { padding: 10px 16px; font-size: 14px; }
     }
 </style>

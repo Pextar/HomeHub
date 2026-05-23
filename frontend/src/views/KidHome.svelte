@@ -116,7 +116,7 @@
         <div class="grid">
             {#each lamps as lamp (lamp.id)}
                 <button
-                    class="tile"
+                    class="kid-tile"
                     class:on={lamp.state}
                     class:pop={popping.has(lamp.id)}
                     onclick={() => onTap(lamp)}

@@ -158,7 +158,7 @@
         in:fly={{ y: 14, duration: dur(280), delay: stagger(0, 60), easing: cubicOut }}>
         <div class="ico" data-tone="primary"><Icon name="home" size={20} /></div>
         <div class="stat-text">
-            <div class="value">{Math.round(totalT.current)}</div>
+            <div class="value num-display">{Math.round(totalT.current)}</div>
             <div class="label">Devices</div>
         </div>
         <div class="caret" class:open={selectedStat === "devices"}>
@@ -174,7 +174,7 @@
         in:fly={{ y: 14, duration: dur(280), delay: stagger(1, 60), easing: cubicOut }}>
         <div class="ico" data-tone="success"><Icon name="bolt" size={20} /></div>
         <div class="stat-text">
-            <div class="value">{Math.round(onT.current)}</div>
+            <div class="value num-display">{Math.round(onT.current)}</div>
             <div class="label">Active now</div>
         </div>
         <div class="caret" class:open={selectedStat === "active"}>
@@ -190,7 +190,7 @@
         in:fly={{ y: 14, duration: dur(280), delay: stagger(2, 60), easing: cubicOut }}>
         <div class="ico" data-tone="info"><Icon name="clock" size={20} /></div>
         <div class="stat-text">
-            <div class="value">{Math.round(schedT.current)}</div>
+            <div class="value num-display">{Math.round(schedT.current)}</div>
             <div class="label">Schedules</div>
         </div>
         <div class="caret" class:open={selectedStat === "schedules"}>
@@ -206,7 +206,7 @@
         in:fly={{ y: 14, duration: dur(280), delay: stagger(3, 60), easing: cubicOut }}>
         <div class="ico" data-tone="warn"><Icon name="scenes" size={20} /></div>
         <div class="stat-text">
-            <div class="value">{Math.round(gsT.current)}</div>
+            <div class="value num-display">{Math.round(gsT.current)}</div>
             <div class="label">Groups &amp; scenes</div>
         </div>
         <div class="caret" class:open={selectedStat === "automations"}>
@@ -255,17 +255,17 @@
                 <div class="proto-row">
                     {#if rfCount > 0}
                         <span class="pbadge" data-proto="rf">
-                            <Icon name="radio" size={13} /> RF · {rfCount}
+                            <Icon name="radio" size={13} /> RF · <span class="mono">{rfCount}</span>
                         </span>
                     {/if}
                     {#if wifiCount > 0}
-                        <span class="pbadge" data-proto="tasmota">
-                            <Icon name="wifi" size={13} /> Wi-Fi · {wifiCount}
+                        <span class="pbadge" data-proto="wifi">
+                            <Icon name="wifi" size={13} /> Wi-Fi · <span class="mono">{wifiCount}</span>
                         </span>
                     {/if}
                     {#if matterCount > 0}
                         <span class="pbadge" data-proto="matter">
-                            <Icon name="devices" size={13} /> Matter · {matterCount}
+                            <Icon name="devices" size={13} /> Matter · <span class="mono">{matterCount}</span>
                         </span>
                     {/if}
                     {#if totalSockets === 0}
@@ -280,9 +280,9 @@
                                 <span class="rg-name">{room}</span>
                                 <div class="rg-counts">
                                     {#if counts.on > 0}
-                                        <span class="rg-on">{counts.on} on</span>
+                                        <span class="rg-on"><span class="mono">{counts.on}</span> on</span>
                                     {/if}
-                                    <span class="rg-total">{counts.total} device{counts.total === 1 ? "" : "s"}</span>
+                                    <span class="rg-total"><span class="mono">{counts.total}</span> device{counts.total === 1 ? "" : "s"}</span>
                                 </div>
                             </div>
                         {/each}
@@ -340,7 +340,7 @@
                             <li class="sched-row">
                                 <span class="action-pill" data-action={s.action}>{s.action}</span>
                                 <span class="sched-target">{getTargetLabel(s)}</span>
-                                <span class="sched-meta">{formatScheduleTime(s)} &middot; {formatDays(s.days)}</span>
+                                <span class="sched-meta"><span class="mono">{formatScheduleTime(s)}</span> &middot; {formatDays(s.days)}</span>
                             </li>
                         {/each}
                     </ul>
@@ -368,8 +368,8 @@
                                     <div class="auto-info">
                                         <span class="auto-name">{g.name}</span>
                                         <span class="auto-sub">
-                                            {g.socket_ids.length} device{g.socket_ids.length === 1 ? "" : "s"}
-                                            {#if g.on > 0}· <span class="auto-on">{g.on} on</span>{/if}
+                                            <span class="mono">{g.socket_ids.length}</span> device{g.socket_ids.length === 1 ? "" : "s"}
+                                            {#if g.on > 0}· <span class="auto-on"><span class="mono">{g.on}</span> on</span>{/if}
                                         </span>
                                     </div>
                                     <div class="auto-btns">
@@ -584,9 +584,9 @@
     .stat {
         all: unset;
         box-sizing: border-box;
-        background: var(--bg-elevated);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-lg);
+        background: var(--card);
+        border: 1px solid var(--hairline);
+        border-radius: var(--r-lg);
         /* Mobile: tighter padding so the card fits in ~165 px */
         padding: var(--space-3);
         gap: var(--space-2);
@@ -595,7 +595,8 @@
         cursor: pointer;
         width: 100%;
         min-height: 68px; /* comfortable tap target height */
-        transition: border-color var(--t-fast), box-shadow var(--t-fast), transform var(--t-fast);
+        overflow: hidden;
+        transition: border-color var(--t-fast), background var(--t-med), box-shadow var(--t-fast), transform var(--t-fast);
         position: relative;
     }
     @media (min-width: 640px) {
@@ -606,8 +607,14 @@
     }
     .stat:focus-visible { box-shadow: var(--focus-ring); }
 
-    /* Selected state — tone-specific glow */
-    .stat.selected[data-tone="primary"] { border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-glow); }
+    /* Selected state — warm tile gradient + tone-specific glow */
+    .stat.selected {
+        background: linear-gradient(155deg, #2b2419 0%, #221d14 60%, #1d180f 100%);
+    }
+    :global([data-theme="light"]) .stat.selected {
+        background: linear-gradient(155deg, #fff5e3 0%, #ffeece 100%);
+    }
+    .stat.selected[data-tone="primary"] { border-color: rgba(245, 189, 110, 0.4); box-shadow: 0 0 0 3px var(--on-soft); }
     .stat.selected[data-tone="success"] { border-color: var(--success); box-shadow: 0 0 0 3px var(--success-soft); }
     .stat.selected[data-tone="info"]    { border-color: var(--info);    box-shadow: 0 0 0 3px var(--info-soft);    }
     .stat.selected[data-tone="warn"]    { border-color: var(--warn);    box-shadow: 0 0 0 3px var(--warn-soft);    }
@@ -615,21 +622,35 @@
     .ico {
         /* Mobile: 32 px icon box */
         width: 32px; height: 32px;
-        border-radius: var(--radius-sm);
+        border-radius: var(--r-sm);
         display: grid; place-items: center;
         flex-shrink: 0;
+        transition: box-shadow var(--t-med);
     }
     @media (min-width: 640px) {
-        .ico { width: 40px; height: 40px; border-radius: var(--radius-md); }
+        .ico { width: 40px; height: 40px; border-radius: var(--r-md); }
     }
-    .ico[data-tone="primary"] { background: var(--primary-soft); color: var(--primary); }
+    .ico[data-tone="primary"] { background: var(--on-soft); color: var(--on); }
     .ico[data-tone="success"] { background: var(--success-soft); color: var(--success); }
     .ico[data-tone="info"]    { background: var(--info-soft);    color: var(--info);    }
     .ico[data-tone="warn"]    { background: var(--warn-soft);    color: var(--warn);    }
+    /* Amber bulb glow when the primary "Devices" stat is active */
+    .stat.selected[data-tone="primary"] .ico {
+        background: var(--on);
+        color: #3a2400;
+        box-shadow: 0 0 0 1px var(--on), 0 0 20px 2px var(--on-glow);
+    }
 
     .stat-text { flex: 1; min-width: 0; text-align: left; }
-    .value { font-size: 1.25rem; font-weight: 700; line-height: 1; }
-    @media (min-width: 640px) { .value { font-size: 1.5rem; } }
+    .value {
+        font-family: var(--font-mono);
+        font-feature-settings: "tnum" 1, "ss01" 1;
+        letter-spacing: -0.04em;
+        font-size: 1.5rem;
+        font-weight: 500;
+        line-height: 1;
+    }
+    @media (min-width: 640px) { .value { font-size: 1.85rem; } }
 
     .label {
         color: var(--text-muted);
@@ -679,10 +700,10 @@
     .dh-left { display: flex; align-items: center; gap: var(--space-2); }
     .dico {
         width: 24px; height: 24px;
-        border-radius: var(--radius-sm);
+        border-radius: var(--r-sm);
         display: grid; place-items: center;
     }
-    .dico[data-tone="primary"] { background: var(--primary-soft); color: var(--primary); }
+    .dico[data-tone="primary"] { background: var(--on-soft); color: var(--on); }
     .dico[data-tone="success"] { background: var(--success-soft); color: var(--success); }
     .dico[data-tone="info"]    { background: var(--info-soft);    color: var(--info);    }
     .dico[data-tone="warn"]    { background: var(--warn-soft);    color: var(--warn);    }
@@ -726,7 +747,7 @@
         border: 1px solid;
     }
     .pbadge[data-proto="rf"]     { color: var(--accent-rf);     background: var(--accent-rf-soft);     border-color: var(--accent-rf-soft);     }
-    .pbadge[data-proto="tasmota"]{ color: var(--accent-wifi);   background: var(--accent-wifi-soft);   border-color: var(--accent-wifi-soft);   }
+    .pbadge[data-proto="wifi"]   { color: var(--accent-wifi);   background: var(--accent-wifi-soft);   border-color: var(--accent-wifi-soft);   }
     .pbadge[data-proto="matter"] { color: var(--accent-matter); background: var(--accent-matter-soft); border-color: var(--accent-matter-soft); }
 
     .note { font-size: 13px; color: var(--text-faint); }
@@ -962,13 +983,13 @@
     /* Coloured icon badge in section headings */
     .section-ico {
         width: 24px; height: 24px;
-        border-radius: var(--radius-sm);
+        border-radius: var(--r-sm);
         display: grid; place-items: center;
         flex-shrink: 0;
     }
-    .section-ico[data-tone="primary"] { background: var(--primary-soft); color: var(--primary); }
-    .section-ico[data-tone="info"]    { background: var(--info-soft);    color: var(--info);    }
-    .section-ico[data-tone="warn"]    { background: var(--warn-soft);    color: var(--warn);    }
+    .section-ico[data-tone="primary"] { background: var(--on-soft);    color: var(--on);   }
+    .section-ico[data-tone="info"]    { background: var(--info-soft);  color: var(--info); }
+    .section-ico[data-tone="warn"]    { background: var(--warn-soft);  color: var(--warn); }
 
     .scene-item, .room-item { display: flex; min-width: 0; }
     .scene-item > :global(*), .room-item > :global(.room) { flex: 1; min-width: 0; }

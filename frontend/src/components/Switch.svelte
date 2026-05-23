@@ -47,7 +47,7 @@
     .switch input { opacity: 0; width: 0; height: 0; position: absolute; }
     .track {
         position: absolute; inset: 0;
-        background: var(--border-strong);
+        background: var(--card-3);
         border-radius: 999px;
         transition: background var(--t-fast), box-shadow var(--t-fast);
         pointer-events: none;
@@ -56,14 +56,14 @@
         content: "";
         position: absolute;
         width: 20px; height: 20px;
-        background: #fff;
+        background: #b5b1a8;
         border-radius: 50%;
         top: 3px; left: 3px;
-        transition: transform 0.28s var(--spring);
+        transition: transform 0.22s var(--spring), background var(--t-fast);
         box-shadow: 0 1px 3px rgba(0,0,0,0.25);
     }
-    .switch input:checked + .track { background: var(--success); }
-    .switch input:checked + .track::after { transform: translateX(18px); }
+    .switch input:checked + .track { background: var(--on); }
+    .switch input:checked + .track::after { transform: translateX(18px); background: #fff; }
     .switch input:focus-visible + .track { box-shadow: var(--focus-ring); }
     .switch input:disabled + .track { opacity: 0.5; cursor: not-allowed; }
     .switch:active .track { box-shadow: 0 0 0 4px var(--primary-glow); }

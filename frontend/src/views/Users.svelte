@@ -139,7 +139,7 @@
                                     <span class="badge">Admin</span>
                                 {/if}
                                 {#if u.pending_invite}<span class="badge invite-badge">Invite pending</span>{/if}
-                                {#if u.kid}<span class="badge kid">Kid 🧸</span>{/if}
+                                {#if u.kid}<span class="badge kid">Kid</span>{/if}
                                 {#if u.id === session.user?.id}<span class="badge you">You</span>{/if}
                             </div>
                             <div class="role">

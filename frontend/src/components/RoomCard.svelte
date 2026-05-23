@@ -22,19 +22,9 @@
     const allOn  = $derived(room.on === room.sockets && room.sockets > 0);
     const allOff = $derived(room.on === 0);
 
-    // Eight vivid accent colours that work well on the dark background.
-    // A tiny djb2 hash of the room name makes each room's colour stable
-    // even if rooms are reordered or new rooms are added.
-    const ACCENTS = [
-        "#818cf8", // indigo
-        "#34d399", // emerald
-        "#fb923c", // orange
-        "#60a5fa", // sky
-        "#f472b6", // pink
-        "#c084fc", // violet
-        "#fbbf24", // amber
-        "#4ade80", // lime
-    ];
+    // Warm / cool / neutral surface category, picked by a stable djb2 hash of
+    // the room name so each room keeps a consistent tone across reorders.
+    const TONES = ["warm", "cool", "neutral"] as const;
 
     function nameHash(s: string): number {
         let h = 5381;
@@ -42,10 +32,10 @@
         return Math.abs(h);
     }
 
-    const accent = $derived(ACCENTS[nameHash(room.name) % ACCENTS.length]);
+    const tone = $derived(TONES[nameHash(room.name) % TONES.length]);
 </script>
 
-<div class="room" class:on={anyOn} style="--room-accent: {accent}">
+<div class="room" class:on={anyOn} data-tone={tone}>
     <div class="body">
         <div class="name" title={room.name}>{room.name}</div>
         <div class="meta">
@@ -71,34 +61,27 @@
 
 <style>
     .room {
-        background: var(--bg-elevated);
-        border: 1px solid var(--border);
+        background: var(--card);
+        border: 1px solid var(--hairline);
         border-radius: var(--radius-lg);
         display: flex;
         flex-direction: column;
         overflow: hidden;          /* clip button radius at card edge */
-        transition: border-color var(--t-fast), box-shadow var(--t-fast);
+        transition: border-color var(--t-fast), background var(--t-med), box-shadow var(--t-fast);
     }
 
-    /* Coloured top accent bar — first flex child, clipped by border-radius */
-    .room::before {
-        content: '';
-        display: block;
-        height: 3px;
-        flex-shrink: 0;
-        background: var(--room-accent, var(--primary));
-        opacity: 0.85;
-        transition: opacity var(--t-fast);
-    }
-    .room:hover::before { opacity: 1; }
+    /* Active rooms light up with a warm / cool / neutral gradient surface. */
+    .room.on { border-color: transparent; }
+    .room.on[data-tone="warm"]    { background: linear-gradient(155deg, #3a2f1f 0%, #271f14 100%); }
+    .room.on[data-tone="cool"]    { background: linear-gradient(155deg, #1f2a30 0%, #161c20 100%); }
+    .room.on[data-tone="neutral"] { background: linear-gradient(155deg, #2a2620 0%, #1d1a15 100%); }
+    :global([data-theme="light"]) .room.on[data-tone="warm"]    { background: linear-gradient(155deg, #fff2dc 0%, #ffe9c6 100%); }
+    :global([data-theme="light"]) .room.on[data-tone="cool"]    { background: linear-gradient(155deg, #e6eef2 0%, #dbe7ed 100%); }
+    :global([data-theme="light"]) .room.on[data-tone="neutral"] { background: linear-gradient(155deg, #f3efe6 0%, #ebe4d6 100%); }
 
-    .room.on {
-        border-color: var(--success);
-        box-shadow: inset 3px 0 0 var(--success);
-    }
     @media (hover: hover) {
         .room:hover { border-color: var(--border-strong); }
-        .room.on:hover { border-color: var(--success); }
+        .room.on:hover { border-color: rgba(245, 189, 110, 0.25); }
     }
 
     /* ── Info section ── */
@@ -124,9 +107,10 @@
         font-size: 12px;
     }
     .count {
+        font-family: var(--font-mono);
         font-variant-numeric: tabular-nums;
         font-weight: 600;
-        color: var(--success);
+        color: var(--on);
     }
     .count.dim { color: var(--text-faint); }
     .status-label {
@@ -169,13 +153,15 @@
     .on-btn  { color: var(--text-muted); }
     .off-btn { color: var(--text-muted); }
 
-    /* Hover feedback: green for On, red for Off */
-    .on-btn:hover  { color: var(--success); background: var(--success-soft); }
-    .off-btn:hover { color: var(--danger);  background: var(--danger-soft);  }
+    /* Hover feedback: amber for On, cool for Off */
+    .on-btn:hover  { color: var(--on);   background: var(--on-soft);   }
+    .off-btn:hover { color: var(--cool); background: var(--cool-soft); }
 
     /* When the room has devices on, give the On button a subtle tint
        so users can see it's the "current" state without it screaming */
-    .room.on .on-btn { color: var(--success); }
+    .room.on .on-btn { color: var(--on); }
+    .room.on .actions { border-top-color: rgba(245, 189, 110, 0.15); }
+    .room.on .act-btn + .act-btn { border-left-color: rgba(245, 189, 110, 0.15); }
 
     @media (pointer: coarse) {
         .act-btn { min-height: 48px; font-size: 14px; }

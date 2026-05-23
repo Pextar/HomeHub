@@ -22,26 +22,36 @@
 <style>
     .topbar {
         display: flex;
-        align-items: center;
+        align-items: flex-start;
         justify-content: space-between;
         gap: var(--space-3);
         /* Never stack — title left, button right, always */
         flex-wrap: nowrap;
     }
-    .title { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
-    .title h1 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .subtitle {
-        color: var(--text-muted); font-size: 13px;
+    .title { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 0; }
+    .title h1 {
+        font-family: var(--font-sans);
+        font-size: 30px;
+        font-weight: 600;
+        letter-spacing: -0.03em;
+        color: var(--text);
+        line-height: 1.1;
         overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
-    .actions { display: flex; gap: var(--space-2); flex-shrink: 0; }
+    .subtitle {
+        color: var(--text-mute);
+        font-size: 12.5px;
+        font-weight: 500;
+        letter-spacing: -0.01em;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .actions { display: flex; align-items: center; gap: var(--space-2); flex-shrink: 0; }
 
-    /* iOS large-title feel on mobile: heavier weight, bigger size */
+    /* Large-title feel on mobile: bigger size, still the 600 redesign weight */
     @media (max-width: 900px) {
         h1 {
             font-size: 1.75rem;
-            font-weight: 800;
-            letter-spacing: -0.025em;
+            letter-spacing: -0.03em;
         }
         .subtitle { font-size: 12px; }
     }

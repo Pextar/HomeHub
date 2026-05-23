@@ -96,9 +96,7 @@
             <div class="sub">{sensor.room || sensor.kind}</div>
         </div>
         {#if alert}
-            <span class="alert-badge" title={alert}>
-                <Icon name="bolt" size={12} /> Alert
-            </span>
+            <span class="alert-badge mono" title={alert}>Alert</span>
         {/if}
         {#if !compact}
             <button class="icon-btn" aria-label="Edit sensor"
@@ -109,7 +107,7 @@
     </div>
 
     <div class="value">
-        <span class="num">{lastFormatted}</span>
+        <span class="num num-display">{lastFormatted}</span>
         {#if sensor.unit}<span class="unit">{sensor.unit}</span>{/if}
     </div>
 
@@ -123,19 +121,23 @@
         {/if}
     </div>
 
-    <div class="footer">{lastAgo}</div>
+    <div class="footer">Last: <span class="mono">{lastAgo}</span></div>
 </div>
 
 <style>
     .sensor {
-        background: var(--bg-elevated);
+        background: var(--bg-raised);
         border: 1px solid var(--border);
         border-radius: var(--radius-lg);
         padding: var(--space-4);
         display: flex;
         flex-direction: column;
-        gap: var(--space-3);
+        gap: var(--space-2);
         min-width: 0;
+        transition: border-color var(--t-fast), transform var(--t-fast), box-shadow var(--t-fast);
+    }
+    @media (hover: hover) {
+        .sensor:hover { border-color: var(--border-strong); transform: translateY(-2px); box-shadow: var(--shadow-md); }
     }
     .header {
         display: flex;
@@ -144,7 +146,7 @@
     }
     .ico {
         width: 36px; height: 36px;
-        border-radius: var(--radius-md);
+        border-radius: var(--radius-sm);
         display: grid; place-items: center;
         flex-shrink: 0;
     }
@@ -180,14 +182,13 @@
         display: flex;
         align-items: baseline;
         gap: 4px;
+        margin-top: var(--space-1);
     }
     .num {
         font-size: 2rem;
-        font-weight: 700;
-        font-variant-numeric: tabular-nums;
         line-height: 1;
     }
-    .unit { color: var(--text-muted); font-weight: 500; }
+    .unit { color: var(--text-muted); font-weight: 500; font-size: 13px; }
 
     .spark { color: var(--info); height: 36px; }
     .spark-placeholder {
@@ -197,9 +198,10 @@
         height: 36px;
     }
     .footer {
-        font-size: 12px;
-        color: var(--text-muted);
+        font-size: 11px;
+        color: var(--text-faint);
     }
+    .footer .mono { color: var(--text-muted); }
 
     .sensor.compact { padding: var(--space-3); gap: var(--space-2); }
     .sensor.compact .num { font-size: 1.5rem; }
@@ -212,15 +214,11 @@
     .alert-badge {
         display: inline-flex;
         align-items: center;
-        gap: 4px;
-        font-size: 11px;
-        font-weight: 700;
+        font-size: 10px;
+        font-weight: 500;
         text-transform: uppercase;
-        letter-spacing: 0.04em;
+        letter-spacing: 0.06em;
         color: var(--danger);
-        background: var(--danger-soft);
-        padding: 3px 8px;
-        border-radius: 999px;
         flex-shrink: 0;
     }
 </style>
