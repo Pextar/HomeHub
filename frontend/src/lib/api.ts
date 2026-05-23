@@ -259,6 +259,9 @@ export const api = {
   updatePushPrefs(prefs: NotifPrefs) {
     return req<NotifPrefs>("/push/prefs", { method: "PUT", body: json(prefs) });
   },
+  testPush() {
+    return req<{ status: string }>("/push/test", { method: "POST" });
+  },
 
   // MQTT — control devices and ingest sensors over a broker.
   mqttStatus() {

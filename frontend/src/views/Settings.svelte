@@ -96,16 +96,41 @@
     }
 
     // ── Push notifications ─────────────────────────────────────────────────
+    // Snapshot saved prefs once to seed the editable form. session.user is
+    // already loaded by the time Settings renders (LoginGate gates on it).
+    const np = session.user?.notif_prefs;
     let notifPrefs = $state({
-        sensor_alerts:  session.user?.notif_prefs?.sensor_alerts  ?? true,
-        state_changes:  session.user?.notif_prefs?.state_changes  ?? true,
-        schedule_fired: session.user?.notif_prefs?.schedule_fired ?? true,
+        sensor_alerts:    np?.sensor_alerts    ?? true,
+        state_changes:    np?.state_changes    ?? true,
+        schedule_fired:   np?.schedule_fired   ?? true,
+        device_offline:   np?.device_offline   ?? true,
+        quiet_hours:      np?.quiet_hours      ?? false,
+        quiet_start:      np?.quiet_start      ?? "22:00",
+        quiet_end:        np?.quiet_end        ?? "07:00",
+        muted_socket_ids: [...(np?.muted_socket_ids ?? [])],
+        muted_sensor_ids: [...(np?.muted_sensor_ids ?? [])],
     });
     let notifSaving = $state(false);
+    let testing = $state(false);
+    let showMuted = $state(false);
 
     $effect(() => {
         pushClient.init();
     });
+
+    // A device is "notifying" when it is NOT in the muted list.
+    function socketNotifying(id: string) { return !notifPrefs.muted_socket_ids.includes(id); }
+    function sensorNotifying(id: string) { return !notifPrefs.muted_sensor_ids.includes(id); }
+    function toggleSocketMute(id: string) {
+        notifPrefs.muted_socket_ids = socketNotifying(id)
+            ? [...notifPrefs.muted_socket_ids, id]
+            : notifPrefs.muted_socket_ids.filter((x) => x !== id);
+    }
+    function toggleSensorMute(id: string) {
+        notifPrefs.muted_sensor_ids = sensorNotifying(id)
+            ? [...notifPrefs.muted_sensor_ids, id]
+            : notifPrefs.muted_sensor_ids.filter((x) => x !== id);
+    }
 
     async function toggleNotifications() {
         if (!pushSupported || pushClient.loading) return;
@@ -132,6 +157,19 @@
             toasts.error("Save failed", (e as Error).message);
         } finally {
             notifSaving = false;
+        }
+    }
+
+    async function sendTest() {
+        if (testing) return;
+        testing = true;
+        try {
+            await api.testPush();
+            toasts.info("Test sent", "A notification should appear shortly.");
+        } catch (e) {
+            toasts.error("Test failed", (e as Error).message);
+        } finally {
+            testing = false;
         }
     }
 
@@ -239,6 +277,13 @@
         </div>
 
         {#if pushClient.isSubscribed}
+            <div class="notif-row">
+                <span class="notif-label">Send a test notification</span>
+                <button type="button" class="btn btn-ghost" onclick={sendTest} disabled={testing}>
+                    {testing ? "Sending…" : "Send test"}
+                </button>
+            </div>
+
             <form class="notif-prefs" onsubmit={(e) => { e.preventDefault(); saveNotifPrefs(); }}>
                 <p class="prefs-label">Notify me when:</p>
                 <label class="check-row">
@@ -253,6 +298,63 @@
                     <input type="checkbox" bind:checked={notifPrefs.schedule_fired} />
                     <span>A schedule or timer fires</span>
                 </label>
+                <label class="check-row">
+                    <input type="checkbox" bind:checked={notifPrefs.device_offline} />
+                    <span>A Wi-Fi or Matter device goes offline</span>
+                </label>
+
+                <!-- Quiet hours -->
+                <div class="prefs-group">
+                    <label class="check-row">
+                        <input type="checkbox" bind:checked={notifPrefs.quiet_hours} />
+                        <span>Quiet hours <span class="optional">(mutes everything except sensor alerts)</span></span>
+                    </label>
+                    {#if notifPrefs.quiet_hours}
+                        <div class="quiet-times">
+                            <label>
+                                From
+                                <input type="time" bind:value={notifPrefs.quiet_start} />
+                            </label>
+                            <label>
+                                to
+                                <input type="time" bind:value={notifPrefs.quiet_end} />
+                            </label>
+                        </div>
+                    {/if}
+                </div>
+
+                <!-- Per-device muting -->
+                {#if v.sockets.length > 0 || v.sensors.length > 0}
+                    <div class="prefs-group">
+                        <button type="button" class="link-btn" onclick={() => (showMuted = !showMuted)}>
+                            {showMuted ? "▾" : "▸"} Per-device settings
+                        </button>
+                        {#if showMuted}
+                            <p class="prefs-label">Uncheck a device to silence its notifications.</p>
+                            {#each v.sockets as sock (sock.id)}
+                                <label class="check-row">
+                                    <input
+                                        type="checkbox"
+                                        checked={socketNotifying(sock.id)}
+                                        onchange={() => toggleSocketMute(sock.id)}
+                                    />
+                                    <span>{sock.name}</span>
+                                </label>
+                            {/each}
+                            {#each v.sensors as sensor (sensor.id)}
+                                <label class="check-row">
+                                    <input
+                                        type="checkbox"
+                                        checked={sensorNotifying(sensor.id)}
+                                        onchange={() => toggleSensorMute(sensor.id)}
+                                    />
+                                    <span>{sensor.name} <span class="optional">(sensor)</span></span>
+                                </label>
+                            {/each}
+                        {/if}
+                    </div>
+                {/if}
+
                 <div class="actions">
                     <button type="submit" class="btn btn-primary" disabled={notifSaving}>
                         {notifSaving ? "Saving…" : "Save preferences"}
@@ -340,5 +442,42 @@
         height: 16px;
         accent-color: var(--primary);
         flex-shrink: 0;
+    }
+    .prefs-group {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-3);
+        padding-top: var(--space-3);
+        border-top: 1px solid var(--border);
+    }
+    .quiet-times {
+        display: flex;
+        gap: var(--space-4);
+        flex-wrap: wrap;
+        padding-left: var(--space-5);
+    }
+    .quiet-times label {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        font-size: 14px;
+        color: var(--text-muted);
+    }
+    .quiet-times input[type="time"] {
+        padding: 4px 8px;
+        border-radius: var(--radius-sm);
+        border: 1px solid var(--border);
+        background: var(--bg);
+        color: var(--text);
+    }
+    .link-btn {
+        background: none;
+        border: none;
+        color: var(--primary);
+        font-size: 13px;
+        cursor: pointer;
+        padding: 0;
+        text-align: left;
+        width: fit-content;
     }
 </style>

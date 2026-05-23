@@ -39,11 +39,20 @@ export interface Settings {
   location_name?: string;
 }
 
-/** Per-user push notification preferences. All default to true on first subscribe. */
+/** Per-user push notification preferences. Categories default to true on first subscribe. */
 export interface NotifPrefs {
   sensor_alerts: boolean;
   state_changes: boolean;
   schedule_fired: boolean;
+  device_offline: boolean;
+  // Quiet hours suppress everything except sensor alerts between
+  // quiet_start and quiet_end (local time, may wrap past midnight).
+  quiet_hours?: boolean;
+  quiet_start?: string; // "HH:MM"
+  quiet_end?: string;   // "HH:MM"
+  // Devices opted out of notifications while their category stays enabled.
+  muted_socket_ids?: string[];
+  muted_sensor_ids?: string[];
 }
 
 // A login profile. Non-admins only see/control the sockets in socket_ids;

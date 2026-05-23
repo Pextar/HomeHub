@@ -20,7 +20,7 @@ func (s *Store) ApplyState(socket *Socket, target *bool) error {
 		if s.OnChange != nil {
 			s.OnChange()
 		}
-		if s.OnStateChange != nil {
+		if s.OnStateChange != nil && !s.SuppressStateChange {
 			s.OnStateChange(*socket, socket.State)
 		}
 	}

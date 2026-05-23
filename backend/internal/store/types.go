@@ -47,13 +47,26 @@ type Schedule struct {
 }
 
 // NotifPrefs controls which event categories trigger push notifications for
-// a user. All fields default to true when a user first subscribes (set
-// explicitly in the subscribe handler). A user who has never subscribed
+// a user. The boolean categories default to true when a user first subscribes
+// (set explicitly in the subscribe handler). A user who has never subscribed
 // will have the zero value (all false) — no notifications sent.
+//
+// QuietHours, when enabled, suppresses every category EXCEPT SensorAlerts
+// (which can be safety-critical) between QuietStart and QuietEnd local time.
+// The window may wrap past midnight (e.g. 22:00–07:00).
+//
+// MutedSocketIDs / MutedSensorIDs let a user opt specific devices out of
+// notifications while keeping the category enabled for everything else.
 type NotifPrefs struct {
-	SensorAlerts  bool `json:"sensor_alerts"`
-	StateChanges  bool `json:"state_changes"`
-	ScheduleFired bool `json:"schedule_fired"`
+	SensorAlerts   bool     `json:"sensor_alerts"`
+	StateChanges   bool     `json:"state_changes"`
+	ScheduleFired  bool     `json:"schedule_fired"`
+	DeviceOffline  bool     `json:"device_offline"`
+	QuietHours     bool     `json:"quiet_hours,omitempty"`
+	QuietStart     string   `json:"quiet_start,omitempty"` // "HH:MM"
+	QuietEnd       string   `json:"quiet_end,omitempty"`   // "HH:MM"
+	MutedSocketIDs []string `json:"muted_socket_ids,omitempty"`
+	MutedSensorIDs []string `json:"muted_sensor_ids,omitempty"`
 }
 
 // User is a login profile. Admins have unrestricted access; non-admins

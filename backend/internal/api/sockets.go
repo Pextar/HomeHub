@@ -318,6 +318,8 @@ func (s *Server) bulkSetState(target bool) http.HandlerFunc {
 
 		var ok int
 		failures := make([]map[string]string, 0)
+		// Suppress per-socket push notifications; we send one summary below.
+		s.Store.SuppressStateChange = true
 		for _, sock := range s.Store.Sockets {
 			if !canAccess(user, sock.ID) {
 				continue
@@ -331,6 +333,7 @@ func (s *Server) bulkSetState(target bool) http.HandlerFunc {
 			}
 			ok++
 		}
+		s.Store.SuppressStateChange = false
 		action := "off"
 		if target {
 			action = "on"
@@ -345,6 +348,7 @@ func (s *Server) bulkSetState(target bool) http.HandlerFunc {
 			writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
 			return
 		}
+		s.notifyBulkState(fmt.Sprintf("All devices turned %s", action), ok)
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"updated":  ok,
 			"failures": failures,

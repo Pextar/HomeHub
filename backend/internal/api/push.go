@@ -8,6 +8,20 @@ import (
 	"rf-socket-controller/internal/store"
 )
 
+// notifyBulkState sends a single summary "device state" notification for a
+// bulk action (all-off, room, group, scene) so users don't get one push per
+// affected socket. A no-op when push is disabled or nothing changed.
+func (s *Server) notifyBulkState(title string, changed int) {
+	if s.Push == nil || changed == 0 {
+		return
+	}
+	go s.Push.NotifyEvent(push.CategoryStateChanges, "", push.PushPayload{
+		Title: title,
+		URL:   "/#/dashboard",
+		Tag:   "bulk-state",
+	})
+}
+
 // getPushVAPIDKey returns the server's VAPID public key so the browser can
 // subscribe to push notifications. No authentication required — the public
 // key is not a secret.
@@ -59,13 +73,14 @@ func (s *Server) subscribePush(w http.ResponseWriter, r *http.Request) {
 	// Enable all notification categories by default for users subscribing for
 	// the first time (all-false zero value → upgrade to all-true).
 	prefs := user.NotifPrefs
-	if !prefs.SensorAlerts && !prefs.StateChanges && !prefs.ScheduleFired {
+	if !prefs.SensorAlerts && !prefs.StateChanges && !prefs.ScheduleFired && !prefs.DeviceOffline {
 		s.Store.Mu.Lock()
 		if u := s.Store.Users[user.ID]; u != nil {
 			u.NotifPrefs = store.NotifPrefs{
 				SensorAlerts:  true,
 				StateChanges:  true,
 				ScheduleFired: true,
+				DeviceOffline: true,
 			}
 			_ = s.Store.Save()
 		}
@@ -100,6 +115,29 @@ func (s *Server) unsubscribePush(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "unsubscribed"})
+}
+
+// testPush sends a test notification to the authenticated user's own
+// subscriptions so they can confirm push is working end-to-end.
+func (s *Server) testPush(w http.ResponseWriter, r *http.Request) {
+	if s.Push == nil {
+		writeError(w, http.StatusServiceUnavailable, "push notifications not configured")
+		return
+	}
+	user := currentUser(r)
+	var userID *string
+	if user != nil {
+		id := user.ID
+		userID = &id
+	}
+	// Bypass category/quiet-hours/mute filters — a test should always arrive.
+	s.Push.Notify(userID, push.PushPayload{
+		Title: "🔔 HomeHub test",
+		Body:  "Push notifications are working.",
+		URL:   "/#/settings",
+		Tag:   "test",
+	})
+	writeJSON(w, http.StatusOK, map[string]string{"status": "sent"})
 }
 
 // updatePushPrefs updates the authenticated user's notification preferences.

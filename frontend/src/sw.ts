@@ -57,12 +57,12 @@ self.addEventListener("push", (event: PushEvent) => {
 });
 
 // When the user taps a notification, focus an existing tab or open a new one.
-self.addEventListener("notificationclick", (event: NotificationClickEvent) => {
+self.addEventListener("notificationclick", (event: NotificationEvent) => {
   event.notification.close();
   const url: string = event.notification.data?.url ?? "/";
 
   event.waitUntil(
-    clients
+    self.clients
       .matchAll({ type: "window", includeUncontrolled: true })
       .then((windowClients) => {
         // Focus an existing window if one is open.
@@ -72,7 +72,7 @@ self.addEventListener("notificationclick", (event: NotificationClickEvent) => {
           }
         }
         // Otherwise open a new window.
-        return clients.openWindow(url);
+        return self.clients.openWindow(url);
       })
   );
 });

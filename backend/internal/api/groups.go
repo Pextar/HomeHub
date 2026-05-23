@@ -146,6 +146,8 @@ func (s *Server) groupAction(action string) http.HandlerFunc {
 
 		var ok2 int
 		failures := make([]map[string]string, 0)
+		// Suppress per-socket push notifications; we send one summary below.
+		s.Store.SuppressStateChange = true
 		for _, sid := range g.SocketIDs {
 			if err := s.Store.ExecuteAction("socket", sid, action); err != nil {
 				failures = append(failures, map[string]string{
@@ -156,6 +158,7 @@ func (s *Server) groupAction(action string) http.HandlerFunc {
 			}
 			ok2++
 		}
+		s.Store.SuppressStateChange = false
 		entry := store.ActivityEntry{Kind: "group", Source: "manual", Action: action, Label: g.Name}
 		if len(failures) > 0 {
 			entry.Status = "error"
@@ -166,6 +169,7 @@ func (s *Server) groupAction(action string) http.HandlerFunc {
 			writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
 			return
 		}
+		s.notifyBulkState(fmt.Sprintf("%s turned %s", g.Name, action), ok2)
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"group":    g.Name,
 			"updated":  ok2,

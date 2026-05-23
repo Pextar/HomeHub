@@ -20,6 +20,7 @@ import (
 	"rf-socket-controller/internal/matter"
 	"rf-socket-controller/internal/mqtt"
 	"rf-socket-controller/internal/push"
+	"rf-socket-controller/internal/reachability"
 	"rf-socket-controller/internal/rf"
 	"rf-socket-controller/internal/rx"
 	"rf-socket-controller/internal/scheduler"
@@ -143,11 +144,23 @@ func main() {
 			defer st.Mu.RUnlock()
 			out := make([]push.UserPrefs, 0, len(st.Users))
 			for _, u := range st.Users {
+				muted := make(map[string]bool, len(u.NotifPrefs.MutedSocketIDs)+len(u.NotifPrefs.MutedSensorIDs))
+				for _, id := range u.NotifPrefs.MutedSocketIDs {
+					muted[id] = true
+				}
+				for _, id := range u.NotifPrefs.MutedSensorIDs {
+					muted[id] = true
+				}
 				out = append(out, push.UserPrefs{
 					ID:            u.ID,
 					SensorAlerts:  u.NotifPrefs.SensorAlerts,
 					StateChanges:  u.NotifPrefs.StateChanges,
 					ScheduleFired: u.NotifPrefs.ScheduleFired,
+					DeviceOffline: u.NotifPrefs.DeviceOffline,
+					QuietHours:    u.NotifPrefs.QuietHours,
+					QuietStart:    u.NotifPrefs.QuietStart,
+					QuietEnd:      u.NotifPrefs.QuietEnd,
+					MutedIDs:      muted,
 				})
 			}
 			return out
@@ -223,6 +236,7 @@ func main() {
 	go scheduler.Run(schedCtx, st, pushSvc)
 	go rx.FromEnv().Run(schedCtx, st)
 	go mqtt.SensorListener{Client: mqttClient}.Run(schedCtx, st)
+	go reachability.Run(schedCtx, st, matterClient, pushSvc)
 
 	go func() {
 		log.Printf("RF Socket Controller listening on http://:%s", port)

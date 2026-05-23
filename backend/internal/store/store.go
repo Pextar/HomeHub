@@ -60,6 +60,13 @@ type Store struct {
 	// while already alerting). direction is "above" or "below".
 	// Runs while Mu is held — keep it non-blocking.
 	OnSensorAlert func(sensor Sensor, value float64, direction string)
+
+	// SuppressStateChange, when true, prevents ApplyState from firing
+	// OnStateChange. Bulk operations (all-off, room, group, scene,
+	// scheduler) set this so they can emit a single summary notification
+	// instead of one per affected socket. OnChange (SSE) still fires so the
+	// UI stays live. Caller must hold Mu (write lock).
+	SuppressStateChange bool
 }
 
 const (

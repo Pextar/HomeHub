@@ -76,14 +76,14 @@ func (s *Server) Handler() http.Handler {
 			if newState {
 				action = "on"
 			}
-			go s.Push.NotifyUsersWithPref("StateChanges", push.PushPayload{
+			go s.Push.NotifyEvent(push.CategoryStateChanges, socket.ID, push.PushPayload{
 				Title: fmt.Sprintf("💡 %s turned %s", socket.Name, action),
 				URL:   "/#/sockets",
 				Tag:   "state-" + socket.ID,
 			})
 		}
 		s.Store.OnSensorAlert = func(sensor store.Sensor, value float64, direction string) {
-			go s.Push.NotifyUsersWithPref("SensorAlerts", push.PushPayload{
+			go s.Push.NotifyEvent(push.CategorySensorAlerts, sensor.ID, push.PushPayload{
 				Title: fmt.Sprintf("⚠️ %s alert", sensor.Name),
 				Body:  fmt.Sprintf("%.1f%s (%s threshold)", value, sensor.Unit, direction),
 				URL:   "/#/sensors",
@@ -217,6 +217,7 @@ func (s *Server) Handler() http.Handler {
 	api.HandleFunc("/push/subscribe", s.subscribePush).Methods("POST")
 	api.HandleFunc("/push/unsubscribe", s.unsubscribePush).Methods("DELETE")
 	api.HandleFunc("/push/prefs", s.updatePushPrefs).Methods("PUT")
+	api.HandleFunc("/push/test", s.testPush).Methods("POST")
 
 	r.PathPrefix("/").Handler(spaHandler(s.SPADir))
 

@@ -113,7 +113,10 @@ func executeTimer(st *store.Store, t store.Timer, pushSvc *push.Service) error {
 
 	delete(st.Timers, t.ID)
 	label := targetLabel(st, t.TargetType, t.TargetID)
+	// Suppress per-socket state-change pushes; the timer summary below covers it.
+	st.SuppressStateChange = true
 	err := st.ExecuteAction(t.TargetType, t.TargetID, t.Action)
+	st.SuppressStateChange = false
 	entry := store.ActivityEntry{Kind: t.TargetType, Source: "timer", Action: t.Action, Label: label}
 	if err != nil {
 		entry.Status = "error"
@@ -126,7 +129,7 @@ func executeTimer(st *store.Store, t store.Timer, pushSvc *push.Service) error {
 	if err == nil {
 		log.Printf("timer fired: %s on %s/%s", t.Action, t.TargetType, t.TargetID)
 		if pushSvc != nil {
-			go pushSvc.NotifyUsersWithPref("ScheduleFired", push.PushPayload{
+			go pushSvc.NotifyEvent(push.CategoryScheduleFired, "", push.PushPayload{
 				Title: fmt.Sprintf("⏰ Timer: %s %s", label, t.Action),
 				URL:   "/#/sockets",
 				Tag:   "timer-" + t.ID,
@@ -145,7 +148,10 @@ func executeSchedule(st *store.Store, s store.Schedule, pushSvc *push.Service) e
 		tt, tid = "socket", s.SocketID
 	}
 	label := targetLabel(st, tt, tid)
+	// Suppress per-socket state-change pushes; the schedule summary below covers it.
+	st.SuppressStateChange = true
 	err := st.ExecuteAction(tt, tid, action)
+	st.SuppressStateChange = false
 	entry := store.ActivityEntry{Kind: tt, Source: "schedule", Action: action, Label: label}
 	if err != nil {
 		entry.Status = "error"
@@ -164,7 +170,7 @@ func executeSchedule(st *store.Store, s store.Schedule, pushSvc *push.Service) e
 	}
 	log.Printf("scheduler: %s %s (%s/%s)", action, s.ID, tt, tid)
 	if pushSvc != nil {
-		go pushSvc.NotifyUsersWithPref("ScheduleFired", push.PushPayload{
+		go pushSvc.NotifyEvent(push.CategoryScheduleFired, "", push.PushPayload{
 			Title: fmt.Sprintf("⏰ Schedule: %s %s", label, action),
 			URL:   "/#/schedules",
 			Tag:   "schedule-" + s.ID,
