@@ -28,6 +28,25 @@
     const enabledSchedules = $derived(v.schedules.filter(s => s.enabled).length);
     const groupsAndScenes = $derived(v.groups.length + v.scenes.length);
 
+    // ── Whole-home hero ─────────────────────────────────────────────────────
+    // Glance status + a single master toggle. Live wattage and inside temp are
+    // pulled from any power / temperature sensors; both readouts hide entirely
+    // when no such sensor exists (so the hero degrades to count + toggle).
+    const heroOn = $derived(onSockets > 0);
+    const powerSensors = $derived(v.sensors.filter(s => s.kind === "power" && s.last_value != null));
+    const hasPower = $derived(powerSensors.length > 0);
+    const powerWatts = $derived(Math.round(powerSensors.reduce((sum, s) => sum + (s.last_value ?? 0), 0)));
+    const tempSensors = $derived(v.sensors.filter(s => s.kind === "temperature" && s.last_value != null));
+    const hasTemp = $derived(tempSensors.length > 0);
+    const insideTemp = $derived(
+        hasTemp ? Math.round(tempSensors.reduce((sum, s) => sum + (s.last_value ?? 0), 0) / tempSensors.length) : 0
+    );
+
+    // Master toggle mirrors the existing confirmed All on / All off actions.
+    function toggleAllMaster() {
+        if (heroOn) allOff(); else allOn();
+    }
+
     // Count-up animation for the four stat numbers.
     const totalT = new Tween(0, { duration: dur(700), easing: cubicOut });
     const onT    = new Tween(0, { duration: dur(700), easing: cubicOut });
@@ -147,6 +166,37 @@
         <button class="btn btn-primary" onclick={() => openModal(SocketModal, {})}>Add device</button>
     {/snippet}
 </Topbar>
+
+<!-- ── Whole-home hero ────────────────────────────────────────────── -->
+<div class="hero tile" class:on={heroOn}
+    in:fly={{ y: 14, duration: dur(280), easing: cubicOut }}>
+    <div class="hero-top">
+        <div class="hero-lead">
+            <div class="hero-eyebrow mono">Whole home</div>
+            <div class="hero-count">
+                <span class="num-display">{onSockets}</span>
+                <span class="hero-of">of {totalSockets} on</span>
+            </div>
+        </div>
+        <button class="sw-big" class:on={heroOn} onclick={toggleAllMaster}
+            aria-label={heroOn ? "Turn all devices off" : "Turn all devices on"}
+            aria-pressed={heroOn}></button>
+    </div>
+    {#if hasPower || hasTemp}
+        <div class="hero-meta">
+            {#if hasPower}
+                <span class="hero-stat">
+                    <Icon name="bolt" size={13} />
+                    <span class="mono hero-em">{powerWatts} W</span> now
+                </span>
+            {/if}
+            {#if hasPower && hasTemp}<span class="hero-sep">·</span>{/if}
+            {#if hasTemp}
+                <span class="hero-stat"><span class="mono hero-em">{insideTemp}°</span> inside</span>
+            {/if}
+        </div>
+    {/if}
+</div>
 
 <!-- ── Stat cards (clickable) ─────────────────────────────────────── -->
 <div class="stats">
@@ -569,6 +619,55 @@
 {/if}
 
 <style>
+    /* ── Whole-home hero ────────────────────────────── */
+    .hero { padding: 20px; gap: 16px; }
+    .hero-top {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px;
+    }
+    .hero-lead { min-width: 0; }
+    .hero-eyebrow {
+        color: var(--on);
+        font-size: 11px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+    }
+    .hero-count {
+        margin-top: 8px;
+        display: flex;
+        align-items: baseline;
+        gap: 10px;
+        white-space: nowrap;
+    }
+    .hero-count .num-display { font-size: 56px; }
+    .hero-of { color: var(--text-mute); font-size: 14px; }
+
+    /* the hero's master toggle is a real button — strip UA chrome */
+    .hero .sw-big {
+        flex-shrink: 0;
+        border: 0;
+        padding: 0;
+        appearance: none;
+        -webkit-appearance: none;
+        cursor: pointer;
+    }
+    .hero .sw-big:focus-visible { box-shadow: var(--focus-ring); }
+
+    .hero-meta {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--text-mute);
+        font-size: 12px;
+        white-space: nowrap;
+    }
+    .hero-stat { display: inline-flex; align-items: center; gap: 6px; }
+    .hero-stat :global(svg) { color: var(--on); }
+    .hero-em { color: var(--text); }
+    .hero-sep { color: var(--text-dim); }
+
     /* ── Stat cards ─────────────────────────────────── */
 
     /* Mobile-first: always 2 columns. At ≥640 px go to 4. */
