@@ -55,12 +55,12 @@
         transition: background var(--t-fast), color var(--t-fast),
                     border-color var(--t-fast);
     }
-    .chip[data-selected="true"] {
+    .day-chip[data-selected="true"] {
         background: var(--primary);
         color: var(--primary-fg);
         border-color: transparent;
     }
-    .chip:active { transform: scale(0.92); transition-duration: 60ms; }
+    .day-chip:active { transform: scale(0.92); transition-duration: 60ms; }
     .presets {
         display: flex;
         gap: var(--space-2);
