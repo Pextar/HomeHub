@@ -214,7 +214,37 @@ export async function startController(): Promise<MatterController> {
         },
         async commission(pairingCode: string, transport?: "wifi" | "thread"): Promise<string> {
             const opts = optionsFromPairingCode(pairingCode, transport);
-            const nodeId = await commissioning.commissionNode(opts);
+
+            // Snapshot of commissioned nodes before the attempt so we can
+            // detect any partial fabric entry left behind if commissionNode
+            // throws — e.g. when the device joined Wi-Fi (Phase 1 done) but
+            // the CASE session over IP failed (Phase 2 failed).
+            const nodesBefore = new Set(commissioning.getCommissionedNodes().map(n => key(n)));
+
+            let nodeId: NodeId;
+            try {
+                nodeId = await commissioning.commissionNode(opts);
+            } catch (err) {
+                // If matter.js persisted a partial node despite the failure,
+                // remove it so the fabric stays clean and a retry (or
+                // factory-reset + retry) starts from a known-good state.
+                const orphaned = commissioning.getCommissionedNodes()
+                    .map(n => key(n))
+                    .filter(id => !nodesBefore.has(id));
+                if (orphaned.length > 0) {
+                    console.warn(
+                        `[matter-bridge] commission failed — removing ${orphaned.length} orphaned node(s): ${orphaned.join(", ")}`,
+                    );
+                    for (const id of orphaned) {
+                        try {
+                            await commissioning.removeNode(NodeId(BigInt(id)));
+                        } catch (removeErr) {
+                            console.error(`[matter-bridge] could not remove orphaned node ${id}:`, removeErr);
+                        }
+                    }
+                }
+                throw err;
+            }
             return key(nodeId);
         },
         async getState(nodeId: string) { return readState(nodeId); },

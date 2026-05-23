@@ -300,15 +300,27 @@
                     <strong>Commissioning failed</strong>
                     <span>{commissionError}</span>
                     <span class="hint">
-                        Common causes: the device isn't in pairing mode (reset it),
-                        Bluetooth isn't available on the bridge,
                         {#if transport === "thread"}
-                            MATTER_BRIDGE_THREAD_DATASET isn't set or the Thread
-                            Border Router (e.g. Apple TV) isn't reachable,
+                            The device may have already joined your Thread mesh but
+                            didn't complete the fabric handshake. Its commissioning
+                            window has likely closed — <strong>open it again</strong>
+                            with a short button press (1–5 s, check your device's
+                            manual), then hit Try again. The device will stay on your
+                            network. Only factory-reset (hold ~10 s) as a last resort
+                            if short-pressing doesn't help. Other causes:
+                            MATTER_BRIDGE_THREAD_DATASET not set or Thread Border
+                            Router (e.g. Apple TV) not reachable.
                         {:else}
-                            the Wi-Fi credentials aren't set on the bridge yet,
+                            The device may have already joined your Wi-Fi but didn't
+                            complete the fabric handshake. Its commissioning window
+                            has likely closed — <strong>open it again</strong> with a
+                            short button press (1–5 s, check your device's manual),
+                            then hit Try again. The device will stay on your Wi-Fi.
+                            Only factory-reset (hold ~10 s) as a last resort if
+                            short-pressing doesn't help. Other causes: Wi-Fi
+                            credentials not configured on the bridge, or Bluetooth
+                            not available.
                         {/if}
-                        or the device is out of BLE range.
                     </span>
                 </div>
             {:else}
