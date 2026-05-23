@@ -190,7 +190,9 @@
         grid-template-columns: repeat(auto-fill, minmax(min(160px, 100%), 1fr));
         gap: var(--space-4);
     }
-    .tile {
+    /* Renamed from .tile → .kid-tile so the new GLOBAL .tile utility
+       doesn't leak its surface styles onto these playful lamp buttons. */
+    .kid-tile {
         aspect-ratio: 1;
         display: flex;
         flex-direction: column;
@@ -205,8 +207,8 @@
         transition: transform 0.18s ease, box-shadow 0.25s ease, background 0.25s ease, border-color 0.25s ease;
         -webkit-tap-highlight-color: transparent;
     }
-    .tile:active { transform: scale(0.95); }
-    .tile { position: relative; }
+    .kid-tile:active { transform: scale(0.95); }
+    .kid-tile { position: relative; }
     .paint {
         position: absolute;
         top: 10px;
@@ -214,36 +216,36 @@
         font-size: 1.4rem;
         opacity: 0.85;
     }
-    .tile .emoji {
+    .kid-tile .emoji {
         font-size: clamp(3rem, 14vw, 5rem);
         line-height: 1;
         filter: grayscale(0.6) opacity(0.6);
         transition: filter 0.25s ease, transform 0.25s ease;
     }
-    .tile .label {
+    .kid-tile .label {
         font-size: clamp(1rem, 3.5vw, 1.25rem);
         font-weight: 800;
         color: var(--text);
         text-align: center;
         line-height: 1.1;
     }
-    .tile .status {
+    .kid-tile .status {
         font-size: 0.85rem;
         font-weight: 800;
         letter-spacing: 0.1em;
     }
-    .tile.on {
+    .kid-tile.on {
         border-color: #ffd23f;
         background: linear-gradient(160deg, #fff3c4, #ffd23f);
         color: #7a5b00;
         box-shadow: 0 0 0 4px rgba(255, 210, 63, 0.25), 0 12px 40px rgba(255, 196, 0, 0.45);
         animation: glow 2.2s ease-in-out infinite;
     }
-    .tile.on .emoji { filter: none; transform: scale(1.08); }
-    .tile.on .label { color: #5e4500; }
+    .kid-tile.on .emoji { filter: none; transform: scale(1.08); }
+    .kid-tile.on .label { color: #5e4500; }
     /* Springy bounce when tapped. */
-    .tile.pop { animation: pop 0.45s cubic-bezier(0.34, 1.56, 0.64, 1); }
-    .tile.on.pop { animation: pop 0.45s cubic-bezier(0.34, 1.56, 0.64, 1), glow 2.2s ease-in-out infinite; }
+    .kid-tile.pop { animation: pop 0.45s cubic-bezier(0.34, 1.56, 0.64, 1); }
+    .kid-tile.on.pop { animation: pop 0.45s cubic-bezier(0.34, 1.56, 0.64, 1), glow 2.2s ease-in-out infinite; }
 
     @keyframes pop {
         0% { transform: scale(1); }
@@ -256,8 +258,8 @@
         50% { box-shadow: 0 0 0 7px rgba(255, 210, 63, 0.30), 0 16px 52px rgba(255, 196, 0, 0.6); }
     }
     @media (prefers-reduced-motion: reduce) {
-        .tile, .tile.on { animation: none; }
-        .tile.pop, .tile.on.pop { animation: none; }
+        .kid-tile, .kid-tile.on { animation: none; }
+        .kid-tile.pop, .kid-tile.on.pop { animation: none; }
     }
 
     .none {

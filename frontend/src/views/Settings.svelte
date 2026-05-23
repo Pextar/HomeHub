@@ -389,17 +389,17 @@
 
 <style>
     .card {
-        background: var(--bg-elevated);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-lg);
+        background: var(--card);
+        border: 1px solid var(--hairline);
+        border-radius: var(--r-lg);
         padding: var(--space-5);
         display: flex;
         flex-direction: column;
         gap: var(--space-5);
         max-width: 640px;
     }
-    header h2 { margin: 0 0 4px; font-size: 1.05rem; }
-    header p  { margin: 0; color: var(--text-muted); font-size: 13px; }
+    header h2 { margin: 0 0 4px; font-size: 17px; font-weight: 600; letter-spacing: -0.01em; }
+    header p  { margin: 0; color: var(--text-mute); font-size: 13px; }
     form { display: flex; flex-direction: column; gap: var(--space-4); }
     .actions {
         display: flex;
@@ -407,7 +407,13 @@
         gap: var(--space-2);
         flex-wrap: wrap;
     }
-    .optional { color: var(--text-muted); font-weight: 400; font-size: 12px; }
+    .optional { color: var(--text-mute); font-weight: 400; font-size: 12px; }
+
+    /* Coordinates are numeric — render them with tabular mono figures. */
+    form input[type="number"] {
+        font-family: var(--font-mono);
+        font-variant-numeric: tabular-nums;
+    }
 
     /* Push notification section */
     .notif-row {
@@ -465,10 +471,12 @@
     }
     .quiet-times input[type="time"] {
         padding: 4px 8px;
-        border-radius: var(--radius-sm);
-        border: 1px solid var(--border);
-        background: var(--bg);
+        border-radius: var(--r-sm);
+        border: 1px solid var(--hairline);
+        background: var(--card-2);
         color: var(--text);
+        font-family: var(--font-mono);
+        font-variant-numeric: tabular-nums;
     }
     .link-btn {
         background: none;

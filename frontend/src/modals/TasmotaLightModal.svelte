@@ -169,7 +169,7 @@
     }
     .swatch.dim { opacity: 0.3; }
     .meta { flex: 1; min-width: 0; }
-    .device-ip { font-size: 12px; color: var(--text-muted); font-family: ui-monospace, monospace; }
+    .device-ip { font-size: 12px; color: var(--text-muted); font-family: var(--font-mono); }
     .hint { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
     .toggle { display: flex; align-items: center; gap: 6px; cursor: pointer; }
     .toggle-label { font-size: 13px; font-weight: 500; }
@@ -179,8 +179,8 @@
         display: flex; justify-content: space-between; align-items: baseline;
     }
     .field label { font-size: 13px; font-weight: 500; }
-    .val { font-size: 12px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
-    .mono { font-family: ui-monospace, monospace; }
+    .val { font-size: 12px; color: var(--text-muted); font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+    .mono { font-family: var(--font-mono); }
 
     input[type="range"] {
         width: 100%;

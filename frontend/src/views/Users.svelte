@@ -210,9 +210,9 @@
         gap: var(--space-4);
     }
     .card {
-        background: var(--bg-elevated);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
+        background: var(--card);
+        border: 1px solid var(--hairline);
+        border-radius: var(--r-lg);
         padding: var(--space-4);
         display: flex;
         flex-direction: column;
@@ -238,14 +238,15 @@
     .name { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .role { color: var(--text-muted); font-size: 12px; margin-top: 2px; }
     .badge {
+        font-family: var(--font-mono);
         font-size: 10px;
-        font-weight: 700;
+        font-weight: 500;
         text-transform: uppercase;
         letter-spacing: 0.04em;
-        color: var(--primary);
-        background: var(--primary-soft);
+        color: var(--on);
+        background: var(--on-soft);
         padding: 1px 6px;
-        border-radius: 999px;
+        border-radius: var(--r-sm);
     }
     .badge.you { color: var(--text-muted); background: var(--surface-hover); }
     .badge.kid { color: #b15dff; background: rgba(177, 93, 255, 0.14); }
@@ -274,15 +275,15 @@
         align-items: center;
         gap: var(--space-3);
         padding: var(--space-2) var(--space-3);
-        background: var(--surface);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
+        background: var(--card-3);
+        border: 1px solid var(--hairline);
+        border-radius: var(--r-md);
     }
-    .code-label, .dev-label { color: var(--text-muted); font-size: 12px; flex-shrink: 0; }
+    .code-label, .dev-label { color: var(--text-mute); font-size: 12px; flex-shrink: 0; }
     .code {
-        font-family: ui-monospace, monospace;
+        font-family: var(--font-mono);
         font-size: 1.15rem;
-        font-weight: 700;
+        font-weight: 600;
         letter-spacing: 0.22em;
         font-variant-numeric: tabular-nums;
         color: var(--text);

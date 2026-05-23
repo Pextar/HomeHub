@@ -819,17 +819,21 @@
         transition: box-shadow var(--t-med), border-color var(--t-med);
     }
     .pulse[data-active="true"] {
-        border-color: rgba(251, 191, 36, 0.4);
-        box-shadow: 0 0 0 1px rgba(251, 191, 36, 0.18),
-                    0 12px 32px -16px rgba(251, 191, 36, 0.35);
+        border-color: var(--on);
+        box-shadow: 0 0 0 1px var(--on-soft),
+                    0 12px 32px -16px var(--on-glow);
     }
-    .pulse-num { display: flex; align-items: baseline; gap: 4px; font-variant-numeric: tabular-nums; }
+    .pulse-num {
+        display: flex; align-items: baseline; gap: 4px;
+        font-family: var(--font-mono);
+        font-variant-numeric: tabular-nums;
+    }
     .pulse-num .big {
-        font-size: 2.5rem; font-weight: 800; line-height: 1;
+        font-size: 2.5rem; font-weight: 700; line-height: 1;
         letter-spacing: -0.03em; color: var(--text);
     }
-    .pulse[data-active="true"] .pulse-num .big { color: #fbbf24; }
-    .pulse-num .of { font-size: 1rem; color: var(--text-faint); font-weight: 600; }
+    .pulse[data-active="true"] .pulse-num .big { color: var(--on); }
+    .pulse-num .of { font-size: 1rem; color: var(--text-faint); font-weight: 500; }
     .pulse-title { font-weight: 700; font-size: 1rem; letter-spacing: -0.01em; }
     .pulse-sub { color: var(--text-muted); font-size: 12px; margin-top: 2px; }
 
@@ -868,8 +872,8 @@
         border-radius: 8px;
         background:
             radial-gradient(120% 80% at 50% 60%,
-                rgba(251, 191, 36, calc(var(--warmth, 0) * 0.36)) 0%,
-                rgba(251, 191, 36, calc(var(--warmth, 0) * 0.08)) 50%,
+                rgba(245, 189, 110, calc(var(--warmth, 0) * 0.36)) 0%,
+                rgba(245, 189, 110, calc(var(--warmth, 0) * 0.08)) 50%,
                 transparent 75%),
             var(--surface);
         border: 1px solid var(--border);
@@ -904,7 +908,7 @@
         .room[data-size="big"]   { grid-column: span 2; grid-row: span 2; }
     }
     .room.lit {
-        border-color: rgba(251, 191, 36, calc(var(--warmth, 0) * 0.5 + 0.2));
+        border-color: rgba(245, 189, 110, calc(var(--warmth, 0) * 0.5 + 0.2));
     }
     .room.draft {
         border-style: dashed;
@@ -933,10 +937,12 @@
         color: var(--text);
     }
     .room-count {
-        font-size: 11px; font-variant-numeric: tabular-nums;
-        color: var(--text-faint); flex-shrink: 0; font-weight: 600;
+        font-size: 11px;
+        font-family: var(--font-mono);
+        font-variant-numeric: tabular-nums;
+        color: var(--text-faint); flex-shrink: 0; font-weight: 500;
     }
-    .room-count[data-on="true"] { color: #fbbf24; }
+    .room-count[data-on="true"] { color: var(--on); }
     .room-count .slash { opacity: 0.5; margin: 0 1px; }
     .empty-tag {
         text-transform: uppercase; letter-spacing: 0.05em;
@@ -959,9 +965,9 @@
                     box-shadow var(--t-fast);
     }
     .dot[data-on="true"] {
-        background: #fbbf24; border-color: #fbbf24;
-        box-shadow: 0 0 8px rgba(251, 191, 36, 0.6),
-                    0 0 0 2px rgba(251, 191, 36, 0.18);
+        background: var(--on); border-color: var(--on);
+        box-shadow: 0 0 8px var(--on-glow),
+                    0 0 0 2px var(--on-soft);
     }
 
     /* Pencil badge — replaces the on/off count in edit mode */
@@ -1408,8 +1414,8 @@
     /* Lit rooms get a warm halo that scales with how much is on. */
     .room.lit {
         box-shadow:
-            0 0 0 1px rgba(251, 191, 36, calc(var(--warmth, 0) * 0.28)),
-            0 10px 26px -14px rgba(251, 191, 36, calc(var(--warmth, 0) * 0.7));
+            0 0 0 1px rgba(245, 189, 110, calc(var(--warmth, 0) * 0.28)),
+            0 10px 26px -14px rgba(245, 189, 110, calc(var(--warmth, 0) * 0.7));
     }
     /* Selection cue always wins over the lit halo. */
     .room.selected {
@@ -1424,7 +1430,7 @@
         inset: 0;
         z-index: 0;
         background: radial-gradient(120% 160% at 10% 50%,
-            rgba(251, 191, 36, 0.18), transparent 55%);
+            rgba(245, 189, 110, 0.18), transparent 55%);
         opacity: 0;
         transition: opacity var(--t-med);
         pointer-events: none;
@@ -1439,7 +1445,7 @@
     }
     .pulse-num, .pulse-text { position: relative; z-index: 1; }
     .pulse[data-active="true"] .pulse-num .big {
-        text-shadow: 0 0 18px rgba(251, 191, 36, 0.45);
+        text-shadow: 0 0 18px var(--on-glow);
     }
 
     /* Honour reduced-motion: drop the ambient animation. */

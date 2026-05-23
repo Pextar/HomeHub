@@ -222,6 +222,7 @@
         background: var(--bg-elevated);
         border-radius: 999px;
         padding: 2px 8px;
+        font-family: var(--font-mono);
         font-variant-numeric: tabular-nums;
     }
     .adopt { font-size: 12px; color: var(--primary); font-weight: 600; }

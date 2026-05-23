@@ -49,6 +49,7 @@
          while the view's normal gap separates this block from the topbar. -->
     <div class="schedule-section">
         <div class="section-controls">
+            <h2 class="section-head">Automations</h2>
             <button class="btn btn-ghost" onclick={toggleAll} disabled={pausing}>
                 {anyEnabled ? "Pause all" : "Resume all"}
             </button>
@@ -67,7 +68,19 @@
 {/if}
 
 <style>
-    .schedule-section { display: flex; flex-direction: column; gap: var(--space-2); }
-    .section-controls { display: flex; justify-content: flex-end; }
+    .schedule-section { display: flex; flex-direction: column; gap: var(--space-3); }
+    .section-controls {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-3);
+    }
+    .section-head {
+        margin: 0;
+        font-size: 17px;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+        color: var(--text);
+    }
     .list { display: flex; flex-direction: column; gap: var(--space-2); }
 </style>

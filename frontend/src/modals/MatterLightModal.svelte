@@ -346,7 +346,7 @@
         flex: 1; min-width: 0;
     }
     .device-name { font-size: 14px; font-weight: 600; color: var(--text); }
-    .device-id { font-size: 12px; color: var(--text-muted); font-family: ui-monospace, monospace; }
+    .device-id { font-size: 12px; color: var(--text-muted); font-family: var(--font-mono); }
     .hint { font-size: 12px; color: var(--text-muted); }
     .hint.warn { color: var(--warn); }
 
@@ -388,10 +388,11 @@
         padding: var(--space-4) 0 var(--space-2);
     }
     .hex-label {
-        font-family: ui-monospace, monospace;
+        font-family: var(--font-mono);
         font-size: 12px;
         color: var(--text-muted);
         letter-spacing: 0.05em;
+        font-variant-numeric: tabular-nums;
     }
 
     /* --- sliders -------------------------------------------------------- */
@@ -405,7 +406,7 @@
         display: inline-flex; align-items: center; gap: 6px;
         color: var(--text);
     }
-    .val { font-size: 12px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+    .val { font-size: 12px; color: var(--text-muted); font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
 
     input[type="range"] {
         width: 100%;
@@ -458,6 +459,7 @@
         font-size: 11px;
         font-weight: 600;
         color: var(--text-muted);
+        font-family: var(--font-mono);
         letter-spacing: 0.08em;
         text-transform: uppercase;
         margin-bottom: var(--space-3);
