@@ -1,0 +1,22 @@
+# Caddy reverse-proxy config for rf-socket-controller + Tailscale HTTPS.
+#
+# This is a template — the setup script (deploy/tailscale-https-setup.sh)
+# fills in your actual Tailscale hostname and writes the real config to
+# /etc/caddy/Caddyfile on the Pi.  You do NOT need to edit or copy this
+# file manually.
+#
+# Shown here so the shape is visible in version control.
+#
+# $TAILSCALE_HOST  →  e.g.  pi4.example-org.ts.net
+
+$TAILSCALE_HOST {
+    # Forward every request to the Go backend.
+    # Caddy automatically adds X-Forwarded-Proto: https so the app sets
+    # Secure on session cookies without extra config.
+    reverse_proxy localhost:8080
+
+    # Cert issued by Tailscale / Let's Encrypt.
+    # Rotate with:  sudo deploy/tailscale-cert-renew.sh
+    tls /etc/tailscale/certs/$TAILSCALE_HOST.crt \
+        /etc/tailscale/certs/$TAILSCALE_HOST.key
+}
