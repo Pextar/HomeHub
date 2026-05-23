@@ -41,10 +41,19 @@ export interface Settings {
 
 // A login profile. Non-admins only see/control the sockets in socket_ids;
 // admins ignore that list and have full access.
+//
+// Roles:
+//   - owner=true, admin=true  → the one bootstrapped system owner
+//   - owner=false, admin=true → manager (full access, added via invite link)
+//   - admin=false             → limited profile (login code, specific devices)
 export interface User {
   id: string;
   username: string;
   admin: boolean;
+  /** True for the one bootstrapped owner — cannot be deleted or demoted. */
+  owner?: boolean;
+  /** True while the invite link hasn't been accepted yet (no password set). */
+  pending_invite?: boolean;
   // A limited profile rendered with the playful, oversized kid layout.
   kid: boolean;
   // Limited profiles sign in with this generated code instead of a password;
@@ -54,14 +63,19 @@ export interface User {
   created_at: string;
 }
 
-// Admins need a password; limited profiles (admin: false) get a code
-// generated server-side, so password is omitted for them.
+// New admin users get an invite link — no password is set at creation time.
+// Limited profiles (admin: false) get a code generated server-side.
 export interface UserCreate {
   username: string;
-  password?: string;
   admin: boolean;
   kid?: boolean;
   socket_ids: string[];
+}
+
+// Response from POST /api/users when creating an admin (manager) profile.
+// invite_url is only present in this one response; store it before closing.
+export interface UserCreateResponse extends User {
+  invite_url?: string;
 }
 
 // All fields optional — only the ones present are changed. An empty/omitted

@@ -72,6 +72,7 @@
     }
 
     async function removeUser(u: User) {
+        if (u.owner) return; // owner cannot be deleted — button is hidden but guard anyway
         const ok = await openModal<boolean>(ConfirmModal, {
             title: `Delete ${u.username}?`,
             message: "This profile will no longer be able to sign in. This can't be undone.",
@@ -126,26 +127,45 @@
             <li class="card">
                 <div class="top">
                     <div class="ident">
-                        <span class="avatar" class:admin={u.admin}>
+                        <span class="avatar" class:admin={u.admin} class:owner={u.owner}>
                             <Icon name={u.admin ? "settings" : "user"} size={18} />
                         </span>
                         <div class="names">
                             <div class="name-row">
                                 <span class="name">{u.username}</span>
-                                {#if u.admin}<span class="badge">Admin</span>{/if}
+                                {#if u.owner}
+                                    <span class="badge owner-badge">Owner</span>
+                                {:else if u.admin}
+                                    <span class="badge">Admin</span>
+                                {/if}
+                                {#if u.pending_invite}<span class="badge invite-badge">Invite pending</span>{/if}
                                 {#if u.kid}<span class="badge kid">Kid 🧸</span>{/if}
                                 {#if u.id === session.user?.id}<span class="badge you">You</span>{/if}
                             </div>
-                            <div class="role">{u.admin ? "Username + password" : u.kid ? "Kid mode · signs in with a code" : "Signs in with a login code"}</div>
+                            <div class="role">
+                                {#if u.owner}
+                                    System owner · username + password
+                                {:else if u.admin && u.pending_invite}
+                                    Waiting for invite to be accepted
+                                {:else if u.admin}
+                                    Username + password
+                                {:else if u.kid}
+                                    Kid mode · signs in with a code
+                                {:else}
+                                    Signs in with a login code
+                                {/if}
+                            </div>
                         </div>
                     </div>
                     <div class="row-actions">
                         <button class="icon-btn" aria-label="Edit profile" title="Edit" onclick={() => editUser(u)}>
                             <Icon name="edit" size={16} />
                         </button>
-                        <button class="icon-btn danger" aria-label="Delete profile" title="Delete" onclick={() => removeUser(u)}>
-                            <Icon name="trash" size={16} />
-                        </button>
+                        {#if !u.owner}
+                            <button class="icon-btn danger" aria-label="Delete profile" title="Delete" onclick={() => removeUser(u)}>
+                                <Icon name="trash" size={16} />
+                            </button>
+                        {/if}
                     </div>
                 </div>
 
@@ -211,6 +231,8 @@
         flex-shrink: 0;
     }
     .avatar.admin { background: var(--primary-soft); color: var(--primary); }
+    .avatar.owner { background: #fef3c7; color: #92400e; }
+    :global([data-theme="dark"]) .avatar.owner { background: rgba(245, 158, 11, 0.15); color: #fbbf24; }
     .names { min-width: 0; }
     .name-row { display: flex; align-items: center; gap: var(--space-2); }
     .name { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -227,6 +249,10 @@
     }
     .badge.you { color: var(--text-muted); background: var(--surface-hover); }
     .badge.kid { color: #b15dff; background: rgba(177, 93, 255, 0.14); }
+    .badge.owner-badge { color: #92400e; background: #fef3c7; }
+    :global([data-theme="dark"]) .badge.owner-badge { color: #fbbf24; background: rgba(245, 158, 11, 0.15); }
+    .badge.invite-badge { color: #0369a1; background: #e0f2fe; }
+    :global([data-theme="dark"]) .badge.invite-badge { color: #38bdf8; background: rgba(56, 189, 248, 0.15); }
     .row-actions { display: flex; gap: 4px; flex-shrink: 0; }
     .icon-btn {
         display: grid;

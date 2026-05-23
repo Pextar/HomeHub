@@ -19,6 +19,7 @@ import type {
   MatterStateUpdate,
   User,
   UserCreate,
+  UserCreateResponse,
   UserUpdate,
 } from "./types";
 
@@ -74,9 +75,19 @@ export const api = {
 
   // Profiles (admin only)
   listUsers() { return req<User[]>("/users"); },
-  createUser(body: UserCreate) { return req<User>("/users", { method: "POST", body: json(body) }); },
+  // Creating an admin (manager) user returns invite_url in addition to the
+  // normal user fields — copy it before closing the modal.
+  createUser(body: UserCreate) { return req<UserCreateResponse>("/users", { method: "POST", body: json(body) }); },
   updateUser(id: string, body: UserUpdate) { return req<User>(`/users/${encodeURIComponent(id)}`, { method: "PUT", body: json(body) }); },
   deleteUser(id: string) { return req<void>(`/users/${encodeURIComponent(id)}`, { method: "DELETE" }); },
+
+  // Invite flow — both endpoints are public (no session required).
+  // lookupInvite returns the username for a valid/unexpired token.
+  lookupInvite(token: string) { return req<{ username: string }>(`/invite?token=${encodeURIComponent(token)}`); },
+  // acceptInvite sets the password and returns a session cookie in the response.
+  acceptInvite(token: string, password: string) {
+    return req<{ username: string }>("/invite", { method: "POST", body: json({ token, password }) });
+  },
 
   health() {
     return req<{ status: string; sockets: number; schedules: number; groups: number; scenes: number; timers: number; time: string }>("/health");

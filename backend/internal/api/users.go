@@ -1,5 +1,13 @@
 // Package api: users.go — login profiles and per-user socket access.
 //
+// Role model:
+//   - Owner  (Admin=true, Owner=true): the one bootstrapped admin. Cannot be
+//     deleted or demoted. Signs in with username + password set via AUTH_PASS.
+//   - Manager (Admin=true, Owner=false): created by the owner or another admin.
+//     Gets a one-time invite link; they set their own password on first use.
+//   - Limited (Admin=false): limited profile. Signs in with a short numeric
+//     login code. Can only see/control the sockets assigned to them.
+//
 // Admins have unrestricted access and can manage other profiles; non-admin
 // users only see and control the sockets assigned to them. Access is
 // enforced server-side via requireAdmin / requireSocketAccess and the
@@ -8,6 +16,8 @@
 package api
 
 import (
+	cryptorand "crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"math/rand"
@@ -26,13 +36,15 @@ import (
 // an admin can read back and re-share a profile's code; it's only ever set
 // for limited (non-admin) profiles.
 type userView struct {
-	ID        string    `json:"id"`
-	Username  string    `json:"username"`
-	Admin     bool      `json:"admin"`
-	Kid       bool      `json:"kid"`
-	LoginCode string    `json:"login_code,omitempty"`
-	SocketIDs []string  `json:"socket_ids"`
-	CreatedAt time.Time `json:"created_at"`
+	ID            string    `json:"id"`
+	Username      string    `json:"username"`
+	Admin         bool      `json:"admin"`
+	Owner         bool      `json:"owner,omitempty"`
+	Kid           bool      `json:"kid"`
+	LoginCode     string    `json:"login_code,omitempty"`
+	PendingInvite bool      `json:"pending_invite,omitempty"`
+	SocketIDs     []string  `json:"socket_ids"`
+	CreatedAt     time.Time `json:"created_at"`
 }
 
 func toUserView(u *store.User) userView {
@@ -41,13 +53,15 @@ func toUserView(u *store.User) userView {
 		ids = []string{}
 	}
 	return userView{
-		ID:        u.ID,
-		Username:  u.Username,
-		Admin:     u.Admin,
-		Kid:       u.Kid,
-		LoginCode: u.LoginCode,
-		SocketIDs: ids,
-		CreatedAt: u.CreatedAt,
+		ID:            u.ID,
+		Username:      u.Username,
+		Admin:         u.Admin,
+		Owner:         u.Owner,
+		Kid:           u.Kid,
+		LoginCode:     u.LoginCode,
+		PendingInvite: u.Admin && u.InviteToken != "" && u.InviteExpiry.After(time.Now()),
+		SocketIDs:     ids,
+		CreatedAt:     u.CreatedAt,
 	}
 }
 
@@ -64,6 +78,15 @@ func generateLoginCode(st *store.Store) string {
 	// Astronomically unlikely with a handful of users; fall back to a
 	// time-derived value rather than loop forever.
 	return fmt.Sprintf("%06d", int(time.Now().UnixNano()%1_000_000))
+}
+
+// generateInviteToken returns a cryptographically random 32-byte hex token.
+func generateInviteToken() (string, error) {
+	b := make([]byte, 32)
+	if _, err := cryptorand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
 }
 
 // canAccess reports whether the request's user may touch the given socket.
@@ -125,7 +148,6 @@ func (s *Server) listUsers(w http.ResponseWriter, _ *http.Request) {
 func (s *Server) createUser(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Username  string   `json:"username"`
-		Password  string   `json:"password"`
 		Admin     bool     `json:"admin"`
 		Kid       bool     `json:"kid"`
 		SocketIDs []string `json:"socket_ids"`
@@ -139,21 +161,6 @@ func (s *Server) createUser(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "username is required")
 		return
 	}
-	// Admins sign in with a password; limited profiles get a generated
-	// login code instead and have no password.
-	var hash string
-	if body.Admin {
-		if strings.TrimSpace(body.Password) == "" {
-			writeError(w, http.StatusBadRequest, "admin profiles need a password")
-			return
-		}
-		h, err := bcrypt.GenerateFromPassword([]byte(body.Password), bcrypt.DefaultCost)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to hash password")
-			return
-		}
-		hash = string(h)
-	}
 
 	s.Store.Mu.Lock()
 	defer s.Store.Mu.Unlock()
@@ -162,6 +169,7 @@ func (s *Server) createUser(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "a user with that name already exists")
 		return
 	}
+
 	user := &store.User{
 		ID:        fmt.Sprintf("user_%d", time.Now().UnixNano()),
 		Username:  username,
@@ -170,17 +178,47 @@ func (s *Server) createUser(w http.ResponseWriter, r *http.Request) {
 		SocketIDs: sanitizeSocketIDs(s.Store, body.SocketIDs),
 		CreatedAt: time.Now(),
 	}
-	user.PasswordHash = hash
-	if !body.Admin {
+
+	var inviteURL string
+	if body.Admin {
+		// Admin (manager) users get a one-time invite link so they can set
+		// their own password — the creating admin never picks it for them.
+		token, err := generateInviteToken()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to generate invite token")
+			return
+		}
+		user.InviteToken = token
+		user.InviteExpiry = time.Now().Add(7 * 24 * time.Hour)
+
+		// Build the invite URL from the request's host so it points at the
+		// actual running instance (works on LAN, custom domains, etc.).
+		scheme := "http"
+		if isSecureRequest(r) {
+			scheme = "https"
+		}
+		inviteURL = fmt.Sprintf("%s://%s/?invite=%s", scheme, r.Host, token)
+	} else {
+		// Limited profiles get a generated login code.
 		user.LoginCode = generateLoginCode(s.Store)
 	}
+
 	s.Store.Users[user.ID] = user
 	if err := s.Store.Save(); err != nil {
 		delete(s.Store.Users, user.ID)
 		writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
 		return
 	}
-	writeJSON(w, http.StatusCreated, toUserView(user))
+
+	// Include the invite URL only in the creation response, never again.
+	type createResponse struct {
+		userView
+		InviteURL string `json:"invite_url,omitempty"`
+	}
+	writeJSON(w, http.StatusCreated, createResponse{
+		userView:  toUserView(user),
+		InviteURL: inviteURL,
+	})
 }
 
 func (s *Server) updateUser(w http.ResponseWriter, r *http.Request) {
@@ -206,6 +244,13 @@ func (s *Server) updateUser(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "user not found")
 		return
 	}
+
+	// The owner's admin status is immutable — block any attempt to demote.
+	if user.Owner && body.Admin != nil && !*body.Admin {
+		writeError(w, http.StatusBadRequest, "the owner account cannot be demoted")
+		return
+	}
+
 	// Snapshot the credentials so we can detect a change below and bump
 	// TokenVersion, which invalidates this user's existing sessions.
 	prevHash, prevCode := user.PasswordHash, user.LoginCode
@@ -246,8 +291,11 @@ func (s *Server) updateUser(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			user.PasswordHash = string(hash)
+			// Setting a password clears any pending invite.
+			user.InviteToken = ""
+			user.InviteExpiry = time.Time{}
 		}
-		if user.PasswordHash == "" {
+		if user.PasswordHash == "" && user.InviteToken == "" {
 			writeError(w, http.StatusBadRequest, "set a password to make this profile an admin")
 			return
 		}
@@ -256,7 +304,10 @@ func (s *Server) updateUser(w http.ResponseWriter, r *http.Request) {
 		user.LoginCode = ""
 	} else {
 		user.Admin = false
+		user.Owner = false // can't be owner without being admin
 		user.PasswordHash = ""
+		user.InviteToken = ""
+		user.InviteExpiry = time.Time{}
 		if body.Kid != nil {
 			user.Kid = *body.Kid
 		}
@@ -287,6 +338,10 @@ func (s *Server) deleteUser(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "user not found")
 		return
 	}
+	if user.Owner {
+		writeError(w, http.StatusBadRequest, "the owner account cannot be deleted")
+		return
+	}
 	if user.Admin && s.Store.AdminCount() <= 1 {
 		writeError(w, http.StatusBadRequest, "can't delete the last admin")
 		return
@@ -298,6 +353,81 @@ func (s *Server) deleteUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// lookupInvite returns basic info about a pending invite so the frontend can
+// greet the invitee by name. It's a public endpoint — it only reveals the
+// username for an invite that already exists and hasn't expired.
+func (s *Server) lookupInvite(w http.ResponseWriter, r *http.Request) {
+	token := strings.TrimSpace(r.URL.Query().Get("token"))
+	if token == "" {
+		writeError(w, http.StatusBadRequest, "token is required")
+		return
+	}
+
+	s.Store.Mu.RLock()
+	user := s.Store.UserByInviteToken(token)
+	s.Store.Mu.RUnlock()
+
+	if user == nil || user.InviteExpiry.Before(time.Now()) {
+		writeError(w, http.StatusNotFound, "invite link is invalid or has expired")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"username": user.Username})
+}
+
+// acceptInvite lets a newly-invited admin user set their own password via the
+// one-time token they received. On success it logs them in immediately by
+// setting a session cookie — no separate login step needed.
+func (s *Server) acceptInvite(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Token    string `json:"token"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+	token := strings.TrimSpace(body.Token)
+	password := strings.TrimSpace(body.Password)
+	if token == "" {
+		writeError(w, http.StatusBadRequest, "token is required")
+		return
+	}
+	if len(password) < 8 {
+		writeError(w, http.StatusBadRequest, "password must be at least 8 characters")
+		return
+	}
+
+	s.Store.Mu.Lock()
+	defer s.Store.Mu.Unlock()
+
+	user := s.Store.UserByInviteToken(token)
+	if user == nil || user.InviteExpiry.Before(time.Now()) {
+		writeError(w, http.StatusNotFound, "invite link is invalid or has expired")
+		return
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to hash password")
+		return
+	}
+
+	user.PasswordHash = string(hash)
+	user.InviteToken = ""
+	user.InviteExpiry = time.Time{}
+	user.TokenVersion++ // invalidate any stale tokens (shouldn't be any, but defensive)
+
+	if err := s.Store.Save(); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
+		return
+	}
+
+	// Log the user in immediately — they shouldn't have to re-enter their
+	// brand-new password on a separate login screen.
+	setSessionCookie(w, s.SessionSecret, user.ID, user.TokenVersion, isSecureRequest(r))
+	writeJSON(w, http.StatusOK, map[string]string{"username": user.Username})
 }
 
 // sanitizeSocketIDs keeps only IDs that refer to real sockets, dropping
@@ -327,7 +457,9 @@ func sortUserViews(v []userView) {
 
 // Bootstrap seeds an initial admin from AUTH_USER/AUTH_PASS when no users
 // exist yet, so existing single-credential deployments keep working and a
-// fresh install has a way in. A no-op once any user is present.
+// fresh install has a way in. The bootstrapped user is marked Owner=true —
+// they are the one permanent admin and cannot be deleted or demoted.
+// A no-op once any user is present.
 func (s *Server) Bootstrap() error {
 	if s.AuthUser == "" || s.AuthPass == "" {
 		return nil
@@ -335,6 +467,13 @@ func (s *Server) Bootstrap() error {
 	s.Store.Mu.Lock()
 	defer s.Store.Mu.Unlock()
 	if len(s.Store.Users) > 0 {
+		// Ensure the first admin is marked as owner (migration for existing installs).
+		for _, u := range s.Store.Users {
+			if u.Admin && !u.Owner {
+				u.Owner = true
+				return s.Store.Save()
+			}
+		}
 		return nil
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(s.AuthPass), bcrypt.DefaultCost)
@@ -345,6 +484,7 @@ func (s *Server) Bootstrap() error {
 		ID:        fmt.Sprintf("user_%d", time.Now().UnixNano()),
 		Username:  s.AuthUser,
 		Admin:     true,
+		Owner:     true, // the one permanent admin
 		SocketIDs: []string{},
 		CreatedAt: time.Now(),
 	}

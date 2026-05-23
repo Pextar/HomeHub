@@ -83,6 +83,11 @@ func (s *Server) Handler() http.Handler {
 	r.HandleFunc("/api/login", s.handleLogin).Methods("POST")
 	r.HandleFunc("/api/logout", s.handleLogout).Methods("POST")
 
+	// Invite endpoints are also public: a new admin sets their own password
+	// via a one-time link before they have a session cookie.
+	r.HandleFunc("/api/invite", s.lookupInvite).Methods("GET")
+	r.HandleFunc("/api/invite", s.acceptInvite).Methods("POST")
+
 	api := r.PathPrefix("/api").Subrouter()
 	if authEnabled {
 		api.Use(s.authMiddleware)

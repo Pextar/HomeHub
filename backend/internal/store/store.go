@@ -215,6 +215,20 @@ func (s *Store) UserByLoginCode(code string) *User {
 	return nil
 }
 
+// UserByInviteToken returns the user whose pending invite token matches,
+// or nil. An empty token never matches. Caller must hold Mu.
+func (s *Store) UserByInviteToken(token string) *User {
+	if token == "" {
+		return nil
+	}
+	for _, u := range s.Users {
+		if u.InviteToken == token {
+			return u
+		}
+	}
+	return nil
+}
+
 // AdminCount returns how many admin users exist. Caller must hold Mu.
 func (s *Store) AdminCount() int {
 	n := 0
