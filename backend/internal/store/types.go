@@ -46,6 +46,29 @@ type Schedule struct {
 	LastFiredAt         time.Time `json:"last_fired_at,omitempty"`
 }
 
+// NotifPrefs controls which event categories trigger push notifications for
+// a user. The boolean categories default to true when a user first subscribes
+// (set explicitly in the subscribe handler). A user who has never subscribed
+// will have the zero value (all false) — no notifications sent.
+//
+// QuietHours, when enabled, suppresses every category EXCEPT SensorAlerts
+// (which can be safety-critical) between QuietStart and QuietEnd local time.
+// The window may wrap past midnight (e.g. 22:00–07:00).
+//
+// MutedSocketIDs / MutedSensorIDs let a user opt specific devices out of
+// notifications while keeping the category enabled for everything else.
+type NotifPrefs struct {
+	SensorAlerts   bool     `json:"sensor_alerts"`
+	StateChanges   bool     `json:"state_changes"`
+	ScheduleFired  bool     `json:"schedule_fired"`
+	DeviceOffline  bool     `json:"device_offline"`
+	QuietHours     bool     `json:"quiet_hours,omitempty"`
+	QuietStart     string   `json:"quiet_start,omitempty"` // "HH:MM"
+	QuietEnd       string   `json:"quiet_end,omitempty"`   // "HH:MM"
+	MutedSocketIDs []string `json:"muted_socket_ids,omitempty"`
+	MutedSensorIDs []string `json:"muted_sensor_ids,omitempty"`
+}
+
 // User is a login profile. Admins have unrestricted access; non-admins
 // may only see and control the sockets listed in SocketIDs. PasswordHash
 // is a bcrypt hash — it is persisted to disk but the API layer never
@@ -69,11 +92,12 @@ type User struct {
 	// (password or login code). Session cookies embed the version they
 	// were minted with, so changing a credential invalidates every
 	// existing session for that user.
-	TokenVersion int `json:"token_version,omitempty"`
+	TokenVersion int        `json:"token_version,omitempty"`
 	// Invite fields are set when a new admin user is created and cleared
 	// once they accept the invite and set their password.
-	InviteToken  string    `json:"invite_token,omitempty"`
-	InviteExpiry time.Time `json:"invite_expiry,omitempty"`
+	InviteToken  string     `json:"invite_token,omitempty"`
+	InviteExpiry time.Time  `json:"invite_expiry,omitempty"`
+	NotifPrefs   NotifPrefs `json:"notif_prefs,omitempty"`
 }
 
 // CanAccessSocket reports whether this user may see/control the given
@@ -171,6 +195,11 @@ type Sensor struct {
 	AlertMax      *float64   `json:"alert_max,omitempty"`
 	LastValue     *float64   `json:"last_value,omitempty"`
 	LastReadingAt *time.Time `json:"last_reading_at,omitempty"`
+	// Alerting is true while the latest reading is outside the configured
+	// thresholds. Not persisted — resets to false on restart. Used to
+	// detect the rising edge of an alert so push notifications are sent
+	// only once per threshold breach, not on every subsequent reading.
+	Alerting bool `json:"alerting,omitempty"`
 }
 
 // SensorReading is one timestamped value for a sensor. Stored in a

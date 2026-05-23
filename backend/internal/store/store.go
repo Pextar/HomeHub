@@ -49,6 +49,24 @@ type Store struct {
 	// non-blocking — it runs while Mu is held. Used to push live updates to
 	// connected clients over SSE.
 	OnChange func()
+
+	// OnStateChange, if set, is called after a socket's state changes
+	// successfully (same conditions as OnChange). It receives a copy of the
+	// socket and its new state. Runs while Mu is held — keep it non-blocking.
+	OnStateChange func(socket Socket, newState bool)
+
+	// OnSensorAlert, if set, is called when a sensor reading crosses a
+	// threshold for the first time (rising edge only — not on every reading
+	// while already alerting). direction is "above" or "below".
+	// Runs while Mu is held — keep it non-blocking.
+	OnSensorAlert func(sensor Sensor, value float64, direction string)
+
+	// SuppressStateChange, when true, prevents ApplyState from firing
+	// OnStateChange. Bulk operations (all-off, room, group, scene,
+	// scheduler) set this so they can emit a single summary notification
+	// instead of one per affected socket. OnChange (SSE) still fires so the
+	// UI stays live. Caller must hold Mu (write lock).
+	SuppressStateChange bool
 }
 
 const (
@@ -254,7 +272,9 @@ func (s *Store) SaveSensors() error {
 }
 
 // AppendReading adds one reading to a sensor's rolling window, updates
-// the sensor's LastValue/LastReadingAt, and persists. Caller must hold Mu.
+// the sensor's LastValue/LastReadingAt, persists, and fires OnSensorAlert
+// if the reading crosses a configured threshold for the first time.
+// Caller must hold Mu.
 func (s *Store) AppendReading(sensorID string, r SensorReading) error {
 	sensor, ok := s.Sensors[sensorID]
 	if !ok {
@@ -270,6 +290,21 @@ func (s *Store) AppendReading(sensorID string, r SensorReading) error {
 	t := r.Time
 	sensor.LastValue = &v
 	sensor.LastReadingAt = &t
+
+	// Rising-edge alert detection: fire OnSensorAlert only when the sensor
+	// transitions from OK → alerting, not on every reading while breached.
+	wasAlerting := sensor.Alerting
+	nowAlerting := (sensor.AlertMax != nil && r.Value > *sensor.AlertMax) ||
+		(sensor.AlertMin != nil && r.Value < *sensor.AlertMin)
+	sensor.Alerting = nowAlerting
+	if nowAlerting && !wasAlerting && s.OnSensorAlert != nil {
+		direction := "above"
+		if sensor.AlertMin != nil && r.Value < *sensor.AlertMin {
+			direction = "below"
+		}
+		s.OnSensorAlert(*sensor, r.Value, direction)
+	}
+
 	return s.SaveSensors()
 }
 

@@ -205,6 +205,71 @@ The page is also a Progressive Web App: on Chrome / Safari use
 works offline (the shell loads even without network — controlling
 sockets still requires the Pi to be reachable).
 
+## Enabling HTTPS (Tailscale — recommended for iPhones and Web Push)
+
+Several features require a **secure context** (HTTPS):
+
+- Web Push notifications on iOS / Safari
+- QR-code scanner (`getUserMedia`) in mobile browsers
+- `Secure` flag on session cookies
+
+The cleanest solution is **Tailscale + Caddy**: Tailscale gives the Pi a
+stable `<machine>.ts.net` hostname backed by a real Let's Encrypt certificate
+(no browser warnings, works on iPhone out of the box).  Caddy acts as a thin
+reverse proxy that terminates TLS and forwards requests to the Go backend on
+port 8080.
+
+### What you need
+
+| Component | Install |
+|-----------|---------|
+| Tailscale on the Pi | `curl -fsSL https://tailscale.com/install.sh \| sh` |
+| Tailscale on each phone/laptop | [tailscale.com/download](https://tailscale.com/download) — free personal account |
+| Caddy on the Pi | `sudo apt install -y caddy` |
+
+All devices accessing the app need Tailscale running and signed into **the same account** (or a shared tailnet).
+
+### One-time setup
+
+```bash
+# 1. Connect the Pi to Tailscale
+sudo tailscale up
+
+# 2. Enable HTTPS for the machine in the Tailscale admin panel:
+#    https://login.tailscale.com/admin/machines
+#    → click the machine → "…" menu → Enable HTTPS
+
+# 3. Install Caddy
+sudo apt install -y caddy
+
+# 4. Run the setup script (issues the cert, writes Caddyfile, installs cron)
+sudo ./deploy/tailscale-https-setup.sh
+```
+
+The script:
+- Fetches a real cert from Tailscale / Let's Encrypt (`tailscale cert`)
+- Writes `/etc/caddy/Caddyfile` pointed at `localhost:8080`
+- Enables and reloads the `caddy` systemd service
+- Comments out `HTTPS_PORT` in `.env` (Caddy owns TLS from here)
+- Installs a weekly cron (`/etc/cron.weekly/tailscale-cert-renew`) to auto-renew the cert
+
+After setup, the app is available at `https://<machine>.ts.net` — replace
+`<machine>` with the name shown by `tailscale status`.
+
+### Fallback: self-signed cert (desktop browsers only)
+
+If you don't want Tailscale, set `HTTPS_PORT=8443` in `.env`.  The app
+auto-generates a self-signed certificate.  Desktop browsers warn once and
+let you proceed; iOS Safari typically refuses entirely, and Web Push
+subscriptions won't work on iPhones.
+
+```bash
+# In .env:
+HTTPS_PORT=8443
+```
+
+Then reach the app at `https://<pi-ip>:8443`.
+
 ## Frontend development (optional)
 
 For live-reload hacking on the UI without rebuilding each time:

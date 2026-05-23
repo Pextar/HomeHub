@@ -6,10 +6,12 @@ package scheduler
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"math/rand"
 	"time"
 
+	"rf-socket-controller/internal/push"
 	"rf-socket-controller/internal/store"
 )
 
@@ -22,7 +24,8 @@ type pendingFire struct {
 }
 
 // Run blocks until ctx is cancelled. Spawn it in a goroutine.
-func Run(ctx context.Context, st *store.Store) {
+// pushSvc is optional — pass nil to disable push notifications from the scheduler.
+func Run(ctx context.Context, st *store.Store, pushSvc *push.Service) {
 	lastFired := make(map[string]string)
 	// pending holds schedules that are waiting for their random offset to elapse.
 	pending := make(map[string]pendingFire)
@@ -89,12 +92,12 @@ func Run(ctx context.Context, st *store.Store) {
 		for _, s := range dueSchedules {
 			delete(pending, s.ID)
 			lastFired[s.ID] = stamp
-			if err := executeSchedule(st, s); err != nil {
+			if err := executeSchedule(st, s, pushSvc); err != nil {
 				log.Printf("scheduler: schedule %s failed: %v", s.ID, err)
 			}
 		}
 		for _, t := range dueTimers {
-			if err := executeTimer(st, t); err != nil {
+			if err := executeTimer(st, t, pushSvc); err != nil {
 				log.Printf("scheduler: timer %s failed: %v", t.ID, err)
 			}
 		}
@@ -104,13 +107,16 @@ func Run(ctx context.Context, st *store.Store) {
 // executeTimer fires a one-shot timer and removes it from the persistent
 // store regardless of success — the user already saw it scheduled and
 // will see the resulting state on the next refresh.
-func executeTimer(st *store.Store, t store.Timer) error {
+func executeTimer(st *store.Store, t store.Timer, pushSvc *push.Service) error {
 	st.Mu.Lock()
 	defer st.Mu.Unlock()
 
 	delete(st.Timers, t.ID)
 	label := targetLabel(st, t.TargetType, t.TargetID)
+	// Suppress per-socket state-change pushes; the timer summary below covers it.
+	st.SuppressStateChange = true
 	err := st.ExecuteAction(t.TargetType, t.TargetID, t.Action)
+	st.SuppressStateChange = false
 	entry := store.ActivityEntry{Kind: t.TargetType, Source: "timer", Action: t.Action, Label: label}
 	if err != nil {
 		entry.Status = "error"
@@ -122,11 +128,18 @@ func executeTimer(st *store.Store, t store.Timer) error {
 	}
 	if err == nil {
 		log.Printf("timer fired: %s on %s/%s", t.Action, t.TargetType, t.TargetID)
+		if pushSvc != nil {
+			go pushSvc.NotifyEvent(push.CategoryScheduleFired, "", push.PushPayload{
+				Title: fmt.Sprintf("⏰ Timer: %s %s", label, t.Action),
+				URL:   "/#/sockets",
+				Tag:   "timer-" + t.ID,
+			})
+		}
 	}
 	return err
 }
 
-func executeSchedule(st *store.Store, s store.Schedule) error {
+func executeSchedule(st *store.Store, s store.Schedule, pushSvc *push.Service) error {
 	st.Mu.Lock()
 	defer st.Mu.Unlock()
 
@@ -135,7 +148,10 @@ func executeSchedule(st *store.Store, s store.Schedule) error {
 		tt, tid = "socket", s.SocketID
 	}
 	label := targetLabel(st, tt, tid)
+	// Suppress per-socket state-change pushes; the schedule summary below covers it.
+	st.SuppressStateChange = true
 	err := st.ExecuteAction(tt, tid, action)
+	st.SuppressStateChange = false
 	entry := store.ActivityEntry{Kind: tt, Source: "schedule", Action: action, Label: label}
 	if err != nil {
 		entry.Status = "error"
@@ -153,6 +169,13 @@ func executeSchedule(st *store.Store, s store.Schedule) error {
 		return err
 	}
 	log.Printf("scheduler: %s %s (%s/%s)", action, s.ID, tt, tid)
+	if pushSvc != nil {
+		go pushSvc.NotifyEvent(push.CategoryScheduleFired, "", push.PushPayload{
+			Title: fmt.Sprintf("⏰ Schedule: %s %s", label, action),
+			URL:   "/#/schedules",
+			Tag:   "schedule-" + s.ID,
+		})
+	}
 	return nil
 }
 

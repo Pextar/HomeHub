@@ -28,6 +28,8 @@ func (s *Server) roomSetState(target bool) http.HandlerFunc {
 		var ok int
 		failures := make([]map[string]string, 0)
 		var matched bool
+		// Suppress per-socket push notifications; we send one summary below.
+		s.Store.SuppressStateChange = true
 		for _, sock := range s.Store.Sockets {
 			if !strings.EqualFold(sock.Room, room) || !canAccess(user, sock.ID) {
 				continue
@@ -42,6 +44,7 @@ func (s *Server) roomSetState(target bool) http.HandlerFunc {
 			}
 			ok++
 		}
+		s.Store.SuppressStateChange = false
 		if !matched {
 			writeError(w, http.StatusNotFound, "no sockets in that room")
 			return
@@ -60,6 +63,7 @@ func (s *Server) roomSetState(target bool) http.HandlerFunc {
 			writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
 			return
 		}
+		s.notifyBulkState(fmt.Sprintf("%s turned %s", room, action), ok)
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"room":     room,
 			"updated":  ok,

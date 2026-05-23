@@ -39,6 +39,22 @@ export interface Settings {
   location_name?: string;
 }
 
+/** Per-user push notification preferences. Categories default to true on first subscribe. */
+export interface NotifPrefs {
+  sensor_alerts: boolean;
+  state_changes: boolean;
+  schedule_fired: boolean;
+  device_offline: boolean;
+  // Quiet hours suppress everything except sensor alerts between
+  // quiet_start and quiet_end (local time, may wrap past midnight).
+  quiet_hours?: boolean;
+  quiet_start?: string; // "HH:MM"
+  quiet_end?: string;   // "HH:MM"
+  // Devices opted out of notifications while their category stays enabled.
+  muted_socket_ids?: string[];
+  muted_sensor_ids?: string[];
+}
+
 // A login profile. Non-admins only see/control the sockets in socket_ids;
 // admins ignore that list and have full access.
 //
@@ -61,6 +77,7 @@ export interface User {
   login_code?: string;
   socket_ids: string[];
   created_at: string;
+  notif_prefs?: NotifPrefs;
 }
 
 // New admin users get an invite link — no password is set at creation time.
@@ -88,6 +105,12 @@ export interface UserUpdate {
   kid?: boolean;
   socket_ids?: string[];
   regenerate_code?: boolean;
+}
+
+/** Shape expected by POST /api/push/subscribe */
+export interface PushSubscriptionBody {
+  endpoint: string;
+  keys: { p256dh: string; auth: string };
 }
 
 // Tasmota Wi-Fi device state. Fields are undefined when the device doesn't

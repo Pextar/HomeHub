@@ -143,6 +143,8 @@ func (s *Server) activateScene(w http.ResponseWriter, r *http.Request) {
 
 	var okCount int
 	failures := make([]map[string]string, 0)
+	// Suppress per-socket push notifications; we send one summary below.
+	s.Store.SuppressStateChange = true
 	for _, a := range scene.Actions {
 		if err := s.Store.ExecuteAction("socket", a.SocketID, a.Action); err != nil {
 			failures = append(failures, map[string]string{
@@ -153,6 +155,7 @@ func (s *Server) activateScene(w http.ResponseWriter, r *http.Request) {
 		}
 		okCount++
 	}
+	s.Store.SuppressStateChange = false
 	entry := store.ActivityEntry{Kind: "scene", Source: "manual", Action: "activate", Label: scene.Name}
 	if len(failures) > 0 {
 		entry.Status = "error"
@@ -163,6 +166,7 @@ func (s *Server) activateScene(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
 		return
 	}
+	s.notifyBulkState(fmt.Sprintf("Scene activated: %s", scene.Name), okCount)
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"scene":    scene.Name,
 		"updated":  okCount,

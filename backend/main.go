@@ -19,6 +19,8 @@ import (
 	"rf-socket-controller/internal/api"
 	"rf-socket-controller/internal/matter"
 	"rf-socket-controller/internal/mqtt"
+	"rf-socket-controller/internal/push"
+	"rf-socket-controller/internal/reachability"
 	"rf-socket-controller/internal/rf"
 	"rf-socket-controller/internal/rx"
 	"rf-socket-controller/internal/scheduler"
@@ -121,10 +123,56 @@ func main() {
 		log.Fatalf("failed to load session secret: %v", err)
 	}
 
+	// Set up Web Push notifications. VAPID keys are generated on first run
+	// and reused across restarts.
+	vapidKeys, err := push.LoadOrGenerateVAPIDKeys(dataDir)
+	if err != nil {
+		log.Fatalf("failed to load/generate VAPID keys: %v", err)
+	}
+	subStore, err := push.NewSubscriptionStore(dataDir)
+	if err != nil {
+		log.Fatalf("failed to load push subscriptions: %v", err)
+	}
+	pushSvc := &push.Service{
+		VAPIDPublicKey:  vapidKeys.PublicKey,
+		VAPIDPrivateKey: vapidKeys.PrivateKey,
+		Subs:            subStore,
+		// GetUserPrefs reads user prefs under a read lock so it is safe to
+		// call from goroutines spawned by the push callbacks.
+		GetUserPrefs: func() []push.UserPrefs {
+			st.Mu.RLock()
+			defer st.Mu.RUnlock()
+			out := make([]push.UserPrefs, 0, len(st.Users))
+			for _, u := range st.Users {
+				muted := make(map[string]bool, len(u.NotifPrefs.MutedSocketIDs)+len(u.NotifPrefs.MutedSensorIDs))
+				for _, id := range u.NotifPrefs.MutedSocketIDs {
+					muted[id] = true
+				}
+				for _, id := range u.NotifPrefs.MutedSensorIDs {
+					muted[id] = true
+				}
+				out = append(out, push.UserPrefs{
+					ID:            u.ID,
+					SensorAlerts:  u.NotifPrefs.SensorAlerts,
+					StateChanges:  u.NotifPrefs.StateChanges,
+					ScheduleFired: u.NotifPrefs.ScheduleFired,
+					DeviceOffline: u.NotifPrefs.DeviceOffline,
+					QuietHours:    u.NotifPrefs.QuietHours,
+					QuietStart:    u.NotifPrefs.QuietStart,
+					QuietEnd:      u.NotifPrefs.QuietEnd,
+					MutedIDs:      muted,
+				})
+			}
+			return out
+		},
+	}
+	log.Printf("Web Push notifications enabled (VAPID public key: %s...)", vapidKeys.PublicKey[:min(12, len(vapidKeys.PublicKey))])
+
 	server := &api.Server{
 		Store:         st,
 		Matter:        matterClient,
 		MQTT:          mqttClient,
+		Push:          pushSvc,
 		AuthUser:      os.Getenv("AUTH_USER"),
 		AuthPass:      os.Getenv("AUTH_PASS"),
 		SessionSecret: secret,
@@ -185,9 +233,10 @@ func main() {
 	}
 
 	schedCtx, stopScheduler := context.WithCancel(context.Background())
-	go scheduler.Run(schedCtx, st)
+	go scheduler.Run(schedCtx, st, pushSvc)
 	go rx.FromEnv().Run(schedCtx, st)
 	go mqtt.SensorListener{Client: mqttClient}.Run(schedCtx, st)
+	go reachability.Run(schedCtx, st, matterClient, pushSvc)
 
 	go func() {
 		log.Printf("RF Socket Controller listening on http://:%s", port)

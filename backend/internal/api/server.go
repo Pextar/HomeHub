@@ -6,6 +6,7 @@ package api
 import (
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -18,6 +19,7 @@ import (
 
 	"rf-socket-controller/internal/matter"
 	"rf-socket-controller/internal/mqtt"
+	"rf-socket-controller/internal/push"
 	"rf-socket-controller/internal/store"
 )
 
@@ -30,6 +32,7 @@ type Server struct {
 	Store         *store.Store
 	Matter        *matter.Client // optional; nil-safe via Matter.Enabled()
 	MQTT          *mqtt.Client   // optional; nil-safe via MQTT.Enabled()
+	Push          *push.Service  // optional; nil means push notifications are disabled
 	AuthUser      string
 	AuthPass      string
 	SessionSecret []byte // HMAC key for cookie sessions; see LoadOrCreateSessionSecret
@@ -65,6 +68,30 @@ func (s *Server) Handler() http.Handler {
 	// changes — including scheduler- and timer-driven changes, since those
 	// also flow through Store.ApplyState.
 	s.Store.OnChange = s.events.broadcast
+
+	// Wire push notification callbacks when the push service is available.
+	if s.Push != nil {
+		s.Store.OnStateChange = func(socket store.Socket, newState bool) {
+			action := "off"
+			if newState {
+				action = "on"
+			}
+			go s.Push.NotifyEvent(push.CategoryStateChanges, socket.ID, push.PushPayload{
+				Title: fmt.Sprintf("💡 %s turned %s", socket.Name, action),
+				URL:   "/#/sockets",
+				Tag:   "state-" + socket.ID,
+			})
+		}
+		s.Store.OnSensorAlert = func(sensor store.Sensor, value float64, direction string) {
+			go s.Push.NotifyEvent(push.CategorySensorAlerts, sensor.ID, push.PushPayload{
+				Title: fmt.Sprintf("⚠️ %s alert", sensor.Name),
+				Body:  fmt.Sprintf("%.1f%s (%s threshold)", value, sensor.Unit, direction),
+				URL:   "/#/sensors",
+				Tag:   "sensor-" + sensor.ID,
+			})
+		}
+	}
+
 	r := mux.NewRouter()
 	r.Use(loggingMiddleware)
 	r.Use(maxBodyBytes(maxRequestBody))
@@ -182,6 +209,15 @@ func (s *Server) Handler() http.Handler {
 
 	api.HandleFunc("/mqtt/status", s.requireAdmin(s.mqttStatus)).Methods("GET")
 	api.HandleFunc("/mqtt/publish", s.requireAdmin(s.mqttPublish)).Methods("POST")
+
+	// Push notifications. vapid-key is public (no auth) so the frontend can
+	// subscribe before the user is authenticated. Subscribe/unsubscribe require
+	// a session; prefs require auth but not admin.
+	r.HandleFunc("/api/push/vapid-key", s.getPushVAPIDKey).Methods("GET")
+	api.HandleFunc("/push/subscribe", s.subscribePush).Methods("POST")
+	api.HandleFunc("/push/unsubscribe", s.unsubscribePush).Methods("DELETE")
+	api.HandleFunc("/push/prefs", s.updatePushPrefs).Methods("PUT")
+	api.HandleFunc("/push/test", s.testPush).Methods("POST")
 
 	r.PathPrefix("/").Handler(spaHandler(s.SPADir))
 
