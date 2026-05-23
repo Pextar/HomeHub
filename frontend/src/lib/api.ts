@@ -21,6 +21,8 @@ import type {
   UserCreate,
   UserCreateResponse,
   UserUpdate,
+  NotifPrefs,
+  PushSubscriptionBody,
 } from "./types";
 
 const BASE = "/api";
@@ -239,6 +241,23 @@ export const api = {
       method: "PUT",
       body: json(update),
     });
+  },
+
+  // Push notifications
+  getPushVapidKey() {
+    return req<{ public_key: string }>("/push/vapid-key");
+  },
+  subscribePush(sub: PushSubscriptionBody) {
+    return req<{ status: string }>("/push/subscribe", { method: "POST", body: json(sub) });
+  },
+  unsubscribePush(endpoint: string) {
+    return req<{ status: string }>("/push/unsubscribe", {
+      method: "DELETE",
+      body: json({ endpoint }),
+    });
+  },
+  updatePushPrefs(prefs: NotifPrefs) {
+    return req<NotifPrefs>("/push/prefs", { method: "PUT", body: json(prefs) });
   },
 
   // MQTT — control devices and ingest sensors over a broker.

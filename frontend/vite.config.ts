@@ -13,6 +13,16 @@ export default defineConfig({
       // app can show a "Refresh" toast button. autoUpdate skips the waiting
       // phase, which means the prompt never shows on an always-open PWA.
       registerType: "prompt",
+      // injectManifest lets us write a custom service worker (sw.ts) so we
+      // can handle the Web Push `push` and `notificationclick` events
+      // alongside the standard Workbox precaching and offline logic.
+      strategies: "injectManifest",
+      srcDir: "src",
+      filename: "sw.ts",
+      injectManifest: {
+        // Cache the same file types as the previous generateSW setup.
+        globPatterns: ["**/*.{js,css,html,svg,ico,png,webmanifest}"],
+      },
       includeAssets: ["pwa-icon.svg"],
       manifest: {
         name: "HomeHub",
@@ -33,20 +43,6 @@ export default defineConfig({
           { name: "Scenes",    short_name: "Scenes",    url: "/#/scenes" },
           { name: "Schedules", short_name: "Schedules", url: "/#/schedules" },
         ],
-      },
-      workbox: {
-        // Shell-only caching — /api always goes to the network so the app
-        // never returns stale or fake socket state. The HTML/CSS/JS shell
-        // is cached so the app loads when the Pi is offline.
-        navigateFallback: "/index.html",
-        navigateFallbackDenylist: [/^\/api/],
-        runtimeCaching: [
-          {
-            urlPattern: ({ url }) => url.pathname.startsWith("/api"),
-            handler: "NetworkOnly",
-          },
-        ],
-        globPatterns: ["**/*.{js,css,html,svg,ico,png,webmanifest}"],
       },
     }),
   ],

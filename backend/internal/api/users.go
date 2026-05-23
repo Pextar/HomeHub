@@ -36,15 +36,16 @@ import (
 // an admin can read back and re-share a profile's code; it's only ever set
 // for limited (non-admin) profiles.
 type userView struct {
-	ID            string    `json:"id"`
-	Username      string    `json:"username"`
-	Admin         bool      `json:"admin"`
-	Owner         bool      `json:"owner,omitempty"`
-	Kid           bool      `json:"kid"`
-	LoginCode     string    `json:"login_code,omitempty"`
-	PendingInvite bool      `json:"pending_invite,omitempty"`
-	SocketIDs     []string  `json:"socket_ids"`
-	CreatedAt     time.Time `json:"created_at"`
+	ID            string           `json:"id"`
+	Username      string           `json:"username"`
+	Admin         bool             `json:"admin"`
+	Owner         bool             `json:"owner,omitempty"`
+	Kid           bool             `json:"kid"`
+	LoginCode     string           `json:"login_code,omitempty"`
+	PendingInvite bool             `json:"pending_invite,omitempty"`
+	SocketIDs     []string         `json:"socket_ids"`
+	CreatedAt     time.Time        `json:"created_at"`
+	NotifPrefs    store.NotifPrefs `json:"notif_prefs,omitempty"`
 }
 
 func toUserView(u *store.User) userView {
@@ -62,6 +63,7 @@ func toUserView(u *store.User) userView {
 		PendingInvite: u.Admin && u.InviteToken != "" && u.InviteExpiry.After(time.Now()),
 		SocketIDs:     ids,
 		CreatedAt:     u.CreatedAt,
+		NotifPrefs:    u.NotifPrefs,
 	}
 }
 

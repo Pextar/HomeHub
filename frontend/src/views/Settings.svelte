@@ -2,10 +2,11 @@
     import Topbar from "../components/Topbar.svelte";
     import { untrack } from "svelte";
     import { api } from "../lib/api";
-    import { data, toasts } from "../lib/stores.svelte";
+    import { data, toasts, session } from "../lib/stores.svelte";
     import { openModal } from "../lib/modal.svelte";
     import ShortcutsModal from "../modals/ShortcutsModal.svelte";
     import ConfirmModal from "../components/ConfirmModal.svelte";
+    import { pushClient, pushSupported } from "../lib/push.svelte";
 
     const v = $derived(data.value);
 
@@ -94,6 +95,46 @@
         }
     }
 
+    // ── Push notifications ─────────────────────────────────────────────────
+    let notifPrefs = $state({
+        sensor_alerts:  session.user?.notif_prefs?.sensor_alerts  ?? true,
+        state_changes:  session.user?.notif_prefs?.state_changes  ?? true,
+        schedule_fired: session.user?.notif_prefs?.schedule_fired ?? true,
+    });
+    let notifSaving = $state(false);
+
+    $effect(() => {
+        pushClient.init();
+    });
+
+    async function toggleNotifications() {
+        if (!pushSupported || pushClient.loading) return;
+        if (pushClient.isSubscribed) {
+            await pushClient.unsubscribe();
+            toasts.info("Notifications disabled");
+        } else {
+            const ok = await pushClient.subscribe();
+            if (ok) {
+                toasts.success("Notifications enabled", "You'll receive alerts even when the app is closed.");
+            } else if (pushClient.permission === "denied") {
+                toasts.warn("Permission denied", "Enable notifications in your browser settings.");
+            }
+        }
+    }
+
+    async function saveNotifPrefs() {
+        if (notifSaving) return;
+        notifSaving = true;
+        try {
+            await api.updatePushPrefs(notifPrefs);
+            toasts.success("Notification preferences saved");
+        } catch (e) {
+            toasts.error("Save failed", (e as Error).message);
+        } finally {
+            notifSaving = false;
+        }
+    }
+
     let locating = $state(false);
     function useBrowserLocation() {
         if (!navigator.geolocation) {
@@ -166,6 +207,64 @@
 
 <section class="card">
     <header>
+        <h2>Push notifications</h2>
+        <p>
+            {#if !pushSupported}
+                Your browser doesn't support push notifications.
+            {:else if pushClient.permission === "denied"}
+                Notifications are blocked. Enable them in your browser settings and reload.
+            {:else}
+                Receive alerts on this device even when the app is closed.
+            {/if}
+        </p>
+    </header>
+
+    {#if pushSupported && pushClient.permission !== "denied"}
+        <div class="notif-row">
+            <span class="notif-label">
+                {pushClient.isSubscribed ? "Notifications enabled" : "Notifications disabled"}
+            </span>
+            <button
+                type="button"
+                class="btn {pushClient.isSubscribed ? 'btn-ghost' : 'btn-primary'}"
+                onclick={toggleNotifications}
+                disabled={pushClient.loading}
+            >
+                {#if pushClient.loading}
+                    {pushClient.isSubscribed ? "Disabling…" : "Enabling…"}
+                {:else}
+                    {pushClient.isSubscribed ? "Disable" : "Enable"}
+                {/if}
+            </button>
+        </div>
+
+        {#if pushClient.isSubscribed}
+            <form class="notif-prefs" onsubmit={(e) => { e.preventDefault(); saveNotifPrefs(); }}>
+                <p class="prefs-label">Notify me when:</p>
+                <label class="check-row">
+                    <input type="checkbox" bind:checked={notifPrefs.sensor_alerts} />
+                    <span>A sensor crosses its alert threshold</span>
+                </label>
+                <label class="check-row">
+                    <input type="checkbox" bind:checked={notifPrefs.state_changes} />
+                    <span>A device is turned on or off</span>
+                </label>
+                <label class="check-row">
+                    <input type="checkbox" bind:checked={notifPrefs.schedule_fired} />
+                    <span>A schedule or timer fires</span>
+                </label>
+                <div class="actions">
+                    <button type="submit" class="btn btn-primary" disabled={notifSaving}>
+                        {notifSaving ? "Saving…" : "Save preferences"}
+                    </button>
+                </div>
+            </form>
+        {/if}
+    {/if}
+</section>
+
+<section class="card">
+    <header>
         <h2>Backup &amp; restore</h2>
         <p>Export your full configuration to a file, or restore it from one. Profiles and passwords are never included.</p>
     </header>
@@ -207,4 +306,39 @@
         flex-wrap: wrap;
     }
     .optional { color: var(--text-muted); font-weight: 400; font-size: 12px; }
+
+    /* Push notification section */
+    .notif-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-3);
+    }
+    .notif-label { font-size: 14px; }
+    .notif-prefs {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-3);
+        padding-top: var(--space-2);
+        border-top: 1px solid var(--border);
+    }
+    .prefs-label {
+        margin: 0;
+        font-size: 13px;
+        color: var(--text-muted);
+    }
+    .check-row {
+        display: flex;
+        align-items: center;
+        gap: var(--space-3);
+        font-size: 14px;
+        cursor: pointer;
+        user-select: none;
+    }
+    .check-row input[type="checkbox"] {
+        width: 16px;
+        height: 16px;
+        accent-color: var(--primary);
+        flex-shrink: 0;
+    }
 </style>
