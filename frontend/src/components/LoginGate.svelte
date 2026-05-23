@@ -8,7 +8,8 @@
     }
     let { onAuthed, children }: Props = $props();
 
-    type Phase = "checking" | "needs-login" | "authed" | "logging-in";
+    type Phase = "checking" | "needs-login" | "authed" | "logging-in"
+               | "invite-lookup" | "invite-set-password" | "invite-submitting" | "invite-invalid";
     let phase: Phase = $state("checking");
     // "code" is the default for everyday (limited) users; "admin" reveals the
     // username + password form.
@@ -18,6 +19,14 @@
     let password = $state("");
     let error = $state("");
 
+    // Invite flow state
+    let inviteToken = $state("");
+    let inviteUsername = $state("");
+    let newPassword = $state("");
+    let confirmPassword = $state("");
+    let showNewPassword = $state(false);
+    let inviteError = $state("");
+
     // Focus a field as soon as it mounts (initial render and on mode switch)
     // so the user can start typing — and on mobile the keyboard opens right
     // away, which is what people expect on a login screen.
@@ -25,9 +34,25 @@
         node.focus();
     }
 
-    // On boot, probe a protected endpoint. 401 → show login. Anything else
-    // (success or network error) → render the app and let it deal with it.
+    // On boot, check whether the URL carries an invite token. If so, verify
+    // it before showing the password-set form. Otherwise probe auth as usual.
     onMount(async () => {
+        const params = new URLSearchParams(window.location.search);
+        const token = params.get("invite");
+        if (token) {
+            inviteToken = token;
+            phase = "invite-lookup";
+            try {
+                const result = await api.lookupInvite(token);
+                inviteUsername = result.username;
+                phase = "invite-set-password";
+            } catch {
+                phase = "invite-invalid";
+            }
+            return;
+        }
+
+        // Normal auth probe
         try {
             await api.health();
             phase = "authed";
@@ -55,6 +80,9 @@
             await api.login(body);
             password = "";
             code = "";
+            // Remove any ?invite= from the URL so a page reload doesn't
+            // re-trigger the invite flow.
+            clearInviteParam();
             phase = "authed";
             onAuthed?.();
         } catch (e) {
@@ -64,12 +92,95 @@
             phase = "needs-login";
         }
     }
+
+    async function submitInvite(e: Event) {
+        e.preventDefault();
+        inviteError = "";
+        if (newPassword.length < 8) {
+            inviteError = "Password must be at least 8 characters.";
+            return;
+        }
+        if (newPassword !== confirmPassword) {
+            inviteError = "Passwords don't match.";
+            return;
+        }
+        phase = "invite-submitting";
+        try {
+            await api.acceptInvite(inviteToken, newPassword);
+            // Server set a session cookie — clear the invite param and boot the app.
+            clearInviteParam();
+            phase = "authed";
+            onAuthed?.();
+        } catch (e) {
+            inviteError = e instanceof ApiError ? e.message : "Something went wrong. Try again.";
+            phase = "invite-set-password";
+        }
+    }
+
+    function clearInviteParam() {
+        const url = new URL(window.location.href);
+        url.searchParams.delete("invite");
+        window.history.replaceState({}, "", url.toString());
+    }
 </script>
 
 {#if phase === "authed"}
     {@render children?.()}
-{:else if phase === "checking"}
+{:else if phase === "checking" || phase === "invite-lookup"}
     <div class="screen"><div class="splash">Loading…</div></div>
+{:else if phase === "invite-invalid"}
+    <div class="screen">
+        <div class="card">
+            <div class="head">
+                <h1>HomeHub</h1>
+                <p class="sub">Invite link invalid</p>
+            </div>
+            <div class="error" role="alert">
+                This invite link is invalid or has expired. Ask the system owner to send you a new one.
+            </div>
+            <button class="btn btn-primary" onclick={() => { clearInviteParam(); phase = "needs-login"; }}>
+                Go to sign in
+            </button>
+        </div>
+    </div>
+{:else if phase === "invite-set-password" || phase === "invite-submitting"}
+    <div class="screen">
+        <form class="card" onsubmit={submitInvite}>
+            <div class="head">
+                <h1>HomeHub</h1>
+                <p class="sub">Welcome, {inviteUsername}! Set your password to get started.</p>
+            </div>
+
+            <div class="field">
+                <label for="inv-pass">Password</label>
+                <div class="pass-wrap">
+                    <input id="inv-pass" type={showNewPassword ? "text" : "password"}
+                        bind:value={newPassword}
+                        autocomplete="new-password"
+                        placeholder="At least 8 characters"
+                        required use:autofocus />
+                    <button type="button" class="show-btn"
+                        onclick={() => showNewPassword = !showNewPassword}
+                        aria-label={showNewPassword ? "Hide password" : "Show password"}>
+                        {showNewPassword ? "Hide" : "Show"}
+                    </button>
+                </div>
+            </div>
+            <div class="field">
+                <label for="inv-confirm">Confirm password</label>
+                <input id="inv-confirm" type={showNewPassword ? "text" : "password"}
+                    bind:value={confirmPassword}
+                    autocomplete="new-password"
+                    placeholder="Repeat password"
+                    required />
+            </div>
+
+            {#if inviteError}<div class="error" role="alert">{inviteError}</div>{/if}
+            <button class="btn btn-primary" type="submit" disabled={phase === "invite-submitting"}>
+                {phase === "invite-submitting" ? "Setting password…" : "Set password & sign in"}
+            </button>
+        </form>
+    </div>
 {:else}
     <div class="screen">
         <form class="card" onsubmit={submit}>
@@ -164,6 +275,22 @@
         touch-action: manipulation;
     }
     .switch-mode:hover { color: var(--text); text-decoration: underline; }
+    .pass-wrap { position: relative; }
+    .pass-wrap input { padding-right: 52px; }
+    .show-btn {
+        position: absolute;
+        right: 8px;
+        top: 50%;
+        transform: translateY(-50%);
+        background: none;
+        border: none;
+        padding: 4px 6px;
+        cursor: pointer;
+        color: var(--text-muted);
+        font-size: 12px;
+        border-radius: var(--radius-sm);
+    }
+    .show-btn:hover { color: var(--text); }
 
     /* On phones, open the card to full width and anchor it toward the top
        (above the keyboard, which rises from the bottom). */

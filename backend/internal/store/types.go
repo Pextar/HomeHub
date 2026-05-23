@@ -50,12 +50,18 @@ type Schedule struct {
 // may only see and control the sockets listed in SocketIDs. PasswordHash
 // is a bcrypt hash — it is persisted to disk but the API layer never
 // returns a raw User to clients (see api.userView).
+//
+// There is exactly one Owner — the user bootstrapped from AUTH_USER/AUTH_PASS.
+// The owner cannot be deleted or demoted. Additional admin-level users
+// (managers) are created via a one-time invite link; they set their own
+// password through that link rather than having one chosen for them.
 type User struct {
 	ID           string    `json:"id"`
 	Username     string    `json:"username"`
-	PasswordHash string    `json:"password_hash"`           // admins; empty for code-only users
+	PasswordHash string    `json:"password_hash"`           // admins; empty for code-only users or pending invites
 	LoginCode    string    `json:"login_code,omitempty"`    // limited users; a short numeric code, the only credential
 	Admin        bool      `json:"admin"`
+	Owner        bool      `json:"owner,omitempty"`         // true for the one bootstrapped admin; cannot be demoted
 	Kid          bool      `json:"kid,omitempty"`           // limited users; renders the playful kid layout
 	SocketIDs    []string  `json:"socket_ids"`
 	CreatedAt    time.Time `json:"created_at"`
@@ -64,6 +70,10 @@ type User struct {
 	// were minted with, so changing a credential invalidates every
 	// existing session for that user.
 	TokenVersion int `json:"token_version,omitempty"`
+	// Invite fields are set when a new admin user is created and cleared
+	// once they accept the invite and set their password.
+	InviteToken  string    `json:"invite_token,omitempty"`
+	InviteExpiry time.Time `json:"invite_expiry,omitempty"`
 }
 
 // CanAccessSocket reports whether this user may see/control the given
