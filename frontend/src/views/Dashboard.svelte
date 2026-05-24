@@ -305,33 +305,6 @@
     {/if}
 </section>
 
-<!-- ── Recent activity ────────────────────────────────────────────── -->
-{#if v.activity.length > 0}
-    <section class="home-section">
-        <div class="section-head">
-            <h2>Recent activity</h2>
-            <button class="chip" onclick={() => route.go("activity")}>All</button>
-        </div>
-        <ul class="activity">
-            {#each v.activity.slice(0, 8) as a (a.id)}
-                <li class="event" data-status={a.status}
-                    animate:flip={{ duration: dur(260), easing: cubicOut }}
-                    in:fly={{ x: -10, duration: dur(220), easing: cubicOut }}>
-                    <span class="src" data-source={a.source}>{a.source}</span>
-                    <div class="info">
-                        <div class="line">
-                            <span class="act" data-action={a.action}>{a.action}</span>
-                            <span class="label">{a.label}</span>
-                        </div>
-                        {#if a.error}<div class="err">{a.error}</div>{/if}
-                    </div>
-                    <time class="when mono">{new Date(a.time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time>
-                </li>
-            {/each}
-        </ul>
-    </section>
-{/if}
-
 <style>
     /* ── Greeting ───────────────────────────────────── */
     .greeting {
@@ -535,57 +508,4 @@
     .room-item { display: flex; min-width: 0; }
     .room-item > :global(.room) { flex: 1; min-width: 0; }
 
-    /* ── Activity ───────────────────────────────────── */
-    .activity { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
-    .event {
-        display: grid;
-        grid-template-columns: auto 1fr auto;
-        align-items: center;
-        gap: var(--space-3);
-        padding: 8px 10px;
-        border-radius: var(--radius-md);
-        background: var(--surface);
-    }
-    .event[data-status="error"] { background: var(--danger-soft); }
-    .src {
-        font-size: 11px;
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-        font-weight: 600;
-        color: var(--text-muted);
-        padding: 2px 8px;
-        border-radius: 999px;
-        background: var(--bg-elevated);
-        border: 1px solid var(--border);
-        white-space: nowrap;
-    }
-    .src[data-source="schedule"] { color: var(--info); }
-    .src[data-source="timer"]    { color: var(--warn); }
-    .info { min-width: 0; }
-    .line { display: flex; align-items: baseline; gap: var(--space-2); flex-wrap: wrap; }
-    .act {
-        font-weight: 600;
-        text-transform: uppercase;
-        font-size: 12px;
-        letter-spacing: 0.04em;
-        color: var(--text-muted);
-    }
-    .act[data-action="on"] { color: var(--success); }
-    .act[data-action="off"] { color: var(--danger); }
-    .act[data-action="activate"] { color: var(--info); }
-    .label { color: var(--text); }
-    .err { color: var(--danger); font-size: 12px; margin-top: 2px; }
-    .when { color: var(--text-faint); font-size: 12px; white-space: nowrap; }
-
-    @media (pointer: coarse) {
-        .event {
-            grid-template-columns: 1fr auto;
-            grid-template-rows: auto auto;
-            row-gap: 4px;
-            padding: 10px 12px;
-        }
-        .src { grid-column: 1; grid-row: 1; justify-self: start; }
-        .when { grid-column: 2; grid-row: 1; align-self: center; }
-        .info { grid-column: 1 / -1; grid-row: 2; }
-    }
 </style>
