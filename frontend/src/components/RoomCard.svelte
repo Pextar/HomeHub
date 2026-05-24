@@ -1,76 +1,56 @@
-<!--
-  Room card — two-part layout:
-    ┌──────────────────────────┐
-    │▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓│  ← 3 px accent bar (colour from room name hash)
-    │ Entré                    │
-    │ 0/2 · off                │
-    │ [☀ On    ] [ 🌙 Off   ] │
-    └──────────────────────────┘
-  The two text+icon buttons span the full card width and are 44px tall —
-  easy to tap, visually balanced, and clearly labelled.
--->
 <script lang="ts">
-    import Icon from "./Icon.svelte";
-    import { api } from "../lib/api";
-    import { runAction } from "../lib/utils";
+    import { route } from "../lib/stores.svelte";
     import type { RoomSummary } from "../lib/types";
 
     interface Props { room: RoomSummary; }
     let { room }: Props = $props();
 
-    const anyOn  = $derived(room.on > 0);
-    const allOn  = $derived(room.on === room.sockets && room.sockets > 0);
-    const allOff = $derived(room.on === 0);
+    const anyOn = $derived(room.on > 0);
 
     // Warm / cool / neutral surface category, picked by a stable djb2 hash of
     // the room name so each room keeps a consistent tone across reorders.
     const TONES = ["warm", "cool", "neutral"] as const;
-
     function nameHash(s: string): number {
         let h = 5381;
         for (let i = 0; i < s.length; i++) h = ((h << 5) + h) ^ s.charCodeAt(i);
         return Math.abs(h);
     }
-
     const tone = $derived(TONES[nameHash(room.name) % TONES.length]);
+
+    function open() {
+        route.go("sockets", { room: room.name });
+    }
 </script>
 
-<div class="room" class:on={anyOn} data-tone={tone}>
+<button class="room" class:on={anyOn} data-tone={tone} onclick={open}
+    aria-label="Open {room.name}">
+    <div class="top">
+        <span class="dot on" class:hidden={!anyOn}></span>
+    </div>
     <div class="body">
         <div class="name" title={room.name}>{room.name}</div>
         <div class="meta">
-            <span class="count" class:dim={!anyOn}>{room.on}/{room.sockets}</span>
-            <span class="status-label">{allOn ? "all on" : anyOn ? "on" : "off"}</span>
+            <span class="count" class:lit={anyOn}>{room.on}</span><span class="slash"> / {room.sockets}</span> on
         </div>
     </div>
-    <div class="actions">
-        <button class="act-btn on-btn" aria-label="Turn {room.name} on"
-            disabled={allOn}
-            onclick={() => runAction(() => api.roomOn(room.name), `${room.name} on`)}>
-            <Icon name="sun" size={14} />
-            <span>On</span>
-        </button>
-        <button class="act-btn off-btn" aria-label="Turn {room.name} off"
-            disabled={allOff}
-            onclick={() => runAction(() => api.roomOff(room.name), `${room.name} off`)}>
-            <Icon name="moon" size={14} />
-            <span>Off</span>
-        </button>
-    </div>
-</div>
+</button>
 
 <style>
     .room {
+        all: unset;
+        box-sizing: border-box;
         background: var(--card);
         border: 1px solid var(--hairline);
-        border-radius: var(--radius-lg);
+        border-radius: var(--r-lg);
+        padding: 14px;
+        height: 150px;
         display: flex;
         flex-direction: column;
-        overflow: hidden;          /* clip button radius at card edge */
-        transition: border-color var(--t-fast), background var(--t-med), box-shadow var(--t-fast);
+        justify-content: space-between;
+        cursor: pointer;
+        touch-action: manipulation;
+        transition: border-color var(--t-fast), background var(--t-med), transform var(--t-fast), box-shadow var(--t-fast);
     }
-
-    /* Active rooms light up with a warm / cool / neutral gradient surface. */
     .room.on { border-color: transparent; }
     .room.on[data-tone="warm"]    { background: linear-gradient(155deg, #3a2f1f 0%, #271f14 100%); }
     .room.on[data-tone="cool"]    { background: linear-gradient(155deg, #1f2a30 0%, #161c20 100%); }
@@ -80,90 +60,19 @@
     :global([data-theme="light"]) .room.on[data-tone="neutral"] { background: linear-gradient(155deg, #f3efe6 0%, #ebe4d6 100%); }
 
     @media (hover: hover) {
-        .room:hover { border-color: var(--border-strong); }
-        .room.on:hover { border-color: rgba(245, 189, 110, 0.25); }
+        .room:hover { border-color: var(--border-strong); transform: translateY(-2px); box-shadow: var(--shadow-md); }
+        .room.on:hover { border-color: rgba(245, 189, 110, 0.28); }
     }
+    .room:active { transform: scale(0.98); transition-duration: 80ms; }
+    .room:focus-visible { box-shadow: var(--focus-ring); }
 
-    /* ── Info section ── */
-    .body {
-        padding: var(--space-3) var(--space-3) var(--space-2);
-        display: flex;
-        flex-direction: column;
-        gap: 2px;
-        flex: 1;
-    }
-    .name {
-        font-weight: 700;
-        font-size: 15px;
-        line-height: 1.2;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-    }
-    .meta {
-        display: flex;
-        align-items: baseline;
-        gap: 5px;
-        font-size: 12px;
-    }
-    .count {
-        font-family: var(--font-mono);
-        font-variant-numeric: tabular-nums;
-        font-weight: 600;
-        color: var(--on);
-    }
-    .count.dim { color: var(--text-faint); }
-    .status-label {
-        color: var(--text-muted);
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-        font-size: 10px;
-    }
+    .top { display: flex; justify-content: space-between; align-items: flex-start; }
+    .dot.hidden { visibility: hidden; }
 
-    /* ── Button row ── */
-    .actions {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        border-top: 1px solid var(--border);
-    }
-
-    .act-btn {
-        all: unset;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: var(--space-1);
-        padding: 10px 0;
-        min-height: 44px;
-        font-size: 13px;
-        font-weight: 600;
-        cursor: pointer;
-        touch-action: manipulation;
-        transition: background var(--t-fast), color var(--t-fast);
-        user-select: none;
-    }
-    .act-btn + .act-btn {
-        border-left: 1px solid var(--border);
-    }
-    .act-btn:active { background: var(--surface-hover); }
-    .act-btn:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
-    .act-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-
-    /* Both buttons neutral by default — no false "active" impression */
-    .on-btn  { color: var(--text-muted); }
-    .off-btn { color: var(--text-muted); }
-
-    /* Hover feedback: amber for On, cool for Off */
-    .on-btn:hover  { color: var(--on);   background: var(--on-soft);   }
-    .off-btn:hover { color: var(--cool); background: var(--cool-soft); }
-
-    /* When the room has devices on, give the On button a subtle tint
-       so users can see it's the "current" state without it screaming */
-    .room.on .on-btn { color: var(--on); }
-    .room.on .actions { border-top-color: rgba(245, 189, 110, 0.15); }
-    .room.on .act-btn + .act-btn { border-left-color: rgba(245, 189, 110, 0.15); }
-
-    @media (pointer: coarse) {
-        .act-btn { min-height: 48px; font-size: 14px; }
-    }
+    .name { font-weight: 600; font-size: 16px; margin-bottom: 2px; line-height: 1.2;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .meta { color: var(--text-mute); font-size: 12.5px; }
+    .count { font-family: var(--font-mono); font-variant-numeric: tabular-nums; color: var(--text-mute); }
+    .count.lit { color: var(--on); }
+    .slash { color: var(--text-dim); }
 </style>

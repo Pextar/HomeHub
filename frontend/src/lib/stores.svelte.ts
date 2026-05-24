@@ -110,20 +110,32 @@ function createToastStore() {
 
 function createRouteStore() {
   const valid: Route[] = ["dashboard", "floorplan", "sockets", "groups", "scenes", "schedules", "sensors", "insights", "activity", "users", "settings"];
-  const current = $state<{ route: Route }>({ route: parse() });
+  const current = $state<{ route: Route; query: Record<string, string> }>({ route: parse(), query: parseQuery() });
 
   function parse(): Route {
     const m = window.location.hash.match(/^#\/([\w-]+)/);
     const r = (m?.[1] ?? "dashboard") as Route;
     return valid.includes(r) ? r : "dashboard";
   }
+  function parseQuery(): Record<string, string> {
+    const i = window.location.hash.indexOf("?");
+    if (i < 0) return {};
+    return Object.fromEntries(new URLSearchParams(window.location.hash.slice(i + 1)));
+  }
 
-  window.addEventListener("hashchange", () => { current.route = parse(); });
+  window.addEventListener("hashchange", () => {
+    current.route = parse();
+    current.query = parseQuery();
+  });
   if (!window.location.hash) window.location.hash = "#/dashboard";
 
   return {
     get current() { return current.route; },
-    go(r: Route) { window.location.hash = `#/${r}`; },
+    get query() { return current.query; },
+    go(r: Route, params?: Record<string, string>) {
+      const q = params && Object.keys(params).length ? "?" + new URLSearchParams(params).toString() : "";
+      window.location.hash = `#/${r}${q}`;
+    },
   };
 }
 

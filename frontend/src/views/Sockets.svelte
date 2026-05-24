@@ -5,7 +5,7 @@
     import EmptyState from "../components/EmptyState.svelte";
     import Segmented from "../components/Segmented.svelte";
     import { api } from "../lib/api";
-    import { data, toasts } from "../lib/stores.svelte";
+    import { data, toasts, route } from "../lib/stores.svelte";
     import { groupSocketsByRoom, runAction } from "../lib/utils";
     import { openModal } from "../lib/modal.svelte";
     import SocketModal from "../modals/SocketModal.svelte";
@@ -17,7 +17,8 @@
     const v = $derived(data.value);
 
     let search = $state("");
-    let roomFilter = $state("");
+    // Initialised from a ?room= deep link (e.g. tapping a room card on Home).
+    let roomFilter = $state(route.query.room ?? "");
     let statusFilter = $state("all");
 
     const allRooms = $derived(
