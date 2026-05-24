@@ -75,12 +75,11 @@ func (s *Store) ExecuteAction(targetType, targetID, action string) error {
 			if err := s.ExecuteAction("socket", a.SocketID, a.Action); err != nil && firstErr == nil {
 				firstErr = err
 			}
-			// After switching a smart light on, apply its scene brightness/colour.
-			if a.Action == "on" && s.Light != nil && (a.Level != nil || a.Color != "") {
+			// After switching a smart light on, queue its scene brightness/colour.
+			// The actual bridge call happens in FlushLights, off-lock.
+			if a.Action == "on" && (a.Level != nil || a.Color != "") {
 				if sock, ok := s.Sockets[a.SocketID]; ok {
-					if err := s.Light.SetLight(*sock, a.Level, a.Color); err != nil && firstErr == nil {
-						firstErr = err
-					}
+					s.QueueLight(*sock, a.Level, a.Color)
 				}
 			}
 		}
@@ -88,6 +87,29 @@ func (s *Store) ExecuteAction(targetType, targetID, action string) error {
 
 	default:
 		return fmt.Errorf("unsupported target type %q", targetType)
+	}
+}
+
+// QueueLight buffers a smart-light brightness/colour command to be applied by
+// FlushLights once the lock is released. Caller must hold Mu (write lock).
+func (s *Store) QueueLight(socket Socket, level *int, color string) {
+	s.pendingLights = append(s.pendingLights, lightCmd{socket: socket, level: level, color: color})
+}
+
+// FlushLights drains queued smart-light commands and sends them to the bridge.
+// It briefly takes Mu to swap the buffer, then makes the (network) bridge calls
+// WITHOUT the lock held. Caller must NOT hold Mu. Safe to call when empty.
+func (s *Store) FlushLights() {
+	s.Mu.Lock()
+	cmds := s.pendingLights
+	s.pendingLights = nil
+	light := s.Light
+	s.Mu.Unlock()
+	if light == nil {
+		return
+	}
+	for _, c := range cmds {
+		_ = light.SetLight(c.socket, c.level, c.color)
 	}
 }
 

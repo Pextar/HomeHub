@@ -24,6 +24,17 @@
 
     const onCount = $derived(scene.actions.filter(a => a.action === "on").length);
     const offCount = $derived(scene.actions.filter(a => a.action === "off").length);
+
+    // Brightness/colour hint: levels set on any on-action, and distinct colours.
+    const dimLevels = $derived(
+        scene.actions.filter(a => a.action === "on" && a.level != null).map(a => a.level as number),
+    );
+    const brightHint = $derived(
+        dimLevels.length === 0 ? "" :
+        dimLevels.length === 1 ? `${dimLevels[0]}%` :
+        `${Math.min(...dimLevels)}–${Math.max(...dimLevels)}%`,
+    );
+    const sceneColors = $derived([...new Set(scene.actions.filter(a => a.color).map(a => a.color as string))]);
     const sub = $derived(
         scene.actions.length === 0 ? "No devices" :
         [onCount ? `${onCount} on` : "", offCount ? `${offCount} off` : ""].filter(Boolean).join(" · ")
@@ -71,6 +82,16 @@
         <span class="meta">
             <span class="name">{scene.name}</span>
             <span class="sub">{sub}</span>
+            {#if brightHint || sceneColors.length}
+                <span class="tags">
+                    {#if brightHint}
+                        <span class="dim-badge"><Icon name="sun" size={11} />{brightHint}</span>
+                    {/if}
+                    {#each sceneColors as c (c)}
+                        <span class="cdot" style="background:#{c}"></span>
+                    {/each}
+                </span>
+            {/if}
             <span class="count mono">{scene.actions.length} {scene.actions.length === 1 ? "device" : "devices"}</span>
         </span>
     </button>
@@ -138,6 +159,19 @@
     .meta { display: flex; flex-direction: column; min-width: 0; }
     .name { font-weight: 600; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .sub { color: var(--text-mute); font-size: 12px; margin-top: 3px; line-height: 1.3; }
+    .tags { display: flex; align-items: center; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+    .dim-badge {
+        display: inline-flex; align-items: center; gap: 3px;
+        font-size: 10.5px; color: var(--on);
+        background: var(--on-soft);
+        padding: 1px 6px; border-radius: var(--r-pill);
+    }
+    .dim-badge :global(svg) { color: var(--on); }
+    .cdot {
+        width: 12px; height: 12px; border-radius: 50%;
+        border: 1px solid var(--hairline);
+        flex-shrink: 0;
+    }
     .count { color: var(--text-dim); font-size: 11.5px; margin-top: 6px; }
 
     .more-corner {

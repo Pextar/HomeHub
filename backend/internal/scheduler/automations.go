@@ -151,6 +151,7 @@ func (e *autoEngine) conditionsHold(conds []store.AutomationCondition, curSocket
 
 func (e *autoEngine) execute(st *store.Store, a store.Automation, now time.Time, pushSvc *push.Service) error {
 	st.Mu.Lock()
+	defer st.FlushLights() // off-lock bridge calls for scene brightness/colour
 	defer st.Mu.Unlock()
 
 	st.SuppressStateChange = true

@@ -42,6 +42,10 @@ func TestSceneAppliesLevelAndColorToSmartLight(t *testing.T) {
 	if err := s.ExecuteAction("scene", "sc", "activate"); err != nil {
 		t.Fatalf("activate scene: %v", err)
 	}
+	if light.calls != 0 {
+		t.Fatalf("SetLight should be deferred to FlushLights, but ran %d times during execution", light.calls)
+	}
+	s.FlushLights()
 
 	if light.calls != 1 {
 		t.Fatalf("expected SetLight once (smart light only), got %d", light.calls)

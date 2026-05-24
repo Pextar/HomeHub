@@ -134,6 +134,9 @@ func (s *Server) activateScene(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
 
 	s.Store.Mu.Lock()
+	// Drains queued smart-light commands after the lock is released (LIFO:
+	// Unlock runs first, then FlushLights), keeping bridge I/O off the lock.
+	defer s.Store.FlushLights()
 	defer s.Store.Mu.Unlock()
 
 	scene, ok := s.Store.Scenes[id]
@@ -154,10 +157,11 @@ func (s *Server) activateScene(w http.ResponseWriter, r *http.Request) {
 			})
 			continue
 		}
-		// Apply scene brightness/colour to smart lights switched on.
-		if a.Action == "on" && s.Store.Light != nil && (a.Level != nil || a.Color != "") {
+		// Queue scene brightness/colour for smart lights switched on; the
+		// bridge call runs in FlushLights once the lock is released.
+		if a.Action == "on" && (a.Level != nil || a.Color != "") {
 			if sock, ok := s.Store.Sockets[a.SocketID]; ok {
-				_ = s.Store.Light.SetLight(*sock, a.Level, a.Color)
+				s.Store.QueueLight(*sock, a.Level, a.Color)
 			}
 		}
 		okCount++

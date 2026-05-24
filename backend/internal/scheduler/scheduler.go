@@ -116,6 +116,7 @@ func Run(ctx context.Context, st *store.Store, pushSvc *push.Service) {
 // will see the resulting state on the next refresh.
 func executeTimer(st *store.Store, t store.Timer, pushSvc *push.Service) error {
 	st.Mu.Lock()
+	defer st.FlushLights() // off-lock bridge calls for scene brightness/colour
 	defer st.Mu.Unlock()
 
 	delete(st.Timers, t.ID)
@@ -148,6 +149,7 @@ func executeTimer(st *store.Store, t store.Timer, pushSvc *push.Service) error {
 
 func executeSchedule(st *store.Store, s store.Schedule, pushSvc *push.Service) error {
 	st.Mu.Lock()
+	defer st.FlushLights() // off-lock bridge calls for scene brightness/colour
 	defer st.Mu.Unlock()
 
 	tt, tid, action := s.TargetType, s.TargetID, s.Action

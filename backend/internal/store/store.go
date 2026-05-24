@@ -78,6 +78,17 @@ type Store struct {
 	// instead of one per affected socket. OnChange (SSE) still fires so the
 	// UI stays live. Caller must hold Mu (write lock).
 	SuppressStateChange bool
+
+	// pendingLights buffers smart-light brightness/colour commands produced
+	// while executing a scene under Mu. They are drained by FlushLights after
+	// the lock is released, so the (network) bridge calls never block the lock.
+	pendingLights []lightCmd
+}
+
+type lightCmd struct {
+	socket Socket
+	level  *int
+	color  string
 }
 
 const (
