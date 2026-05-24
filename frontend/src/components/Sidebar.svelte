@@ -40,6 +40,8 @@
     { route: "schedules", icon: "clock", label: "Schedules", admin: true },
     { route: "floorplan", icon: "map", label: "Floor plan", admin: true },
     { route: "sensors", icon: "sensor", label: "Sensors", admin: true },
+    { route: "insights", icon: "chart", label: "Insights", admin: true },
+    { route: "activity", icon: "activity", label: "Activity", admin: true },
     { route: "scenes", icon: "scenes", label: "Scenes", admin: true },
     { route: "users", icon: "user", label: "Profiles", admin: true },
     { route: "settings", icon: "settings", label: "Settings", admin: true },
