@@ -27,13 +27,14 @@ type RFSender interface {
 
 // Store is the single source of truth for application state at runtime.
 type Store struct {
-	Mu        sync.RWMutex
-	Sockets   map[string]*Socket
-	Schedules map[string]*Schedule
-	Groups    map[string]*Group
-	Scenes    map[string]*Scene
-	Timers    map[string]*Timer
-	Sensors   map[string]*Sensor
+	Mu          sync.RWMutex
+	Sockets     map[string]*Socket
+	Schedules   map[string]*Schedule
+	Groups      map[string]*Group
+	Scenes      map[string]*Scene
+	Timers      map[string]*Timer
+	Automations map[string]*Automation
+	Sensors     map[string]*Sensor
 	// Readings is a rolling window of recent values per sensor id.
 	// Trimmed to ReadingsHistorySize on each append.
 	Readings  map[string][]SensorReading
@@ -70,15 +71,16 @@ type Store struct {
 }
 
 const (
-	socketsFile   = "sockets.json"
-	schedulesFile = "schedules.json"
-	groupsFile    = "groups.json"
-	scenesFile    = "scenes.json"
-	timersFile    = "timers.json"
-	sensorsFile   = "sensors.json"
-	readingsFile  = "readings.json"
-	settingsFile  = "settings.json"
-	usersFile     = "users.json"
+	socketsFile     = "sockets.json"
+	schedulesFile   = "schedules.json"
+	groupsFile      = "groups.json"
+	scenesFile      = "scenes.json"
+	timersFile      = "timers.json"
+	automationsFile = "automations.json"
+	sensorsFile     = "sensors.json"
+	readingsFile    = "readings.json"
+	settingsFile    = "settings.json"
+	usersFile       = "users.json"
 
 	// ReadingsHistorySize caps how many readings are kept per sensor.
 	// At one sample per minute that's ~16 hours; at one per five minutes
@@ -90,19 +92,20 @@ const (
 // previously persisted data into it.
 func New(dataDir string, rf RFSender) *Store {
 	return &Store{
-		Sockets:   make(map[string]*Socket),
-		Schedules: make(map[string]*Schedule),
-		Groups:    make(map[string]*Group),
-		Scenes:    make(map[string]*Scene),
-		Timers:    make(map[string]*Timer),
-		Sensors:   make(map[string]*Sensor),
-		Readings:  make(map[string][]SensorReading),
-		Users:     make(map[string]*User),
-		Settings:  &Settings{},
-		Activity:  NewActivityLog(200),
-		Discovery: &Discovery{Candidates: make(map[string]*DiscoveryCandidate)},
-		DataDir:   dataDir,
-		RF:        rf,
+		Sockets:     make(map[string]*Socket),
+		Schedules:   make(map[string]*Schedule),
+		Groups:      make(map[string]*Group),
+		Scenes:      make(map[string]*Scene),
+		Timers:      make(map[string]*Timer),
+		Automations: make(map[string]*Automation),
+		Sensors:     make(map[string]*Sensor),
+		Readings:    make(map[string][]SensorReading),
+		Users:       make(map[string]*User),
+		Settings:    &Settings{},
+		Activity:    NewActivityLog(200),
+		Discovery:   &Discovery{Candidates: make(map[string]*DiscoveryCandidate)},
+		DataDir:     dataDir,
+		RF:          rf,
 	}
 }
 
@@ -124,6 +127,9 @@ func (s *Store) Load() error {
 	}
 	if err := readJSON(filepath.Join(s.DataDir, timersFile), &s.Timers); err != nil {
 		return fmt.Errorf("loading timers: %w", err)
+	}
+	if err := readJSON(filepath.Join(s.DataDir, automationsFile), &s.Automations); err != nil {
+		return fmt.Errorf("loading automations: %w", err)
 	}
 	if err := readJSON(filepath.Join(s.DataDir, sensorsFile), &s.Sensors); err != nil {
 		return fmt.Errorf("loading sensors: %w", err)
@@ -158,6 +164,9 @@ func (s *Store) Load() error {
 	if s.Timers == nil {
 		s.Timers = make(map[string]*Timer)
 	}
+	if s.Automations == nil {
+		s.Automations = make(map[string]*Automation)
+	}
 	if s.Sensors == nil {
 		s.Sensors = make(map[string]*Sensor)
 	}
@@ -190,6 +199,9 @@ func (s *Store) Save() error {
 	}
 	if err := writeJSON(filepath.Join(s.DataDir, timersFile), s.Timers); err != nil {
 		return fmt.Errorf("saving timers: %w", err)
+	}
+	if err := writeJSON(filepath.Join(s.DataDir, automationsFile), s.Automations); err != nil {
+		return fmt.Errorf("saving automations: %w", err)
 	}
 	if err := writeJSON(filepath.Join(s.DataDir, sensorsFile), s.Sensors); err != nil {
 		return fmt.Errorf("saving sensors: %w", err)

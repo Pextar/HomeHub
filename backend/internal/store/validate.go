@@ -90,6 +90,113 @@ func (s *Store) ValidateSchedule(sch *Schedule) error {
 	return nil
 }
 
+// ValidateAutomation normalizes and validates an automation: its trigger,
+// optional conditions, and ordered actions. Referenced sockets/groups/scenes/
+// sensors must exist. Caller must hold Mu (read lock at minimum).
+func (s *Store) ValidateAutomation(a *Automation) error {
+	a.Name = strings.TrimSpace(a.Name)
+	if a.Name == "" {
+		return errors.New("name is required")
+	}
+
+	// ── Trigger ──────────────────────────────────────────────
+	t := &a.Trigger
+	t.Type = strings.ToLower(strings.TrimSpace(t.Type))
+	switch t.Type {
+	case "time":
+		t.TimeMode = strings.ToLower(strings.TrimSpace(t.TimeMode))
+		t.Time = strings.TrimSpace(t.Time)
+		switch t.TimeMode {
+		case "", ModeFixed:
+			t.TimeMode = ModeFixed
+			t.SolarOffsetMinutes = 0
+			if _, err := time.Parse("15:04", t.Time); err != nil {
+				return errors.New("trigger time must be in HH:MM format")
+			}
+		case ModeSunrise, ModeSunset:
+			t.Time = ""
+			if t.SolarOffsetMinutes < -120 || t.SolarOffsetMinutes > 120 {
+				return errors.New("solar_offset_minutes must be between -120 and 120")
+			}
+		default:
+			return errors.New("trigger time_mode must be fixed, sunrise, or sunset")
+		}
+		for _, d := range t.Days {
+			if d < 0 || d > 6 {
+				return errors.New("trigger days must be 0-6 (Sun-Sat)")
+			}
+		}
+	case "sensor":
+		t.SensorID = strings.TrimSpace(t.SensorID)
+		t.Op = strings.ToLower(strings.TrimSpace(t.Op))
+		if _, ok := s.Sensors[t.SensorID]; !ok {
+			return errors.New("trigger sensor does not exist")
+		}
+		if t.Op != "above" && t.Op != "below" {
+			return errors.New("sensor trigger op must be above or below")
+		}
+	case "device":
+		t.SocketID = strings.TrimSpace(t.SocketID)
+		t.ToState = strings.ToLower(strings.TrimSpace(t.ToState))
+		if _, ok := s.Sockets[t.SocketID]; !ok {
+			return errors.New("trigger device does not exist")
+		}
+		if t.ToState != "on" && t.ToState != "off" {
+			return errors.New("device trigger to_state must be on or off")
+		}
+	default:
+		return errors.New("trigger type must be time, sensor, or device")
+	}
+
+	// ── Conditions (optional, AND) ───────────────────────────
+	for i := range a.Conditions {
+		c := &a.Conditions[i]
+		c.Type = strings.ToLower(strings.TrimSpace(c.Type))
+		switch c.Type {
+		case "device":
+			c.SocketID = strings.TrimSpace(c.SocketID)
+			c.State = strings.ToLower(strings.TrimSpace(c.State))
+			if _, ok := s.Sockets[c.SocketID]; !ok {
+				return errors.New("condition device does not exist")
+			}
+			if c.State != "on" && c.State != "off" {
+				return errors.New("device condition state must be on or off")
+			}
+		case "time_range":
+			if _, err := time.Parse("15:04", strings.TrimSpace(c.After)); err != nil {
+				return errors.New("condition after must be in HH:MM format")
+			}
+			if _, err := time.Parse("15:04", strings.TrimSpace(c.Before)); err != nil {
+				return errors.New("condition before must be in HH:MM format")
+			}
+			c.After = strings.TrimSpace(c.After)
+			c.Before = strings.TrimSpace(c.Before)
+		default:
+			return errors.New("condition type must be device or time_range")
+		}
+	}
+
+	// ── Actions (ordered, at least one) ──────────────────────
+	if len(a.Actions) == 0 {
+		return errors.New("at least one action is required")
+	}
+	for i := range a.Actions {
+		act := &a.Actions[i]
+		act.TargetType = strings.ToLower(strings.TrimSpace(act.TargetType))
+		act.TargetID = strings.TrimSpace(act.TargetID)
+		act.Action = strings.ToLower(strings.TrimSpace(act.Action))
+		if err := s.VerifyTarget(act.TargetType, act.TargetID); err != nil {
+			return err
+		}
+		if act.TargetType == "scene" {
+			act.Action = "activate"
+		} else if act.Action != "on" && act.Action != "off" && act.Action != "toggle" {
+			return errors.New("action must be on/off/toggle")
+		}
+	}
+	return nil
+}
+
 // ValidateSettings normalizes and bounds-checks the settings struct.
 func (s *Store) ValidateSettings(set *Settings) error {
 	set.LocationName = strings.TrimSpace(set.LocationName)

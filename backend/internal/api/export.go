@@ -13,14 +13,15 @@ import (
 // Profiles and password hashes are deliberately excluded so a backup file
 // can be shared or version-controlled without leaking credentials.
 type configBundle struct {
-	Version    int                       `json:"version"`
-	ExportedAt time.Time                 `json:"exported_at"`
-	Sockets    map[string]*store.Socket   `json:"sockets"`
-	Schedules  map[string]*store.Schedule `json:"schedules"`
-	Groups     map[string]*store.Group    `json:"groups"`
-	Scenes     map[string]*store.Scene    `json:"scenes"`
-	Sensors    map[string]*store.Sensor   `json:"sensors"`
-	Settings   *store.Settings            `json:"settings"`
+	Version     int                          `json:"version"`
+	ExportedAt  time.Time                    `json:"exported_at"`
+	Sockets     map[string]*store.Socket     `json:"sockets"`
+	Schedules   map[string]*store.Schedule   `json:"schedules"`
+	Groups      map[string]*store.Group      `json:"groups"`
+	Scenes      map[string]*store.Scene      `json:"scenes"`
+	Automations map[string]*store.Automation `json:"automations"`
+	Sensors     map[string]*store.Sensor     `json:"sensors"`
+	Settings    *store.Settings              `json:"settings"`
 }
 
 // exportConfig returns the current configuration as a downloadable JSON
@@ -30,14 +31,15 @@ func (s *Server) exportConfig(w http.ResponseWriter, _ *http.Request) {
 	s.Store.Mu.RLock()
 	settings := *s.Store.Settings
 	bundle := configBundle{
-		Version:    1,
-		ExportedAt: time.Now().UTC(),
-		Sockets:    s.Store.Sockets,
-		Schedules:  s.Store.Schedules,
-		Groups:     s.Store.Groups,
-		Scenes:     s.Store.Scenes,
-		Sensors:    s.Store.Sensors,
-		Settings:   &settings,
+		Version:     1,
+		ExportedAt:  time.Now().UTC(),
+		Sockets:     s.Store.Sockets,
+		Schedules:   s.Store.Schedules,
+		Groups:      s.Store.Groups,
+		Scenes:      s.Store.Scenes,
+		Automations: s.Store.Automations,
+		Sensors:     s.Store.Sensors,
+		Settings:    &settings,
 	}
 	body, err := json.MarshalIndent(bundle, "", "  ")
 	s.Store.Mu.RUnlock()
@@ -79,6 +81,9 @@ func (s *Server) importConfig(w http.ResponseWriter, r *http.Request) {
 	if bundle.Scenes != nil {
 		s.Store.Scenes = bundle.Scenes
 	}
+	if bundle.Automations != nil {
+		s.Store.Automations = bundle.Automations
+	}
 	if bundle.Sensors != nil {
 		s.Store.Sensors = bundle.Sensors
 	}
@@ -91,10 +96,11 @@ func (s *Server) importConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"sockets":   len(s.Store.Sockets),
-		"schedules": len(s.Store.Schedules),
-		"groups":    len(s.Store.Groups),
-		"scenes":    len(s.Store.Scenes),
-		"sensors":   len(s.Store.Sensors),
+		"sockets":     len(s.Store.Sockets),
+		"schedules":   len(s.Store.Schedules),
+		"groups":      len(s.Store.Groups),
+		"scenes":      len(s.Store.Scenes),
+		"automations": len(s.Store.Automations),
+		"sensors":     len(s.Store.Sensors),
 	})
 }

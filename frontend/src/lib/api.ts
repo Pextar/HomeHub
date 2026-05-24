@@ -23,6 +23,7 @@ import type {
   UserUpdate,
   NotifPrefs,
   PushSubscriptionBody,
+  Automation,
 } from "./types";
 
 const BASE = "/api";
@@ -126,6 +127,13 @@ export const api = {
   },
   updateSchedule(id: string, body: Partial<Schedule>) { return req<Schedule>(`/schedules/${encodeURIComponent(id)}`, { method: "PUT", body: json(body) }); },
   deleteSchedule(id: string) { return req<void>(`/schedules/${encodeURIComponent(id)}`, { method: "DELETE" }); },
+
+  // Automations
+  listAutomations() { return req<Automation[]>("/automations"); },
+  createAutomation(body: Partial<Automation>) { return req<Automation>("/automations", { method: "POST", body: json(body) }); },
+  updateAutomation(id: string, body: Partial<Automation>) { return req<Automation>(`/automations/${encodeURIComponent(id)}`, { method: "PUT", body: json(body) }); },
+  deleteAutomation(id: string) { return req<void>(`/automations/${encodeURIComponent(id)}`, { method: "DELETE" }); },
+  runAutomation(id: string) { return req<Automation>(`/automations/${encodeURIComponent(id)}/run`, { method: "POST" }); },
 
   // Groups
   listGroups() { return req<Group[]>("/groups"); },

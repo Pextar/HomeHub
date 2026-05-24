@@ -183,12 +183,57 @@ export interface RoomSummary {
   on: number;
 }
 
+export type AutomationTriggerType = "time" | "sensor" | "device";
+
+export interface AutomationTrigger {
+  type: AutomationTriggerType;
+  // time
+  time_mode?: "fixed" | "sunrise" | "sunset";
+  time?: string;
+  solar_offset_minutes?: number;
+  days?: number[];
+  // sensor
+  sensor_id?: string;
+  op?: "above" | "below";
+  value?: number;
+  // device
+  socket_id?: string;
+  to_state?: "on" | "off";
+}
+
+export interface AutomationCondition {
+  type: "device" | "time_range";
+  // device
+  socket_id?: string;
+  state?: "on" | "off";
+  // time_range
+  after?: string;
+  before?: string;
+}
+
+export interface AutomationAction {
+  target_type: TargetType;
+  target_id: string;
+  action: SocketAction | "activate";
+}
+
+export interface Automation {
+  id: string;
+  name: string;
+  enabled: boolean;
+  trigger: AutomationTrigger;
+  conditions?: AutomationCondition[];
+  actions: AutomationAction[];
+  last_fired_at?: string;
+  run_count?: number;
+}
+
 export interface BulkResult {
   updated: number;
   failures: { socket_id: string; error: string }[];
 }
 
-export type Route = "dashboard" | "floorplan" | "sockets" | "groups" | "scenes" | "schedules" | "sensors" | "insights" | "activity" | "users" | "settings";
+export type Route = "dashboard" | "floorplan" | "sockets" | "groups" | "scenes" | "schedules" | "sensors" | "automations" | "insights" | "activity" | "users" | "settings";
 
 export type SensorKind = "temperature" | "humidity" | "motion" | "light" | "power" | "custom";
 
