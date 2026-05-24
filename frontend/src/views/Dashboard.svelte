@@ -428,14 +428,14 @@
     /* ── Sensors ────────────────────────────────────── */
     .sensors {
         display: grid;
-        grid-template-columns: 1fr;
-        gap: var(--space-3);
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
     }
     @media (min-width: 600px) {
-        .sensors { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+        .sensors { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: var(--space-3); }
     }
-    .sensor-item { display: flex; }
-    .sensor-item > :global(.card) { flex: 1; }
+    .sensor-item { display: flex; min-width: 0; }
+    .sensor-item > :global(.sensor) { flex: 1; min-width: 0; }
 
     .timers { display: flex; flex-direction: column; gap: var(--space-2); }
 

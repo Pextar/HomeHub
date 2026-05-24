@@ -186,11 +186,11 @@
 
     .grid {
         display: grid;
-        grid-template-columns: 1fr;
-        gap: var(--space-3);
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
     }
     @media (min-width: 600px) {
-        .grid { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+        .grid { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: var(--space-3); }
     }
     .grid-item {
         text-align: left;
@@ -200,10 +200,12 @@
         cursor: pointer;
         border-radius: var(--radius-lg);
         transition: transform var(--t-fast);
+        min-width: 0;
     }
     .grid-item:hover { transform: translateY(-1px); }
-    .grid-item.active :global(.card.sensor) {
-        outline: 2px solid var(--on);
-        outline-offset: 2px;
+    .grid-item > :global(.sensor) { width: 100%; }
+    .grid-item.active :global(.sensor) {
+        border-color: var(--on);
+        box-shadow: inset 0 0 0 1px var(--on);
     }
 </style>
