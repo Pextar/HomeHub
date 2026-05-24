@@ -1,7 +1,7 @@
 <script lang="ts">
     import Icon from "./Icon.svelte";
     import { api } from "../lib/api";
-    import { runAction } from "../lib/utils";
+    import { runAction, automationsUsingTarget, plural } from "../lib/utils";
     import { openModal } from "../lib/modal.svelte";
     import { data, toasts } from "../lib/stores.svelte";
     import SceneModal from "../modals/SceneModal.svelte";
@@ -36,9 +36,11 @@
     function openEdit() { moreOpen = false; openModal(SceneModal, { existing: scene }); }
     async function confirmDelete() {
         moreOpen = false;
+        const autoN = automationsUsingTarget(data.value.automations, "scene", scene.id);
+        const extra = autoN > 0 ? ` ${plural(autoN, "automation")} using it will also be updated or removed.` : "";
         const ok = await openModal<boolean>(ConfirmModal, {
             title: "Delete scene?",
-            message: `“${scene.name}” and any schedules pointing at it will be removed.`,
+            message: `“${scene.name}” and any schedules pointing at it will be removed.${extra}`,
             confirmLabel: "Delete",
             danger: true,
         });

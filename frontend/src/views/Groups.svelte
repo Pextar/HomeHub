@@ -5,7 +5,7 @@
     import Icon from "../components/Icon.svelte";
     import { api } from "../lib/api";
     import { data, toasts } from "../lib/stores.svelte";
-    import { runAction } from "../lib/utils";
+    import { runAction, automationsUsingTarget, plural } from "../lib/utils";
     import { openModal } from "../lib/modal.svelte";
     import GroupModal from "../modals/GroupModal.svelte";
     import ConfirmModal from "../components/ConfirmModal.svelte";
@@ -29,9 +29,11 @@
 
     async function confirmDelete(g: typeof v.groups[number]) {
         openId = null;
+        const autoN = automationsUsingTarget(v.automations, "group", g.id);
+        const extra = autoN > 0 ? ` ${plural(autoN, "automation")} using it will also be updated or removed.` : "";
         const ok = await openModal<boolean>(ConfirmModal, {
             title: "Delete group?",
-            message: `“${g.name}” and any schedules pointing at it will be removed. The sockets themselves are not affected.`,
+            message: `“${g.name}” and any schedules pointing at it will be removed. The sockets themselves are not affected.${extra}`,
             confirmLabel: "Delete",
             danger: true,
         });

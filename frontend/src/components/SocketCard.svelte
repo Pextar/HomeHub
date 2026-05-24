@@ -2,7 +2,7 @@
     import Icon from "./Icon.svelte";
     import { untrack, onMount } from "svelte";
     import { api } from "../lib/api";
-    import { socketAction } from "../lib/utils";
+    import { socketAction, automationsUsingSocket, plural } from "../lib/utils";
     import { openModal } from "../lib/modal.svelte";
     import { toasts, data } from "../lib/stores.svelte";
     import type { Socket } from "../lib/types";
@@ -76,9 +76,11 @@
 
     async function confirmDelete() {
         moreOpen = false;
+        const autoN = automationsUsingSocket(data.value.automations, socket.id);
+        const extra = autoN > 0 ? ` ${plural(autoN, "automation")} that use it will also be updated or removed.` : "";
         const ok = await openModal<boolean>(ConfirmModal, {
             title: "Delete device?",
-            message: `"${socket.name}" and any schedules pointing to it will be removed.`,
+            message: `"${socket.name}" and any schedules pointing to it will be removed.${extra}`,
             confirmLabel: "Delete",
             danger: true,
         });
