@@ -25,6 +25,15 @@ type RFSender interface {
 	Send(code, protocol string, state bool) error
 }
 
+// LightController applies brightness/colour to a smart light (Tasmota/Matter).
+// Implemented outside the store (it talks to the bridges), wired in at
+// startup. Nil-safe: when unset, scenes still switch lights on/off but skip
+// level/colour. Implementations must not touch the store (it is called while
+// Mu is held).
+type LightController interface {
+	SetLight(socket Socket, level *int, color string) error
+}
+
 // Store is the single source of truth for application state at runtime.
 type Store struct {
 	Mu          sync.RWMutex
@@ -44,6 +53,7 @@ type Store struct {
 	Discovery *Discovery
 	DataDir   string
 	RF        RFSender
+	Light     LightController
 
 	// OnChange, if set, is invoked whenever a socket's state changes via
 	// ApplyState (manual control, scheduler, or timer). It must be cheap and

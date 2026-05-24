@@ -205,9 +205,14 @@ type Group struct {
 }
 
 // SceneAction sets one socket to a specific state when its scene fires.
+// For smart lights (Tasmota/Matter) turned on, an optional Level (1-100%)
+// and/or Color (RRGGBB hex) are applied after switching on. RF sockets
+// ignore Level/Color.
 type SceneAction struct {
 	SocketID string `json:"socket_id"`
-	Action   string `json:"action"` // "on" | "off"
+	Action   string `json:"action"`          // "on" | "off"
+	Level    *int   `json:"level,omitempty"` // 1-100, smart lights only
+	Color    string `json:"color,omitempty"` // "RRGGBB", smart lights only
 }
 
 // Scene is a named preset that drives a specific set of sockets to

@@ -75,6 +75,14 @@ func (s *Store) ExecuteAction(targetType, targetID, action string) error {
 			if err := s.ExecuteAction("socket", a.SocketID, a.Action); err != nil && firstErr == nil {
 				firstErr = err
 			}
+			// After switching a smart light on, apply its scene brightness/colour.
+			if a.Action == "on" && s.Light != nil && (a.Level != nil || a.Color != "") {
+				if sock, ok := s.Sockets[a.SocketID]; ok {
+					if err := s.Light.SetLight(*sock, a.Level, a.Color); err != nil && firstErr == nil {
+						firstErr = err
+					}
+				}
+			}
 		}
 		return firstErr
 

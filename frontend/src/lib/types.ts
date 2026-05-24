@@ -159,6 +159,8 @@ export interface Group {
 export interface SceneAction {
   socket_id: string;
   action: SceneActionKind;
+  level?: number; // 1-100, smart lights only
+  color?: string; // "RRGGBB", smart lights only
 }
 
 export interface Scene {

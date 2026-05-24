@@ -254,6 +254,21 @@ func (s *Store) ValidateScene(sc *Scene) error {
 		if _, ok := s.Sockets[a.SocketID]; !ok {
 			return fmt.Errorf("unknown socket %q", a.SocketID)
 		}
+		// Brightness/colour only make sense for a light being switched on.
+		if a.Action != "on" {
+			a.Level = nil
+			a.Color = ""
+		} else {
+			if a.Level != nil {
+				if *a.Level < 1 || *a.Level > 100 {
+					return errors.New("scene level must be between 1 and 100")
+				}
+			}
+			a.Color = strings.TrimPrefix(strings.ToLower(strings.TrimSpace(a.Color)), "#")
+			if a.Color != "" && !isHex6(a.Color) {
+				return errors.New("scene color must be a 6-digit RRGGBB hex")
+			}
+		}
 		seen[a.SocketID] = true
 		out = append(out, a)
 	}
@@ -289,6 +304,18 @@ func (s *Store) ValidateSensor(sn *Sensor) error {
 		sn.Unit = defaultUnitForKind(sn.Kind)
 	}
 	return nil
+}
+
+func isHex6(s string) bool {
+	if len(s) != 6 {
+		return false
+	}
+	for _, c := range s {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+			return false
+		}
+	}
+	return true
 }
 
 func defaultUnitForKind(kind string) string {

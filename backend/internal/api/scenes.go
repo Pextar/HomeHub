@@ -154,6 +154,12 @@ func (s *Server) activateScene(w http.ResponseWriter, r *http.Request) {
 			})
 			continue
 		}
+		// Apply scene brightness/colour to smart lights switched on.
+		if a.Action == "on" && s.Store.Light != nil && (a.Level != nil || a.Color != "") {
+			if sock, ok := s.Store.Sockets[a.SocketID]; ok {
+				_ = s.Store.Light.SetLight(*sock, a.Level, a.Color)
+			}
+		}
 		okCount++
 	}
 	s.Store.SuppressStateChange = false
