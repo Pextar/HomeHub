@@ -92,8 +92,8 @@
 
 <Topbar title="Profiles" subtitle="Who can sign in, and which devices each profile controls">
     {#snippet actions()}
-        <button class="btn btn-primary" onclick={addUser}>
-            <Icon name="plus" size={16} /> Add profile
+        <button class="chip" onclick={addUser}>
+            <Icon name="plus" size={14} /> Invite
         </button>
     {/snippet}
 </Topbar>

@@ -44,7 +44,7 @@
 
 <Topbar title="Groups" subtitle="{v.groups.length} configured">
     {#snippet actions()}
-        <button class="btn btn-primary" onclick={() => openModal(GroupModal, {})}>Add group</button>
+        <button class="chip" onclick={() => openModal(GroupModal, {})}><Icon name="plus" size={14} /> New group</button>
     {/snippet}
 </Topbar>
 

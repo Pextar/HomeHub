@@ -48,7 +48,7 @@
 
 <Topbar title="Devices" subtitle="{v.sockets.length} configured · RF, Wi-Fi &amp; Matter">
     {#snippet actions()}
-        <button class="btn btn-primary" onclick={() => openModal(SocketModal, {})}>Add device</button>
+        <button class="chip" onclick={() => openModal(SocketModal, {})}><Icon name="plus" size={14} /> Add</button>
     {/snippet}
 </Topbar>
 

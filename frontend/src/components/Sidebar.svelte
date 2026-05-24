@@ -34,7 +34,7 @@
   // profiles, who only get Dashboard + Devices.
   const PRIMARY_COUNT = 4;
   const allItems: NavItem[] = [
-    { route: "dashboard", icon: "home", label: "Dashboard" },
+    { route: "dashboard", icon: "home", label: "Home" },
     { route: "sockets", icon: "socket", label: "Devices" },
     { route: "groups", icon: "groups", label: "Groups", admin: true },
     { route: "schedules", icon: "clock", label: "Schedules", admin: true },

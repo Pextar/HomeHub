@@ -44,7 +44,7 @@
 
 <Topbar title="Scenes" subtitle="{v.scenes.length} configured">
     {#snippet actions()}
-        <button class="btn btn-primary" onclick={() => openModal(SceneModal, {})}>Add scene</button>
+        <button class="chip" onclick={() => openModal(SceneModal, {})}><Icon name="plus" size={14} /> New scene</button>
     {/snippet}
 </Topbar>
 

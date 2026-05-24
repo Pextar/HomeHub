@@ -62,8 +62,8 @@
 
 <Topbar title="Sensors" subtitle="{v.sensors.length} configured">
     {#snippet actions()}
-        <button class="btn btn-ghost" onclick={() => openModal(PairSensorModal, {})}>Pair</button>
-        <button class="btn btn-primary" onclick={() => openModal(SensorModal, {})}>Add sensor</button>
+        <button class="chip" onclick={() => openModal(PairSensorModal, {})}><Icon name="plus" size={14} /> Pair</button>
+        <button class="chip" onclick={() => openModal(SensorModal, {})}><Icon name="plus" size={14} /> Add</button>
     {/snippet}
 </Topbar>
 

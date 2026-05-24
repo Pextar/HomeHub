@@ -1,5 +1,6 @@
 <script lang="ts">
     import Topbar from "../components/Topbar.svelte";
+    import Icon from "../components/Icon.svelte";
     import EmptyState from "../components/EmptyState.svelte";
     import ScheduleRow from "../components/ScheduleRow.svelte";
     import { api } from "../lib/api";
@@ -81,7 +82,7 @@
 
 <Topbar title="Schedules" subtitle="{v.schedules.length} configured">
     {#snippet actions()}
-        <button class="btn btn-primary" onclick={() => openModal(ScheduleModal, {})}>Add schedule</button>
+        <button class="chip" onclick={() => openModal(ScheduleModal, {})}><Icon name="plus" size={14} /> New</button>
     {/snippet}
 </Topbar>
 
