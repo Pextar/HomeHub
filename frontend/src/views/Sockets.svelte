@@ -191,13 +191,13 @@
     }
     .grid {
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-        gap: var(--space-4);
+        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+        gap: var(--space-3);
     }
-    /* On small phones, single-column is more comfortable */
-    @media (max-width: 480px) {
-        .grid { grid-template-columns: 1fr; gap: var(--space-3); }
+    /* Compact device tiles flow two-up on phones, matching the mockup. */
+    @media (max-width: 600px) {
+        .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
     }
-    .grid-item { display: flex; }
-    .grid-item > :global(.card) { flex: 1; }
+    .grid-item { display: flex; min-width: 0; }
+    .grid-item > :global(.tile) { flex: 1; min-width: 0; }
 </style>
