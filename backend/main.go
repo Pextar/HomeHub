@@ -26,7 +26,28 @@ import (
 	"rf-socket-controller/internal/scheduler"
 	"rf-socket-controller/internal/sender"
 	"rf-socket-controller/internal/store"
+	"rf-socket-controller/internal/tasmota"
 )
+
+// lightControl applies scene brightness/colour to smart lights. It satisfies
+// store.LightController and routes by protocol to the Tasmota/Matter bridges.
+// RF and other protocols are no-ops (on/off only).
+type lightControl struct{ matter *matter.Client }
+
+func (l lightControl) SetLight(socket store.Socket, level *int, color string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+	defer cancel()
+	switch socket.Protocol {
+	case "tasmota":
+		return tasmota.SetState(ctx, socket.Code, tasmota.StateUpdate{Dimmer: level, Color: color})
+	case "matter", "matter-thread":
+		if l.matter == nil || !l.matter.Enabled() {
+			return nil
+		}
+		return l.matter.SetState(ctx, socket.Code, matter.StateUpdate{Level: level, Color: color})
+	}
+	return nil
+}
 
 // nexaScriptPath locates the lgpio-backed Nexa transmitter helper.
 // NEXA_TX_SCRIPT overrides it; otherwise we look for nexa_tx.py next to
@@ -114,6 +135,7 @@ func main() {
 		Matter: matterClient,
 		MQTT:   mqttClient,
 	})
+	st.Light = lightControl{matter: matterClient}
 	if err := st.Load(); err != nil {
 		log.Fatalf("failed to load data: %v", err)
 	}

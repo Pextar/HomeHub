@@ -1,5 +1,5 @@
 import { api } from "./api";
-import type { Socket, Schedule, Group, Scene, Timer, RoomSummary, ToastSpec, Route, ActivityEntry, Sensor, Settings, User } from "./types";
+import type { Socket, Schedule, Group, Scene, Timer, RoomSummary, ToastSpec, Route, ActivityEntry, Sensor, Settings, User, Automation } from "./types";
 
 // Reactive global state. Svelte 5 runes ($state) make any property mutation
 // trigger downstream reactivity in components that read these values.
@@ -12,6 +12,7 @@ function createDataStore() {
     groups: [] as Group[],
     scenes: [] as Scene[],
     timers: [] as Timer[],
+    automations: [] as Automation[],
     rooms: [] as RoomSummary[],
     activity: [] as ActivityEntry[],
     sensors: [] as Sensor[],
@@ -30,11 +31,12 @@ function createDataStore() {
       data.rooms = rooms ?? [];
 
       if (session.isAdmin) {
-        const [schedules, groups, scenes, timers, activity, sensors, settings] = await Promise.all([
+        const [schedules, groups, scenes, timers, automations, activity, sensors, settings] = await Promise.all([
           api.listSchedules(),
           api.listGroups(),
           api.listScenes(),
           api.listTimers(),
+          api.listAutomations(),
           api.listActivity(50),
           api.listSensors(),
           api.getSettings(),
@@ -43,6 +45,7 @@ function createDataStore() {
         data.groups = groups ?? [];
         data.scenes = scenes ?? [];
         data.timers = timers ?? [];
+        data.automations = automations ?? [];
         data.activity = activity ?? [];
         data.sensors = sensors ?? [];
         data.settings = settings ?? { latitude: 0, longitude: 0 };
@@ -109,21 +112,33 @@ function createToastStore() {
 }
 
 function createRouteStore() {
-  const valid: Route[] = ["dashboard", "floorplan", "sockets", "groups", "scenes", "schedules", "sensors", "users", "settings"];
-  const current = $state<{ route: Route }>({ route: parse() });
+  const valid: Route[] = ["dashboard", "floorplan", "sockets", "groups", "scenes", "schedules", "sensors", "automations", "insights", "activity", "users", "settings"];
+  const current = $state<{ route: Route; query: Record<string, string> }>({ route: parse(), query: parseQuery() });
 
   function parse(): Route {
     const m = window.location.hash.match(/^#\/([\w-]+)/);
     const r = (m?.[1] ?? "dashboard") as Route;
     return valid.includes(r) ? r : "dashboard";
   }
+  function parseQuery(): Record<string, string> {
+    const i = window.location.hash.indexOf("?");
+    if (i < 0) return {};
+    return Object.fromEntries(new URLSearchParams(window.location.hash.slice(i + 1)));
+  }
 
-  window.addEventListener("hashchange", () => { current.route = parse(); });
+  window.addEventListener("hashchange", () => {
+    current.route = parse();
+    current.query = parseQuery();
+  });
   if (!window.location.hash) window.location.hash = "#/dashboard";
 
   return {
     get current() { return current.route; },
-    go(r: Route) { window.location.hash = `#/${r}`; },
+    get query() { return current.query; },
+    go(r: Route, params?: Record<string, string>) {
+      const q = params && Object.keys(params).length ? "?" + new URLSearchParams(params).toString() : "";
+      window.location.hash = `#/${r}${q}`;
+    },
   };
 }
 

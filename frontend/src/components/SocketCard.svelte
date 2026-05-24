@@ -2,7 +2,7 @@
     import Icon from "./Icon.svelte";
     import { untrack, onMount } from "svelte";
     import { api } from "../lib/api";
-    import { socketAction } from "../lib/utils";
+    import { socketAction, automationsUsingSocket, plural } from "../lib/utils";
     import { openModal } from "../lib/modal.svelte";
     import { toasts, data } from "../lib/stores.svelte";
     import type { Socket } from "../lib/types";
@@ -22,6 +22,10 @@
     const isThread  = $derived(socket.protocol === "matter-thread");
     const isSmartLight = $derived(isTasmota || isMatter);
 
+    const proto = $derived(isTasmota ? "tasmota" : isMatter ? "matter" : "rf");
+    const protoLabel = $derived(isTasmota ? "Wi-Fi" : isThread ? "Thread" : isMatter ? "Matter" : "RF");
+    const protoIcon = $derived(isTasmota ? "wifi" : isMatter ? "devices" : "radio");
+
     // One-shot "pulse" ring whenever the socket's state flips.
     let prevState = untrack(() => socket.state);
     let pulsing = $state(false);
@@ -35,75 +39,48 @@
         }
     });
 
-    // --- Inline brightness (Tasmota + Matter share this row) ---
-    // Lazy-loaded; the userTouched flag prevents a stale bridge response
-    // from overwriting a value the user is actively dragging. We also
-    // remember the current color (Matter) so the slider track can be tinted
-    // to match the bulb — makes a wall of cards much easier to scan.
+    // Brightness drives the read-only rail + "On · NN%" label. Lazy-loaded from
+    // the bridge once the tile scrolls into view (a wall of smart lights would
+    // otherwise fire a burst of requests on mount). Full control lives in the
+    // light modal opened from the actions menu.
     let brightness = $state<number | null>(null);
-    let tintColor = $state<string | null>(null);
-    let userTouched = $state(false);
-
-    // Only hit the bridge once the card scrolls into view — a wall of smart
-    // lights would otherwise fire a burst of requests on mount.
     let cardEl = $state<HTMLElement>();
     let visible = $state(false);
     onMount(() => {
         if (!cardEl) return;
         const io = new IntersectionObserver((entries) => {
-            if (entries.some(e => e.isIntersecting)) {
-                visible = true;
-                io.disconnect();
-            }
+            if (entries.some(e => e.isIntersecting)) { visible = true; io.disconnect(); }
         }, { rootMargin: "100px" });
         io.observe(cardEl);
         return () => io.disconnect();
     });
-
     $effect(() => {
-        if (!visible || !isSmartLight || brightness !== null || userTouched) return;
+        if (!visible || !isSmartLight || brightness !== null) return;
         if (isTasmota) {
-            api.tasmotaGetState(socket.id).then(s => {
-                if (!userTouched && s.dimmer != null) brightness = s.dimmer;
-                if (s.color) tintColor = "#" + s.color.toLowerCase();
-            }).catch(() => {});
+            api.tasmotaGetState(socket.id).then(s => { if (s.dimmer != null) brightness = s.dimmer; }).catch(() => {});
         } else if (isMatter) {
-            api.matterGetState(socket.id).then(s => {
-                if (!userTouched && s.level != null) brightness = s.level;
-                if (s.color) tintColor = "#" + s.color.toLowerCase();
-            }).catch(() => {});
+            api.matterGetState(socket.id).then(s => { if (s.level != null) brightness = s.level; }).catch(() => {});
         }
     });
 
-    let dimmerTimer: ReturnType<typeof setTimeout> | undefined;
-    function onDimmerInput() {
-        userTouched = true;
-        if (brightness === null) return;
-        const value = brightness;
-        clearTimeout(dimmerTimer);
-        dimmerTimer = setTimeout(async () => {
-            try {
-                if (isTasmota)     await api.tasmotaSetState(socket.id, { dimmer: value });
-                else if (isMatter) await api.matterSetState(socket.id,  { level: value });
-            } catch (e) {
-                toasts.error("Brightness update failed", (e as Error).message);
-            }
-        }, 150);
-    }
+    const statusText = $derived(
+        socket.state ? (isSmartLight && brightness != null ? `On · ${brightness}%` : "On") : "Off"
+    );
+    const showRail = $derived(isSmartLight && socket.state && brightness != null);
 
     async function toggleFavorite() {
-        try {
-            await api.socketToggleFavorite(socket.id);
-            await data.refresh();
-        } catch (e) {
-            toasts.error("Failed", (e as Error).message);
-        }
+        moreOpen = false;
+        try { await api.socketToggleFavorite(socket.id); await data.refresh(); }
+        catch (e) { toasts.error("Failed", (e as Error).message); }
     }
 
     async function confirmDelete() {
+        moreOpen = false;
+        const autoN = automationsUsingSocket(data.value.automations, socket.id);
+        const extra = autoN > 0 ? ` ${plural(autoN, "automation")} that use it will also be updated or removed.` : "";
         const ok = await openModal<boolean>(ConfirmModal, {
             title: "Delete device?",
-            message: `"${socket.name}" and any schedules pointing to it will be removed.`,
+            message: `"${socket.name}" and any schedules pointing to it will be removed.${extra}`,
             confirmLabel: "Delete",
             danger: true,
         });
@@ -112,354 +89,259 @@
             await api.deleteSocket(socket.id);
             toasts.success("Device deleted", socket.name);
             await data.refresh();
-        } catch (e) {
-            toasts.error("Failed", (e as Error).message);
-        }
+        } catch (e) { toasts.error("Failed", (e as Error).message); }
     }
 
-    // ── Overflow menu (mobile ⋯ button) ────────────────────────────────────
-    let moreOpen = $state(false);
-    let moreWrapEl = $state<HTMLElement>();
+    function openControls() {
+        moreOpen = false;
+        if (isTasmota) openModal(TasmotaLightModal, { socket });
+        else if (isMatter) openModal(MatterLightModal, { socket });
+    }
+    function openTimer() { moreOpen = false; openModal(TimerModal, { socket }); }
+    function openEdit()  { moreOpen = false; openModal(SocketModal, { existing: socket }); }
 
-    // Close the overflow menu when the user taps anywhere outside the card.
+    // Actions popover — opened by tapping the tile body. Replaces the old
+    // On/Off/Toggle button row; the switch is the primary control now.
+    let moreOpen = $state(false);
     $effect(() => {
         if (!moreOpen) return;
         function onDocClick(e: MouseEvent) {
-            if (!moreWrapEl?.closest("article")?.contains(e.target as Node)) {
-                moreOpen = false;
-            }
+            if (!cardEl?.contains(e.target as Node)) moreOpen = false;
         }
         document.addEventListener("click", onDocClick, true);
         return () => document.removeEventListener("click", onDocClick, true);
     });
 
-    function openTimer()  { moreOpen = false; openModal(TimerModal, { socket }); }
-    function openEdit()   { moreOpen = false; openModal(SocketModal, { existing: socket }); }
-    function openDelete() { moreOpen = false; confirmDelete(); }
+    function onBodyClick() {
+        // Smart lights open their control modal directly; everything else
+        // opens the actions menu (there's no per-device detail for RF).
+        if (isSmartLight) openControls();
+        else moreOpen = !moreOpen;
+    }
 </script>
 
-<article class="card" class:on={socket.state} class:pulsing bind:this={cardEl}>
-    <div class="head">
-        {#if isTasmota}
-            <button class="title-btn" onclick={() => openModal(TasmotaLightModal, { socket })}
-                title="Open device controls">
-                <div class="title">
-                    <div class="name">{socket.name}</div>
-                    <div class="meta">{socket.room || "Unassigned"}</div>
-                </div>
-            </button>
-        {:else if isMatter}
-            <button class="title-btn" onclick={() => openModal(MatterLightModal, { socket })}
-                title="Open device controls">
-                <div class="title">
-                    <div class="name">{socket.name}</div>
-                    <div class="meta">{socket.room || "Unassigned"}</div>
-                </div>
-            </button>
-        {:else}
-            <div class="title">
-                <div class="name" title={socket.name}>{socket.name}</div>
-                <div class="meta">{socket.room || "Unassigned"}</div>
-            </div>
-        {/if}
+<article class="tile" class:on={socket.state} class:pulsing bind:this={cardEl}>
+    <button class="sw" class:on={socket.state}
+        role="switch" aria-checked={socket.state}
+        aria-label="Toggle {socket.name}"
+        onclick={(e) => { e.stopPropagation(); socketAction(socket, "toggle"); }}></button>
 
-        <div class="menu" bind:this={moreWrapEl}>
-            <!-- ── Desktop: all four icons ── -->
-            <button class="icon-btn fav-btn desktop-action" class:fav={socket.favorite}
-                title={socket.favorite ? "Remove from favorites" : "Add to favorites"}
-                aria-label={socket.favorite ? "Remove from favorites" : "Add to favorites"}
-                aria-pressed={socket.favorite}
-                onclick={toggleFavorite}>
-                <Icon name={socket.favorite ? "star" : "starOutline"} size={16} />
-            </button>
-            <button class="icon-btn desktop-action" title="Set timer" aria-label="Set timer"
-                onclick={() => openModal(TimerModal, { socket })}>
-                <Icon name="timer" size={16} />
-            </button>
-            <button class="icon-btn desktop-action" title="Edit" aria-label="Edit"
-                onclick={() => openModal(SocketModal, { existing: socket })}>
-                <Icon name="edit" size={16} />
-            </button>
-            <button class="icon-btn danger desktop-action" title="Delete" aria-label="Delete"
-                onclick={confirmDelete}>
-                <Icon name="trash" size={16} />
-            </button>
+    <button class="tile-hit" onclick={onBodyClick}
+        aria-haspopup={isSmartLight ? undefined : "menu"}
+        aria-expanded={isSmartLight ? undefined : moreOpen}>
+        <span class="tile-bulb"><Icon name="light" size={18} /></span>
+        <span class="tile-info">
+            <span class="name" title={socket.name}>{socket.name}</span>
+            <span class="meta-row">
+                <span class="meta">{statusText}{socket.room ? ` · ${socket.room}` : ""}</span>
+                <span class="protocol-badge" data-proto={proto} title={`${socket.protocol || "rf"} · ${socket.code}`}>
+                    <Icon name={protoIcon} size={11} />{protoLabel}
+                </span>
+            </span>
+            {#if showRail}
+                <span class="rail"><i style="width:{brightness}%"></i></span>
+            {/if}
+        </span>
+    </button>
 
-            <!-- ── Mobile: favorite + ⋯ only ── -->
-            <button class="icon-btn fav-btn mobile-action" class:fav={socket.favorite}
-                aria-label={socket.favorite ? "Remove from favorites" : "Add to favorites"}
-                aria-pressed={socket.favorite}
-                onclick={toggleFavorite}>
-                <Icon name={socket.favorite ? "star" : "starOutline"} size={18} />
-            </button>
-            <button class="icon-btn mobile-action more-btn"
-                class:open={moreOpen}
-                aria-label="More options"
-                aria-expanded={moreOpen}
-                aria-haspopup="menu"
-                onclick={(e) => { e.stopPropagation(); moreOpen = !moreOpen; }}>
-                <Icon name="more" size={18} />
-            </button>
-        </div>
-    </div>
+    <button class="more-corner" aria-label="Device actions"
+        onclick={(e) => { e.stopPropagation(); moreOpen = !moreOpen; }}>
+        <Icon name="more" size={16} />
+    </button>
 
-    <!-- ── Mobile overflow action list ── -->
     {#if moreOpen}
         <div class="overflow-menu" role="menu"
             in:scale={{ start: 0.95, duration: 140, easing: cubicOut, opacity: 0 }}
             out:scale={{ start: 0.95, duration: 100, easing: cubicOut, opacity: 0 }}>
-            <button class="overflow-item" role="menuitem"
-                onclick={openTimer}>
-                <Icon name="timer" size={16} />
-                <span>Set timer</span>
+            {#if isSmartLight}
+                <button class="overflow-item" role="menuitem" onclick={openControls}>
+                    <Icon name="sun" size={16} /><span>Brightness &amp; colour</span>
+                </button>
+            {/if}
+            <button class="overflow-item" role="menuitem" onclick={toggleFavorite}>
+                <Icon name={socket.favorite ? "star" : "starOutline"} size={16} />
+                <span>{socket.favorite ? "Remove favourite" : "Add to favourites"}</span>
             </button>
-            <button class="overflow-item" role="menuitem"
-                onclick={openEdit}>
-                <Icon name="edit" size={16} />
-                <span>Edit device</span>
+            <button class="overflow-item" role="menuitem" onclick={openTimer}>
+                <Icon name="timer" size={16} /><span>Set timer</span>
             </button>
-            <button class="overflow-item danger" role="menuitem"
-                onclick={openDelete}>
-                <Icon name="trash" size={16} />
-                <span>Delete</span>
+            <button class="overflow-item" role="menuitem" onclick={openEdit}>
+                <Icon name="edit" size={16} /><span>Edit device</span>
+            </button>
+            <button class="overflow-item danger" role="menuitem" onclick={confirmDelete}>
+                <Icon name="trash" size={16} /><span>Delete</span>
             </button>
         </div>
     {/if}
-
-    <div class="status">
-        <span class="dot"></span>
-        <span class="state">{socket.state ? "ON" : "OFF"}</span>
-        <span class="code-chip"
-            data-proto={isTasmota ? "tasmota" : isMatter ? "matter" : "rf"}
-            title={`${socket.protocol || "rf"} · ${socket.code}`}>
-            <Icon name={isTasmota ? "wifi" : isMatter ? "devices" : "radio"} size={12} />
-            <span class="proto-label">{isTasmota ? "Wi-Fi" : isThread ? "Thread" : isMatter ? "Matter" : "RF"}</span>
-            <span class="proto-code"> · {socket.code}</span>
-        </span>
-    </div>
-    {#if isSmartLight}
-        <div class="dim-row" class:disabled={!socket.state} class:loading={brightness === null}>
-            <Icon name="sun" size={14} />
-            <input type="range" min="1" max="100" step="1"
-                value={brightness ?? 50}
-                oninput={(e) => { brightness = +(e.currentTarget as HTMLInputElement).value; onDimmerInput(); }}
-                disabled={!socket.state || brightness === null}
-                aria-label="Brightness"
-                style:--tint={tintColor || "var(--primary)"} />
-            <span class="dim-val">{brightness === null ? "—" : brightness + "%"}</span>
-        </div>
-    {/if}
-    <div class="controls">
-        <button class="btn btn-success" disabled={socket.state}
-            onclick={() => socketAction(socket, "on")}>
-            On
-        </button>
-        <button class="btn btn-danger" disabled={!socket.state}
-            onclick={() => socketAction(socket, "off")}>
-            Off
-        </button>
-        <button class="btn"
-            onclick={() => socketAction(socket, "toggle")}>
-            Toggle
-        </button>
-    </div>
 </article>
 
 <style>
-    .card {
-        background: var(--bg-elevated);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-lg);
-        padding: var(--space-5);
+    .tile {
+        position: relative;
+        border-radius: var(--r-lg);
+        padding: 16px;
+        background: var(--card);
+        border: 1px solid var(--hairline);
         display: flex;
         flex-direction: column;
-        gap: var(--space-4);
-        transition: border-color var(--t-fast), transform var(--t-fast), box-shadow var(--t-fast);
+        overflow: visible;
+        transition: background var(--t-med), border-color var(--t-med), box-shadow var(--t-fast);
     }
-    .card:hover { border-color: var(--border-strong); }
+    .tile.on {
+        background: linear-gradient(155deg, #2b2419 0%, #221d14 60%, #1d180f 100%);
+        border-color: rgba(245, 189, 110, 0.18);
+    }
+    :global([data-theme="light"]) .tile.on {
+        background: linear-gradient(155deg, #fff5e3 0%, #ffeece 100%);
+        border-color: rgba(201, 122, 31, 0.20);
+    }
     @media (hover: hover) {
-        .card:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); }
+        .tile:hover { border-color: var(--border-strong); }
+        .tile.on:hover { border-color: rgba(245, 189, 110, 0.32); }
     }
-    .card.on { border-color: var(--success); box-shadow: inset 0 0 0 1px var(--success-soft); }
 
-    .card.pulsing.on { animation: pulse-on 0.55s ease-out; }
-    .card.pulsing:not(.on) { animation: pulse-off 0.55s ease-out; }
+    .tile.pulsing.on { animation: pulse-on 0.55s ease-out; }
     @keyframes pulse-on {
-        0%   { box-shadow: inset 0 0 0 1px var(--success-soft), 0 0 0 0 rgba(52, 211, 153, 0.55); }
-        100% { box-shadow: inset 0 0 0 1px var(--success-soft), 0 0 0 16px rgba(52, 211, 153, 0); }
-    }
-    @keyframes pulse-off {
-        0%   { box-shadow: 0 0 0 0 rgba(148, 163, 184, 0.45); }
-        100% { box-shadow: 0 0 0 14px rgba(148, 163, 184, 0); }
+        0%   { box-shadow: 0 0 0 0 var(--on-glow); }
+        100% { box-shadow: 0 0 0 16px rgba(245, 189, 110, 0); }
     }
 
-    .head {
+    /* Primary control: the switch, pinned top-right per the mockup. */
+    .sw {
+        position: absolute;
+        top: 16px; right: 16px;
+        z-index: 2;
+        width: 44px; height: 26px;
+        background: var(--card-3);
+        border: 0; border-radius: 13px;
+        cursor: pointer;
+        flex-shrink: 0;
+        touch-action: manipulation;
+        transition: background 150ms ease;
+    }
+    .sw::after {
+        content: "";
+        position: absolute;
+        top: 3px; left: 3px;
+        width: 20px; height: 20px;
+        border-radius: 50%;
+        background: #b5b1a8;
+        transition: transform 220ms var(--spring), background 150ms ease;
+    }
+    .sw.on { background: var(--on); }
+    .sw.on::after { transform: translateX(18px); background: #fff; }
+
+    /* Tap target for the tile body — opens controls (smart) or actions menu. */
+    .tile-hit {
+        all: unset;
         display: flex;
-        align-items: flex-start;
-        justify-content: space-between;
-        gap: var(--space-3);
+        flex-direction: column;
+        gap: 12px;
+        cursor: pointer;
+        /* leave room for the absolute switch on the first row */
+        padding-right: 52px;
+        min-height: 36px;
     }
-    .title { min-width: 0; flex: 1; }
-    .name { font-weight: 600; font-size: 1rem; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .meta { color: var(--text-muted); font-size: 12px; margin-top: 2px; }
-    .menu { display: flex; gap: 4px; flex-shrink: 0; }
-    .fav-btn.fav { color: #f5c518; }
-    .fav-btn.fav:hover { color: #fbbf24; }
+    .tile-hit:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: var(--r-md); }
 
-    /* Desktop shows all 4 icons; mobile shows just fav + ⋯ */
-    .mobile-action { display: none; }
-    .desktop-action { display: grid; }
+    .tile-bulb {
+        width: 36px; height: 36px;
+        border-radius: 50%;
+        background: var(--card-3);
+        display: grid; place-items: center;
+        position: relative;
+        flex-shrink: 0;
+        color: var(--text-mute);
+        transition: background var(--t-med), color var(--t-med);
+    }
+    .tile.on .tile-bulb {
+        background: var(--on);
+        color: #3a2400;
+        box-shadow: 0 0 0 1px var(--on), 0 0 24px 4px var(--on-glow);
+    }
+    .tile.on .tile-bulb::after {
+        content: "";
+        position: absolute;
+        inset: -22px;
+        border-radius: 50%;
+        background: radial-gradient(closest-side, var(--on-glow), transparent 70%);
+        pointer-events: none;
+        z-index: -1;
+    }
 
-    /* Active/open state for the ⋯ button */
-    .more-btn.open { background: var(--surface-hover); color: var(--text); }
+    .tile-info { display: flex; flex-direction: column; gap: 2px; margin-top: 2px; min-width: 0; padding-right: 0; }
+    .name {
+        font-weight: 600; font-size: 15px;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .meta-row {
+        display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    }
+    .meta {
+        color: var(--text-mute); font-size: 12px;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
+    }
+    .protocol-badge { flex-shrink: 0; }
+    .tile.on .meta { color: var(--on); }
 
-    /* ── Overflow action list ── */
+    .rail { margin-top: 6px; }
+
+    /* Subtle ⋯ affordance, bottom-right. Hover-revealed on desktop, always on
+       touch so management actions stay discoverable on the cleaner tile. */
+    .more-corner {
+        position: absolute;
+        bottom: 10px; right: 10px;
+        width: 28px; height: 28px;
+        display: grid; place-items: center;
+        border: 0; background: transparent;
+        color: var(--text-mute);
+        border-radius: var(--r-sm);
+        cursor: pointer;
+        opacity: 0;
+        transition: opacity var(--t-fast), background var(--t-fast), color var(--t-fast);
+    }
+    .more-corner:hover { background: var(--surface-hover); color: var(--text); }
+    @media (hover: hover) { .tile:hover .more-corner { opacity: 1; } }
+    @media (pointer: coarse) { .more-corner { opacity: 0.6; bottom: 8px; right: 8px; } }
+
+    /* ── Actions popover ── */
     .overflow-menu {
-        display: none; /* hidden on desktop — shown only on mobile */
+        position: absolute;
+        right: 12px; bottom: 44px;
+        z-index: 10;
+        min-width: 200px;
+        display: flex;
         flex-direction: column;
         background: var(--bg-raised);
         border: 1px solid var(--border);
         border-radius: var(--radius-md);
         overflow: hidden;
-        /* Subtle left accent matching the card tone */
-        box-shadow: inset 3px 0 0 var(--primary);
+        box-shadow: var(--shadow-md);
     }
     .overflow-item {
         display: flex;
         align-items: center;
         gap: var(--space-3);
-        padding: 14px var(--space-4);
+        padding: 12px var(--space-4);
         background: transparent;
         border: none;
         border-bottom: 1px solid var(--border);
         cursor: pointer;
         font: inherit;
-        font-size: 15px;
+        font-size: 14px;
         color: var(--text);
         text-align: left;
-        min-height: 52px;
         touch-action: manipulation;
         transition: background var(--t-fast);
     }
     .overflow-item:last-child { border-bottom: none; }
     .overflow-item :global(svg) { color: var(--text-muted); flex-shrink: 0; }
-    .overflow-item:active { background: var(--surface-hover); }
+    .overflow-item:hover { background: var(--surface-hover); }
     .overflow-item.danger { color: var(--danger); }
     .overflow-item.danger :global(svg) { color: var(--danger); }
 
-    .title-btn {
-        all: unset;
-        cursor: pointer;
-        flex: 1;
-        min-width: 0;
-        border-radius: var(--radius-sm);
-        padding: 2px 4px;
-        margin: -2px -4px;
-    }
-    .title-btn:focus-visible { outline: 2px solid var(--primary); }
-    .title-btn:hover .name { text-decoration: underline; text-decoration-color: var(--border-strong); }
-
-    .status {
-        display: flex; align-items: center; gap: var(--space-2);
-        color: var(--text-muted); font-size: 13px;
-    }
-    .dot {
-        width: 10px; height: 10px;
-        border-radius: 50%;
-        background: var(--text-faint);
-        transition: background var(--t-fast), box-shadow var(--t-fast);
-    }
-    .card.on .dot { background: var(--success); box-shadow: 0 0 0 4px var(--success-soft); }
-    .card.on .state { color: var(--success); font-weight: 600; }
-
-    .code-chip[data-proto="tasmota"] {
-        color: var(--accent-wifi);
-        border-color: var(--accent-wifi-soft);
-        background: var(--accent-wifi-soft);
-    }
-    .code-chip[data-proto="matter"] {
-        color: var(--accent-matter);
-        border-color: var(--accent-matter-soft);
-        background: var(--accent-matter-soft);
-    }
-    .code-chip[data-proto="rf"] {
-        color: var(--accent-rf);
-        border-color: var(--accent-rf-soft);
-        background: var(--accent-rf-soft);
-    }
-
-    .dim-row {
-        display: flex; align-items: center; gap: var(--space-2);
-        color: var(--text-muted); font-size: 12px;
-        padding: 4px 0;
-    }
-    .dim-row.disabled { opacity: 0.4; }
-    .dim-row.loading { opacity: 0.5; }
-    .dim-row input[type="range"] {
-        flex: 1;
-        appearance: none;
-        height: 8px;
-        border-radius: 4px;
-        background: linear-gradient(to right,
-            color-mix(in srgb, var(--tint) 65%, transparent),
-            var(--tint));
-        outline: none;
-        border: 1px solid var(--border);
-        cursor: pointer;
-    }
-    .dim-row input[type="range"]:disabled { cursor: not-allowed; }
-    .dim-row input[type="range"]::-webkit-slider-thumb {
-        appearance: none;
-        width: 16px; height: 16px;
-        border-radius: 50%;
-        background: #fff;
-        border: 2px solid rgba(0,0,0,0.3);
-        cursor: pointer;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.3);
-    }
-    .dim-row input[type="range"]::-moz-range-thumb {
-        width: 16px; height: 16px;
-        border-radius: 50%;
-        background: #fff;
-        border: 2px solid rgba(0,0,0,0.3);
-        cursor: pointer;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.3);
-    }
-    .dim-val { font-variant-numeric: tabular-nums; min-width: 36px; text-align: right; }
-
-    .controls {
-        display: grid;
-        grid-template-columns: 1fr 1fr 1fr;
-        gap: var(--space-2);
-    }
-
-    /* Hide the long code ID on touch screens — just show the protocol label */
     @media (pointer: coarse) {
-        .proto-code { display: none; }
-    }
-
-    /* ── Mobile layout ── */
-    @media (pointer: coarse) {
-        /* Swap icon sets */
-        .desktop-action { display: none; }
-        .mobile-action  { display: grid; }
-
-        /* Show the overflow menu on mobile */
-        .overflow-menu { display: flex; }
-
-        /* Bigger name text — easier to scan a list of cards */
-        .name { font-size: 1.05rem; }
-
-        /* Taller control buttons — full 44px tap targets */
-        .controls { gap: var(--space-2); }
-        .controls :global(.btn) { min-height: 48px; font-size: 15px; font-weight: 600; }
-
-        /* Slightly bigger range thumb */
-        .dim-row input[type="range"]::-webkit-slider-thumb {
-            width: 22px; height: 22px;
-        }
-        .dim-row input[type="range"]::-moz-range-thumb {
-            width: 22px; height: 22px;
-        }
+        .name { font-size: 15.5px; }
+        .overflow-item { padding: 14px var(--space-4); font-size: 15px; min-height: 52px; }
     }
 </style>

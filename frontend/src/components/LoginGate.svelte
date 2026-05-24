@@ -262,6 +262,7 @@
         font-size: 1.5rem;
         letter-spacing: 0.4em;
         text-align: center;
+        font-family: var(--font-mono);
         font-variant-numeric: tabular-nums;
     }
     .switch-mode {

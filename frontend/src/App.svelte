@@ -8,9 +8,12 @@
     import FloorPlan from "./views/FloorPlan.svelte";
     import Sockets from "./views/Sockets.svelte";
     import Schedules from "./views/Schedules.svelte";
+    import Automations from "./views/Automations.svelte";
     import Groups from "./views/Groups.svelte";
     import Scenes from "./views/Scenes.svelte";
     import Sensors from "./views/Sensors.svelte";
+    import Insights from "./views/Insights.svelte";
+    import Activity from "./views/Activity.svelte";
     import Users from "./views/Users.svelte";
     import Settings from "./views/Settings.svelte";
     import KidHome from "./views/KidHome.svelte";
@@ -93,14 +96,17 @@
         groups: Groups,
         scenes: Scenes,
         schedules: Schedules,
+        automations: Automations,
         sensors: Sensors,
+        insights: Insights,
+        activity: Activity,
         users: Users,
         settings: Settings,
     };
 
     // Routes a non-admin profile is allowed to open. Everything else is
     // admin-only; deep-linking elsewhere bounces back to the dashboard.
-    const ADMIN_ONLY: Route[] = ["floorplan", "groups", "scenes", "schedules", "sensors", "users", "settings"];
+    const ADMIN_ONLY: Route[] = ["floorplan", "groups", "scenes", "schedules", "automations", "sensors", "insights", "activity", "users", "settings"];
     const effectiveRoute = $derived(
         !session.isAdmin && ADMIN_ONLY.includes(route.current) ? "dashboard" : route.current,
     );

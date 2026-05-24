@@ -234,15 +234,15 @@
 <style>
     .root {
         position: fixed; inset: 0;
-        background: rgba(8, 11, 22, 0.65);
-        backdrop-filter: blur(4px);
+        background: rgba(10, 8, 4, 0.66);
+        backdrop-filter: blur(6px);
         display: grid; place-items: center;
         z-index: 150;
         padding: var(--space-4);
         /* Prevent any overscroll from leaking to the underlying document. */
         overscroll-behavior: contain;
     }
-    :global([data-theme="light"]) .root { background: rgba(20, 24, 38, 0.40); }
+    :global([data-theme="light"]) .root { background: rgba(26, 24, 19, 0.38); }
 
     .dialog {
         background: var(--bg-elevated);
@@ -307,8 +307,11 @@
         .root { align-items: flex-end; padding: 0; }
         .dialog {
             max-width: 100% !important;
+            border-top-left-radius: var(--radius-xl);
+            border-top-right-radius: var(--radius-xl);
             border-bottom-left-radius: 0;
             border-bottom-right-radius: 0;
+            border-bottom: 0;
             max-height: 92vh;
         }
 

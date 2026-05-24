@@ -29,6 +29,8 @@ func Run(ctx context.Context, st *store.Store, pushSvc *push.Service) {
 	lastFired := make(map[string]string)
 	// pending holds schedules that are waiting for their random offset to elapse.
 	pending := make(map[string]pendingFire)
+	// automations are evaluated on the same tick via their own edge-tracking engine.
+	autos := newAutoEngine()
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 
@@ -101,6 +103,11 @@ func Run(ctx context.Context, st *store.Store, pushSvc *push.Service) {
 				log.Printf("scheduler: timer %s failed: %v", t.ID, err)
 			}
 		}
+
+		// Automations run off the same tick: time triggers match the minute,
+		// while sensor/device triggers fire on edges detected against the
+		// previous tick's snapshot.
+		autos.tick(st, now, pushSvc)
 	}
 }
 
@@ -109,6 +116,7 @@ func Run(ctx context.Context, st *store.Store, pushSvc *push.Service) {
 // will see the resulting state on the next refresh.
 func executeTimer(st *store.Store, t store.Timer, pushSvc *push.Service) error {
 	st.Mu.Lock()
+	defer st.FlushLights() // off-lock bridge calls for scene brightness/colour
 	defer st.Mu.Unlock()
 
 	delete(st.Timers, t.ID)
@@ -141,6 +149,7 @@ func executeTimer(st *store.Store, t store.Timer, pushSvc *push.Service) error {
 
 func executeSchedule(st *store.Store, s store.Schedule, pushSvc *push.Service) error {
 	st.Mu.Lock()
+	defer st.FlushLights() // off-lock bridge calls for scene brightness/colour
 	defer st.Mu.Unlock()
 
 	tt, tid, action := s.TargetType, s.TargetID, s.Action

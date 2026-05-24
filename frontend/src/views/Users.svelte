@@ -33,6 +33,14 @@
         }),
     );
 
+    const AVATAR_HUES = ["var(--cool)", "#a96bd9", "var(--good)", "#d97a45"];
+    function avatarColor(u: User): string {
+        if (u.admin || u.owner) return "var(--on)";
+        let h = 5381;
+        for (let i = 0; i < u.username.length; i++) h = ((h << 5) + h) ^ u.username.charCodeAt(i);
+        return AVATAR_HUES[Math.abs(h) % AVATAR_HUES.length];
+    }
+
     function socketName(id: string): string {
         return data.value.sockets.find((s) => s.id === id)?.name ?? id;
     }
@@ -92,8 +100,8 @@
 
 <Topbar title="Profiles" subtitle="Who can sign in, and which devices each profile controls">
     {#snippet actions()}
-        <button class="btn btn-primary" onclick={addUser}>
-            <Icon name="plus" size={16} /> Add profile
+        <button class="chip" onclick={addUser}>
+            <Icon name="plus" size={14} /> Invite
         </button>
     {/snippet}
 </Topbar>
@@ -127,8 +135,8 @@
             <li class="card">
                 <div class="top">
                     <div class="ident">
-                        <span class="avatar" class:admin={u.admin} class:owner={u.owner}>
-                            <Icon name={u.admin ? "settings" : "user"} size={18} />
+                        <span class="avatar mono" style="background:{avatarColor(u)}">
+                            {u.username.charAt(0).toUpperCase()}
                         </span>
                         <div class="names">
                             <div class="name-row">
@@ -139,7 +147,7 @@
                                     <span class="badge">Admin</span>
                                 {/if}
                                 {#if u.pending_invite}<span class="badge invite-badge">Invite pending</span>{/if}
-                                {#if u.kid}<span class="badge kid">Kid 🧸</span>{/if}
+                                {#if u.kid}<span class="badge kid">Kid</span>{/if}
                                 {#if u.id === session.user?.id}<span class="badge you">You</span>{/if}
                             </div>
                             <div class="role">
@@ -210,9 +218,9 @@
         gap: var(--space-4);
     }
     .card {
-        background: var(--bg-elevated);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
+        background: var(--card);
+        border: 1px solid var(--hairline);
+        border-radius: var(--r-lg);
         padding: var(--space-4);
         display: flex;
         flex-direction: column;
@@ -221,31 +229,30 @@
     .top { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-3); }
     .ident { display: flex; align-items: center; gap: var(--space-3); min-width: 0; }
     .avatar {
-        width: 40px;
-        height: 40px;
+        width: 42px;
+        height: 42px;
         border-radius: 50%;
         display: grid;
         place-items: center;
-        background: var(--surface-hover);
-        color: var(--text-muted);
+        color: #3a2400;
+        font-weight: 600;
+        font-size: 16px;
         flex-shrink: 0;
     }
-    .avatar.admin { background: var(--primary-soft); color: var(--primary); }
-    .avatar.owner { background: #fef3c7; color: #92400e; }
-    :global([data-theme="dark"]) .avatar.owner { background: rgba(245, 158, 11, 0.15); color: #fbbf24; }
     .names { min-width: 0; }
     .name-row { display: flex; align-items: center; gap: var(--space-2); }
     .name { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .role { color: var(--text-muted); font-size: 12px; margin-top: 2px; }
     .badge {
+        font-family: var(--font-mono);
         font-size: 10px;
-        font-weight: 700;
+        font-weight: 500;
         text-transform: uppercase;
         letter-spacing: 0.04em;
-        color: var(--primary);
-        background: var(--primary-soft);
+        color: var(--on);
+        background: var(--on-soft);
         padding: 1px 6px;
-        border-radius: 999px;
+        border-radius: var(--r-sm);
     }
     .badge.you { color: var(--text-muted); background: var(--surface-hover); }
     .badge.kid { color: #b15dff; background: rgba(177, 93, 255, 0.14); }
@@ -274,15 +281,15 @@
         align-items: center;
         gap: var(--space-3);
         padding: var(--space-2) var(--space-3);
-        background: var(--surface);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
+        background: var(--card-3);
+        border: 1px solid var(--hairline);
+        border-radius: var(--r-md);
     }
-    .code-label, .dev-label { color: var(--text-muted); font-size: 12px; flex-shrink: 0; }
+    .code-label, .dev-label { color: var(--text-mute); font-size: 12px; flex-shrink: 0; }
     .code {
-        font-family: ui-monospace, monospace;
+        font-family: var(--font-mono);
         font-size: 1.15rem;
-        font-weight: 700;
+        font-weight: 600;
         letter-spacing: 0.22em;
         font-variant-numeric: tabular-nums;
         color: var(--text);

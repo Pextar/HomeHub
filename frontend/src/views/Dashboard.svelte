@@ -1,99 +1,72 @@
 <script lang="ts">
-    import Topbar from "../components/Topbar.svelte";
     import Icon from "../components/Icon.svelte";
     import RoomCard from "../components/RoomCard.svelte";
     import SceneTile from "../components/SceneTile.svelte";
     import SensorCard from "../components/SensorCard.svelte";
     import SocketCard from "../components/SocketCard.svelte";
     import TimerRow from "../components/TimerRow.svelte";
-    import { route } from "../lib/stores.svelte";
+    import { route, data, toasts, session } from "../lib/stores.svelte";
     import { api } from "../lib/api";
-    import { data, toasts } from "../lib/stores.svelte";
-    import { runAction, formatDays, socketAction } from "../lib/utils";
+    import { runAction, describeTarget } from "../lib/utils";
     import { openModal } from "../lib/modal.svelte";
-    import SocketModal from "../modals/SocketModal.svelte";
-    import SceneModal from "../modals/SceneModal.svelte";
     import ConfirmModal from "../components/ConfirmModal.svelte";
-    import type { Schedule } from "../lib/types";
-    import { Tween } from "svelte/motion";
+    import SocketModal from "../modals/SocketModal.svelte";
     import { fly, scale } from "svelte/transition";
     import { flip } from "svelte/animate";
     import { cubicOut } from "svelte/easing";
     import { dur, stagger } from "../lib/motion";
 
     const v = $derived(data.value);
+
+    // ── Greeting ────────────────────────────────────────────────────────────
+    const now = new Date();
+    const greeting =
+        now.getHours() < 12 ? "Good morning" :
+        now.getHours() < 18 ? "Good afternoon" : "Good evening";
+    const dateLabel =
+        now.toLocaleDateString([], { weekday: "long" }) + ", " +
+        now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    const name = $derived(session.user?.username || "there");
+
+    // ── Whole-home hero ─────────────────────────────────────────────────────
     const favoriteSockets = $derived(v.sockets.filter(s => s.favorite));
-    const totalSockets    = $derived(v.sockets.length);
-    const onSockets       = $derived(v.sockets.filter(s => s.state).length);
-    const enabledSchedules = $derived(v.schedules.filter(s => s.enabled).length);
-    const groupsAndScenes = $derived(v.groups.length + v.scenes.length);
+    const totalSockets = $derived(v.sockets.length);
+    const onSockets = $derived(v.sockets.filter(s => s.state).length);
+    const heroOn = $derived(onSockets > 0);
 
-    // Count-up animation for the four stat numbers.
-    const totalT = new Tween(0, { duration: dur(700), easing: cubicOut });
-    const onT    = new Tween(0, { duration: dur(700), easing: cubicOut });
-    const schedT = new Tween(0, { duration: dur(700), easing: cubicOut });
-    const gsT    = new Tween(0, { duration: dur(700), easing: cubicOut });
-    $effect(() => { totalT.target = totalSockets; });
-    $effect(() => { onT.target = onSockets; });
-    $effect(() => { schedT.target = enabledSchedules; });
-    $effect(() => { gsT.target = groupsAndScenes; });
-
-    // ── Stat detail panel ──────────────────────────────────────────────────
-    type StatKey = "devices" | "active" | "schedules" | "automations";
-    let selectedStat = $state<StatKey | null>(null);
-
-    function toggleStat(key: StatKey) {
-        selectedStat = selectedStat === key ? null : key;
-    }
-
-    function goAndClose(r: Parameters<typeof route.go>[0]) {
-        selectedStat = null;
-        route.go(r);
-    }
-
-    // Devices panel data
-    const rfCount     = $derived(v.sockets.filter(s => s.protocol !== "tasmota" && !s.protocol.startsWith("matter")).length);
-    const wifiCount   = $derived(v.sockets.filter(s => s.protocol === "tasmota").length);
-    const matterCount = $derived(v.sockets.filter(s => s.protocol.startsWith("matter")).length);
-
-    const devicesByRoom = $derived.by(() => {
-        const map = new Map<string, { total: number; on: number }>();
-        for (const s of v.sockets) {
-            const r = s.room || "Unassigned";
-            const cur = map.get(r) ?? { total: 0, on: 0 };
-            map.set(r, { total: cur.total + 1, on: cur.on + (s.state ? 1 : 0) });
-        }
-        return [...map.entries()].sort((a, b) => b[1].total - a[1].total);
-    });
-
-    // Active now panel data
-    const activeDevices = $derived(
-        v.sockets.filter(s => s.state).sort((a, b) => (a.room ?? "").localeCompare(b.room ?? ""))
+    const powerSensors = $derived(v.sensors.filter(s => s.kind === "power" && s.last_value != null));
+    const hasPower = $derived(powerSensors.length > 0);
+    const powerWatts = $derived(Math.round(powerSensors.reduce((sum, s) => sum + (s.last_value ?? 0), 0)));
+    const tempSensors = $derived(v.sensors.filter(s => s.kind === "temperature" && s.last_value != null));
+    const hasTemp = $derived(tempSensors.length > 0);
+    const insideTemp = $derived(
+        hasTemp ? Math.round(tempSensors.reduce((sum, s) => sum + (s.last_value ?? 0), 0) / tempSensors.length) : 0
     );
 
-    // Schedules panel data
-    const enabledSchedulesList = $derived(v.schedules.filter(s => s.enabled));
+    // Desktop stat strip (wide screens only): real metrics that complement the
+    // hero — how many automations are active and the next scheduled event.
+    const enabledAutomations = $derived(v.automations.filter(a => a.enabled).length);
+    const nextEvent = $derived.by(() => {
+        const nowMin = now.getHours() * 60 + now.getMinutes();
+        const parse = (s?: string) => {
+            if (!s || !/^\d\d:\d\d/.test(s)) return -1;
+            const [h, m] = s.split(":").map(Number);
+            return h * 60 + m;
+        };
+        const items = v.schedules
+            .filter(s => s.enabled)
+            .map(s => ({
+                min: parse(s.effective_time || s.time),
+                time: s.effective_time || s.time,
+                label: describeTarget(s.target_type, s.target_id, s.socket_id).label,
+            }))
+            .filter(x => x.min >= 0);
+        if (items.length === 0) return null;
+        const upcoming = items.filter(x => x.min >= nowMin).sort((a, b) => a.min - b.min);
+        return upcoming[0] ?? items.sort((a, b) => a.min - b.min)[0];
+    });
 
-    function formatScheduleTime(s: Schedule): string {
-        if (!s.time_mode || s.time_mode === "fixed") return s.time ?? "";
-        const offset = s.solar_offset_minutes ?? 0;
-        const suffix = offset !== 0 ? ` ${offset > 0 ? "+" : ""}${offset}m` : "";
-        return s.time_mode === "sunrise" ? `Sunrise${suffix}` : `Sunset${suffix}`;
-    }
-
-    function getTargetLabel(s: Schedule): string {
-        if (s.target_type === "socket" && s.target_id)
-            return v.sockets.find(x => x.id === s.target_id)?.name ?? "Unknown";
-        if (s.target_type === "group" && s.target_id)
-            return v.groups.find(x => x.id === s.target_id)?.name ?? "Unknown";
-        if (s.target_type === "scene" && s.target_id)
-            return v.scenes.find(x => x.id === s.target_id)?.name ?? "Unknown";
-        if (s.socket_id)
-            return v.sockets.find(x => x.id === s.socket_id)?.name ?? "Unknown";
-        return "Unknown";
-    }
-
-    // Automations panel data
+    // Groups with a live on-count for the groups section.
     const groupsWithState = $derived(
         v.groups.map(g => ({
             ...g,
@@ -102,7 +75,7 @@
     );
 
     // Live room on-counts derived from socket state so RoomCards stay in sync
-    // with optimistic toggles (rather than waiting for the next server refresh).
+    // with optimistic toggles rather than waiting for the next server refresh.
     const liveRooms = $derived.by(() => {
         const onByRoom = new Map<string, number>();
         for (const s of v.sockets) {
@@ -112,7 +85,7 @@
         return v.rooms.map(r => ({ ...r, on: onByRoom.get(r.name) ?? 0 }));
     });
 
-    // ── Bulk actions ───────────────────────────────────────────────────────
+    // ── Bulk actions ────────────────────────────────────────────────────────
     async function allOn() {
         const ok = await openModal<boolean>(ConfirmModal, {
             title: "Turn all devices ON?",
@@ -140,365 +113,150 @@
             await data.refresh();
         } catch (e) { toasts.error("Failed", (e as Error).message); }
     }
+    function toggleAllMaster() {
+        if (heroOn) allOff(); else allOn();
+    }
 </script>
 
-<Topbar title="Dashboard" subtitle="Your connected home">
-    {#snippet actions()}
-        <button class="btn btn-primary" onclick={() => openModal(SocketModal, {})}>Add device</button>
-    {/snippet}
-</Topbar>
-
-<!-- ── Stat cards (clickable) ─────────────────────────────────────── -->
-<div class="stats">
-    <button class="stat" data-tone="primary"
-        class:selected={selectedStat === "devices"}
-        aria-expanded={selectedStat === "devices"}
-        aria-controls="stat-detail"
-        onclick={() => toggleStat("devices")}
-        in:fly={{ y: 14, duration: dur(280), delay: stagger(0, 60), easing: cubicOut }}>
-        <div class="ico" data-tone="primary"><Icon name="home" size={20} /></div>
-        <div class="stat-text">
-            <div class="value">{Math.round(totalT.current)}</div>
-            <div class="label">Devices</div>
-        </div>
-        <div class="caret" class:open={selectedStat === "devices"}>
-            <Icon name="chevronDown" size={14} />
-        </div>
-    </button>
-
-    <button class="stat" data-tone="success"
-        class:selected={selectedStat === "active"}
-        aria-expanded={selectedStat === "active"}
-        aria-controls="stat-detail"
-        onclick={() => toggleStat("active")}
-        in:fly={{ y: 14, duration: dur(280), delay: stagger(1, 60), easing: cubicOut }}>
-        <div class="ico" data-tone="success"><Icon name="bolt" size={20} /></div>
-        <div class="stat-text">
-            <div class="value">{Math.round(onT.current)}</div>
-            <div class="label">Active now</div>
-        </div>
-        <div class="caret" class:open={selectedStat === "active"}>
-            <Icon name="chevronDown" size={14} />
-        </div>
-    </button>
-
-    <button class="stat" data-tone="info"
-        class:selected={selectedStat === "schedules"}
-        aria-expanded={selectedStat === "schedules"}
-        aria-controls="stat-detail"
-        onclick={() => toggleStat("schedules")}
-        in:fly={{ y: 14, duration: dur(280), delay: stagger(2, 60), easing: cubicOut }}>
-        <div class="ico" data-tone="info"><Icon name="clock" size={20} /></div>
-        <div class="stat-text">
-            <div class="value">{Math.round(schedT.current)}</div>
-            <div class="label">Schedules</div>
-        </div>
-        <div class="caret" class:open={selectedStat === "schedules"}>
-            <Icon name="chevronDown" size={14} />
-        </div>
-    </button>
-
-    <button class="stat" data-tone="warn"
-        class:selected={selectedStat === "automations"}
-        aria-expanded={selectedStat === "automations"}
-        aria-controls="stat-detail"
-        onclick={() => toggleStat("automations")}
-        in:fly={{ y: 14, duration: dur(280), delay: stagger(3, 60), easing: cubicOut }}>
-        <div class="ico" data-tone="warn"><Icon name="scenes" size={20} /></div>
-        <div class="stat-text">
-            <div class="value">{Math.round(gsT.current)}</div>
-            <div class="label">Groups &amp; scenes</div>
-        </div>
-        <div class="caret" class:open={selectedStat === "automations"}>
-            <Icon name="chevronDown" size={14} />
-        </div>
-    </button>
-</div>
-
-<!-- ── Expandable detail panel ────────────────────────────────────── -->
-{#if selectedStat}
-    <div id="stat-detail" class="detail" data-tone={
-            selectedStat === "devices"     ? "primary" :
-            selectedStat === "active"      ? "success" :
-            selectedStat === "schedules"   ? "info"    : "warn"
-        }
-        in:fly={{ y: -10, duration: dur(220), easing: cubicOut }}
-        out:fly={{ y: -10, duration: dur(160) }}>
-
-        <!-- header -->
-        <div class="dh">
-            <div class="dh-left">
-                {#if selectedStat === "devices"}
-                    <div class="dico" data-tone="primary"><Icon name="home" size={14} /></div>
-                    <span class="dt">Device breakdown</span>
-                {:else if selectedStat === "active"}
-                    <div class="dico" data-tone="success"><Icon name="bolt" size={14} /></div>
-                    <span class="dt">Active devices</span>
-                {:else if selectedStat === "schedules"}
-                    <div class="dico" data-tone="info"><Icon name="clock" size={14} /></div>
-                    <span class="dt">Active schedules</span>
-                {:else}
-                    <div class="dico" data-tone="warn"><Icon name="scenes" size={14} /></div>
-                    <span class="dt">Groups &amp; scenes</span>
-                {/if}
-            </div>
-            <button class="icon-btn" onclick={() => selectedStat = null} aria-label="Close">
-                <Icon name="close" size={16} />
+<!-- ── Greeting header ────────────────────────────────────────────── -->
+<header class="greeting">
+    <div class="greet-text">
+        <div class="greet-date mono">{dateLabel}</div>
+        <h1 class="greet-title">{greeting},<br /><span class="greet-name">{name}</span></h1>
+    </div>
+    {#if session.isAdmin}
+        <div class="greet-actions">
+            <button class="chip add-device" onclick={() => openModal(SocketModal, {})}>
+                <Icon name="plus" size={14} /> Add device
+            </button>
+            <button class="chip icon-chip" aria-label="Activity" onclick={() => route.go("activity")}>
+                <Icon name="activity" size={16} />
+            </button>
+            <button class="chip icon-chip" aria-label="Settings" onclick={() => route.go("settings")}>
+                <Icon name="settings" size={16} />
             </button>
         </div>
+    {/if}
+</header>
 
-        <!-- body -->
-        <div class="db">
-
-            <!-- DEVICES -->
-            {#if selectedStat === "devices"}
-                <div class="proto-row">
-                    {#if rfCount > 0}
-                        <span class="pbadge" data-proto="rf">
-                            <Icon name="radio" size={13} /> RF · {rfCount}
-                        </span>
-                    {/if}
-                    {#if wifiCount > 0}
-                        <span class="pbadge" data-proto="tasmota">
-                            <Icon name="wifi" size={13} /> Wi-Fi · {wifiCount}
-                        </span>
-                    {/if}
-                    {#if matterCount > 0}
-                        <span class="pbadge" data-proto="matter">
-                            <Icon name="devices" size={13} /> Matter · {matterCount}
-                        </span>
-                    {/if}
-                    {#if totalSockets === 0}
-                        <span class="note">No devices added yet</span>
-                    {/if}
+<!-- ── Whole-home hero + desktop stat strip ───────────────────────── -->
+<div class="top-grid">
+    <div class="hero tile" class:on={heroOn}
+        in:fly={{ y: 14, duration: dur(280), easing: cubicOut }}>
+        <div class="hero-top">
+            <div class="hero-lead">
+                <div class="hero-eyebrow mono">Whole home</div>
+                <div class="hero-count">
+                    <span class="num-display">{onSockets}</span>
+                    <span class="hero-of">of {totalSockets} on</span>
                 </div>
-
-                {#if devicesByRoom.length > 0}
-                    <div class="room-grid">
-                        {#each devicesByRoom as [room, counts]}
-                            <div class="rg-row">
-                                <span class="rg-name">{room}</span>
-                                <div class="rg-counts">
-                                    {#if counts.on > 0}
-                                        <span class="rg-on">{counts.on} on</span>
-                                    {/if}
-                                    <span class="rg-total">{counts.total} device{counts.total === 1 ? "" : "s"}</span>
-                                </div>
-                            </div>
-                        {/each}
-                    </div>
-                {/if}
-
-                <div class="df">
-                    <button class="btn btn-ghost" onclick={() => goAndClose("sockets")}>
-                        View all devices →
-                    </button>
-                </div>
-
-            <!-- ACTIVE NOW -->
-            {:else if selectedStat === "active"}
-                {#if activeDevices.length === 0}
-                    <div class="dempty">
-                        <Icon name="moon" size={24} />
-                        <p>Everything is off</p>
-                    </div>
-                {:else}
-                    <ul class="dev-list">
-                        {#each activeDevices as s (s.id)}
-                            <li class="dev-row"
-                                animate:flip={{ duration: dur(260), easing: cubicOut }}
-                                in:fly={{ x: -6, duration: dur(180), easing: cubicOut }}>
-                                <span class="dev-dot"></span>
-                                <span class="dev-name">{s.name}</span>
-                                {#if s.room}<span class="room-chip">{s.room}</span>{/if}
-                                <button class="btn btn-danger btn-xs"
-                                    onclick={() => socketAction(s, "off")}>
-                                    Off
-                                </button>
-                            </li>
-                        {/each}
-                    </ul>
-                {/if}
-
-                <div class="df">
-                    {#if activeDevices.length > 0}
-                        <button class="btn btn-danger" onclick={allOff}>Turn all off</button>
-                    {/if}
-                    <button class="btn btn-ghost" onclick={() => goAndClose("sockets")}>View devices →</button>
-                </div>
-
-            <!-- SCHEDULES -->
-            {:else if selectedStat === "schedules"}
-                {#if enabledSchedulesList.length === 0}
-                    <div class="dempty">
-                        <Icon name="clock" size={24} />
-                        <p>No active schedules</p>
-                    </div>
-                {:else}
-                    <ul class="sched-list">
-                        {#each enabledSchedulesList as s (s.id)}
-                            <li class="sched-row">
-                                <span class="action-pill" data-action={s.action}>{s.action}</span>
-                                <span class="sched-target">{getTargetLabel(s)}</span>
-                                <span class="sched-meta">{formatScheduleTime(s)} &middot; {formatDays(s.days)}</span>
-                            </li>
-                        {/each}
-                    </ul>
-                {/if}
-
-                <div class="df">
-                    <button class="btn btn-ghost" onclick={() => goAndClose("schedules")}>
-                        View schedules →
-                    </button>
-                </div>
-
-            <!-- AUTOMATIONS -->
-            {:else if selectedStat === "automations"}
-                {#if v.groups.length === 0 && v.scenes.length === 0}
-                    <div class="dempty">
-                        <Icon name="scenes" size={24} />
-                        <p>No groups or scenes yet</p>
-                    </div>
-                {:else}
-                    {#if groupsWithState.length > 0}
-                        <div class="auto-section">
-                            <div class="auto-label">Groups</div>
-                            {#each groupsWithState as g (g.id)}
-                                <div class="auto-row">
-                                    <div class="auto-info">
-                                        <span class="auto-name">{g.name}</span>
-                                        <span class="auto-sub">
-                                            {g.socket_ids.length} device{g.socket_ids.length === 1 ? "" : "s"}
-                                            {#if g.on > 0}· <span class="auto-on">{g.on} on</span>{/if}
-                                        </span>
-                                    </div>
-                                    <div class="auto-btns">
-                                        <button class="btn btn-success btn-xs"
-                                            onclick={() => runAction(() => api.groupAction(g.id, "on"), `${g.name} on`)}>
-                                            On
-                                        </button>
-                                        <button class="btn btn-danger btn-xs"
-                                            onclick={() => runAction(() => api.groupAction(g.id, "off"), `${g.name} off`)}>
-                                            Off
-                                        </button>
-                                    </div>
-                                </div>
-                            {/each}
-                        </div>
-                    {/if}
-
-                    {#if v.scenes.length > 0}
-                        <div class="auto-section">
-                            <div class="auto-label">Scenes</div>
-                            {#each v.scenes as sc (sc.id)}
-                                <div class="auto-row">
-                                    <div class="auto-info">
-                                        <span class="auto-name">{sc.name}</span>
-                                        <span class="auto-sub">{sc.actions.length} action{sc.actions.length === 1 ? "" : "s"}</span>
-                                    </div>
-                                    <button class="btn btn-primary btn-xs"
-                                        onclick={() => runAction(() => api.activateScene(sc.id), `Activated ${sc.name}`)}>
-                                        Activate
-                                    </button>
-                                </div>
-                            {/each}
-                        </div>
-                    {/if}
-                {/if}
-
-                <div class="df">
-                    <button class="btn btn-ghost" onclick={() => goAndClose("groups")}>Groups →</button>
-                    <button class="btn btn-ghost" onclick={() => goAndClose("scenes")}>Scenes →</button>
-                </div>
-            {/if}
+            </div>
+            <button class="sw-big" class:on={heroOn} onclick={toggleAllMaster}
+                aria-label={heroOn ? "Turn all devices off" : "Turn all devices on"}
+                aria-pressed={heroOn}></button>
         </div>
-    </div>
-{/if}
-
-<!-- ── Rest of dashboard ──────────────────────────────────────────── -->
-<section class="card">
-    <div class="card-header"><h2>Quick actions</h2></div>
-    <div class="quick">
-        <button class="btn btn-success" onclick={allOn}>All on</button>
-        <button class="btn btn-danger"  onclick={allOff}>All off</button>
-    </div>
-</section>
-
-{#if favoriteSockets.length > 0}
-<section class="card">
-    <div class="card-header">
-        <h2>
-            <Icon name="star" size={16} />
-            Favorites
-        </h2>
-        <span class="header-meta">{favoriteSockets.length}</span>
-    </div>
-    <div class="favorites">
-        {#each favoriteSockets as socket, i (socket.id)}
-            <div class="favorite-item"
-                animate:flip={{ duration: dur(280), easing: cubicOut }}
-                in:scale={{ start: 0.95, opacity: 0, duration: dur(220), delay: stagger(i), easing: cubicOut }}>
-                <SocketCard {socket} />
-            </div>
-        {/each}
-    </div>
-</section>
-{/if}
-
-{#if groupsWithState.length > 0}
-<section class="card">
-    <div class="card-header"><h2><span class="section-ico" data-tone="info"><Icon name="devices" size={15} /></span>Groups</h2></div>
-    <div class="group-list">
-        {#each groupsWithState as g, i (g.id)}
-            <div class="group-row"
-                animate:flip={{ duration: dur(280), easing: cubicOut }}
-                in:fly={{ y: 8, duration: dur(220), delay: stagger(i), easing: cubicOut }}>
-                <div class="group-info">
-                    <span class="group-name">{g.name}</span>
-                    <span class="group-meta">
-                        {g.socket_ids.length} socket{g.socket_ids.length === 1 ? '' : 's'}
-                        {#if g.on > 0}<span class="group-on">· {g.on} on</span>{/if}
+        {#if hasPower || hasTemp}
+            <div class="hero-meta">
+                {#if hasPower}
+                    <span class="hero-stat">
+                        <Icon name="bolt" size={13} />
+                        <span class="mono hero-em">{powerWatts} W</span> now
                     </span>
-                </div>
-                <div class="group-actions">
-                    <button class="btn btn-success"
-                        disabled={g.on === g.socket_ids.length}
-                        onclick={() => runAction(() => api.groupAction(g.id, 'on'), `${g.name} on`)}>On</button>
-                    <button class="btn btn-danger"
-                        disabled={g.on === 0}
-                        onclick={() => runAction(() => api.groupAction(g.id, 'off'), `${g.name} off`)}>Off</button>
-                </div>
+                {/if}
+                {#if hasPower && hasTemp}<span class="hero-sep">·</span>{/if}
+                {#if hasTemp}
+                    <span class="hero-stat"><span class="mono hero-em">{insideTemp}°</span> inside</span>
+                {/if}
             </div>
-        {/each}
+        {/if}
     </div>
-</section>
+
+    {#if nextEvent}
+        <div class="stat tile">
+            <div class="stat-eyebrow mono">Next event</div>
+            <div class="stat-value cool">{nextEvent.time}</div>
+            <div class="stat-sub">{nextEvent.label}</div>
+        </div>
+    {/if}
+    {#if enabledAutomations > 0}
+        <div class="stat tile">
+            <div class="stat-eyebrow mono">Automations</div>
+            <div class="stat-value">{enabledAutomations}</div>
+            <div class="stat-sub">active</div>
+        </div>
+    {/if}
+</div>
+
+<!-- ── Scenes scroller ────────────────────────────────────────────── -->
+{#if v.scenes.length > 0}
+    <section class="home-section">
+        <div class="section-head">
+            <h2>Scenes</h2>
+            <button class="chip" onclick={() => route.go("scenes")}>All</button>
+        </div>
+        <div class="scene-scroll h-scroll">
+            {#each v.scenes as scene (scene.id)}
+                <div class="scene-cell"><SceneTile {scene} /></div>
+            {/each}
+        </div>
+    </section>
 {/if}
 
-<section class="card">
-    <div class="card-header">
-        <h2><span class="section-ico" data-tone="warn"><Icon name="scenes" size={15} /></span>Scenes</h2>
-        <button class="btn btn-ghost" onclick={() => openModal(SceneModal, {})}>New scene</button>
-    </div>
-    {#if v.scenes.length === 0}
-        <p class="field-help">No scenes yet. Click "New scene" to combine a few devices into a one-tap action.</p>
-    {:else}
-        <div class="scenes">
-            {#each v.scenes as scene, i (scene.id)}
-                <div class="scene-item"
+<!-- ── Favorites ──────────────────────────────────────────────────── -->
+{#if favoriteSockets.length > 0}
+    <section class="home-section">
+        <div class="section-head">
+            <h2><Icon name="star" size={16} /> Favorites</h2>
+            <span class="header-meta">{favoriteSockets.length}</span>
+        </div>
+        <div class="favorites">
+            {#each favoriteSockets as socket, i (socket.id)}
+                <div class="favorite-item"
                     animate:flip={{ duration: dur(280), easing: cubicOut }}
                     in:scale={{ start: 0.95, opacity: 0, duration: dur(220), delay: stagger(i), easing: cubicOut }}>
-                    <SceneTile {scene} />
+                    <SocketCard {socket} />
                 </div>
             {/each}
         </div>
-    {/if}
-</section>
+    </section>
+{/if}
 
+<!-- ── Groups ─────────────────────────────────────────────────────── -->
+{#if groupsWithState.length > 0}
+    <section class="home-section">
+        <div class="section-head"><h2><span class="section-ico"><Icon name="groups" size={15} /></span>Groups</h2></div>
+        <div class="group-list">
+            {#each groupsWithState as g, i (g.id)}
+                <div class="group-row"
+                    animate:flip={{ duration: dur(280), easing: cubicOut }}
+                    in:fly={{ y: 8, duration: dur(220), delay: stagger(i), easing: cubicOut }}>
+                    <div class="group-info">
+                        <span class="group-name">{g.name}</span>
+                        <span class="group-meta">
+                            <span class="mono">{g.socket_ids.length}</span> socket{g.socket_ids.length === 1 ? '' : 's'}
+                            {#if g.on > 0}<span class="group-on">· <span class="mono">{g.on}</span> on</span>{/if}
+                        </span>
+                    </div>
+                    <div class="group-actions">
+                        <button class="btn btn-success"
+                            disabled={g.on === g.socket_ids.length}
+                            onclick={() => runAction(() => api.groupAction(g.id, 'on'), `${g.name} on`)}>On</button>
+                        <button class="btn btn-danger"
+                            disabled={g.on === 0}
+                            onclick={() => runAction(() => api.groupAction(g.id, 'off'), `${g.name} off`)}>Off</button>
+                    </div>
+                </div>
+            {/each}
+        </div>
+    </section>
+{/if}
+
+<!-- ── Sensors ────────────────────────────────────────────────────── -->
 {#if v.sensors.length > 0}
-    <section class="card">
-        <div class="card-header">
+    <section class="home-section">
+        <div class="section-head">
             <h2>Sensors</h2>
-            <button class="btn btn-ghost" onclick={() => route.go("sensors")}>View all</button>
+            <button class="chip" onclick={() => route.go("sensors")}>All</button>
         </div>
         <div class="sensors">
             {#each v.sensors.slice(0, 6) as sensor, i (sensor.id)}
@@ -512,9 +270,10 @@
     </section>
 {/if}
 
+<!-- ── Pending timers ─────────────────────────────────────────────── -->
 {#if v.timers.length > 0}
-    <section class="card">
-        <div class="card-header"><h2>Pending timers</h2></div>
+    <section class="home-section">
+        <div class="section-head"><h2>Pending timers</h2></div>
         <div class="timers">
             {#each v.timers as timer, i (timer.id)}
                 <div
@@ -528,8 +287,9 @@
     </section>
 {/if}
 
-<section class="card">
-    <div class="card-header"><h2><span class="section-ico" data-tone="primary"><Icon name="home" size={15} /></span>Rooms</h2></div>
+<!-- ── Rooms ──────────────────────────────────────────────────────── -->
+<section class="home-section">
+    <div class="section-head"><h2><span class="section-ico"><Icon name="home" size={15} /></span>Rooms</h2></div>
     {#if liveRooms.length === 0}
         <p class="field-help">No rooms yet. Create devices and assign rooms to them.</p>
     {:else}
@@ -545,11 +305,15 @@
     {/if}
 </section>
 
+<!-- ── Recent activity ────────────────────────────────────────────── -->
 {#if v.activity.length > 0}
-    <section class="card">
-        <div class="card-header"><h2>Recent activity</h2></div>
+    <section class="home-section">
+        <div class="section-head">
+            <h2>Recent activity</h2>
+            <button class="chip" onclick={() => route.go("activity")}>All</button>
+        </div>
         <ul class="activity">
-            {#each v.activity as a (a.id)}
+            {#each v.activity.slice(0, 8) as a (a.id)}
                 <li class="event" data-status={a.status}
                     animate:flip={{ duration: dur(260), easing: cubicOut }}
                     in:fly={{ x: -10, duration: dur(220), easing: cubicOut }}>
@@ -561,7 +325,7 @@
                         </div>
                         {#if a.error}<div class="err">{a.error}</div>{/if}
                     </div>
-                    <time class="when">{new Date(a.time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time>
+                    <time class="when mono">{new Date(a.time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time>
                 </li>
             {/each}
         </ul>
@@ -569,318 +333,160 @@
 {/if}
 
 <style>
-    /* ── Stat cards ─────────────────────────────────── */
-
-    /* Mobile-first: always 2 columns. At ≥640 px go to 4. */
-    .stats {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
+    /* ── Greeting ───────────────────────────────────── */
+    .greeting {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
         gap: var(--space-3);
     }
-    @media (min-width: 640px) {
-        .stats { grid-template-columns: repeat(4, 1fr); gap: var(--space-4); }
+    .greet-date { color: var(--text-mute); font-size: 13px; font-weight: 500; }
+    .greet-title {
+        font-size: 30px;
+        font-weight: 600;
+        letter-spacing: -0.03em;
+        margin-top: 4px;
+        line-height: 1.1;
     }
+    .greet-name { color: var(--text-mute); }
+    .greet-actions { display: flex; gap: var(--space-2); flex-shrink: 0; align-items: center; }
+    .icon-chip {
+        width: 38px; height: 38px;
+        padding: 0;
+        justify-content: center;
+    }
+    /* The labelled "Add device" chip is desktop-only; the mockup's mobile
+       Home greeting keeps just the icon chips. */
+    .add-device { display: none; }
+    @media (min-width: 700px) { .add-device { display: inline-flex; } }
 
+    /* Hero spans full width on phones; on desktop it shares a row with the
+       real-data stat tiles, matching the desktop dashboard mockup. */
+    .top-grid { display: grid; grid-template-columns: 1fr; gap: var(--space-4); }
+    .stat { display: none; }
+    @media (min-width: 1024px) {
+        .top-grid { grid-template-columns: 1.6fr 1fr 1fr; align-items: stretch; }
+        .stat { display: flex; }
+    }
     .stat {
-        all: unset;
-        box-sizing: border-box;
-        background: var(--bg-elevated);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-lg);
-        /* Mobile: tighter padding so the card fits in ~165 px */
-        padding: var(--space-3);
-        gap: var(--space-2);
+        padding: 18px;
+        flex-direction: column;
+        justify-content: space-between;
+        gap: 8px;
+    }
+    .stat-eyebrow {
+        color: var(--text-mute);
+        font-size: 11px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+    }
+    .stat-value { font-size: 32px; font-weight: 600; letter-spacing: -0.02em; }
+    .stat-value.cool { color: var(--cool); }
+    .stat-sub { color: var(--text-mute); font-size: 12px; }
+
+    /* ── Whole-home hero ────────────────────────────── */
+    .hero { padding: 20px; gap: 16px; }
+    .hero-top {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px;
+    }
+    .hero-lead { min-width: 0; }
+    .hero-eyebrow {
+        color: var(--on);
+        font-size: 11px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+    }
+    .hero-count {
+        margin-top: 8px;
+        display: flex;
+        align-items: baseline;
+        gap: 10px;
+        white-space: nowrap;
+    }
+    .hero-count .num-display { font-size: 56px; }
+    .hero-of { color: var(--text-mute); font-size: 14px; }
+    .hero .sw-big {
+        flex-shrink: 0;
+        border: 0; padding: 0;
+        appearance: none; -webkit-appearance: none;
+        cursor: pointer;
+    }
+    .hero .sw-big:focus-visible { box-shadow: var(--focus-ring); }
+    .hero-meta {
         display: flex;
         align-items: center;
-        cursor: pointer;
-        width: 100%;
-        min-height: 68px; /* comfortable tap target height */
-        transition: border-color var(--t-fast), box-shadow var(--t-fast), transform var(--t-fast);
-        position: relative;
-    }
-    @media (min-width: 640px) {
-        .stat { padding: var(--space-4) var(--space-5); gap: var(--space-4); }
-    }
-    @media (hover: hover) {
-        .stat:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); }
-    }
-    .stat:focus-visible { box-shadow: var(--focus-ring); }
-
-    /* Selected state — tone-specific glow */
-    .stat.selected[data-tone="primary"] { border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-glow); }
-    .stat.selected[data-tone="success"] { border-color: var(--success); box-shadow: 0 0 0 3px var(--success-soft); }
-    .stat.selected[data-tone="info"]    { border-color: var(--info);    box-shadow: 0 0 0 3px var(--info-soft);    }
-    .stat.selected[data-tone="warn"]    { border-color: var(--warn);    box-shadow: 0 0 0 3px var(--warn-soft);    }
-
-    .ico {
-        /* Mobile: 32 px icon box */
-        width: 32px; height: 32px;
-        border-radius: var(--radius-sm);
-        display: grid; place-items: center;
-        flex-shrink: 0;
-    }
-    @media (min-width: 640px) {
-        .ico { width: 40px; height: 40px; border-radius: var(--radius-md); }
-    }
-    .ico[data-tone="primary"] { background: var(--primary-soft); color: var(--primary); }
-    .ico[data-tone="success"] { background: var(--success-soft); color: var(--success); }
-    .ico[data-tone="info"]    { background: var(--info-soft);    color: var(--info);    }
-    .ico[data-tone="warn"]    { background: var(--warn-soft);    color: var(--warn);    }
-
-    .stat-text { flex: 1; min-width: 0; text-align: left; }
-    .value { font-size: 1.25rem; font-weight: 700; line-height: 1; }
-    @media (min-width: 640px) { .value { font-size: 1.5rem; } }
-
-    .label {
-        color: var(--text-muted);
+        gap: 8px;
+        color: var(--text-mute);
         font-size: 12px;
-        margin-top: 3px;
-        /* Prevent "Groups & scenes" from overflowing a ~70 px column */
         white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
     }
-    @media (min-width: 640px) { .label { font-size: 13px; margin-top: 4px; } }
+    .hero-stat { display: inline-flex; align-items: center; gap: 6px; }
+    .hero-stat :global(svg) { color: var(--on); }
+    .hero-em { color: var(--text); }
+    .hero-sep { color: var(--text-dim); }
 
-    /* Caret: pinned to top-right corner on mobile so it doesn't steal
-       horizontal space from the text. Inline on desktop. */
-    .caret {
-        position: absolute;
-        top: 10px; right: 10px;
-        color: var(--text-faint);
-        transition: transform var(--t-med), color var(--t-fast);
-    }
-    @media (min-width: 640px) {
-        .caret { position: static; margin-left: auto; flex-shrink: 0; }
-    }
-    .caret.open { transform: rotate(180deg); color: var(--text-muted); }
-
-    /* ── Detail panel ───────────────────────────────── */
-    .detail {
-        background: var(--bg-elevated);
-        border-radius: var(--radius-lg);
-        border: 1px solid var(--border);
-        overflow: hidden;
-    }
-    /* Left accent bar by tone */
-    .detail[data-tone="primary"] { box-shadow: inset 4px 0 0 var(--primary); }
-    .detail[data-tone="success"] { box-shadow: inset 4px 0 0 var(--success); }
-    .detail[data-tone="info"]    { box-shadow: inset 4px 0 0 var(--info);    }
-    .detail[data-tone="warn"]    { box-shadow: inset 4px 0 0 var(--warn);    }
-
-    /* header */
-    .dh {
+    /* ── Sections ───────────────────────────────────── */
+    .home-section { display: flex; flex-direction: column; gap: var(--space-3); }
+    .section-head {
         display: flex;
         align-items: center;
         justify-content: space-between;
-        padding: var(--space-4) var(--space-5) var(--space-3);
-        border-bottom: 1px solid var(--border);
-    }
-    .dh-left { display: flex; align-items: center; gap: var(--space-2); }
-    .dico {
-        width: 24px; height: 24px;
-        border-radius: var(--radius-sm);
-        display: grid; place-items: center;
-    }
-    .dico[data-tone="primary"] { background: var(--primary-soft); color: var(--primary); }
-    .dico[data-tone="success"] { background: var(--success-soft); color: var(--success); }
-    .dico[data-tone="info"]    { background: var(--info-soft);    color: var(--info);    }
-    .dico[data-tone="warn"]    { background: var(--warn-soft);    color: var(--warn);    }
-    .dt { font-weight: 600; font-size: 0.875rem; }
-
-    /* body — scrolls internally; caps at 50 vh on mobile so the rest of
-       the page remains reachable without the panel dominating the screen */
-    .db {
-        padding: var(--space-3) var(--space-4);
-        display: flex;
-        flex-direction: column;
         gap: var(--space-3);
-        max-height: min(340px, 50vh);
-        overflow-y: auto;
-        -webkit-overflow-scrolling: touch;
     }
-    @media (min-width: 640px) {
-        .db { padding: var(--space-4) var(--space-5); gap: var(--space-4); max-height: 340px; }
-    }
-
-    /* footer */
-    .df {
-        display: flex;
-        gap: var(--space-2);
-        flex-wrap: wrap;
-        padding-top: var(--space-2);
-        border-top: 1px solid var(--border);
-        margin-top: var(--space-1);
-    }
-
-    /* ── Devices panel ─────────────────────── */
-    .proto-row { display: flex; flex-wrap: wrap; gap: var(--space-2); }
-    .pbadge {
+    .section-head h2 {
         display: inline-flex;
         align-items: center;
         gap: 6px;
-        font-size: 12px;
+        font-size: 17px;
         font-weight: 600;
-        padding: 4px 10px;
-        border-radius: 999px;
-        border: 1px solid;
     }
-    .pbadge[data-proto="rf"]     { color: var(--accent-rf);     background: var(--accent-rf-soft);     border-color: var(--accent-rf-soft);     }
-    .pbadge[data-proto="tasmota"]{ color: var(--accent-wifi);   background: var(--accent-wifi-soft);   border-color: var(--accent-wifi-soft);   }
-    .pbadge[data-proto="matter"] { color: var(--accent-matter); background: var(--accent-matter-soft); border-color: var(--accent-matter-soft); }
-
-    .note { font-size: 13px; color: var(--text-faint); }
-
-    .room-grid { display: flex; flex-direction: column; gap: 4px; }
-    .rg-row {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: var(--space-3);
-        padding: 6px 0;
-        border-bottom: 1px solid var(--border);
-        font-size: 13px;
-    }
-    .rg-row:last-child { border-bottom: none; }
-    .rg-name { font-weight: 500; }
-    .rg-counts { display: flex; gap: var(--space-3); color: var(--text-muted); }
-    .rg-on { color: var(--success); font-weight: 600; }
-    .rg-total { color: var(--text-faint); }
-
-    /* ── Active now panel ──────────────────── */
-    .dev-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
-    .dev-row {
-        display: flex;
-        align-items: center;
-        gap: var(--space-3);
-        padding: 6px 8px;
-        border-radius: var(--radius-sm);
-        background: var(--surface);
-        font-size: 13px;
-    }
-    .dev-dot {
-        width: 8px; height: 8px;
-        border-radius: 50%;
-        background: var(--success);
-        box-shadow: 0 0 0 3px var(--success-soft);
+    .section-ico {
+        width: 24px; height: 24px;
+        border-radius: var(--r-sm);
+        display: grid; place-items: center;
+        background: var(--on-soft);
+        color: var(--on);
         flex-shrink: 0;
     }
-    .dev-name { flex: 1; font-weight: 500; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .room-chip {
-        font-size: 11px;
+    .header-meta {
+        font-size: 12px;
+        color: var(--text-muted);
+        background: var(--surface);
         padding: 2px 8px;
-        background: var(--surface-hover);
-        border: 1px solid var(--border);
         border-radius: 999px;
-        color: var(--text-muted);
-        white-space: nowrap;
-    }
-
-    /* ── Schedules panel ───────────────────── */
-    .sched-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-    /* flex-wrap lets sched-meta fall to the next line on narrow screens */
-    .sched-row {
-        display: flex;
-        align-items: center;
-        flex-wrap: wrap;
-        gap: var(--space-2);
-        padding: 8px;
-        border-radius: var(--radius-sm);
-        background: var(--surface);
-        font-size: 13px;
-    }
-    .action-pill {
-        font-size: 10px;
-        font-weight: 700;
-        text-transform: uppercase;
-        letter-spacing: 0.06em;
-        padding: 3px 7px;
-        border-radius: 999px;
-        background: var(--surface-hover);
-        color: var(--text-muted);
-        white-space: nowrap;
-        flex-shrink: 0;
-    }
-    .action-pill[data-action="on"]       { background: var(--success-soft); color: var(--success); }
-    .action-pill[data-action="off"]      { background: var(--danger-soft);  color: var(--danger);  }
-    .action-pill[data-action="activate"] { background: var(--info-soft);    color: var(--info);    }
-    /* Target grows to fill row; meta wraps below when there's no room */
-    .sched-target {
-        flex: 1;
-        min-width: 90px;
-        font-weight: 500;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-    }
-    /* Combined "18:00 · Weekdays" — always wraps as a unit */
-    .sched-meta {
-        width: 100%; /* force onto its own line */
-        color: var(--text-muted);
-        font-size: 11px;
         font-variant-numeric: tabular-nums;
-        padding-left: calc(var(--space-2) + 28px); /* align under target */
-    }
-    @media (min-width: 640px) {
-        .sched-meta { width: auto; padding-left: 0; font-size: 12px; white-space: nowrap; }
     }
 
-    /* ── Automations panel ─────────────────── */
-    .auto-section { display: flex; flex-direction: column; gap: 4px; }
-    .auto-section + .auto-section { padding-top: var(--space-3); border-top: 1px solid var(--border); }
-    .auto-label {
-        font-size: 11px;
-        font-weight: 700;
-        text-transform: uppercase;
-        letter-spacing: 0.06em;
-        color: var(--text-faint);
-        margin-bottom: var(--space-1);
-    }
-    .auto-row {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: var(--space-3);
-        padding: 7px 8px;
-        border-radius: var(--radius-sm);
-        background: var(--surface);
-        font-size: 13px;
-    }
-    .auto-info { min-width: 0; flex: 1; }
-    .auto-name {
-        font-weight: 500;
-        display: block;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-    }
-    .auto-sub { color: var(--text-faint); font-size: 11px; }
-    .auto-on { color: var(--success); }
-    .auto-btns { display: flex; gap: var(--space-1); flex-shrink: 0; }
-
-    /* xs button: min-height 36 px so it meets a comfortable touch target */
-    :global(.btn-xs) { padding: 6px 12px; font-size: 12px; min-height: 36px; }
-
-    /* ── Empty state inside panel ──────────── */
-    .dempty {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        gap: var(--space-2);
-        padding: var(--space-6) 0;
-        color: var(--text-faint);
-        text-align: center;
-    }
-    .dempty p { font-size: 13px; margin: 0; }
-
-    /* ── Rest of dashboard ─────────────────────────── */
-    .quick { display: flex; flex-wrap: wrap; gap: var(--space-2); }
-    @media (pointer: coarse) {
-        /* Full-width, prominent quick-action buttons on touch screens */
-        .quick { flex-direction: column; }
-        .quick :global(.btn) { width: 100%; justify-content: center; min-height: 52px; font-size: 16px; font-weight: 700; }
+    /* ── Scenes: horizontal scroller on phones, grid on wide screens ── */
+    .scene-scroll { padding-bottom: 2px; }
+    .scene-cell { width: 160px; display: flex; }
+    .scene-cell > :global(*) { flex: 1; min-width: 0; }
+    @media (min-width: 700px) {
+        .scene-scroll {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+            gap: var(--space-3);
+            overflow: visible;
+        }
+        .scene-cell { width: auto; }
     }
 
+    /* ── Favorites grid ─────────────────────────────── */
+    .favorites {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+    }
+    @media (min-width: 600px) {
+        .favorites { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: var(--space-3); }
+    }
+    .favorite-item { display: flex; min-width: 0; }
+    .favorite-item > :global(.tile) { flex: 1; min-width: 0; }
+
+    /* ── Groups ─────────────────────────────────────── */
     .group-list { display: flex; flex-direction: column; gap: var(--space-2); }
     .group-row {
         display: flex;
@@ -888,42 +494,35 @@
         gap: var(--space-3);
         padding: var(--space-2) var(--space-3);
         background: var(--surface);
-        border-radius: var(--radius-sm);
+        border-radius: var(--radius-md);
         min-height: 48px;
     }
     @media (pointer: coarse) {
-        .group-row { padding: var(--space-3); min-height: 60px; border-radius: var(--radius-md); }
+        .group-row { padding: var(--space-3); min-height: 60px; }
     }
     .group-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
     .group-name { font-weight: 500; }
     .group-meta { color: var(--text-muted); font-size: 12px; }
-    .group-on { color: var(--success); font-weight: 600; }
+    .group-on { color: var(--on); font-weight: 600; }
     .group-actions { display: flex; gap: var(--space-2); flex-shrink: 0; }
-    .scenes {
-        display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-        gap: var(--space-3);
-    }
-    @media (pointer: coarse) {
-        /* On phones: scenes stack single-column for easy tapping */
-        .scenes { grid-template-columns: 1fr 1fr; gap: var(--space-2); }
-    }
-    .timers { display: flex; flex-direction: column; gap: var(--space-2); }
+
+    /* ── Sensors ────────────────────────────────────── */
     .sensors {
         display: grid;
-        grid-template-columns: 1fr;
-        gap: var(--space-3);
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
     }
     @media (min-width: 600px) {
-        .sensors { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+        .sensors { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: var(--space-3); }
     }
-    .sensor-item { display: flex; }
-    .sensor-item > :global(.card) { flex: 1; }
+    .sensor-item { display: flex; min-width: 0; }
+    .sensor-item > :global(.sensor) { flex: 1; min-width: 0; }
+
+    .timers { display: flex; flex-direction: column; gap: var(--space-2); }
+
+    /* ── Rooms ──────────────────────────────────────── */
     .rooms {
         display: grid;
-        /* minmax(0, 1fr) instead of bare 1fr so tracks can't grow past
-           their share — bare 1fr is minmax(auto, 1fr) which lets grid
-           items' min-content size push tracks wider than the viewport. */
         grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: var(--space-2);
     }
@@ -933,46 +532,10 @@
             gap: var(--space-3);
         }
     }
+    .room-item { display: flex; min-width: 0; }
+    .room-item > :global(.room) { flex: 1; min-width: 0; }
 
-    /* Favorites grid: same layout as the regular sockets view */
-    .favorites {
-        display: grid;
-        grid-template-columns: 1fr;
-        gap: var(--space-3);
-    }
-    @media (min-width: 600px) {
-        .favorites { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
-    }
-    .favorite-item { display: flex; }
-    .favorite-item > :global(.card) { flex: 1; }
-    .header-meta {
-        font-size: 12px;
-        color: var(--text-muted);
-        background: var(--surface);
-        padding: 2px 8px;
-        border-radius: 999px;
-        font-variant-numeric: tabular-nums;
-    }
-    .card-header h2 {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-    }
-
-    /* Coloured icon badge in section headings */
-    .section-ico {
-        width: 24px; height: 24px;
-        border-radius: var(--radius-sm);
-        display: grid; place-items: center;
-        flex-shrink: 0;
-    }
-    .section-ico[data-tone="primary"] { background: var(--primary-soft); color: var(--primary); }
-    .section-ico[data-tone="info"]    { background: var(--info-soft);    color: var(--info);    }
-    .section-ico[data-tone="warn"]    { background: var(--warn-soft);    color: var(--warn);    }
-
-    .scene-item, .room-item { display: flex; min-width: 0; }
-    .scene-item > :global(*), .room-item > :global(.room) { flex: 1; min-width: 0; }
-
+    /* ── Activity ───────────────────────────────────── */
     .activity { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
     .event {
         display: grid;
@@ -980,7 +543,7 @@
         align-items: center;
         gap: var(--space-3);
         padding: 8px 10px;
-        border-radius: var(--radius-sm);
+        border-radius: var(--radius-md);
         background: var(--surface);
     }
     .event[data-status="error"] { background: var(--danger-soft); }
@@ -1012,9 +575,8 @@
     .act[data-action="activate"] { color: var(--info); }
     .label { color: var(--text); }
     .err { color: var(--danger); font-size: 12px; margin-top: 2px; }
-    .when { color: var(--text-faint); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .when { color: var(--text-faint); font-size: 12px; white-space: nowrap; }
 
-    /* Mobile activity log: stack source+time on one line, label below */
     @media (pointer: coarse) {
         .event {
             grid-template-columns: 1fr auto;
@@ -1022,16 +584,8 @@
             row-gap: 4px;
             padding: 10px 12px;
         }
-        .src {
-            grid-column: 1; grid-row: 1;
-            justify-self: start;
-        }
-        .when {
-            grid-column: 2; grid-row: 1;
-            align-self: center;
-        }
-        .info {
-            grid-column: 1 / -1; grid-row: 2;
-        }
+        .src { grid-column: 1; grid-row: 1; justify-self: start; }
+        .when { grid-column: 2; grid-row: 1; align-self: center; }
+        .info { grid-column: 1 / -1; grid-row: 2; }
     }
 </style>

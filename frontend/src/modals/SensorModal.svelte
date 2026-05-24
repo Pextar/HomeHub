@@ -3,6 +3,7 @@
     import { closeModal, openModal } from "../lib/modal.svelte";
     import { api } from "../lib/api";
     import { data, toasts } from "../lib/stores.svelte";
+    import { automationsUsingSensor, plural } from "../lib/utils";
     import { untrack } from "svelte";
     import ConfirmModal from "../components/ConfirmModal.svelte";
     import type { Sensor, SensorKind } from "../lib/types";
@@ -93,9 +94,11 @@
 
     async function remove() {
         if (!existing) return;
+        const autoN = automationsUsingSensor(data.value.automations, existing.id);
+        const extra = autoN > 0 ? ` ${plural(autoN, "automation")} triggered by it will also be removed.` : "";
         const ok = await openModal<boolean>(ConfirmModal, {
             title: "Delete sensor?",
-            message: `Remove "${existing.name}" and discard its reading history.`,
+            message: `Remove "${existing.name}" and discard its reading history.${extra}`,
             confirmLabel: "Delete",
             danger: true,
         });

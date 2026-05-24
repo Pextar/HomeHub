@@ -120,6 +120,7 @@ func (s *Server) deleteScene(w http.ResponseWriter, r *http.Request) {
 			delete(s.Store.Timers, tid)
 		}
 	}
+	s.Store.PruneAutomationsForTarget("scene", id)
 	if err := s.Store.Save(); err != nil {
 		s.Store.Mu.Unlock()
 		writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
@@ -133,6 +134,9 @@ func (s *Server) activateScene(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
 
 	s.Store.Mu.Lock()
+	// Drains queued smart-light commands after the lock is released (LIFO:
+	// Unlock runs first, then FlushLights), keeping bridge I/O off the lock.
+	defer s.Store.FlushLights()
 	defer s.Store.Mu.Unlock()
 
 	scene, ok := s.Store.Scenes[id]
@@ -152,6 +156,13 @@ func (s *Server) activateScene(w http.ResponseWriter, r *http.Request) {
 				"error":     err.Error(),
 			})
 			continue
+		}
+		// Queue scene brightness/colour for smart lights switched on; the
+		// bridge call runs in FlushLights once the lock is released.
+		if a.Action == "on" && (a.Level != nil || a.Color != "") {
+			if sock, ok := s.Store.Sockets[a.SocketID]; ok {
+				s.Store.QueueLight(*sock, a.Level, a.Color)
+			}
 		}
 		okCount++
 	}

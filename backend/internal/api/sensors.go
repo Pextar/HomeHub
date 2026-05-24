@@ -121,6 +121,7 @@ func (s *Server) deleteSensor(w http.ResponseWriter, r *http.Request) {
 	}
 	delete(s.Store.Sensors, id)
 	delete(s.Store.Readings, id)
+	s.Store.PruneAutomationsForSensor(id)
 	if err := s.Store.Save(); err != nil {
 		s.Store.Mu.Unlock()
 		writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())

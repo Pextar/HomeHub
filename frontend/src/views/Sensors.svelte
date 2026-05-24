@@ -62,8 +62,8 @@
 
 <Topbar title="Sensors" subtitle="{v.sensors.length} configured">
     {#snippet actions()}
-        <button class="btn btn-ghost" onclick={() => openModal(PairSensorModal, {})}>Pair</button>
-        <button class="btn btn-primary" onclick={() => openModal(SensorModal, {})}>Add sensor</button>
+        <button class="chip" onclick={() => openModal(PairSensorModal, {})}><Icon name="plus" size={14} /> Pair</button>
+        <button class="chip" onclick={() => openModal(SensorModal, {})}><Icon name="plus" size={14} /> Add</button>
     {/snippet}
 </Topbar>
 
@@ -138,7 +138,7 @@
         gap: var(--space-4);
         flex-wrap: wrap;
     }
-    .title-block h2 { margin: 0; }
+    .title-block h2 { margin: 0; font-size: 17px; font-weight: 600; letter-spacing: -0.02em; }
     .sub {
         color: var(--text-muted);
         font-size: 13px;
@@ -147,10 +147,12 @@
     }
     .sub .kind { text-transform: capitalize; }
     .sub code {
-        background: var(--surface);
-        border-radius: 4px;
+        background: var(--card-2);
+        border-radius: var(--r-sm);
         padding: 1px 6px;
         font-size: 12px;
+        font-family: var(--font-mono);
+        color: var(--text-mute);
     }
     .big-value {
         display: flex;
@@ -158,10 +160,12 @@
         gap: 6px;
     }
     .bv {
+        font-family: var(--font-mono);
+        font-feature-settings: "tnum" 1, "ss01" 1;
         font-size: 3rem;
-        font-weight: 700;
+        font-weight: 500;
         line-height: 1;
-        font-variant-numeric: tabular-nums;
+        letter-spacing: -0.04em;
     }
     .bv.muted { color: var(--text-faint); }
     .bu { color: var(--text-muted); font-weight: 500; font-size: 1.25rem; }
@@ -176,15 +180,17 @@
         color: var(--text-muted);
     }
     .icon-btn:hover { color: var(--text); background: var(--surface-hover); }
-    .loading { color: var(--text-muted); font-size: 12px; }
+    .loading { color: var(--text-muted); font-size: 12px; font-family: var(--font-mono); }
+
+    .card-header h2 { font-size: 17px; font-weight: 600; letter-spacing: -0.02em; }
 
     .grid {
         display: grid;
-        grid-template-columns: 1fr;
-        gap: var(--space-3);
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
     }
     @media (min-width: 600px) {
-        .grid { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+        .grid { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: var(--space-3); }
     }
     .grid-item {
         text-align: left;
@@ -194,10 +200,12 @@
         cursor: pointer;
         border-radius: var(--radius-lg);
         transition: transform var(--t-fast);
+        min-width: 0;
     }
     .grid-item:hover { transform: translateY(-1px); }
-    .grid-item.active :global(.card.sensor) {
-        outline: 2px solid var(--primary);
-        outline-offset: 2px;
+    .grid-item > :global(.sensor) { width: 100%; }
+    .grid-item.active :global(.sensor) {
+        border-color: var(--on);
+        box-shadow: inset 0 0 0 1px var(--on);
     }
 </style>

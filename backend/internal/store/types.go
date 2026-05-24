@@ -6,10 +6,10 @@ import "time"
 type Socket struct {
 	ID       string `json:"id"`
 	Name     string `json:"name"`
-	Code     string `json:"code"`     // 433MHz code, Tasmota IP, or Matter node id
-	Protocol string `json:"protocol"` // e.g., "nexa", "kaku", "intertechno", "tasmota", "matter", "matter-thread"
-	State    bool   `json:"state"`    // true = on, false = off
-	Room     string `json:"room"`     // room/location
+	Code     string `json:"code"`               // 433MHz code, Tasmota IP, or Matter node id
+	Protocol string `json:"protocol"`           // e.g., "nexa", "kaku", "intertechno", "tasmota", "matter", "matter-thread"
+	State    bool   `json:"state"`              // true = on, false = off
+	Room     string `json:"room"`               // room/location
 	Favorite bool   `json:"favorite,omitempty"` // pinned to dashboard
 	Emoji    string `json:"emoji,omitempty"`    // shown big in kid mode; admin-picked
 }
@@ -36,14 +36,75 @@ type Schedule struct {
 	SocketID            string    `json:"socket_id,omitempty"`
 	TargetType          string    `json:"target_type,omitempty"`
 	TargetID            string    `json:"target_id,omitempty"`
-	Action              string    `json:"action"`              // "on" | "off" | "toggle" | "activate"
-	TimeMode            string    `json:"time_mode,omitempty"` // "fixed" | "sunrise" | "sunset" (empty == "fixed")
-	Time                string    `json:"time"`                // "HH:MM" format (used when TimeMode is "fixed")
+	Action              string    `json:"action"`                         // "on" | "off" | "toggle" | "activate"
+	TimeMode            string    `json:"time_mode,omitempty"`            // "fixed" | "sunrise" | "sunset" (empty == "fixed")
+	Time                string    `json:"time"`                           // "HH:MM" format (used when TimeMode is "fixed")
 	SolarOffsetMinutes  int       `json:"solar_offset_minutes,omitempty"` // -120..120, used when TimeMode is sunrise/sunset
-	Days                []int     `json:"days"`                // 0=Sun, 1=Mon, etc
+	Days                []int     `json:"days"`                           // 0=Sun, 1=Mon, etc
 	Enabled             bool      `json:"enabled"`
 	RandomOffsetMinutes int       `json:"random_offset_minutes,omitempty"` // fire at a random time 0..N minutes after the trigger time
 	LastFiredAt         time.Time `json:"last_fired_at,omitempty"`
+}
+
+// AutomationTrigger fires an automation. Type selects which fields apply:
+//   - "time":   wall-clock / solar time, like a Schedule (Time/TimeMode/Days).
+//   - "sensor": a sensor reading crosses a threshold (SensorID Op Value).
+//   - "device": a socket changes to a given state (SocketID -> ToState).
+type AutomationTrigger struct {
+	Type string `json:"type"` // "time" | "sensor" | "device"
+
+	// time
+	TimeMode           string `json:"time_mode,omitempty"` // "fixed" | "sunrise" | "sunset" (empty == "fixed")
+	Time               string `json:"time,omitempty"`      // "HH:MM" when TimeMode is fixed
+	SolarOffsetMinutes int    `json:"solar_offset_minutes,omitempty"`
+	Days               []int  `json:"days,omitempty"` // 0=Sun..6=Sat; empty == every day
+
+	// sensor
+	SensorID string  `json:"sensor_id,omitempty"`
+	Op       string  `json:"op,omitempty"`    // "above" | "below"
+	Value    float64 `json:"value,omitempty"` // threshold for Op
+
+	// device
+	SocketID string `json:"socket_id,omitempty"`
+	ToState  string `json:"to_state,omitempty"` // "on" | "off"
+}
+
+// AutomationCondition optionally gates a trigger. All conditions on an
+// automation must hold (logical AND) for its actions to run.
+//   - "device":     a socket must currently be on/off.
+//   - "time_range": local time must fall within [After, Before] (may wrap midnight).
+type AutomationCondition struct {
+	Type string `json:"type"` // "device" | "time_range"
+
+	// device
+	SocketID string `json:"socket_id,omitempty"`
+	State    string `json:"state,omitempty"` // "on" | "off"
+
+	// time_range
+	After  string `json:"after,omitempty"`  // "HH:MM"
+	Before string `json:"before,omitempty"` // "HH:MM"
+}
+
+// AutomationAction is one step run when an automation fires. Targets and
+// actions mirror Schedule/Timer semantics and go through ExecuteAction.
+type AutomationAction struct {
+	TargetType string `json:"target_type"` // "socket" | "group" | "scene"
+	TargetID   string `json:"target_id"`
+	Action     string `json:"action"` // "on" | "off" | "toggle" | "activate"
+}
+
+// Automation is a trigger → optional conditions → ordered actions rule.
+// Unlike a Schedule (time-only), an automation can react to sensor
+// thresholds and device-state changes. Evaluated by the scheduler tick.
+type Automation struct {
+	ID          string                `json:"id"`
+	Name        string                `json:"name"`
+	Enabled     bool                  `json:"enabled"`
+	Trigger     AutomationTrigger     `json:"trigger"`
+	Conditions  []AutomationCondition `json:"conditions,omitempty"`
+	Actions     []AutomationAction    `json:"actions"`
+	LastFiredAt time.Time             `json:"last_fired_at,omitempty"`
+	RunCount    int                   `json:"run_count,omitempty"`
 }
 
 // NotifPrefs controls which event categories trigger push notifications for
@@ -81,18 +142,18 @@ type NotifPrefs struct {
 type User struct {
 	ID           string    `json:"id"`
 	Username     string    `json:"username"`
-	PasswordHash string    `json:"password_hash"`           // admins; empty for code-only users or pending invites
-	LoginCode    string    `json:"login_code,omitempty"`    // limited users; a short numeric code, the only credential
+	PasswordHash string    `json:"password_hash"`        // admins; empty for code-only users or pending invites
+	LoginCode    string    `json:"login_code,omitempty"` // limited users; a short numeric code, the only credential
 	Admin        bool      `json:"admin"`
-	Owner        bool      `json:"owner,omitempty"`         // true for the one bootstrapped admin; cannot be demoted
-	Kid          bool      `json:"kid,omitempty"`           // limited users; renders the playful kid layout
+	Owner        bool      `json:"owner,omitempty"` // true for the one bootstrapped admin; cannot be demoted
+	Kid          bool      `json:"kid,omitempty"`   // limited users; renders the playful kid layout
 	SocketIDs    []string  `json:"socket_ids"`
 	CreatedAt    time.Time `json:"created_at"`
 	// TokenVersion is bumped whenever the user's credentials change
 	// (password or login code). Session cookies embed the version they
 	// were minted with, so changing a credential invalidates every
 	// existing session for that user.
-	TokenVersion int        `json:"token_version,omitempty"`
+	TokenVersion int `json:"token_version,omitempty"`
 	// Invite fields are set when a new admin user is created and cleared
 	// once they accept the invite and set their password.
 	InviteToken  string     `json:"invite_token,omitempty"`
@@ -144,9 +205,14 @@ type Group struct {
 }
 
 // SceneAction sets one socket to a specific state when its scene fires.
+// For smart lights (Tasmota/Matter) turned on, an optional Level (1-100%)
+// and/or Color (RRGGBB hex) are applied after switching on. RF sockets
+// ignore Level/Color.
 type SceneAction struct {
 	SocketID string `json:"socket_id"`
-	Action   string `json:"action"` // "on" | "off"
+	Action   string `json:"action"`          // "on" | "off"
+	Level    *int   `json:"level,omitempty"` // 1-100, smart lights only
+	Color    string `json:"color,omitempty"` // "RRGGBB", smart lights only
 }
 
 // Scene is a named preset that drives a specific set of sockets to
@@ -178,17 +244,17 @@ type Timer struct {
 //   - Protocol: which decoder produced the packet (e.g. "rtl_433")
 //   - Code:     stable per-device identifier (e.g. "Acurite-Tower:1234")
 //   - Field:    which JSON key to read as the numeric value (e.g.
-//               "temperature_C", "humidity"). Empty means "the only
-//               numeric field in the packet" — useful for simple sensors.
+//     "temperature_C", "humidity"). Empty means "the only
+//     numeric field in the packet" — useful for simple sensors.
 type Sensor struct {
-	ID            string     `json:"id"`
-	Name          string     `json:"name"`
-	Kind          string     `json:"kind"`     // temperature|humidity|motion|light|power|custom
-	Unit          string     `json:"unit"`     // "°C", "%", "lux", "W", ...
-	Code          string     `json:"code"`     // 433MHz device identifier
-	Protocol      string     `json:"protocol"` // decoder/source label
-	Field         string     `json:"field,omitempty"`
-	Room          string     `json:"room,omitempty"`
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Kind     string `json:"kind"`     // temperature|humidity|motion|light|power|custom
+	Unit     string `json:"unit"`     // "°C", "%", "lux", "W", ...
+	Code     string `json:"code"`     // 433MHz device identifier
+	Protocol string `json:"protocol"` // decoder/source label
+	Field    string `json:"field,omitempty"`
+	Room     string `json:"room,omitempty"`
 	// Optional alert thresholds. When set, the UI flags the sensor whenever
 	// its latest reading falls below AlertMin or above AlertMax.
 	AlertMin      *float64   `json:"alert_min,omitempty"`

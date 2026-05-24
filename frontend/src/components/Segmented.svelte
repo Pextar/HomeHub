@@ -38,9 +38,9 @@
 <style>
     .segmented {
         display: inline-flex;
-        background: var(--surface);
+        background: var(--bg-elevated);
         border: 1px solid var(--border);
-        border-radius: var(--radius-md);
+        border-radius: var(--r-pill);
         padding: 3px;
         gap: 2px;
     }
@@ -58,7 +58,7 @@
         align-items: center;
         justify-content: center;
         padding: 6px 14px;
-        border-radius: 7px;
+        border-radius: var(--r-pill);
         cursor: pointer;
         color: var(--text-muted);
         font-weight: 500;
@@ -68,7 +68,7 @@
         user-select: none;
     }
     .segmented input:checked + label {
-        background: var(--bg-elevated);
+        background: var(--card-3);
         color: var(--text);
         box-shadow: var(--shadow-sm);
     }

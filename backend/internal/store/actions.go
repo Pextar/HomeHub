@@ -75,11 +75,41 @@ func (s *Store) ExecuteAction(targetType, targetID, action string) error {
 			if err := s.ExecuteAction("socket", a.SocketID, a.Action); err != nil && firstErr == nil {
 				firstErr = err
 			}
+			// After switching a smart light on, queue its scene brightness/colour.
+			// The actual bridge call happens in FlushLights, off-lock.
+			if a.Action == "on" && (a.Level != nil || a.Color != "") {
+				if sock, ok := s.Sockets[a.SocketID]; ok {
+					s.QueueLight(*sock, a.Level, a.Color)
+				}
+			}
 		}
 		return firstErr
 
 	default:
 		return fmt.Errorf("unsupported target type %q", targetType)
+	}
+}
+
+// QueueLight buffers a smart-light brightness/colour command to be applied by
+// FlushLights once the lock is released. Caller must hold Mu (write lock).
+func (s *Store) QueueLight(socket Socket, level *int, color string) {
+	s.pendingLights = append(s.pendingLights, lightCmd{socket: socket, level: level, color: color})
+}
+
+// FlushLights drains queued smart-light commands and sends them to the bridge.
+// It briefly takes Mu to swap the buffer, then makes the (network) bridge calls
+// WITHOUT the lock held. Caller must NOT hold Mu. Safe to call when empty.
+func (s *Store) FlushLights() {
+	s.Mu.Lock()
+	cmds := s.pendingLights
+	s.pendingLights = nil
+	light := s.Light
+	s.Mu.Unlock()
+	if light == nil {
+		return
+	}
+	for _, c := range cmds {
+		_ = light.SetLight(c.socket, c.level, c.color)
 	}
 }
 
@@ -112,6 +142,65 @@ func (s *Store) CascadeDeleteSocket(socketID string) {
 	for _, u := range s.Users {
 		u.SocketIDs = filterStrings(u.SocketIDs, socketID)
 	}
+	s.pruneAutomationsForSocket(socketID)
+}
+
+// pruneAutomationsForSocket cleans automations that reference a deleted
+// socket. An automation triggered by the socket's state can never fire again,
+// so it is removed; otherwise device conditions and socket actions pointing at
+// it are dropped, and the automation is removed if no actions remain. Caller
+// must hold Mu.
+func (s *Store) pruneAutomationsForSocket(socketID string) {
+	for id, a := range s.Automations {
+		if a.Trigger.Type == "device" && a.Trigger.SocketID == socketID {
+			delete(s.Automations, id)
+			continue
+		}
+		conds := a.Conditions[:0]
+		for _, c := range a.Conditions {
+			if c.Type == "device" && c.SocketID == socketID {
+				continue
+			}
+			conds = append(conds, c)
+		}
+		a.Conditions = conds
+		a.Actions = filterActions(a.Actions, "socket", socketID)
+		if len(a.Actions) == 0 {
+			delete(s.Automations, id)
+		}
+	}
+}
+
+// PruneAutomationsForSensor removes automations whose trigger watches a
+// deleted sensor (sensors are only referenced by triggers). Caller holds Mu.
+func (s *Store) PruneAutomationsForSensor(sensorID string) {
+	for id, a := range s.Automations {
+		if a.Trigger.Type == "sensor" && a.Trigger.SensorID == sensorID {
+			delete(s.Automations, id)
+		}
+	}
+}
+
+// PruneAutomationsForTarget drops actions that target a deleted group or
+// scene, removing the automation if it is left with no actions. Caller holds Mu.
+func (s *Store) PruneAutomationsForTarget(targetType, targetID string) {
+	for id, a := range s.Automations {
+		a.Actions = filterActions(a.Actions, targetType, targetID)
+		if len(a.Actions) == 0 {
+			delete(s.Automations, id)
+		}
+	}
+}
+
+func filterActions(in []AutomationAction, targetType, targetID string) []AutomationAction {
+	out := in[:0]
+	for _, act := range in {
+		if act.TargetType == targetType && act.TargetID == targetID {
+			continue
+		}
+		out = append(out, act)
+	}
+	return out
 }
 
 func filterStrings(in []string, drop string) []string {

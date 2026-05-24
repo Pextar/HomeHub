@@ -445,7 +445,7 @@
     .note.error  { border-color: var(--danger); color: var(--danger); }
     .note.success { border-color: var(--success); }
     .note .hint { color: var(--text-muted); font-size: 12px; }
-    .note code { font-family: ui-monospace, monospace; font-size: 12px; }
+    .note code { font-family: var(--font-mono); font-size: 12px; }
 
     .commissioning {
         display: flex; flex-direction: column; align-items: center;
@@ -486,7 +486,7 @@
         color: var(--text-muted);
         margin-top: 4px;
     }
-    .field-help code { font-family: ui-monospace, monospace; }
+    .field-help code { font-family: var(--font-mono); }
     .opt { color: var(--text-muted); font-weight: 400; font-size: 12px; }
 
     .camera-fallback-hint {

@@ -39,9 +39,10 @@
         pointer-events: none;
     }
     .toast {
+        --tone: var(--info);
         background: var(--bg-elevated);
         border: 1px solid var(--border);
-        border-left: 3px solid var(--info);
+        border-left: 3px solid var(--tone);
         border-radius: var(--radius-md);
         padding: var(--space-3) var(--space-4);
         box-shadow: var(--shadow-md);
@@ -50,11 +51,27 @@
         align-items: flex-start;
         pointer-events: auto;
     }
-    .toast[data-tone="success"] { border-left-color: var(--success); }
-    .toast[data-tone="error"] { border-left-color: var(--danger); }
-    .toast[data-tone="warn"] { border-left-color: var(--warn); }
+    .toast[data-tone="success"] { --tone: var(--success); }
+    .toast[data-tone="error"]   { --tone: var(--danger); }
+    /* Spec warn tone is a warmer amber than the generic --warn token. */
+    .toast[data-tone="warn"]    { --tone: #e8b96b; }
     .body { flex: 1; min-width: 0; }
-    .title { font-weight: 600; }
+    .title {
+        font-weight: 600;
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+    }
+    /* Colored tone marker beside the title — keeps the warm accent visible
+       even when the thin left border is easy to miss. */
+    .title::before {
+        content: "";
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--tone);
+        flex-shrink: 0;
+    }
     .msg { color: var(--text-muted); font-size: 13px; margin-top: 2px; }
     .close {
         background: transparent; border: 0;

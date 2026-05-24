@@ -296,7 +296,7 @@
     }
     .invite-label { font-size: 12px; color: var(--text-muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
     .invite-url {
-        font-family: ui-monospace, monospace;
+        font-family: var(--font-mono);
         font-size: 12px;
         word-break: break-all;
         color: var(--text);
@@ -318,6 +318,7 @@
         font-size: 1.5rem;
         font-weight: 700;
         letter-spacing: 0.25em;
+        font-family: var(--font-mono);
         font-variant-numeric: tabular-nums;
     }
     .code-actions { display: flex; gap: 4px; flex-shrink: 0; }

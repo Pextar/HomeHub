@@ -1,0 +1,155 @@
+package api
+
+import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"sort"
+	"time"
+
+	"github.com/gorilla/mux"
+
+	"rf-socket-controller/internal/store"
+)
+
+func (s *Server) getAutomations(w http.ResponseWriter, r *http.Request) {
+	s.Store.Mu.RLock()
+	list := make([]*store.Automation, 0, len(s.Store.Automations))
+	for _, a := range s.Store.Automations {
+		list = append(list, a)
+	}
+	s.Store.Mu.RUnlock()
+
+	sort.Slice(list, func(i, j int) bool {
+		if list[i].Name != list[j].Name {
+			return list[i].Name < list[j].Name
+		}
+		return list[i].ID < list[j].ID
+	})
+	writeJSON(w, http.StatusOK, list)
+}
+
+func (s *Server) createAutomation(w http.ResponseWriter, r *http.Request) {
+	var a store.Automation
+	if err := json.NewDecoder(r.Body).Decode(&a); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+
+	s.Store.Mu.Lock()
+	defer s.Store.Mu.Unlock()
+
+	if err := s.Store.ValidateAutomation(&a); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if a.ID == "" {
+		a.ID = fmt.Sprintf("automation_%d", time.Now().UnixNano())
+	}
+	s.Store.Automations[a.ID] = &a
+	if err := s.Store.Save(); err != nil {
+		delete(s.Store.Automations, a.ID)
+		writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, a)
+}
+
+func (s *Server) updateAutomation(w http.ResponseWriter, r *http.Request) {
+	id := mux.Vars(r)["id"]
+
+	var updated store.Automation
+	if err := json.NewDecoder(r.Body).Decode(&updated); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+
+	s.Store.Mu.Lock()
+	defer s.Store.Mu.Unlock()
+
+	existing, ok := s.Store.Automations[id]
+	if !ok {
+		writeError(w, http.StatusNotFound, "automation not found")
+		return
+	}
+
+	// Full-object replace: the editor always sends the complete automation.
+	// Preserve identity and run history; everything else comes from the body.
+	updated.ID = id
+	updated.LastFiredAt = existing.LastFiredAt
+	updated.RunCount = existing.RunCount
+	if err := s.Store.ValidateAutomation(&updated); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	*existing = updated
+	if err := s.Store.Save(); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, existing)
+}
+
+func (s *Server) deleteAutomation(w http.ResponseWriter, r *http.Request) {
+	id := mux.Vars(r)["id"]
+
+	s.Store.Mu.Lock()
+	if _, ok := s.Store.Automations[id]; !ok {
+		s.Store.Mu.Unlock()
+		writeError(w, http.StatusNotFound, "automation not found")
+		return
+	}
+	delete(s.Store.Automations, id)
+	if err := s.Store.Save(); err != nil {
+		s.Store.Mu.Unlock()
+		writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
+		return
+	}
+	s.Store.Mu.Unlock()
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// runAutomation fires an automation's actions immediately, ignoring its
+// trigger and conditions — the "Run now" / test button in the editor.
+func (s *Server) runAutomation(w http.ResponseWriter, r *http.Request) {
+	id := mux.Vars(r)["id"]
+
+	s.Store.Mu.Lock()
+	defer s.Store.Mu.Unlock()
+
+	a, ok := s.Store.Automations[id]
+	if !ok {
+		writeError(w, http.StatusNotFound, "automation not found")
+		return
+	}
+
+	s.Store.SuppressStateChange = true
+	var firstErr error
+	for _, act := range a.Actions {
+		if err := s.Store.ExecuteAction(act.TargetType, act.TargetID, act.Action); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	s.Store.SuppressStateChange = false
+
+	kind := "bulk"
+	if len(a.Actions) == 1 {
+		kind = a.Actions[0].TargetType
+	}
+	entry := store.ActivityEntry{Kind: kind, Source: "automation", Action: "run", Label: a.Name}
+	if firstErr != nil {
+		entry.Status = "error"
+		entry.Error = firstErr.Error()
+	}
+	s.Store.Activity.Add(entry)
+	a.LastFiredAt = time.Now().UTC()
+	a.RunCount++
+	if err := s.Store.Save(); err != nil && firstErr == nil {
+		firstErr = err
+	}
+	if firstErr != nil {
+		writeError(w, http.StatusInternalServerError, firstErr.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, a)
+}

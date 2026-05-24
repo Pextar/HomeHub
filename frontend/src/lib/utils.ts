@@ -1,6 +1,27 @@
-import type { Group, Scene, Schedule, Socket, Timer, SocketAction } from "./types";
+import type { Group, Scene, Schedule, Socket, Timer, SocketAction, Automation } from "./types";
 import { api } from "./api";
 import { data, toasts } from "./stores.svelte";
+
+// Count automations that reference an entity, so delete confirmations can warn
+// that the cascade will remove or prune them (mirrors the backend cleanup).
+export function automationsUsingSocket(autos: Automation[], id: string): number {
+  return autos.filter(a =>
+    (a.trigger.type === "device" && a.trigger.socket_id === id) ||
+    (a.conditions?.some(c => c.type === "device" && c.socket_id === id) ?? false) ||
+    a.actions.some(ac => ac.target_type === "socket" && ac.target_id === id),
+  ).length;
+}
+export function automationsUsingSensor(autos: Automation[], id: string): number {
+  return autos.filter(a => a.trigger.type === "sensor" && a.trigger.sensor_id === id).length;
+}
+export function automationsUsingTarget(autos: Automation[], type: "group" | "scene", id: string): number {
+  return autos.filter(a => a.actions.some(ac => ac.target_type === type && ac.target_id === id)).length;
+}
+
+// "1 automation" / "3 automations" — for warning copy.
+export function plural(n: number, word: string): string {
+  return `${n} ${word}${n === 1 ? "" : "s"}`;
+}
 
 export const DAY_SHORT = ["S", "M", "T", "W", "T", "F", "S"];
 export const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];

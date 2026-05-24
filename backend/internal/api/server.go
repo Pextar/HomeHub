@@ -158,6 +158,12 @@ func (s *Server) Handler() http.Handler {
 	api.HandleFunc("/schedules/{id}", s.requireAdmin(s.updateSchedule)).Methods("PUT")
 	api.HandleFunc("/schedules/{id}", s.requireAdmin(s.deleteSchedule)).Methods("DELETE")
 
+	api.HandleFunc("/automations", s.requireAdmin(s.getAutomations)).Methods("GET")
+	api.HandleFunc("/automations", s.requireAdmin(s.createAutomation)).Methods("POST")
+	api.HandleFunc("/automations/{id}", s.requireAdmin(s.updateAutomation)).Methods("PUT")
+	api.HandleFunc("/automations/{id}", s.requireAdmin(s.deleteAutomation)).Methods("DELETE")
+	api.HandleFunc("/automations/{id}/run", s.requireAdmin(s.runAutomation)).Methods("POST")
+
 	api.HandleFunc("/groups", s.requireAdmin(s.getGroups)).Methods("GET")
 	api.HandleFunc("/groups", s.requireAdmin(s.createGroup)).Methods("POST")
 	api.HandleFunc("/groups/{id}", s.requireAdmin(s.getGroup)).Methods("GET")

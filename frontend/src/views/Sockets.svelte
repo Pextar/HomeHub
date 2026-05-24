@@ -5,7 +5,7 @@
     import EmptyState from "../components/EmptyState.svelte";
     import Segmented from "../components/Segmented.svelte";
     import { api } from "../lib/api";
-    import { data, toasts } from "../lib/stores.svelte";
+    import { data, toasts, route } from "../lib/stores.svelte";
     import { groupSocketsByRoom, runAction } from "../lib/utils";
     import { openModal } from "../lib/modal.svelte";
     import SocketModal from "../modals/SocketModal.svelte";
@@ -17,7 +17,8 @@
     const v = $derived(data.value);
 
     let search = $state("");
-    let roomFilter = $state("");
+    // Initialised from a ?room= deep link (e.g. tapping a room card on Home).
+    let roomFilter = $state(route.query.room ?? "");
     let statusFilter = $state("all");
 
     const allRooms = $derived(
@@ -48,7 +49,7 @@
 
 <Topbar title="Devices" subtitle="{v.sockets.length} configured · RF, Wi-Fi &amp; Matter">
     {#snippet actions()}
-        <button class="btn btn-primary" onclick={() => openModal(SocketModal, {})}>Add device</button>
+        <button class="chip" onclick={() => openModal(SocketModal, {})}><Icon name="plus" size={14} /> Add</button>
     {/snippet}
 </Topbar>
 
@@ -90,7 +91,12 @@
                 animate:flip={{ duration: dur(280), easing: cubicOut }}
                 in:fade={{ duration: dur(180) }}>
                 <div class="room-header">
-                    <h3>{room} · {items.length} device{items.length === 1 ? "" : "s"} · {onCount} on</h3>
+                    <h3>
+                        <span class="room-title">{room}</span>
+                        <span class="room-meta">
+                            <span class="mono on-count" class:lit={onCount > 0}>{onCount}</span><span class="slash"> / </span><span class="mono total">{items.length}</span> on
+                        </span>
+                    </h3>
                     <div class="room-actions">
                         <button class="btn btn-ghost"
                             onclick={() => runAction(() => api.roomOn(room), `${room} on`)}>All on</button>
@@ -118,9 +124,9 @@
         gap: var(--space-3);
         flex-wrap: wrap;
         padding: var(--space-3);
-        background: var(--bg-elevated);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
+        background: var(--card);
+        border: 1px solid var(--hairline);
+        border-radius: var(--radius-lg);
         align-items: center;
     }
     .search {
@@ -130,9 +136,9 @@
         align-items: center;
         gap: var(--space-2);
         padding: 0 var(--space-3);
-        background: var(--surface);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
+        background: var(--card-2);
+        border: 1px solid var(--hairline);
+        border-radius: var(--r-pill);
         color: var(--text-muted);
     }
     .search input {
@@ -162,11 +168,23 @@
         gap: var(--space-3);
     }
     .room-header h3 {
-        color: var(--text-muted);
-        font-size: 12px;
-        text-transform: uppercase;
-        letter-spacing: 0.06em;
+        display: flex;
+        align-items: baseline;
+        gap: var(--space-3);
+        color: var(--text);
+        font-size: 17px;
+        font-weight: 600;
+        letter-spacing: -0.02em;
     }
+    .room-header .room-meta {
+        font-size: 12.5px;
+        font-weight: 500;
+        color: var(--text-mute);
+        letter-spacing: 0;
+    }
+    .room-header .on-count { color: var(--text-mute); }
+    .room-header .on-count.lit { color: var(--on); }
+    .room-header .slash, .room-header .total { color: var(--text-dim); }
     .room-actions { display: flex; gap: var(--space-2); }
     @media (pointer: coarse) {
         .room-header { padding: var(--space-1) 0; }
@@ -174,13 +192,13 @@
     }
     .grid {
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-        gap: var(--space-4);
+        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+        gap: var(--space-3);
     }
-    /* On small phones, single-column is more comfortable */
-    @media (max-width: 480px) {
-        .grid { grid-template-columns: 1fr; gap: var(--space-3); }
+    /* Compact device tiles flow two-up on phones, matching the mockup. */
+    @media (max-width: 600px) {
+        .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
     }
-    .grid-item { display: flex; }
-    .grid-item > :global(.card) { flex: 1; }
+    .grid-item { display: flex; min-width: 0; }
+    .grid-item > :global(.tile) { flex: 1; min-width: 0; }
 </style>

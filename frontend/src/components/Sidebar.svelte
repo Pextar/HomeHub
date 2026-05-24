@@ -34,12 +34,15 @@
   // profiles, who only get Dashboard + Devices.
   const PRIMARY_COUNT = 4;
   const allItems: NavItem[] = [
-    { route: "dashboard", icon: "home", label: "Dashboard" },
+    { route: "dashboard", icon: "home", label: "Home" },
     { route: "sockets", icon: "socket", label: "Devices" },
     { route: "groups", icon: "groups", label: "Groups", admin: true },
     { route: "schedules", icon: "clock", label: "Schedules", admin: true },
+    { route: "automations", icon: "automation", label: "Automations", admin: true },
     { route: "floorplan", icon: "map", label: "Floor plan", admin: true },
     { route: "sensors", icon: "sensor", label: "Sensors", admin: true },
+    { route: "insights", icon: "chart", label: "Insights", admin: true },
+    { route: "activity", icon: "activity", label: "Activity", admin: true },
     { route: "scenes", icon: "scenes", label: "Scenes", admin: true },
     { route: "users", icon: "user", label: "Profiles", admin: true },
     { route: "settings", icon: "settings", label: "Settings", admin: true },
@@ -362,11 +365,13 @@
 
 <style>
   .sidebar {
-    background: var(--bg-elevated);
-    border-right: 1px solid var(--border);
-    padding: var(--space-6) var(--space-4);
+    width: 240px;
+    background: var(--bg-2);
+    border-right: 1px solid var(--hairline);
+    padding: 22px 16px;
     display: flex;
     flex-direction: column;
+    gap: 4px;
     position: sticky;
     top: 0;
     height: 100vh;
@@ -374,33 +379,30 @@
   .brand {
     display: flex;
     align-items: center;
-    gap: var(--space-3);
-    padding: 0 var(--space-2) var(--space-6);
-    border-bottom: 1px solid var(--border);
-    margin-bottom: var(--space-4);
+    gap: 10px;
+    padding: 4px 12px 22px;
+    margin-bottom: var(--space-2);
   }
   .mark {
-    width: 36px;
-    height: 36px;
-    border-radius: var(--radius-md);
-    background: var(--gradient-brand);
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    background: var(--on);
     display: grid;
     place-items: center;
-    color: #fff;
-    box-shadow: 0 4px 12px var(--primary-glow);
+    color: var(--bg);
     flex-shrink: 0;
   }
   .name {
-    font-weight: 800;
+    font-size: 15px;
+    font-weight: 600;
     letter-spacing: -0.02em;
-    background: var(--gradient-brand);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
+    color: var(--text);
   }
   .sub {
-    font-size: 12px;
-    color: var(--text-faint);
+    font-size: 10.5px;
+    font-family: var(--font-mono);
+    color: var(--text-mute);
   }
 
   .nav {
@@ -414,100 +416,109 @@
   .nav-item {
     display: flex;
     align-items: center;
-    gap: var(--space-3);
-    padding: 10px var(--space-3);
-    border-radius: var(--radius-md);
-    color: var(--text-muted);
+    gap: 12px;
+    padding: 10px 12px;
+    border-radius: var(--r-sm);
+    color: var(--text-mute);
+    font-size: 13.5px;
+    font-weight: 500;
     transition:
-      background var(--t-fast),
-      color var(--t-fast);
+      background 150ms ease,
+      color 150ms ease;
     cursor: pointer;
     background: transparent;
     border: none;
     text-align: left;
-    font: inherit;
+    font-family: var(--font-sans);
     width: 100%;
   }
   .nav-item:hover {
-    background: var(--surface-hover);
+    background: var(--card);
     color: var(--text);
   }
   .nav-item[aria-current="page"] {
-    background: var(--primary-soft);
-    color: var(--primary);
-    font-weight: 600;
-    box-shadow: inset 3px 0 0 var(--primary);
+    background: var(--card);
+    color: var(--text);
+    font-weight: 500;
   }
   .nav-item[aria-current="page"] :global(svg) {
-    color: var(--primary);
+    color: var(--on);
   }
   .nav-key {
     margin-left: auto;
     font-family: var(--font-mono);
     font-size: 10px;
     line-height: 1;
-    padding: 2px 5px;
-    border-radius: 4px;
-    color: var(--text-faint);
-    background: var(--surface);
-    border: 1px solid var(--border);
+    padding: 2px 6px;
+    border-radius: 6px;
+    color: var(--text-mute);
+    background: var(--card-3);
     opacity: 0;
-    transition: opacity var(--t-fast);
+    transition: opacity 150ms ease;
   }
   .sidebar:hover .nav-key { opacity: 1; }
-  .nav-item[aria-current="page"] .nav-key { opacity: 1; color: var(--primary); }
+  .nav-item[aria-current="page"] .nav-key { opacity: 1; color: var(--text-mute); }
 
   .footer {
     margin-top: auto;
     display: flex;
     flex-direction: column;
-    gap: var(--space-3);
-    padding-top: var(--space-4);
-    border-top: 1px solid var(--border);
+    gap: var(--space-2);
+    padding-top: var(--space-3);
   }
   .profile {
     display: flex;
     align-items: center;
-    gap: var(--space-2);
-    padding: 0 var(--space-3) var(--space-1);
-    color: var(--text-muted);
-    font-size: 13px;
+    gap: 10px;
+    padding: 12px;
+    background: var(--card);
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-md);
+    color: var(--text-mute);
+    font-size: 12.5px;
     min-width: 0;
   }
+  .profile :global(svg) {
+    color: var(--on);
+    flex-shrink: 0;
+  }
   .profile-name {
-    font-weight: 600;
+    font-weight: 500;
     color: var(--text);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    flex: 1;
+    min-width: 0;
   }
   .profile-tag {
     font-size: 10px;
-    font-weight: 700;
+    font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.04em;
-    color: var(--primary);
-    background: var(--primary-soft);
+    color: var(--on);
+    background: var(--on-soft);
     padding: 1px 6px;
-    border-radius: 999px;
+    border-radius: var(--r-pill);
     flex-shrink: 0;
   }
   .theme-toggle {
     display: flex;
     align-items: center;
-    gap: var(--space-3);
-    padding: 8px var(--space-3);
-    border: 1px solid var(--border);
-    background: transparent;
-    border-radius: var(--radius-md);
+    gap: 12px;
+    padding: 9px 12px;
+    border: 1px solid var(--hairline);
+    background: var(--card-2);
+    border-radius: var(--r-sm);
     cursor: pointer;
-    color: var(--text-muted);
+    color: var(--text-mute);
+    font-size: 13px;
     transition:
-      background var(--t-fast),
-      color var(--t-fast);
+      background 150ms ease,
+      color 150ms ease;
   }
   .theme-toggle:hover {
-    background: var(--surface-hover);
+    background: var(--card-3);
     color: var(--text);
   }
 
@@ -515,42 +526,43 @@
     display: flex;
     align-items: center;
     gap: var(--space-2);
-    color: var(--text-muted);
-    font-size: 12px;
-    padding: 0 var(--space-3);
+    color: var(--text-mute);
+    font-size: 11.5px;
+    padding: 4px 12px 0;
   }
   .dot {
-    width: 8px;
-    height: 8px;
+    width: 7px;
+    height: 7px;
     border-radius: 50%;
-    background: var(--text-faint);
+    background: var(--text-dim);
     flex-shrink: 0;
     transition:
-      background var(--t-med),
-      box-shadow var(--t-med);
+      background 200ms ease,
+      box-shadow 200ms ease;
   }
   .dot[data-state="ok"] {
-    background: var(--success);
-    box-shadow: 0 0 0 3px var(--success-soft);
+    background: var(--good);
+    box-shadow: 0 0 0 4px var(--on-soft);
     animation: pulse-dot 2.5s ease-in-out infinite;
   }
   .dot[data-state="error"] {
-    background: var(--danger);
-    box-shadow: 0 0 0 3px var(--danger-soft);
+    background: var(--bad);
+    box-shadow: 0 0 0 3px rgba(224,138,122,0.18);
   }
   @keyframes pulse-dot {
     0%,
     100% {
-      box-shadow: 0 0 0 3px var(--success-soft);
+      box-shadow: 0 0 0 3px rgba(156,194,138,0.18);
     }
     50% {
-      box-shadow: 0 0 0 5px var(--success-soft);
+      box-shadow: 0 0 0 5px rgba(156,194,138,0.18);
     }
   }
 
-  /* ---------- Mobile bottom nav — iOS tab bar ---------- */
+  /* ---------- Mobile bottom nav — warm-dark tab bar ---------- */
   @media (max-width: 900px) {
     .sidebar {
+      width: auto;
       position: fixed;
       bottom: 0;
       left: 0;
@@ -560,15 +572,14 @@
       flex-direction: row;
       align-items: stretch;
       border-right: none;
-      /* Frosted-glass iOS tab bar */
-      background: var(--bg-bar);
-      backdrop-filter: saturate(180%) blur(24px);
-      -webkit-backdrop-filter: saturate(180%) blur(24px);
-      /* iOS hairline separator — no heavy shadow */
-      border-top: 0.5px solid var(--separator);
+      /* Warm-dark bar fading up into the page, matching the prototype tabbar */
+      background: linear-gradient(to top, var(--bg) 55%, rgba(20,19,15,0.85));
+      backdrop-filter: saturate(160%) blur(20px);
+      -webkit-backdrop-filter: saturate(160%) blur(20px);
+      border-top: 1px solid var(--hairline);
       box-shadow: none;
-      padding: 0;
-      padding-bottom: env(safe-area-inset-bottom);
+      padding: 8px 14px;
+      padding-bottom: calc(8px + env(safe-area-inset-bottom));
       z-index: 100;
       gap: 0;
     }
@@ -585,6 +596,7 @@
       display: flex;
       flex: 1;
       flex-direction: row;
+      justify-content: space-around;
       gap: 0;
     }
     .nav-mobile .nav-item {
@@ -592,31 +604,36 @@
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      gap: 3px;
-      padding: 8px 4px;
+      gap: 4px;
+      padding: 6px 10px;
       border-radius: 0;
-      font-size: 10px; /* iOS tab label size */
-      min-height: 49px; /* iOS standard tab bar height */
-      color: var(--text-muted);
+      font-size: 10.5px;
+      font-weight: 500;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+      color: var(--text-dim);
       text-align: center;
       width: auto;
     }
-    /* Scale up icons slightly in the tab bar */
+    .nav-mobile .nav-item:hover {
+      background: transparent;
+      color: var(--text-mute);
+    }
     .nav-mobile .nav-item :global(svg) {
-      width: 24px;
-      height: 24px;
+      width: 22px;
+      height: 22px;
       /* Spring easing gives the icon a subtle pop when a tab is selected. */
       transition: transform 0.28s var(--spring);
     }
-    /* iOS: active = tint color only, no indicator line */
+    /* Active = amber tint, no indicator line */
     .nav-mobile .nav-item[aria-current="page"] {
       background: transparent;
-      color: var(--primary);
+      color: var(--on);
       box-shadow: none;
     }
     .nav-mobile .nav-item[aria-current="page"] :global(svg) {
-      color: var(--primary);
-      transform: scale(1.12);
+      color: var(--on);
+      transform: scale(1.1);
     }
     /* Quick dip on press for tactile feedback. */
     .nav-mobile .nav-item:active :global(svg) {
@@ -625,11 +642,8 @@
     }
     .nav-mobile .nav-label {
       line-height: 1;
-      font-weight: 400; /* iOS uses regular weight for tab labels */
-      letter-spacing: 0;
-    }
-    .nav-mobile .nav-item[aria-current="page"] .nav-label {
-      font-weight: 500; /* Slightly heavier on active — subtle cue */
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
     }
   }
 
@@ -637,7 +651,7 @@
   .drawer-root {
     position: fixed;
     inset: 0;
-    background: rgba(8, 11, 22, 0.5);
+    background: rgba(10, 10, 8, 0.6);
     backdrop-filter: blur(3px);
     z-index: 120;
     display: flex;
@@ -647,16 +661,16 @@
     overscroll-behavior: contain;
   }
   :global([data-theme="light"]) .drawer-root {
-    background: rgba(20, 24, 38, 0.35);
+    background: rgba(40, 34, 24, 0.35);
   }
   .drawer {
     width: 100%;
-    background: var(--bg-bar);
+    background: var(--card);
     backdrop-filter: saturate(180%) blur(24px);
     -webkit-backdrop-filter: saturate(180%) blur(24px);
-    border-top: 0.5px solid var(--separator);
-    border-top-left-radius: var(--radius-xl);
-    border-top-right-radius: var(--radius-xl);
+    border-top: 1px solid var(--hairline);
+    border-top-left-radius: var(--r-xl);
+    border-top-right-radius: var(--r-xl);
     padding: 0 var(--space-4)
       calc(var(--space-4) + 56px + env(safe-area-inset-bottom));
     display: flex;
@@ -684,8 +698,8 @@
   .drawer-handle {
     width: 40px;
     height: 5px;
-    border-radius: 999px;
-    background: var(--border-strong);
+    border-radius: var(--r-pill);
+    background: var(--card-3);
     pointer-events: none;
   }
   .drawer-section {
@@ -695,7 +709,7 @@
     padding: var(--space-1) 0;
   }
   .drawer-section + .drawer-section {
-    border-top: 1px solid var(--border);
+    border-top: 1px solid var(--hairline);
     padding-top: var(--space-2);
     margin-top: var(--space-1);
   }
@@ -704,7 +718,7 @@
     align-items: center;
     gap: var(--space-3);
     padding: 14px var(--space-3);
-    border-radius: var(--radius-md);
+    border-radius: var(--r-md);
     color: var(--text);
     background: transparent;
     border: none;
@@ -713,31 +727,31 @@
     text-align: left;
     width: 100%;
     transition:
-      background var(--t-fast),
-      color var(--t-fast);
+      background 150ms ease,
+      color 150ms ease;
   }
   .drawer-item:hover {
-    background: var(--surface-hover);
+    background: var(--card-2);
   }
   .drawer-item:active {
-    background: var(--surface);
+    background: var(--card-3);
   }
   .drawer-item[aria-current="page"] {
-    background: var(--surface);
-    color: var(--primary);
+    background: var(--card-2);
+    color: var(--on);
     font-weight: 600;
   }
   .drawer-item[aria-current="page"] :global(svg) {
-    color: var(--primary);
+    color: var(--on);
   }
   .drawer-item.danger {
-    color: var(--danger);
+    color: var(--bad);
   }
   .drawer-icon {
     width: 28px;
     display: grid;
     place-items: center;
-    color: var(--text-muted);
+    color: var(--text-mute);
   }
   .drawer-item[aria-current="page"] .drawer-icon,
   .drawer-item.danger .drawer-icon {
@@ -750,10 +764,10 @@
     display: flex;
     align-items: center;
     gap: var(--space-2);
-    color: var(--text-muted);
+    color: var(--text-mute);
     font-size: 12px;
     padding: var(--space-2) var(--space-3) 0;
-    border-top: 1px solid var(--border);
+    border-top: 1px solid var(--hairline);
     margin-top: var(--space-1);
   }
 

@@ -18,7 +18,7 @@
       {#if chips.length}
         <div class="chips">
           {#each chips as c}
-            <span class="chip" data-tone={c.tone ?? ""}>{c.text}</span>
+            <span class="entity-chip" data-tone={c.tone ?? ""}>{c.text}</span>
           {/each}
         </div>
       {/if}
@@ -31,7 +31,7 @@
 
 <style>
   .card {
-    background: var(--bg-elevated);
+    background: var(--bg-raised);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
     padding: var(--space-4) var(--space-5);
@@ -67,13 +67,15 @@
     gap: 6px;
     margin-top: var(--space-2);
   }
-  .chip {
+  /* Renamed from .chip to .entity-chip to avoid colliding with the new
+     global .chip utility class. */
+  .entity-chip {
     display: inline-flex;
     align-items: center;
     gap: 6px;
     padding: 3px 10px;
-    border-radius: 999px;
-    background: var(--surface);
+    border-radius: var(--radius-pill);
+    background: var(--card-3);
     border: 1px solid var(--border);
     font-size: 12px;
     color: var(--text-muted);
@@ -82,13 +84,15 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .chip[data-tone="on"] {
-    color: var(--success);
-    border-color: rgba(52, 211, 153, 0.3);
+  .entity-chip[data-tone="on"] {
+    color: var(--on);
+    background: var(--on-soft);
+    border-color: transparent;
   }
-  .chip[data-tone="off"] {
+  .entity-chip[data-tone="off"] {
     color: var(--danger);
-    border-color: rgba(248, 113, 113, 0.3);
+    background: var(--danger-soft);
+    border-color: transparent;
   }
   .actions {
     display: flex;
