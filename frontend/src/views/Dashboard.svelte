@@ -7,9 +7,10 @@
     import TimerRow from "../components/TimerRow.svelte";
     import { route, data, toasts, session } from "../lib/stores.svelte";
     import { api } from "../lib/api";
-    import { runAction } from "../lib/utils";
+    import { runAction, describeTarget } from "../lib/utils";
     import { openModal } from "../lib/modal.svelte";
     import ConfirmModal from "../components/ConfirmModal.svelte";
+    import SocketModal from "../modals/SocketModal.svelte";
     import { fly, scale } from "svelte/transition";
     import { flip } from "svelte/animate";
     import { cubicOut } from "svelte/easing";
@@ -41,6 +42,29 @@
     const insideTemp = $derived(
         hasTemp ? Math.round(tempSensors.reduce((sum, s) => sum + (s.last_value ?? 0), 0) / tempSensors.length) : 0
     );
+
+    // Desktop stat strip (wide screens only): real metrics that complement the
+    // hero — how many automations are active and the next scheduled event.
+    const enabledAutomations = $derived(v.automations.filter(a => a.enabled).length);
+    const nextEvent = $derived.by(() => {
+        const nowMin = now.getHours() * 60 + now.getMinutes();
+        const parse = (s?: string) => {
+            if (!s || !/^\d\d:\d\d/.test(s)) return -1;
+            const [h, m] = s.split(":").map(Number);
+            return h * 60 + m;
+        };
+        const items = v.schedules
+            .filter(s => s.enabled)
+            .map(s => ({
+                min: parse(s.effective_time || s.time),
+                time: s.effective_time || s.time,
+                label: describeTarget(s.target_type, s.target_id, s.socket_id).label,
+            }))
+            .filter(x => x.min >= 0);
+        if (items.length === 0) return null;
+        const upcoming = items.filter(x => x.min >= nowMin).sort((a, b) => a.min - b.min);
+        return upcoming[0] ?? items.sort((a, b) => a.min - b.min)[0];
+    });
 
     // Groups with a live on-count for the groups section.
     const groupsWithState = $derived(
@@ -102,6 +126,9 @@
     </div>
     {#if session.isAdmin}
         <div class="greet-actions">
+            <button class="chip add-device" onclick={() => openModal(SocketModal, {})}>
+                <Icon name="plus" size={14} /> Add device
+            </button>
             <button class="chip icon-chip" aria-label="Activity" onclick={() => route.go("activity")}>
                 <Icon name="activity" size={16} />
             </button>
@@ -112,33 +139,50 @@
     {/if}
 </header>
 
-<!-- ── Whole-home hero ────────────────────────────────────────────── -->
-<div class="hero tile" class:on={heroOn}
-    in:fly={{ y: 14, duration: dur(280), easing: cubicOut }}>
-    <div class="hero-top">
-        <div class="hero-lead">
-            <div class="hero-eyebrow mono">Whole home</div>
-            <div class="hero-count">
-                <span class="num-display">{onSockets}</span>
-                <span class="hero-of">of {totalSockets} on</span>
+<!-- ── Whole-home hero + desktop stat strip ───────────────────────── -->
+<div class="top-grid">
+    <div class="hero tile" class:on={heroOn}
+        in:fly={{ y: 14, duration: dur(280), easing: cubicOut }}>
+        <div class="hero-top">
+            <div class="hero-lead">
+                <div class="hero-eyebrow mono">Whole home</div>
+                <div class="hero-count">
+                    <span class="num-display">{onSockets}</span>
+                    <span class="hero-of">of {totalSockets} on</span>
+                </div>
             </div>
+            <button class="sw-big" class:on={heroOn} onclick={toggleAllMaster}
+                aria-label={heroOn ? "Turn all devices off" : "Turn all devices on"}
+                aria-pressed={heroOn}></button>
         </div>
-        <button class="sw-big" class:on={heroOn} onclick={toggleAllMaster}
-            aria-label={heroOn ? "Turn all devices off" : "Turn all devices on"}
-            aria-pressed={heroOn}></button>
+        {#if hasPower || hasTemp}
+            <div class="hero-meta">
+                {#if hasPower}
+                    <span class="hero-stat">
+                        <Icon name="bolt" size={13} />
+                        <span class="mono hero-em">{powerWatts} W</span> now
+                    </span>
+                {/if}
+                {#if hasPower && hasTemp}<span class="hero-sep">·</span>{/if}
+                {#if hasTemp}
+                    <span class="hero-stat"><span class="mono hero-em">{insideTemp}°</span> inside</span>
+                {/if}
+            </div>
+        {/if}
     </div>
-    {#if hasPower || hasTemp}
-        <div class="hero-meta">
-            {#if hasPower}
-                <span class="hero-stat">
-                    <Icon name="bolt" size={13} />
-                    <span class="mono hero-em">{powerWatts} W</span> now
-                </span>
-            {/if}
-            {#if hasPower && hasTemp}<span class="hero-sep">·</span>{/if}
-            {#if hasTemp}
-                <span class="hero-stat"><span class="mono hero-em">{insideTemp}°</span> inside</span>
-            {/if}
+
+    {#if nextEvent}
+        <div class="stat tile">
+            <div class="stat-eyebrow mono">Next event</div>
+            <div class="stat-value cool">{nextEvent.time}</div>
+            <div class="stat-sub">{nextEvent.label}</div>
+        </div>
+    {/if}
+    {#if enabledAutomations > 0}
+        <div class="stat tile">
+            <div class="stat-eyebrow mono">Automations</div>
+            <div class="stat-value">{enabledAutomations}</div>
+            <div class="stat-sub">active</div>
         </div>
     {/if}
 </div>
@@ -305,12 +349,40 @@
         line-height: 1.1;
     }
     .greet-name { color: var(--text-mute); }
-    .greet-actions { display: flex; gap: var(--space-2); flex-shrink: 0; }
+    .greet-actions { display: flex; gap: var(--space-2); flex-shrink: 0; align-items: center; }
     .icon-chip {
         width: 38px; height: 38px;
         padding: 0;
         justify-content: center;
     }
+    /* The labelled "Add device" chip is desktop-only; the mockup's mobile
+       Home greeting keeps just the icon chips. */
+    .add-device { display: none; }
+    @media (min-width: 700px) { .add-device { display: inline-flex; } }
+
+    /* Hero spans full width on phones; on desktop it shares a row with the
+       real-data stat tiles, matching the desktop dashboard mockup. */
+    .top-grid { display: grid; grid-template-columns: 1fr; gap: var(--space-4); }
+    .stat { display: none; }
+    @media (min-width: 1024px) {
+        .top-grid { grid-template-columns: 1.6fr 1fr 1fr; align-items: stretch; }
+        .stat { display: flex; }
+    }
+    .stat {
+        padding: 18px;
+        flex-direction: column;
+        justify-content: space-between;
+        gap: 8px;
+    }
+    .stat-eyebrow {
+        color: var(--text-mute);
+        font-size: 11px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+    }
+    .stat-value { font-size: 32px; font-weight: 600; letter-spacing: -0.02em; }
+    .stat-value.cool { color: var(--cool); }
+    .stat-sub { color: var(--text-mute); font-size: 12px; }
 
     /* ── Whole-home hero ────────────────────────────── */
     .hero { padding: 20px; gap: 16px; }
@@ -388,10 +460,19 @@
         font-variant-numeric: tabular-nums;
     }
 
-    /* ── Scenes scroller ────────────────────────────── */
+    /* ── Scenes: horizontal scroller on phones, grid on wide screens ── */
     .scene-scroll { padding-bottom: 2px; }
     .scene-cell { width: 160px; display: flex; }
     .scene-cell > :global(*) { flex: 1; min-width: 0; }
+    @media (min-width: 700px) {
+        .scene-scroll {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+            gap: var(--space-3);
+            overflow: visible;
+        }
+        .scene-cell { width: auto; }
+    }
 
     /* ── Favorites grid ─────────────────────────────── */
     .favorites {
