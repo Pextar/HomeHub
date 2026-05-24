@@ -2,13 +2,29 @@
     import Topbar from "../components/Topbar.svelte";
     import { untrack } from "svelte";
     import { api } from "../lib/api";
-    import { data, toasts, session } from "../lib/stores.svelte";
+    import { data, toasts, session, theme } from "../lib/stores.svelte";
     import { openModal } from "../lib/modal.svelte";
+    import Icon from "../components/Icon.svelte";
     import ShortcutsModal from "../modals/ShortcutsModal.svelte";
     import ConfirmModal from "../components/ConfirmModal.svelte";
     import { pushClient, pushSupported } from "../lib/push.svelte";
 
     const v = $derived(data.value);
+
+    const username = $derived(session.user?.username ?? "You");
+    const initial = $derived(username.charAt(0).toUpperCase());
+    const roleLabel = $derived(session.user?.admin ? "Admin · signed in" : "Limited · signed in");
+
+    async function signOut() {
+        const ok = await openModal<boolean>(ConfirmModal, {
+            title: "Sign out?",
+            message: "You'll need to sign in again to get back in.",
+            confirmLabel: "Sign out",
+        });
+        if (!ok) return;
+        try { await api.logout(); } catch { /* ignore */ }
+        window.location.reload();
+    }
 
     let latitude     = $state(untrack(() => data.value.settings.latitude));
     let longitude    = $state(untrack(() => data.value.settings.longitude));
@@ -194,6 +210,24 @@
 </script>
 
 <Topbar title="Settings" subtitle="Controller configuration" />
+
+<!-- Profile card -->
+<div class="profile-card">
+    <span class="avatar mono">{initial}</span>
+    <div class="who">
+        <div class="who-name">{username}</div>
+        <div class="who-role">{roleLabel}</div>
+    </div>
+    <div class="who-actions">
+        <button class="chip" onclick={() => theme.toggle()} aria-label="Toggle theme">
+            <Icon name={theme.current === "dark" ? "moon" : "sun"} size={15} />
+            {theme.current === "dark" ? "Dark" : "Light"}
+        </button>
+        <button class="chip danger" onclick={signOut}>
+            <Icon name="logout" size={15} /> Sign out
+        </button>
+    </div>
+</div>
 
 <section class="card">
     <header>
@@ -388,6 +422,31 @@
 </section>
 
 <style>
+    .profile-card {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        background: var(--card);
+        border: 1px solid var(--hairline);
+        border-radius: var(--r-lg);
+        padding: 16px;
+        max-width: 640px;
+    }
+    .avatar {
+        width: 50px; height: 50px;
+        border-radius: 50%;
+        background: var(--on);
+        color: #3a2400;
+        display: grid; place-items: center;
+        font-weight: 600; font-size: 18px;
+        flex-shrink: 0;
+    }
+    .who { flex: 1; min-width: 0; }
+    .who-name { font-weight: 600; font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .who-role { color: var(--text-mute); font-size: 12.5px; }
+    .who-actions { display: flex; gap: var(--space-2); flex-shrink: 0; flex-wrap: wrap; justify-content: flex-end; }
+    .chip.danger { color: var(--bad); }
+
     .card {
         background: var(--card);
         border: 1px solid var(--hairline);
