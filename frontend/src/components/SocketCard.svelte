@@ -272,7 +272,11 @@
     .tile-info { display: flex; flex-direction: column; gap: 2px; margin-top: 2px; min-width: 0; padding-right: 0; }
     .name {
         font-weight: 600; font-size: 15px;
-        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+        line-height: 1.25;
     }
     .meta-row {
         display: flex; align-items: center; justify-content: space-between; gap: 8px;
