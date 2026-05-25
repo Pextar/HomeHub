@@ -257,6 +257,9 @@ func main() {
 	schedCtx, stopScheduler := context.WithCancel(context.Background())
 	go scheduler.Run(schedCtx, st, pushSvc)
 	go rx.FromEnv().Run(schedCtx, st)
+	if serial := rx.SerialFromEnv(); serial != nil {
+		go serial.Run(schedCtx, st)
+	}
 	go mqtt.SensorListener{Client: mqttClient}.Run(schedCtx, st)
 	go reachability.Run(schedCtx, st, matterClient, pushSvc)
 
