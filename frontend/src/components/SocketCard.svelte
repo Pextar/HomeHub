@@ -103,8 +103,32 @@
     // Actions popover — opened by tapping the tile body. Replaces the old
     // On/Off/Toggle button row; the switch is the primary control now.
     let moreOpen = $state(false);
+    let moreBtnEl = $state<HTMLElement>();
+    // Fixed position for the menu — computed when it opens so the popup never
+    // goes off-screen (cards can be as narrow as half the viewport in the
+    // 2-column Favorites grid).
+    let menuPos = $state<{ bottom: number; right?: number; left?: number } | null>(null);
+
     $effect(() => {
-        if (!moreOpen) return;
+        if (!moreOpen) { menuPos = null; return; }
+
+        // Compute where the menu should appear relative to the viewport.
+        if (moreBtnEl) {
+            const rect = moreBtnEl.getBoundingClientRect();
+            const menuWidth = 210;
+            const vw = window.innerWidth;
+            const gap = 6;
+            const bottom = window.innerHeight - rect.top + gap;
+            const rightDist = vw - rect.right; // px from right edge of viewport
+
+            if (vw - rightDist - menuWidth < 8) {
+                // Would overflow the left edge — anchor from the left instead.
+                menuPos = { bottom, left: Math.max(8, rect.left) };
+            } else {
+                menuPos = { bottom, right: rightDist };
+            }
+        }
+
         function onDocClick(e: MouseEvent) {
             if (!cardEl?.contains(e.target as Node)) moreOpen = false;
         }
@@ -144,13 +168,17 @@
         </span>
     </button>
 
-    <button class="more-corner" aria-label="Device actions"
+    <button class="more-corner" aria-label="Device actions" bind:this={moreBtnEl}
         onclick={(e) => { e.stopPropagation(); moreOpen = !moreOpen; }}>
         <Icon name="more" size={16} />
     </button>
 
-    {#if moreOpen}
+    {#if moreOpen && menuPos}
         <div class="overflow-menu" role="menu"
+            style:position="fixed"
+            style:bottom="{menuPos.bottom}px"
+            style:right={menuPos.right != null ? `${menuPos.right}px` : undefined}
+            style:left={menuPos.left != null ? `${menuPos.left}px` : undefined}
             in:scale={{ start: 0.95, duration: 140, easing: cubicOut, opacity: 0 }}
             out:scale={{ start: 0.95, duration: 100, easing: cubicOut, opacity: 0 }}>
             {#if isSmartLight}
@@ -309,11 +337,11 @@
     @media (pointer: coarse) { .more-corner { opacity: 0.6; bottom: 8px; right: 8px; } }
 
     /* ── Actions popover ── */
+    /* position/bottom/right|left are set inline (position:fixed + computed
+       coords) so the menu never clips off-screen on narrow grid cards. */
     .overflow-menu {
-        position: absolute;
-        right: 12px; bottom: 44px;
-        z-index: 10;
-        min-width: 200px;
+        z-index: 200;
+        min-width: 210px;
         display: flex;
         flex-direction: column;
         background: var(--bg-raised);

@@ -124,6 +124,7 @@
         flex-direction: column;
         gap: 12px;
         transition: background var(--t-med), border-color var(--t-med);
+        overflow: visible; /* allow dropdown menu to escape the card bounds */
     }
     .tile.on {
         background: linear-gradient(155deg, #2b2419 0%, #221d14 60%, #1d180f 100%);
