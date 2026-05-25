@@ -273,6 +273,11 @@ input[type="search"], input[type="password"], textarea {
     color: var(--text);
     transition: border-color var(--t-fast), box-shadow var(--t-fast);
 }
+/* Center the time value in its field — on iOS Safari the native picker
+   button sits on the right, which otherwise pushes the text right. */
+input[type="time"] {
+    text-align: center;
+}
 /* Custom select chrome — removes the native OS widget and adds a themed
    chevron so selects look consistent with the rest of the design system. */
 select {
