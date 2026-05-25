@@ -51,7 +51,7 @@
         const extra = autoN > 0 ? ` ${plural(autoN, "automation")} using it will also be updated or removed.` : "";
         const ok = await openModal<boolean>(ConfirmModal, {
             title: "Delete scene?",
-            message: `“${scene.name}” and any schedules pointing at it will be removed.${extra}`,
+            message: `"${scene.name}" and any schedules pointing at it will be removed.${extra}`,
             confirmLabel: "Delete",
             danger: true,
         });
@@ -157,7 +157,14 @@
     .run { color: var(--text-mute); font-size: 11px; }
 
     .meta { display: flex; flex-direction: column; min-width: 0; }
-    .name { font-weight: 600; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .name {
+        font-weight: 600; font-size: 15px;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+        line-height: 1.25;
+    }
     .sub { color: var(--text-mute); font-size: 12px; margin-top: 3px; line-height: 1.3; }
     .tags { display: flex; align-items: center; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
     .dim-badge {

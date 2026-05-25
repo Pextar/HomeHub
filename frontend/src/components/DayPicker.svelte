@@ -36,14 +36,15 @@
 
 <style>
     .picker {
-        display: flex;
+        display: grid;
+        grid-template-columns: repeat(7, 1fr);
         gap: 6px;
-        flex-wrap: wrap;
     }
     .day-chip {
-        display: inline-flex;
+        display: flex;
         align-items: center; justify-content: center;
-        width: 36px; height: 36px;
+        width: 100%;
+        aspect-ratio: 1;
         border-radius: 50%;
         background: var(--surface);
         border: 1px solid var(--border);
@@ -54,6 +55,7 @@
         user-select: none;
         transition: background var(--t-fast), color var(--t-fast),
                     border-color var(--t-fast);
+        min-width: 0;
     }
     .day-chip[data-selected="true"] {
         background: var(--primary);
@@ -80,10 +82,11 @@
     .preset:hover { background: var(--surface-hover); color: var(--text); }
     .preset:active { transform: scale(0.96); transition-duration: 60ms; }
 
-    /* Touch screens: meet the 44px minimum target. */
+    /* Touch screens: slightly larger preset buttons. The day chips scale
+       automatically via the grid — no fixed size override needed. */
     @media (pointer: coarse) {
         .picker { gap: var(--space-2); }
-        .day-chip { width: 44px; height: 44px; font-size: 14px; }
+        .day-chip { font-size: 13px; }
         .preset { padding: 10px 16px; font-size: 14px; }
     }
 </style>
