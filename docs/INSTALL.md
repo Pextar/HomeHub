@@ -41,44 +41,103 @@ sudo apt-get install wiringpi
 # This provides codesend command
 ```
 
-### 433MHz Receiver (for sensors)
+### 433 MHz receiver (for sensors)
 
-Sensor pairing needs a receiver. The recommended setup is an **RTL-SDR
-USB dongle** (any RTL2832U + R820T2 stick, ~$15–25); decoded by
-`rtl_433`, it covers Acurite, Nexus, LaCrosse, Oregon, Fineoffset,
-Telldus and most other common 433 MHz sensor families out of the box.
+Sensor pairing requires a 433 MHz receiver.  There are two options:
+
+---
+
+#### Option A — superheterodyne module wired to Pi GPIO (recommended)
+
+If you already have a superheterodyne 433 MHz OOK receiver module (the kind
+with a green trimmer capacitor and a copper coil), wire it directly to the
+Raspberry Pi header.  No extra hardware, no SDR dongle needed.
+
+**Wiring**
+
+| Receiver pin | Raspberry Pi |
+|---|---|
+| VCC | **3.3 V** — Pin 1 or 17 |
+| GND | GND — Pin 6, 9, 14, or any other GND |
+| DATA | **GPIO 4** — Pin 7 (or override with `RF_RX_GPIO`) |
+
+> ⚠️  Use **3.3 V**, not 5 V.  Most superheterodyne modules work at 3.3 V; the
+> DATA output is then 3.3 V logic — safe for the Pi's GPIO pins.  If you must
+> power from 5 V, add a 10 kΩ / 20 kΩ voltage divider on DATA.
+
+Install lgpio (already present on Pi OS Bookworm; install manually on older
+releases):
 
 ```bash
-sudo apt install -y rtl-433
+sudo pip3 install lgpio
 ```
 
-Plug in the dongle, then smoke-test from a terminal:
+Set `SENSOR_RX_CMD` in `.env`:
+
+```dotenv
+SENSOR_RX_CMD=python3 /home/pi/rf-socket-controller/scripts/ft007th_rx.py
+```
+
+Optional environment variables (add to `.env` if needed):
+
+```dotenv
+RF_RX_GPIO=4    # BCM pin number, default 4
+RF_RX_CHIP=0    # /dev/gpiochipN, default 0
+```
+
+Smoke-test before starting the service:
 
 ```bash
-rtl_433 -F json
+python3 scripts/ft007th_rx.py
+# → trigger the FT007TH; you should see JSON lines appear within 60 s
 ```
 
-Trigger a sensor (press a doorbell, wait for the thermometer to beacon).
-You should see one JSON line per packet. If you get `usb_claim_interface
-error -6` or "device busy", the kernel's DVB driver auto-bound to the
-dongle — unbind it and retry:
-
-```bash
-sudo modprobe -r dvb_usb_rtl28xxu rtl2832 rtl2830
-```
-
-The `rtl-433` package ships a udev rule that grants non-root access; if
-you still hit permission errors after a reboot, add yourself to the
-`plugdev` group: `sudo usermod -aG plugdev $USER` and log out / back in.
-
-`SENSOR_RX_CMD` in `.env` stays unset — the controller's default is
-already `rtl_433 -F json`. Restart the service after install:
+Restart the service and pair via the UI:
 
 ```bash
 sudo systemctl restart rf-controller
 ```
 
-Then hit **Pair** on the Sensors page in the UI and trigger your sensor.
+---
+
+#### Option B — RTL-SDR USB dongle + rtl_433
+
+The RTL-SDR dongle (RTL2832U + R820T2, ~€15) is a software-defined radio that
+covers **all** 433 MHz sensor families (Acurite, Nexus, LaCrosse, Oregon,
+Fineoffset, Telldus, etc.) without any sensor-specific code.
+
+```bash
+sudo apt install -y rtl-433
+rtl_433 -F json      # smoke-test; trigger a sensor and watch for JSON
+```
+
+If you see `usb_claim_interface error -6`, unbind the DVB driver first:
+
+```bash
+sudo modprobe -r dvb_usb_rtl28xxu rtl2832 rtl2830
+```
+
+`SENSOR_RX_CMD` stays **unset** — the controller defaults to `rtl_433 -F json`.
+
+```bash
+sudo systemctl restart rf-controller
+```
+
+---
+
+#### Option C — nRF52840 Dongle (advanced, requires soldering)
+
+Flash the Zephyr firmware in `firmware/ft007th-rx/` to an nRF52840 Dongle,
+solder the receiver DATA line to test pad **TP8 (P0.29)** on the Dongle's
+underside, and plug the Dongle into the Pi's USB port.  Then set:
+
+```dotenv
+SENSOR_SERIAL_PORT=/dev/ttyACM0
+```
+
+See [`firmware/ft007th-rx/README.md`](../firmware/ft007th-rx/README.md) for
+full build and flash instructions.  This option makes sense only if all Pi GPIO
+pins are in use — Option A is much simpler.
 
 ### MQTT broker (for MQTT devices & sensors)
 

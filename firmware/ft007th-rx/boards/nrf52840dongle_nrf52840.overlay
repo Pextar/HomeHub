@@ -1,0 +1,30 @@
+/*
+ * nRF52840 Dongle (PCA10059) overlay for ft007th-rx.
+ *
+ * RF receiver DATA pin → TP8 (P0.29) on the bottom of the PCB.
+ * This test point requires soldering a thin wire (~28 AWG).
+ *
+ * Wiring:
+ *   Receiver VCC  → VDD pad on Dongle (3.3 V regulator output)
+ *   Receiver GND  → GND pad
+ *   Receiver DATA → TP8 / P0.29
+ *
+ * Note: the Dongle is a compact USB stick with no GPIO headers.
+ * For easier wiring, prefer connecting the receiver directly to the
+ * Raspberry Pi GPIO and using scripts/ft007th_rx.py instead.
+ */
+
+/ {
+	rf_inputs {
+		compatible = "gpio-keys";
+
+		rf_rx: rf_rx_0 {
+			gpios = <&gpio0 29 GPIO_ACTIVE_HIGH>;
+			label = "RF RX Data (TP8)";
+		};
+	};
+
+	aliases {
+		rf-rx = &rf_rx;
+	};
+};
