@@ -181,7 +181,7 @@ export const api = {
   postSensorReading(id: string, body: { value: number; time?: string }) {
     return req<SensorReading>(`/sensors/${encodeURIComponent(id)}/readings`, { method: "POST", body: json(body) });
   },
-  startSensorPair(seconds = 60) {
+  startSensorPair(seconds = 300) {
     return req<{ active: boolean; until: string; seconds: number }>("/sensors/pair/start", {
       method: "POST",
       body: json({ seconds }),

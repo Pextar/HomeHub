@@ -20,7 +20,7 @@ RestartSec=5
 NoNewPrivileges=true
 ProtectSystem=full
 ProtectHome=read-only
-ReadWritePaths=/home/claw/rf-socket-controller/data
+ReadWritePaths=/home/claw/rf-socket-controller/data /home/claw/rf-socket-controller
 PrivateTmp=true
 
 [Install]

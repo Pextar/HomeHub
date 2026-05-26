@@ -15,6 +15,7 @@
 #   ~/rf-socket-controller/
 #     rf-controller            (binary)
 #     nexa_tx.py               (lgpio-backed Nexa 433MHz transmitter helper)
+#     ft007th_rx.py            (lgpio-backed FT007TH 433MHz receiver helper)
 #     frontend/dist/           (built UI)
 #     data/                    (runtime state, never overwritten)
 #     .env                     (seeded once from env.example, never overwritten)
@@ -44,6 +45,7 @@ rsync -av --delete \
   --exclude='.env' \
   "$RELEASE/rf-controller" \
   "$RELEASE/nexa_tx.py" \
+  "$RELEASE/ft007th_rx.py" \
   "$RELEASE/frontend" \
   "$HOST:$REMOTE_DIR/"
 
