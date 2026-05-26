@@ -345,13 +345,14 @@
                         <div class="step-card">
                             <div class="step-header">
                                 <span class="step-badge">Step {i + 1}</span>
-                                <span class="step-when">{stepLabel(i, step.delay_minutes)}</span>
-                                {#if i > 0}
-                                    <div class="step-delay-wrap">
-                                        <span class="delay-label">After</span>
+                                {#if i === 0}
+                                    <span class="step-when">Runs immediately</span>
+                                {:else}
+                                    <div class="step-timing">
+                                        <span class="timing-lbl">After</span>
                                         <input
                                             type="number"
-                                            class="delay-input"
+                                            class="delay-input mono"
                                             min="1"
                                             max="1440"
                                             step="1"
@@ -362,9 +363,10 @@
                                             }}
                                             aria-label="Delay in minutes for step {i + 1}"
                                         />
-                                        <span class="delay-label">min</span>
+                                        <span class="timing-lbl">min</span>
                                     </div>
-                                    <button type="button" class="remove-step" onclick={() => removeStep(i)}
+                                    <button type="button" class="remove-step"
+                                        onclick={() => removeStep(i)}
                                         aria-label="Remove step {i + 1}">
                                         <Icon name="close" size={14} />
                                     </button>
@@ -372,44 +374,76 @@
                             </div>
 
                             <div class="picker">
-                                {#each sockets as s (s.id)}
-                                    <div class="picker-row">
-                                        <div class="info">
-                                            <div>{s.name}</div>
-                                            <div class="field-help">{s.room || "Unassigned"}</div>
+                                {#each sockets as s, si (s.id)}
+                                    {@const state = step.perSocket[s.id]}
+                                    {#if si > 0}<div class="row-sep" aria-hidden="true"></div>{/if}
+                                    <div class="picker-row"
+                                        class:row-on={state === 'on'}
+                                        class:row-off={state === 'off'}>
+                                        <div class="row-main">
+                                            <div class="row-bulb"
+                                                class:bulb-on={state === 'on'}
+                                                class:bulb-off={state === 'off'}
+                                                aria-hidden="true">
+                                                <Icon name="light" size={14} />
+                                            </div>
+                                            <div class="row-info">
+                                                <span class="row-name">{s.name}</span>
+                                                <span class="row-room">{s.room || "Unassigned"}</span>
+                                            </div>
+                                            <div class="state-group" role="group"
+                                                aria-label="Action for {s.name} in step {i + 1}">
+                                                <button
+                                                    type="button"
+                                                    class="state-btn"
+                                                    class:s-active={state === 'ignore'}
+                                                    onclick={() => { step.perSocket[s.id] = 'ignore'; stepsError = ''; }}
+                                                    aria-pressed={state === 'ignore'}
+                                                    aria-label="Ignore {s.name} in step {i + 1}"
+                                                >—</button>
+                                                <button
+                                                    type="button"
+                                                    class="state-btn s-on"
+                                                    class:s-active={state === 'on'}
+                                                    onclick={() => { step.perSocket[s.id] = 'on'; stepsError = ''; }}
+                                                    aria-pressed={state === 'on'}
+                                                    aria-label="Turn {s.name} on in step {i + 1}"
+                                                >On</button>
+                                                <button
+                                                    type="button"
+                                                    class="state-btn s-off"
+                                                    class:s-active={state === 'off'}
+                                                    onclick={() => { step.perSocket[s.id] = 'off'; stepsError = ''; }}
+                                                    aria-pressed={state === 'off'}
+                                                    aria-label="Turn {s.name} off in step {i + 1}"
+                                                >Off</button>
+                                            </div>
                                         </div>
-                                        <select bind:value={step.perSocket[s.id]}
-                                            aria-label="Action for {s.name} in step {i + 1}"
-                                            onchange={() => stepsError = ""}>
-                                            <option value="ignore">Ignore</option>
-                                            <option value="on">Turn on</option>
-                                            <option value="off">Turn off</option>
-                                        </select>
+                                        {#if state === 'on' && isSmart(s.protocol)}
+                                            <div class="light-row">
+                                                <div class="bright">
+                                                    <span class="bright-ico"><Icon name="sun" size={14} /></span>
+                                                    <input type="range" min="1" max="100" step="1"
+                                                        bind:value={step.levels[s.id]}
+                                                        aria-label="Brightness for {s.name} in step {i + 1}" />
+                                                    <span class="bright-val mono">{step.levels[s.id]}%</span>
+                                                </div>
+                                                <div class="swatches">
+                                                    {#each COLOURS as c (c.name)}
+                                                        <button type="button" class="swatch"
+                                                            class:active={step.colors[s.id] === c.hex}
+                                                            class:auto={c.hex === ""}
+                                                            style={c.hex ? `background:#${c.hex}` : ""}
+                                                            title={c.name}
+                                                            aria-label="{c.name} for {s.name} in step {i + 1}"
+                                                            onclick={() => step.colors[s.id] = c.hex}>
+                                                            {#if c.hex === ""}<Icon name="close" size={12} />{/if}
+                                                        </button>
+                                                    {/each}
+                                                </div>
+                                            </div>
+                                        {/if}
                                     </div>
-                                    {#if step.perSocket[s.id] === "on" && isSmart(s.protocol)}
-                                        <div class="light-row">
-                                            <div class="bright">
-                                                <span class="bright-ico"><Icon name="sun" size={14} /></span>
-                                                <input type="range" min="1" max="100" step="1"
-                                                    bind:value={step.levels[s.id]}
-                                                    aria-label="Brightness for {s.name} in step {i + 1}" />
-                                                <span class="bright-val mono">{step.levels[s.id]}%</span>
-                                            </div>
-                                            <div class="swatches">
-                                                {#each COLOURS as c (c.name)}
-                                                    <button type="button" class="swatch"
-                                                        class:active={step.colors[s.id] === c.hex}
-                                                        class:auto={c.hex === ""}
-                                                        style={c.hex ? `background:#${c.hex}` : ""}
-                                                        title={c.name}
-                                                        aria-label="{c.name} for {s.name} in step {i + 1}"
-                                                        onclick={() => step.colors[s.id] = c.hex}>
-                                                        {#if c.hex === ""}<Icon name="close" size={12} />{/if}
-                                                    </button>
-                                                {/each}
-                                            </div>
-                                        </div>
-                                    {/if}
                                 {/each}
                             </div>
                         </div>
@@ -745,7 +779,7 @@
         display: flex;
         align-items: center;
         gap: 8px;
-        padding: 8px 10px;
+        padding: 8px 12px;
         background: var(--card-3);
         border-bottom: 1px solid var(--border);
         flex-wrap: wrap;
@@ -756,30 +790,34 @@
         font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 0.08em;
-        color: var(--text-mute);
+        color: var(--text-muted);
         flex-shrink: 0;
     }
     .step-when {
         font-size: 12px;
-        color: var(--text);
+        color: var(--text-muted);
         flex: 1;
         min-width: 0;
     }
-    .step-delay-wrap {
+    /* Inline timing row for steps 2+ */
+    .step-timing {
         display: flex;
         align-items: center;
-        gap: 4px;
-        flex-shrink: 0;
+        gap: 5px;
+        flex: 1;
+        min-width: 0;
     }
-    .delay-label {
+    .timing-lbl {
         font-size: 12px;
-        color: var(--text-mute);
+        color: var(--text-muted);
+        white-space: nowrap;
     }
     .delay-input {
-        width: 60px;
-        padding: 3px 6px;
+        width: 56px;
+        padding: 3px 7px;
         text-align: right;
         border-radius: var(--radius-sm);
+        font-size: 13px;
     }
     .remove-step {
         position: relative;
@@ -787,12 +825,13 @@
         border: 0;
         padding: 4px;
         cursor: pointer;
-        color: var(--text-mute);
+        color: var(--text-muted);
         display: grid;
         place-items: center;
         border-radius: var(--radius-sm);
         margin-left: auto;
         flex-shrink: 0;
+        transition: background var(--t-fast), color var(--t-fast);
     }
     .remove-step:hover { background: var(--surface-hover); color: var(--bad); }
 
@@ -800,38 +839,135 @@
     .picker {
         display: flex;
         flex-direction: column;
-        gap: 4px;
-        max-height: 280px;
-        overflow-y: auto;
         padding: 4px;
     }
-    .picker-row {
-        display: flex;
-        align-items: center;
-        gap: var(--space-3);
-        padding: 8px 10px;
-        border-radius: var(--radius-sm);
-    }
-    .info { flex: 1; min-width: 0; }
-    .picker-row select {
-        width: auto;
-        padding: 4px 10px;
-        font-size: 13px;
+
+    /* Hairline separator between rows, indented past the bulb icon */
+    .row-sep {
+        height: 1px;
+        background: var(--separator);
+        margin: 0 12px 0 58px;
     }
 
-    /* Smart-light brightness + colour */
+    /* Each device is a flex column: main row + optional light controls */
+    .picker-row {
+        display: flex;
+        flex-direction: column;
+        border-radius: var(--radius-sm);
+        overflow: hidden;
+        transition: background var(--t-fast);
+    }
+    .picker-row.row-on { background: var(--primary-soft); }
+
+    /* Inner flex row: bulb · info · state buttons */
+    .row-main {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 10px 12px;
+        min-height: 48px;
+    }
+
+    /* Circular bulb state indicator */
+    .row-bulb {
+        width: 30px;
+        height: 30px;
+        border-radius: 50%;
+        background: var(--card-3);
+        display: grid;
+        place-items: center;
+        color: var(--text-faint);
+        flex-shrink: 0;
+        transition: background var(--t-fast), color var(--t-fast), box-shadow var(--t-fast);
+    }
+    .row-bulb.bulb-on {
+        background: var(--primary);
+        color: var(--primary-fg);
+        box-shadow: 0 0 0 1px var(--primary), 0 0 14px 2px var(--primary-glow);
+    }
+    .row-bulb.bulb-off {
+        background: var(--surface-hover);
+        color: var(--text-faint);
+    }
+
+    .row-info {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 1px;
+    }
+    .row-name {
+        font-size: 13.5px;
+        font-weight: 500;
+        color: var(--text);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .row-room {
+        font-size: 11.5px;
+        color: var(--text-muted);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    /* ── 3-state action control ──────────────────────────────────── */
+    .state-group {
+        display: flex;
+        background: var(--bg-elevated);
+        border: 1px solid var(--border);
+        border-radius: var(--r-pill);
+        padding: 2px;
+        gap: 1px;
+        flex-shrink: 0;
+    }
+    .state-btn {
+        padding: 5px 10px;
+        border-radius: var(--r-pill);
+        border: none;
+        background: transparent;
+        font-size: 12px;
+        font-weight: 500;
+        color: var(--text-muted);
+        cursor: pointer;
+        touch-action: manipulation;
+        transition: background var(--t-fast), color var(--t-fast), box-shadow var(--t-fast);
+        white-space: nowrap;
+        line-height: 1;
+    }
+    .state-btn:hover:not(.s-active) {
+        background: var(--surface-hover);
+        color: var(--text);
+    }
+    /* Default active state (ignore) */
+    .state-btn.s-active {
+        background: var(--card-3);
+        color: var(--text);
+        box-shadow: var(--shadow-sm);
+    }
+    /* On active — amber tint */
+    .state-btn.s-on.s-active {
+        background: var(--primary-soft);
+        color: var(--primary);
+        box-shadow: none;
+    }
+    /* Off active — neutral (uses .s-active base) */
+
+    /* ── Smart-light controls (lives inside .picker-row) ─────────── */
     .light-row {
         display: flex;
         flex-direction: column;
         gap: 8px;
-        padding: 2px 10px 10px 10px;
-        margin: -2px 0 4px;
+        /* Indent to align with device name: 12px pad + 30px bulb + 12px gap */
+        padding: 0 12px 12px 54px;
     }
     .bright { display: flex; align-items: center; gap: 8px; }
     .bright-ico { color: var(--on); display: inline-flex; flex-shrink: 0; }
     .bright input[type="range"] { flex: 1; }
-    .bright-val { font-size: 12px; color: var(--text-mute); min-width: 38px; text-align: right; }
-    .swatches { display: flex; gap: 8px; }
+    .bright-val { font-size: 12px; color: var(--text-muted); min-width: 38px; text-align: right; }
+    .swatches { display: flex; gap: 6px; flex-wrap: wrap; }
     .swatch {
         width: 24px; height: 24px;
         border-radius: 50%;
@@ -839,7 +975,9 @@
         cursor: pointer;
         display: grid; place-items: center;
         padding: 0;
-        color: var(--text-mute);
+        color: var(--text-muted);
+        touch-action: manipulation;
+        transition: box-shadow var(--t-fast);
     }
     .swatch.auto { background: var(--card-3); }
     .swatch.active { box-shadow: 0 0 0 2px var(--on), 0 0 0 4px var(--bg-elevated); }
@@ -853,17 +991,19 @@
         border: 1px dashed var(--border-strong);
         border-radius: var(--radius-md);
         background: transparent;
-        color: var(--text-mute);
+        color: var(--text-muted);
         font-size: 13px;
         cursor: pointer;
+        touch-action: manipulation;
         margin-top: 4px;
         width: 100%;
         justify-content: center;
+        transition: background var(--t-fast), color var(--t-fast), border-color var(--t-fast);
     }
     .add-step-btn:hover {
         background: var(--surface-hover);
         color: var(--text);
-        border-color: var(--text-mute);
+        border-color: var(--text-muted);
     }
 
     .steps-err  { margin-top: 6px; }
@@ -997,6 +1137,7 @@
     @media (prefers-reduced-motion: reduce) {
         .act-config { animation-duration: 0.001ms; }
         .wiz-dot, .wiz-line, .act-card { transition-duration: 0.001ms; }
+        .row-bulb, .picker-row, .state-btn { transition-duration: 0.001ms; }
     }
 
     /* ── Mobile layout ───────────────────────────────────────────── */
@@ -1009,16 +1150,23 @@
             padding: 12px;
         }
         .act-card-body { gap: 2px; }
-        .picker-row { min-height: 44px; padding: 10px; }
-        .picker-row select { font-size: 16px; padding: 8px 12px; min-height: 44px; }
-        .delay-input { font-size: 16px; padding: 6px 8px; }
+        /* Picker rows: ensure 44px minimum touch target */
+        .row-main { min-height: 52px; padding: 10px; }
+        /* 3-state buttons: bigger tap area on touch */
+        .state-btn { padding: 7px 10px; font-size: 12px; min-height: 36px; }
+        /* Delay input: 16px prevents iOS zoom */
+        .delay-input { font-size: 16px; padding: 5px 8px; }
         .remove-step { min-width: 44px; min-height: 44px; }
         .add-step-btn { min-height: 44px; }
-        .swatch { width: 30px; height: 30px; }
+        .swatch { width: 28px; height: 28px; }
         .bright input[type="range"] { height: 28px; }
+        /* Light controls: tighter indent on narrow screens */
+        .light-row { padding: 0 10px 12px 52px; }
     }
     @media (pointer: coarse) {
         .act-card { min-height: 44px; }
         input[type="range"] { height: 28px; }
+        .swatch { width: 30px; height: 30px; }
+        .state-btn { min-height: 34px; }
     }
 </style>
