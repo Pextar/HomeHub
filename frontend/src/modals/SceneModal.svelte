@@ -658,7 +658,7 @@
             <button class="btn btn-ghost" onclick={() => closeModal()}>Cancel</button>
             <button class="btn btn-primary" onclick={advanceToActivation}>
                 Next: Activation
-                <Icon name="chevronDown" size={15} style="transform:rotate(-90deg);margin-left:4px;display:inline-block" />
+                <span class="next-arrow" aria-hidden="true"><Icon name="chevronDown" size={15} /></span>
             </button>
         {:else if !isEdit && wizardStep === 2}
             <button class="btn btn-ghost" onclick={() => wizardStep = 1}>← Back</button>
@@ -982,6 +982,13 @@
     }
     .tag.cool { color: var(--cool); }
     .mt { margin-top: var(--space-3); }
+
+    /* Rotated chevron used on the "Next" button */
+    .next-arrow {
+        display: inline-flex;
+        transform: rotate(-90deg);
+        margin-left: 4px;
+    }
 
     @keyframes slideDown {
         from { opacity: 0; transform: translateY(-5px); }
