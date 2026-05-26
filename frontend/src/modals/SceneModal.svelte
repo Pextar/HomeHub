@@ -246,14 +246,14 @@
                     </div>
                 {/each}
 
-                {#if stepsError}<div class="field-error" style="margin-top:6px">{stepsError}</div>{/if}
+                {#if stepsError}<div class="field-error steps-err">{stepsError}</div>{/if}
 
                 <button type="button" class="add-step-btn" onclick={addStep}>
                     <Icon name="plus" size={15} />
                     Add another step
                 </button>
 
-                <div class="field-help" style="margin-top:6px">
+                <div class="field-help steps-hint">
                     Each step runs after its delay from when the scene is activated.
                     Add multiple steps to ramp a lamp's brightness over time.
                 </div>
@@ -291,10 +291,11 @@
         flex-wrap: wrap;
     }
     .step-badge {
+        font-family: var(--font-mono);
         font-size: 11px;
         font-weight: 600;
         text-transform: uppercase;
-        letter-spacing: .04em;
+        letter-spacing: 0.08em;
         color: var(--text-mute);
         flex-shrink: 0;
     }
@@ -315,16 +316,15 @@
         color: var(--text-mute);
     }
     .delay-input {
+        /* Global input styles (padding, border, bg, color, radius) apply;
+           only override what's needed for the compact inline display. */
         width: 60px;
         padding: 3px 6px;
-        font-size: 13px;
         text-align: right;
-        border: 1px solid var(--border);
         border-radius: var(--radius-sm);
-        background: var(--input-bg, var(--bg-elevated));
-        color: var(--text);
     }
     .remove-step {
+        position: relative;
         background: transparent;
         border: 0;
         padding: 4px;
@@ -336,7 +336,7 @@
         margin-left: auto;
         flex-shrink: 0;
     }
-    .remove-step:hover { background: var(--surface-hover); color: var(--danger); }
+    .remove-step:hover { background: var(--surface-hover); color: var(--bad); }
 
     /* ── Device picker (same as before, now inside each step card) ─ */
     .picker {
@@ -408,9 +408,17 @@
         border-color: var(--text-mute);
     }
 
+    /* ── Spacing helpers (avoids inline style="") ────────────────── */
+    .steps-err  { margin-top: 6px; }
+    .steps-hint { margin-top: 6px; }
+
     @media (pointer: coarse) {
         .picker-row { min-height: 44px; padding: 10px; }
+        /* 16px prevents iOS auto-zoom on focus */
         .picker-row select { font-size: 16px; padding: 8px 12px; min-height: 44px; }
+        .delay-input { font-size: 16px; padding: 6px 8px; }
+        .remove-step { min-width: 44px; min-height: 44px; }
+        .add-step-btn { min-height: 44px; }
         .swatch { width: 30px; height: 30px; }
         .bright input[type="range"] { height: 28px; }
     }
