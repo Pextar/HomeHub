@@ -234,45 +234,84 @@ func (s *Store) ValidateGroup(g *Group) error {
 }
 
 // ValidateScene checks that every socket referenced by the scene exists
-// and that each action is on/off. Caller must hold Mu.
+// and that each action is on/off. The same socket may appear in different
+// steps but is deduplicated within a single step. Caller must hold Mu.
 func (s *Store) ValidateScene(sc *Scene) error {
 	sc.Name = strings.TrimSpace(sc.Name)
 	if sc.Name == "" {
 		return errors.New("name is required")
 	}
-	seen := make(map[string]bool, len(sc.Actions))
-	out := make([]SceneAction, 0, len(sc.Actions))
-	for _, a := range sc.Actions {
-		a.SocketID = strings.TrimSpace(a.SocketID)
-		a.Action = strings.ToLower(strings.TrimSpace(a.Action))
-		if a.SocketID == "" || seen[a.SocketID] {
-			continue
+
+	// Migrate legacy flat-actions format to steps so the rest of the
+	// validation only has to handle one shape.
+	if len(sc.Steps) == 0 && len(sc.Actions) > 0 {
+		sc.Steps = []SceneStep{{DelayMinutes: 0, Actions: sc.Actions}}
+		sc.Actions = nil
+	}
+
+	if len(sc.Steps) == 0 {
+		return errors.New("at least one step with an action is required")
+	}
+
+	hasAction := false
+	for si := range sc.Steps {
+		step := &sc.Steps[si]
+		if step.DelayMinutes < 0 {
+			return errors.New("delay_minutes must be zero or positive")
 		}
-		if a.Action != "on" && a.Action != "off" {
-			return errors.New("scene action must be on or off")
-		}
-		if _, ok := s.Sockets[a.SocketID]; !ok {
-			return fmt.Errorf("unknown socket %q", a.SocketID)
-		}
-		// Brightness/colour only make sense for a light being switched on.
-		if a.Action != "on" {
-			a.Level = nil
-			a.Color = ""
-		} else {
-			if a.Level != nil {
-				if *a.Level < 1 || *a.Level > 100 {
-					return errors.New("scene level must be between 1 and 100")
+
+		// Deduplicate socket IDs within this step (same socket can appear
+		// in different steps but not twice in the same step).
+		seen := make(map[string]bool, len(step.Actions))
+		out := make([]SceneAction, 0, len(step.Actions))
+		for _, a := range step.Actions {
+			a.SocketID = strings.TrimSpace(a.SocketID)
+			a.Action = strings.ToLower(strings.TrimSpace(a.Action))
+			if a.SocketID == "" || seen[a.SocketID] {
+				continue
+			}
+			if a.Action != "on" && a.Action != "off" {
+				return errors.New("scene action must be on or off")
+			}
+			if _, ok := s.Sockets[a.SocketID]; !ok {
+				return fmt.Errorf("unknown socket %q", a.SocketID)
+			}
+			// Brightness/colour only make sense for a light being switched on.
+			if a.Action != "on" {
+				a.Level = nil
+				a.Color = ""
+			} else {
+				if a.Level != nil {
+					if *a.Level < 1 || *a.Level > 100 {
+						return errors.New("scene level must be between 1 and 100")
+					}
+				}
+				a.Color = strings.TrimPrefix(strings.ToLower(strings.TrimSpace(a.Color)), "#")
+				if a.Color != "" && !isHex6(a.Color) {
+					return errors.New("scene color must be a 6-digit RRGGBB hex")
 				}
 			}
-			a.Color = strings.TrimPrefix(strings.ToLower(strings.TrimSpace(a.Color)), "#")
-			if a.Color != "" && !isHex6(a.Color) {
-				return errors.New("scene color must be a 6-digit RRGGBB hex")
-			}
+			seen[a.SocketID] = true
+			out = append(out, a)
 		}
-		seen[a.SocketID] = true
-		out = append(out, a)
+		step.Actions = out
+		if len(out) > 0 {
+			hasAction = true
+		}
 	}
-	sc.Actions = out
+
+	// Drop empty steps (steps that had only blank/duplicate socket IDs).
+	active := sc.Steps[:0]
+	for _, step := range sc.Steps {
+		if len(step.Actions) > 0 {
+			active = append(active, step)
+		}
+	}
+	sc.Steps = active
+
+	if !hasAction {
+		return errors.New("at least one step must have an action")
+	}
 	return nil
 }
 

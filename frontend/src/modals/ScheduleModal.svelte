@@ -51,7 +51,7 @@
     const targets = $derived.by(() => {
         if (targetType === "socket") return v.sockets.map(s => ({ id: s.id, label: `${s.name}${s.room ? ` · ${s.room}` : ""}` }));
         if (targetType === "group")  return v.groups.map(g => ({ id: g.id, label: `${g.name} · ${g.socket_ids.length} sockets` }));
-        return v.scenes.map(s => ({ id: s.id, label: `${s.name} · ${s.actions.length} actions` }));
+        return v.scenes.map(s => ({ id: s.id, label: s.steps?.length > 1 ? `${s.name} · ${s.steps.length} steps` : `${s.name} · ${s.steps?.[0]?.actions.length ?? 0} actions` }));
     });
 
     $effect(() => {

@@ -1,6 +1,9 @@
 package store
 
-import "fmt"
+import (
+	"fmt"
+	"time"
+)
 
 // ApplyState changes a single socket's state and fires the RF command.
 // Caller must hold Mu (write lock). On RF failure the previous state is
@@ -70,18 +73,20 @@ func (s *Store) ExecuteAction(targetType, targetID, action string) error {
 		if !ok {
 			return fmt.Errorf("scene %q no longer exists", targetID)
 		}
-		var firstErr error
-		for _, a := range scene.Actions {
-			if err := s.ExecuteAction("socket", a.SocketID, a.Action); err != nil && firstErr == nil {
-				firstErr = err
-			}
-			// After switching a smart light on, queue its scene brightness/colour.
-			// The actual bridge call happens in FlushLights, off-lock.
-			if a.Action == "on" && (a.Level != nil || a.Color != "") {
-				if sock, ok := s.Sockets[a.SocketID]; ok {
-					s.QueueLight(*sock, a.Level, a.Color)
-				}
-			}
+		// Inline migration: scenes that were never run through Load/ValidateScene
+		// may still carry the legacy flat Actions slice (e.g. in tests).
+		if len(scene.Steps) == 0 && len(scene.Actions) > 0 {
+			scene.Steps = []SceneStep{{DelayMinutes: 0, Actions: scene.Actions}}
+			scene.Actions = nil
+		}
+		if len(scene.Steps) == 0 {
+			return nil
+		}
+		// Execute the first step immediately (caller holds Mu).
+		firstErr := s.execStepLocked(scene.Steps[0])
+		// Schedule any remaining steps to fire after their delay.
+		for _, step := range scene.Steps[1:] {
+			s.ScheduleStep(step)
 		}
 		return firstErr
 
@@ -113,6 +118,43 @@ func (s *Store) FlushLights() {
 	}
 }
 
+// execStepLocked executes all actions in a single SceneStep.
+// Caller must hold Mu (write lock). Smart-light brightness/colour
+// commands are queued via QueueLight; drain them with FlushLights
+// after releasing the lock.
+func (s *Store) execStepLocked(step SceneStep) error {
+	var firstErr error
+	for _, a := range step.Actions {
+		if err := s.ExecuteAction("socket", a.SocketID, a.Action); err != nil && firstErr == nil {
+			firstErr = err
+		}
+		// After switching a smart light on, queue its brightness/colour.
+		// The actual bridge call happens in FlushLights, off-lock.
+		if a.Action == "on" && (a.Level != nil || a.Color != "") {
+			if sock, ok := s.Sockets[a.SocketID]; ok {
+				s.QueueLight(*sock, a.Level, a.Color)
+			}
+		}
+	}
+	return firstErr
+}
+
+// ScheduleStep launches a goroutine that waits for step.DelayMinutes
+// and then acquires the lock, executes the step, saves, and flushes
+// smart-light commands. Fire-and-forget: errors are silently ignored
+// (matching scheduler/automation behaviour for scene steps).
+// Caller may or may not hold Mu — the goroutine acquires it when it wakes up.
+func (s *Store) ScheduleStep(step SceneStep) {
+	delay := time.Duration(step.DelayMinutes) * time.Minute
+	time.AfterFunc(delay, func() {
+		s.Mu.Lock()
+		_ = s.execStepLocked(step)
+		_ = s.Save()
+		s.Mu.Unlock()
+		s.FlushLights()
+	})
+}
+
 // CascadeDeleteSocket removes a socket from every group/scene and
 // deletes schedules and timers that target it directly. Caller must
 // hold Mu.
@@ -131,13 +173,15 @@ func (s *Store) CascadeDeleteSocket(socketID string) {
 		g.SocketIDs = filterStrings(g.SocketIDs, socketID)
 	}
 	for _, sc := range s.Scenes {
-		out := sc.Actions[:0]
-		for _, a := range sc.Actions {
-			if a.SocketID != socketID {
-				out = append(out, a)
+		for i := range sc.Steps {
+			out := sc.Steps[i].Actions[:0]
+			for _, a := range sc.Steps[i].Actions {
+				if a.SocketID != socketID {
+					out = append(out, a)
+				}
 			}
+			sc.Steps[i].Actions = out
 		}
-		sc.Actions = out
 	}
 	for _, u := range s.Users {
 		u.SocketIDs = filterStrings(u.SocketIDs, socketID)

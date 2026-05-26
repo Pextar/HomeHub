@@ -77,7 +77,7 @@ export function describeTarget(
   if (tt === "scene") {
     const sc = data.sceneById(tid);
     return sc
-      ? { kind: "Scene", label: sc.name, sub: `${sc.actions.length} action${sc.actions.length === 1 ? "" : "s"}` }
+      ? { kind: "Scene", label: sc.name, sub: sc.steps.length > 1 ? `${sc.steps.length} steps` : `${sc.steps[0]?.actions.length ?? 0} action${(sc.steps[0]?.actions.length ?? 0) === 1 ? "" : "s"}` }
       : { kind: "Scene", label: "(removed scene)", sub: "—" };
   }
   return { kind: "?", label: "Unknown target", sub: "" };
