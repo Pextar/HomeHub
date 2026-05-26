@@ -1,0 +1,395 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>HomeHub — Design handoff</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet"/>
+<style>
+:root {
+  --bg: #14130f;
+  --bg-2: #1c1a15;
+  --card: #1f1d17;
+  --card-2: #26231c;
+  --card-3: #2e2a22;
+  --hairline: #2a2720;
+  --border: #34302a;
+  --text: #eceae4;
+  --text-mute: #9c988e;
+  --text-dim: #66635c;
+  --on: #f5bd6e;
+  --on-soft: rgba(245,189,110,0.14);
+  --cool: #84acc4;
+  --good: #9cc28a;
+  --bad: #e08a7a;
+  --mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  padding: 60px 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Geist", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 15px;
+  line-height: 1.6;
+  letter-spacing: -0.005em;
+}
+.page {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 0 32px;
+}
+h1, h2, h3, h4 { margin: 0; font-weight: 600; letter-spacing: -0.02em; }
+h1 { font-size: 40px; line-height: 1.1; }
+h2 { font-size: 22px; margin-top: 56px; padding-top: 28px; border-top: 1px solid var(--hairline); }
+h3 { font-size: 16px; margin-top: 32px; color: var(--on); }
+h4 { font-size: 14px; margin-top: 18px; color: var(--text-mute); font-weight: 500; text-transform: uppercase; letter-spacing: 0.08em; font-family: var(--mono); }
+p { margin: 12px 0; color: var(--text); }
+p.lede { font-size: 17px; color: var(--text-mute); max-width: 560px; }
+code, .mono { font-family: var(--mono); font-size: 0.92em; }
+code { background: var(--card-2); padding: 2px 6px; border-radius: 4px; color: var(--on); }
+pre {
+  background: var(--card);
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  padding: 16px 18px;
+  overflow-x: auto;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text);
+}
+pre .c { color: var(--text-dim); }
+pre .k { color: var(--cool); }
+pre .v { color: var(--on); }
+pre .s { color: var(--good); }
+ul { padding-left: 22px; }
+li { margin: 6px 0; }
+li::marker { color: var(--text-dim); }
+hr { border: 0; border-top: 1px solid var(--hairline); margin: 32px 0; }
+a { color: var(--on); }
+.meta { color: var(--text-mute); font-size: 13px; }
+.kbd {
+  font-family: var(--mono);
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: var(--card-2);
+  border: 1px solid var(--hairline);
+  color: var(--text);
+}
+table { width: 100%; border-collapse: collapse; margin: 18px 0; }
+th, td { text-align: left; padding: 12px 14px; border-bottom: 1px solid var(--hairline); font-size: 13.5px; }
+th { color: var(--text-mute); font-weight: 500; font-size: 11.5px; font-family: var(--mono); text-transform: uppercase; letter-spacing: 0.08em; }
+td.mono { font-family: var(--mono); color: var(--text-mute); font-size: 12.5px; }
+
+/* token chips */
+.swatch-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 16px 0; }
+.swatch { background: var(--card); border: 1px solid var(--hairline); border-radius: 12px; padding: 16px; }
+.swatch .chip { width: 100%; height: 56px; border-radius: 8px; margin-bottom: 10px; }
+.swatch .name { font-size: 12px; color: var(--text); font-weight: 600; }
+.swatch .val  { font-size: 11px; font-family: var(--mono); color: var(--text-mute); margin-top: 2px; }
+
+.callout {
+  border-left: 3px solid var(--on);
+  background: var(--card-2);
+  padding: 14px 18px;
+  border-radius: 0 12px 12px 0;
+  margin: 18px 0;
+  color: var(--text);
+}
+.callout.warn { border-color: #e8b96b; }
+.callout strong { color: var(--on); }
+.callout.warn strong { color: #e8b96b; }
+</style>
+</head>
+<body>
+<div class="page">
+
+<p class="meta">HomeHub · Design handoff · v1.1</p>
+<h1>HomeHub redesign — handoff spec</h1>
+<p class="lede">A self-contained brief for Claude Code: design system, screen inventory, and the rules to apply when extrapolating screens that aren't in the canvas. Read this before touching the Svelte code.</p>
+
+<h2>1 — Direction</h2>
+
+<p>The system is <strong>warm dark mode</strong>, anchored on an <strong>incandescent amber accent</strong>. It should feel like the room you're controlling — quiet, layered, lit from within — not like a generic dashboard. Surfaces are warm near-blacks; the "ON" state lights up with amber + soft glow, mirroring the lights themselves.</p>
+
+<ul>
+  <li><strong>No emoji.</strong> Except in <code>KidHome</code>, which is the one place playful glyphs make sense.</li>
+  <li><strong>No decorative SVG.</strong> Icons only where functional; placeholders + monospace explainers for imagery.</li>
+  <li><strong>No gradients except for state shifts.</strong> The ON-state tile gradient and the day/night timeline gradient are the only allowed gradients.</li>
+  <li><strong>Numbers in monospace.</strong> Every count, watt, temp, time uses Geist Mono with tabular figures. Labels stay in sans.</li>
+</ul>
+
+<h2>2 — Tokens</h2>
+
+<h3>Color</h3>
+<div class="swatch-row">
+  <div class="swatch"><div class="chip" style="background:#14130f"></div><div class="name">--bg</div><div class="val">#14130f</div></div>
+  <div class="swatch"><div class="chip" style="background:#1f1d17"></div><div class="name">--card</div><div class="val">#1f1d17</div></div>
+  <div class="swatch"><div class="chip" style="background:#26231c"></div><div class="name">--card-2</div><div class="val">#26231c</div></div>
+  <div class="swatch"><div class="chip" style="background:#2e2a22"></div><div class="name">--card-3</div><div class="val">#2e2a22</div></div>
+  <div class="swatch"><div class="chip" style="background:#2a2720"></div><div class="name">--hairline</div><div class="val">#2a2720</div></div>
+  <div class="swatch"><div class="chip" style="background:#eceae4"></div><div class="name">--text</div><div class="val">#eceae4</div></div>
+  <div class="swatch"><div class="chip" style="background:#9c988e"></div><div class="name">--text-mute</div><div class="val">#9c988e</div></div>
+  <div class="swatch"><div class="chip" style="background:#66635c"></div><div class="name">--text-dim</div><div class="val">#66635c</div></div>
+  <div class="swatch"><div class="chip" style="background:#f5bd6e"></div><div class="name">--on</div><div class="val">#f5bd6e</div></div>
+  <div class="swatch"><div class="chip" style="background:#84acc4"></div><div class="name">--cool</div><div class="val">#84acc4</div></div>
+  <div class="swatch"><div class="chip" style="background:#9cc28a"></div><div class="name">--good</div><div class="val">#9cc28a</div></div>
+  <div class="swatch"><div class="chip" style="background:#e08a7a"></div><div class="name">--bad</div><div class="val">#e08a7a</div></div>
+</div>
+
+<h4>Protocol accents</h4>
+<table>
+  <tr><th>Protocol</th><th>Var</th><th>Color</th></tr>
+  <tr><td>RF (433 MHz)</td><td class="mono">--p-rf</td><td class="mono">#f5a06e</td></tr>
+  <tr><td>Wi-Fi (Tasmota)</td><td class="mono">--p-wifi</td><td class="mono">#9cc28a</td></tr>
+  <tr><td>Matter</td><td class="mono">--p-matter</td><td class="mono">#c4a4e0</td></tr>
+  <tr><td>MQTT</td><td class="mono">--p-mqtt</td><td class="mono">#e0c47a</td></tr>
+</table>
+
+<div class="callout"><strong>Light mode</strong> mirrors the same hues through <code>oklch</code> at higher lightness — see <code>[data-theme="light"]</code> in <code>styles.css</code>. Switch via the Tweaks panel on the canvas.</div>
+
+<h3>Type</h3>
+<table>
+  <tr><th>Role</th><th>Family</th><th>Size</th><th>Weight</th></tr>
+  <tr><td>Display (h1)</td><td>Geist</td><td>26–30 mobile / 28–40 desktop</td><td>600</td></tr>
+  <tr><td>Section (h2)</td><td>Geist</td><td>17</td><td>600</td></tr>
+  <tr><td>Body</td><td>Geist</td><td>14</td><td>400</td></tr>
+  <tr><td>Label / micro</td><td>Geist Mono</td><td>10.5–11.5</td><td>500</td></tr>
+  <tr><td>Numerics</td><td>Geist Mono</td><td>any</td><td>500</td></tr>
+</table>
+<p>Letter-spacing: <code>-0.03em</code> on h1, <code>-0.02em</code> on h2/h3, <code>-0.005em</code> on body. Monospace uppercase micro-labels use <code>+0.08em</code>.</p>
+
+<h3>Spacing &amp; radius</h3>
+<table>
+  <tr><th>Token</th><th>Value</th><th>Used for</th></tr>
+  <tr><td class="mono">--r-sm</td><td class="mono">10</td><td>Nav items, small chips</td></tr>
+  <tr><td class="mono">--r-md</td><td class="mono">14</td><td>Inputs, segmented controls</td></tr>
+  <tr><td class="mono">--r-lg</td><td class="mono">22</td><td>Cards, tiles</td></tr>
+  <tr><td class="mono">--r-xl</td><td class="mono">30</td><td>Sheets, hero buttons</td></tr>
+  <tr><td class="mono">--r-pill</td><td class="mono">999</td><td>Chips, switches, dots</td></tr>
+</table>
+<p>Mobile screen padding: <code>22px</code> horizontal. Desktop main padding: <code>28px 36px</code>. Cards: <code>14–22px</code> internal. Section heads: <code>26px top, 12px bottom</code>.</p>
+
+<h2>3 — Core primitives</h2>
+
+<p>Every screen composes from a small kit. Build these once in Svelte, then everything else falls out.</p>
+
+<h4>Tile</h4>
+<p>The most-used surface. Default is muted card; <code>.tile.on</code> shifts to a warm gradient with an amber border tint and the <code>.tile-bulb</code> indicator glows. This single transition does almost all visual storytelling.</p>
+<pre><span class="c">/* default */</span>
+.tile { background: var(--card); border: 1px solid var(--hairline); border-radius: 22px; padding: 16px; }
+
+<span class="c">/* on */</span>
+.tile.on {
+  background: linear-gradient(155deg, #2b2419 0%, #221d14 60%, #1d180f 100%);
+  border-color: rgba(245,189,110,0.18);
+}
+.tile.on .tile-bulb { background: var(--on); box-shadow: 0 0 24px 4px var(--on-glow); }</pre>
+
+<h4>Switch</h4>
+<p>Two sizes: <code>.sw</code> (44×26, list rows) and <code>.sw-big</code> (64×36, hero). Spring easing on the thumb: <code>cubic-bezier(0.34, 1.56, 0.64, 1)</code>. Off uses warm gray <code>#b5b1a8</code>, on uses pure white.</p>
+
+<h4>Chip</h4>
+<p>Pill, padding 7×12, font 12.5. Three states: default (muted card), <code>.active</code> (text-on-text), <code>.on</code> (amber soft + amber fg).</p>
+
+<h4>Rail</h4>
+<p>Slider track. <code>.rail</code> is 6px (inline). <code>.rail-fat</code> is 64px tall with embedded label + percent — used on Light detail for brightness.</p>
+
+<h4>Protocol badge</h4>
+<p>Uppercase 10px mono label + tiny line icon. Always uses the protocol accent. Never use the badge as a button.</p>
+
+<h2>4 — Layout rules</h2>
+
+<h3>Mobile</h3>
+<ul>
+  <li>Status bar reserved: top 54px is empty padding.</li>
+  <li>Bottom: 90px reserved for tab bar (60px bar + 30px safe area). All scroll content must use <code>padding-bottom: 90px</code>.</li>
+  <li>Tab bar items: 5 max. <code>.tabbar &gt; button.active</code> tints amber.</li>
+  <li>Bottom sheets: 82% height by default, 28px top-radius, grabber + close X, sticky footer with primary (amber, 2fr) + optional secondary (card, 1fr).</li>
+  <li>Detail screens (Light detail, Matter steps): no tab bar — they get a back chevron in the chip-style.</li>
+</ul>
+
+<h3>Desktop (≥ 900px)</h3>
+<ul>
+  <li>Fixed 240px nav rail, scrollable main. Same component for every page via <code>DesktopShell</code>.</li>
+  <li>Topbar: large h1 left, action buttons right. No breadcrumbs.</li>
+  <li>Device grid: 4 cols at 1280px. Drops to 3 at 1024, 2 at 768.</li>
+  <li>Notifications, add-device, and other transient surfaces open as <strong>popovers</strong>, not modals. See <code>DesktopNotificationsPanel</code>.</li>
+</ul>
+
+<h2>5 — Screen inventory</h2>
+
+<p>Every screen in the canvas (<a href="index.html">index.html</a>) is named below with its source file. Sections numbered top-to-bottom.</p>
+
+<table>
+  <tr><th>Section</th><th>Screen</th><th>Component</th></tr>
+  <tr><td rowspan="4">Onboarding</td><td>Login · code mode</td><td class="mono">LoginCodeScreen</td></tr>
+  <tr><td>Login · admin</td><td class="mono">LoginAdminScreen</td></tr>
+  <tr><td>NEW Set password (invite)</td><td class="mono">InviteSetPasswordScreen</td></tr>
+  <tr><td>Kid mode home</td><td class="mono">KidHomeScreen</td></tr>
+
+  <tr><td rowspan="5">Mobile core</td><td>Home</td><td class="mono">HomeScreen</td></tr>
+  <tr><td>Rooms</td><td class="mono">RoomsScreen</td></tr>
+  <tr><td>Scenes</td><td class="mono">ScenesScreen</td></tr>
+  <tr><td>Schedules</td><td class="mono">SchedulesScreen</td></tr>
+  <tr><td>Settings</td><td class="mono">SettingsScreen</td></tr>
+
+  <tr><td rowspan="2">NEW Notifications</td><td>Permission prompt</td><td class="mono">PushPermissionScreen</td></tr>
+  <tr><td>Inbox</td><td class="mono">NotificationsInboxScreen</td></tr>
+
+  <tr><td rowspan="6">Mobile detail</td><td>Devices (all)</td><td class="mono">DevicesScreen</td></tr>
+  <tr><td>Groups</td><td class="mono">GroupsScreen</td></tr>
+  <tr><td>Sensors</td><td class="mono">SensorsScreen</td></tr>
+  <tr><td>Users (admin)</td><td class="mono">UsersScreen</td></tr>
+  <tr><td>Floor plan · spatial blueprint</td><td class="mono">SpatialBlueprintScreen</td></tr>
+  <tr><td>Light detail</td><td class="mono">LightDetailScreen</td></tr>
+  <tr><td>Console (Settings → System → Console)</td><td class="mono">ConsoleScreen</td></tr>
+
+  <tr><td rowspan="7">Forms &amp; sheets</td><td>Add device · picker</td><td class="mono">AddDeviceScreen</td></tr>
+  <tr><td>New schedule</td><td class="mono">ScheduleFormScreen</td></tr>
+  <tr><td>New scene</td><td class="mono">SceneFormScreen</td></tr>
+  <tr><td>Edit group</td><td class="mono">GroupFormScreen</td></tr>
+  <tr><td>Edit device</td><td class="mono">SocketFormScreen</td></tr>
+  <tr><td>Edit sensor</td><td class="mono">SensorFormScreen</td></tr>
+  <tr><td>One-shot timer</td><td class="mono">TimerSheet</td></tr>
+
+  <tr><td rowspan="4">Matter flow</td><td>Step 1 · Scan QR</td><td class="mono">MatterStep1QR</td></tr>
+  <tr><td>Step 2 · Connecting</td><td class="mono">MatterStep2Connecting</td></tr>
+  <tr><td>Step 3 · Wi-Fi</td><td class="mono">MatterStep3WiFi</td></tr>
+  <tr><td>Step 4 · Name device</td><td class="mono">MatterStep4Done</td></tr>
+
+  <tr><td rowspan="3">States</td><td>Confirm dialog</td><td class="mono">ConfirmModalScreen</td></tr>
+  <tr><td>Toast variants</td><td class="mono">ToastsScreen</td></tr>
+  <tr><td>Empty states</td><td class="mono">EmptyStatesScreen</td></tr>
+
+  <tr><td rowspan="5">Desktop</td><td>Dashboard</td><td class="mono">DesktopDashboard</td></tr>
+  <tr><td>Schedules</td><td class="mono">DesktopSchedules</td></tr>
+  <tr><td>Sensors</td><td class="mono">DesktopSensors</td></tr>
+  <tr><td>Users (admin)</td><td class="mono">DesktopUsers</td></tr>
+  <tr><td>Notifications popover</td><td class="mono">DesktopNotificationsPanel</td></tr>
+</table>
+
+<h2>6 — Rules for extrapolating</h2>
+
+<p>Surfaces not in the canvas (group detail, scene detail, individual settings sub-screens, Tasmota commissioning) follow these rules:</p>
+
+<ul>
+  <li><strong>List → detail.</strong> Detail screens get a back chevron in the chip-style top-left. Same <code>54px</code> status pad. Tab bar hidden on detail.</li>
+  <li><strong>Forms always live in a Sheet.</strong> Never push a full new screen for a form. Sheet height 82% by default; smaller (62–68%) for short forms like Timer.</li>
+  <li><strong>Settings sub-screens</strong> use a card-grouped list pattern (see <code>SettingsScreen</code>) — never reach for a tabbed sub-nav.</li>
+  <li><strong>Empty states</strong> use <code>EmptyStatesScreen</code> primitives: dashed border, dim icon, single CTA in <code>.chip.on</code> style. Mid-card, never full-screen.</li>
+  <li><strong>Loading.</strong> Use the existing app's skeleton primitive (background shimmer on muted card) — don't add spinners.</li>
+  <li><strong>Confirmations.</strong> Destructive actions get the <code>ConfirmModalScreen</code> pattern: centered card 340px max, danger-soft icon, Cancel left + danger-fill right.</li>
+</ul>
+
+<div class="callout warn"><strong>Anti-patterns to avoid.</strong> No tabs inside views (use chip filters). No drawers from the left (use sheets from below). No purple/blue brand gradients (warm only). No pure-black surfaces. No emoji outside Kid mode. No icon-only buttons under 44×44 hit area.</div>
+
+<h2>7 — Motion</h2>
+
+<ul>
+  <li>Press: scale to 0.97, 80ms. iOS-style squish, not translate.</li>
+  <li>Switch thumb: 220ms with spring <code>cubic-bezier(0.34, 1.56, 0.64, 1)</code>.</li>
+  <li>Hover (desktop only): translateY(-1px) at 120ms ease. Disabled on touch via <code>@media (hover: hover)</code>.</li>
+  <li>View transitions: 240ms fly-in (y: 10), 140ms fade-out. Already implemented in <code>App.svelte</code>.</li>
+  <li>Sheet open: 280ms cubic-out from the bottom. Backdrop fades in over 200ms.</li>
+  <li>Reduced motion: collapse all to 0.001ms (already in <code>app.css</code>).</li>
+</ul>
+
+<h2>8 — Notifications (NEW)</h2>
+
+<p>Two surfaces:</p>
+
+<ol>
+  <li><strong>Permission prompt</strong> — hero card with bell icon, explainer list of what gets pushed, big amber CTA. Shown on first sign-in (after dashboard renders) and from Settings.</li>
+  <li><strong>Inbox</strong> — bell icon in the home topbar opens the inbox (mobile: full-page; desktop: popover). Grouped by day, unread items have an amber dot + non-muted styling. Filter chips: All / Unread / Alerts / Schedules / Devices.</li>
+</ol>
+
+<p>Alert tones map to icon color: <code>info → cool</code>, <code>warn → #e8b96b</code>, <code>error → bad</code>, <code>success → good</code>. The icon's background tile is <code>--on-soft</code> when unread, <code>--card-3</code> when read.</p>
+
+<h2>9 — Spatial blueprint &amp; Console (NEW)</h2>
+
+<p>Two specialised surfaces sitting outside the standard tile-pattern world:</p>
+
+<ul>
+  <li><strong>Floor plan</strong> (<code>SpatialBlueprintScreen</code>) — the home as an architectural top-down SVG. Walls are 1.5px amber lines, door gaps are knocked out in bg color, furniture is faint subtle outlines. Each light is a positioned dot with a radial halo whose opacity tracks dim level. Renders on a 360×460 viewBox; ship as one SVG with light positions data-driven. Wears the same chrome as Light detail (back chip + centered title + Edit chip; Rooms tab active). Bottom strip lists active devices only — never the off ones.</li>
+  <li><strong>Console</strong> (<code>ConsoleScreen</code>) — monospace power-user mode reached from <code>Settings → System → Console</code>. No tab bar. Devices render as a 5-column grid (dot · host · val · ASCII bar · age); the ASCII bar is literally <code>█</code>/<code>░</code> characters in <code>var(--font-mono)</code>. Live event tail uses <code>ok</code>/<code>set</code>/<code>in</code>/<code>err</code> tokens, colored from <code>--good</code>/<code>--on</code>/<code>--cool</code>/<code>--bad</code>. Background is <code>#0a0907</code> (one shade deeper than <code>--bg</code>) to signal &ldquo;raw mode.&rdquo; Don&rsquo;t round any corners or add shadows inside the console — that look is intentional.</li>
+</ul>
+
+<div class="callout"><strong>Why two of them?</strong> Floor plan is the spatial way to read the home; Console is the textual way. Both are optional surfaces — most users never open Console — but they earn their keep with the self-hoster audience that runs HomeHub on a Pi.</div>
+
+<h2>10 — New user invite flow (NEW)</h2>
+
+<p>Endpoint: server emails a link with <code>?invite=TOKEN</code>. App opens; <code>LoginGate</code> reads the param, calls <code>api.lookupInvite</code>, swaps the form for the set-password card.</p>
+
+<ul>
+  <li>Title: <code>Welcome, {{username}}</code> — pulled from the invite lookup.</li>
+  <li>Strength meter: 4 segments, all amber at 8+ chars with at least one letter + one digit.</li>
+  <li>On submit: <code>api.acceptInvite(token, newPassword)</code>. Server sets session cookie + we drop the <code>?invite=</code> param.</li>
+  <li>Invalid token: <code>InviteInvalidScreen</code> pattern (single card, danger-soft icon, "Go to sign in" link). Not in canvas — extrapolate from <code>ConfirmModalScreen</code> shape.</li>
+</ul>
+
+<h2>11 — File map (frontend)</h2>
+
+<pre><span class="c">frontend/src/</span>
+<span class="k">app.css</span>                          <span class="c">// design tokens (port from styles.css in design)</span>
+<span class="k">App.svelte</span>                       <span class="c">// router + view transitions (no design change)</span>
+
+<span class="k">components/</span>
+  Tile.svelte                    <span class="c">// NEW — extract from SocketCard, EntityCard, RoomCard</span>
+  Switch.svelte                  <span class="c">// update to new sw/sw-big styling</span>
+  Chip.svelte                    <span class="c">// NEW — replaces ad-hoc chips</span>
+  Rail.svelte                    <span class="c">// NEW — fat + thin slider rail</span>
+  ProtocolBadge.svelte           <span class="c">// NEW</span>
+  Sheet.svelte                   <span class="c">// NEW — bottom-sheet host</span>
+  TabBar.svelte                  <span class="c">// NEW — mobile</span>
+  NavRail.svelte                 <span class="c">// NEW — desktop</span>
+  Icon.svelte                    <span class="c">// keep + add icons listed in icons.jsx</span>
+
+<span class="k">views/</span>
+  Dashboard.svelte               <span class="c">// rebuild from HomeScreen + DesktopDashboard</span>
+  Sockets.svelte                 <span class="c">// from DevicesScreen</span>
+  Schedules.svelte               <span class="c">// from SchedulesScreen + DesktopSchedules</span>
+  Scenes.svelte                  <span class="c">// from ScenesScreen</span>
+  Sensors.svelte                 <span class="c">// from SensorsScreen + DesktopSensors</span>
+  Users.svelte                   <span class="c">// from UsersScreen + DesktopUsers</span>
+  Settings.svelte                <span class="c">// from SettingsScreen</span>
+  FloorPlan.svelte               <span class="c">// from SpatialBlueprintScreen — architectural top-down SVG; light dots glow per dim level</span>
+  KidHome.svelte                 <span class="c">// from KidHomeScreen</span>
+  <span class="v">Notifications.svelte           // NEW — from NotificationsInboxScreen</span>
+  <span class="v">Console.svelte                 // NEW — from ConsoleScreen; live tail of hub events, command input</span>
+
+<span class="k">modals/</span>
+  SocketModal.svelte             <span class="c">// from SocketFormScreen</span>
+  SceneModal.svelte              <span class="c">// from SceneFormScreen</span>
+  ScheduleModal.svelte           <span class="c">// from ScheduleFormScreen</span>
+  GroupModal.svelte              <span class="c">// from GroupFormScreen</span>
+  SensorModal.svelte             <span class="c">// from SensorFormScreen</span>
+  MatterCommissionModal.svelte   <span class="c">// from MatterStep1-4</span>
+  TimerModal.svelte              <span class="c">// from TimerSheet</span>
+  ConfirmModal.svelte            <span class="c">// from ConfirmModalScreen</span>
+
+<span class="k">components/LoginGate.svelte</span>      <span class="c">// rebuild from LoginCodeScreen + LoginAdminScreen + InviteSetPasswordScreen</span>
+<span class="k">lib/push.svelte.ts</span>               <span class="c">// unchanged — UI is in PushPermissionScreen + NotificationsInboxScreen</span></pre>
+
+<h2>12 — Sanity checklist for Claude Code</h2>
+
+<ul>
+  <li>Does every list row use the same <code>.card</code> + row pattern? (44–60px tall, 12–16px padding, icon left 36px wide, content middle, chevron/switch right)</li>
+  <li>Does every "ON" state use <code>.tile.on</code>'s gradient + bulb glow? Don't substitute a simple background-color change.</li>
+  <li>Are all numbers in <code>var(--font-mono)</code> with <code>"tnum" 1</code> feature setting?</li>
+  <li>Are all section headers 17px / 600 / left-padded 22px (mobile) or 0 (desktop)?</li>
+  <li>Did you remove emoji from non-Kid surfaces?</li>
+  <li>Is the tab bar hidden on every detail/form/Matter step screen?</li>
+  <li>Is the notification dot exactly 7×7 amber, not the old 8×8 indigo?</li>
+</ul>
+
+<hr/>
+<p class="meta">Questions during build? The canvas at <code>index.html</code> is the source of truth — open it side-by-side. Open any artboard fullscreen via the Focus icon (top-right of each tile) for pixel measurements.</p>
+
+</div>
+</body>
+</html>

@@ -163,10 +163,20 @@ export interface SceneAction {
   color?: string; // "RRGGBB", smart lights only
 }
 
+// One time-phased stage within a scene.
+// delay_minutes=0 means "run immediately on activation".
+// The same socket can appear in multiple steps with different settings.
+export interface SceneStep {
+  delay_minutes: number;
+  actions: SceneAction[];
+}
+
 export interface Scene {
   id: string;
   name: string;
-  actions: SceneAction[];
+  steps: SceneStep[];
+  /** @deprecated legacy field; migrated to steps on the server */
+  actions?: SceneAction[];
 }
 
 export interface Timer {

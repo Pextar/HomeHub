@@ -201,6 +201,17 @@ func (s *Store) Load() error {
 			sch.TargetID = sch.SocketID
 		}
 	}
+
+	// Migrate legacy flat-actions scenes to the multi-step format.
+	// A scene that only has Actions (pre-multi-step) gets wrapped in a
+	// single step with DelayMinutes=0, then Actions is cleared.
+	for _, sc := range s.Scenes {
+		if len(sc.Steps) == 0 && len(sc.Actions) > 0 {
+			sc.Steps = []SceneStep{{DelayMinutes: 0, Actions: sc.Actions}}
+			sc.Actions = nil
+		}
+	}
+
 	return nil
 }
 

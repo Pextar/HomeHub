@@ -215,12 +215,31 @@ type SceneAction struct {
 	Color    string `json:"color,omitempty"` // "RRGGBB", smart lights only
 }
 
-// Scene is a named preset that drives a specific set of sockets to
-// specific states ("movie night": lamp ON, ceiling OFF).
+// SceneStep is one time-phased stage within a multi-step scene.
+// DelayMinutes=0 means "run immediately on scene activation".
+// Subsequent steps fire DelayMinutes after the scene was activated,
+// allowing the same socket to be driven to different states over time
+// (e.g. on at 30 % immediately, then 70 % an hour later).
+type SceneStep struct {
+	DelayMinutes int           `json:"delay_minutes"`
+	Actions      []SceneAction `json:"actions"`
+}
+
+// Scene is a named preset that drives sockets through one or more
+// time-phased steps. The same socket may appear in multiple steps
+// with different settings (e.g. dim low at step 1, brighter at step 2).
+//
+// Legacy scenes saved before multi-step support used a flat Actions
+// slice. On first load those are migrated to a single step with
+// DelayMinutes=0; the Actions field is then cleared.
 type Scene struct {
-	ID      string        `json:"id"`
-	Name    string        `json:"name"`
-	Actions []SceneAction `json:"actions"`
+	ID    string      `json:"id"`
+	Name  string      `json:"name"`
+	Steps []SceneStep `json:"steps"`
+	// Actions is the legacy single-step field kept for on-disk
+	// backward-compatibility. Populated by old scenes; migrated to
+	// Steps on first load. Omitted when empty so new scenes don't carry it.
+	Actions []SceneAction `json:"actions,omitempty"`
 }
 
 // Timer fires once at FiresAt and is then deleted. Used for "off in 30

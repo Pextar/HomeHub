@@ -85,7 +85,11 @@ func (s *Server) updateScene(w http.ResponseWriter, r *http.Request) {
 	if name := strings.TrimSpace(updates.Name); name != "" {
 		merged.Name = name
 	}
-	if updates.Actions != nil {
+	if updates.Steps != nil {
+		merged.Steps = updates.Steps
+		merged.Actions = nil // clear legacy field when steps are provided
+	} else if updates.Actions != nil {
+		// Legacy clients that still send flat Actions; let ValidateScene migrate.
 		merged.Actions = updates.Actions
 	}
 	if err := s.Store.ValidateScene(&merged); err != nil {
@@ -147,24 +151,33 @@ func (s *Server) activateScene(w http.ResponseWriter, r *http.Request) {
 
 	var okCount int
 	failures := make([]map[string]string, 0)
-	// Suppress per-socket push notifications; we send one summary below.
+
+	// Execute only the first step immediately (with per-socket notifications
+	// suppressed so we send a single summary). Remaining steps are scheduled
+	// as background goroutines by scheduleStep.
 	s.Store.SuppressStateChange = true
-	for _, a := range scene.Actions {
-		if err := s.Store.ExecuteAction("socket", a.SocketID, a.Action); err != nil {
-			failures = append(failures, map[string]string{
-				"socket_id": a.SocketID,
-				"error":     err.Error(),
-			})
-			continue
-		}
-		// Queue scene brightness/colour for smart lights switched on; the
-		// bridge call runs in FlushLights once the lock is released.
-		if a.Action == "on" && (a.Level != nil || a.Color != "") {
-			if sock, ok := s.Store.Sockets[a.SocketID]; ok {
-				s.Store.QueueLight(*sock, a.Level, a.Color)
+	if len(scene.Steps) > 0 {
+		for _, a := range scene.Steps[0].Actions {
+			if err := s.Store.ExecuteAction("socket", a.SocketID, a.Action); err != nil {
+				failures = append(failures, map[string]string{
+					"socket_id": a.SocketID,
+					"error":     err.Error(),
+				})
+				continue
 			}
+			// Queue scene brightness/colour for smart lights switched on; the
+			// bridge call runs in FlushLights once the lock is released.
+			if a.Action == "on" && (a.Level != nil || a.Color != "") {
+				if sock, ok := s.Store.Sockets[a.SocketID]; ok {
+					s.Store.QueueLight(*sock, a.Level, a.Color)
+				}
+			}
+			okCount++
 		}
-		okCount++
+		// Schedule any delayed steps as background goroutines.
+		for _, step := range scene.Steps[1:] {
+			s.Store.ScheduleStep(step)
+		}
 	}
 	s.Store.SuppressStateChange = false
 	entry := store.ActivityEntry{Kind: "scene", Source: "manual", Action: "activate", Label: scene.Name}

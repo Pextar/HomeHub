@@ -22,21 +22,25 @@
     }
     const hue = $derived(PALETTE[nameHash(scene.name) % PALETTE.length]);
 
-    const onCount = $derived(scene.actions.filter(a => a.action === "on").length);
-    const offCount = $derived(scene.actions.filter(a => a.action === "off").length);
+    // Flatten all actions across all steps for summary display.
+    const allActions = $derived((scene.steps ?? []).flatMap(s => s.actions));
+
+    const onCount  = $derived(allActions.filter(a => a.action === "on").length);
+    const offCount = $derived(allActions.filter(a => a.action === "off").length);
+    const stepCount = $derived((scene.steps ?? []).length);
 
     // Brightness/colour hint: levels set on any on-action, and distinct colours.
     const dimLevels = $derived(
-        scene.actions.filter(a => a.action === "on" && a.level != null).map(a => a.level as number),
+        allActions.filter(a => a.action === "on" && a.level != null).map(a => a.level as number),
     );
     const brightHint = $derived(
         dimLevels.length === 0 ? "" :
         dimLevels.length === 1 ? `${dimLevels[0]}%` :
         `${Math.min(...dimLevels)}–${Math.max(...dimLevels)}%`,
     );
-    const sceneColors = $derived([...new Set(scene.actions.filter(a => a.color).map(a => a.color as string))]);
+    const sceneColors = $derived([...new Set(allActions.filter(a => a.color).map(a => a.color as string))]);
     const sub = $derived(
-        scene.actions.length === 0 ? "No devices" :
+        allActions.length === 0 ? "No devices" :
         [onCount ? `${onCount} on` : "", offCount ? `${offCount} off` : ""].filter(Boolean).join(" · ")
     );
 
@@ -92,7 +96,10 @@
                     {/each}
                 </span>
             {/if}
-            <span class="count mono">{scene.actions.length} {scene.actions.length === 1 ? "device" : "devices"}</span>
+            <span class="count mono">
+                {allActions.length} {allActions.length === 1 ? "device" : "devices"}
+                {#if stepCount > 1}<span class="step-hint">· {stepCount} steps</span>{/if}
+            </span>
         </span>
     </button>
 
@@ -180,6 +187,7 @@
         flex-shrink: 0;
     }
     .count { color: var(--text-dim); font-size: 11.5px; margin-top: 6px; }
+    .step-hint { color: var(--on); }
 
     .more-corner {
         position: absolute;
