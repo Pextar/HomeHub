@@ -138,16 +138,18 @@
 
     // Dynamic modal title / subtitle per wizard step
     const modalTitle = $derived(
-        isEdit ? "Edit scene" :
-        wizardStep === 1 ? "New scene" :
-        "When should it run?"
+        wizardStep === 1
+            ? (isEdit ? "Edit scene" : "New scene")
+            : "When should it run?"
     );
     const modalSubtitle = $derived(
-        isEdit
-            ? "Adjust device settings and timing for this scene."
-            : wizardStep === 1
-            ? "A scene can drive devices through multiple timed steps — even the same lamp at different dim levels."
-            : "Choose how this scene gets triggered. You can always add more in Schedules or Automations later."
+        wizardStep === 1
+            ? (isEdit
+                ? "Adjust device settings and timing for this scene."
+                : "A scene can drive devices through multiple timed steps — even the same lamp at different dim levels.")
+            : (isEdit
+                ? "Add a new schedule or automation for this scene. Existing ones can be managed from the Schedules or Automations screens."
+                : "Choose how this scene gets triggered. You can always add more in Schedules or Automations later.")
     );
 
     // ── Step management ─────────────────────────────────────────────────
@@ -217,7 +219,7 @@
             : "";
 
         if (nameError || stepsError) {
-            if (!isEdit) wizardStep = 1;
+            wizardStep = 1;
             return;
         }
 
@@ -225,18 +227,17 @@
         try {
             const payload = { name: name.trim(), steps: builtSteps };
 
+            // Determine scene ID — update existing or create new
+            let sceneId: string;
             if (isEdit) {
                 await api.updateScene(existing!.id, payload);
-                toasts.success("Scene updated", payload.name);
-                closeModal();
-                await data.refresh();
-                return;
+                sceneId = existing!.id;
+            } else {
+                const created = await api.createScene(payload);
+                sceneId = created.id;
             }
 
-            // New scene — create it first, then optionally create activation
-            const created = await api.createScene(payload);
-            const sceneId = created.id;
-
+            // Optionally create activation (schedule or automation)
             try {
                 if (activationMode === "schedule") {
                     await api.createSchedule({
@@ -250,7 +251,10 @@
                         enabled: true,
                         random_offset_minutes: schedRandomOffset,
                     });
-                    toasts.success("Scene created", `${payload.name} · schedule added`);
+                    toasts.success(
+                        isEdit ? "Scene updated" : "Scene created",
+                        `${payload.name} · schedule added`
+                    );
                 } else if (activationMode === "trigger") {
                     // Build trigger payload
                     let trigger: Record<string, unknown>;
@@ -284,14 +288,22 @@
                         conditions: [],
                         actions: [{ target_type: "scene", target_id: sceneId, action: "activate" }],
                     });
-                    toasts.success("Scene created", `${payload.name} · automation added`);
+                    toasts.success(
+                        isEdit ? "Scene updated" : "Scene created",
+                        `${payload.name} · automation added`
+                    );
                 } else {
-                    toasts.success("Scene created", payload.name);
+                    toasts.success(
+                        isEdit ? "Scene updated" : "Scene created",
+                        payload.name
+                    );
                 }
             } catch (_activationErr) {
-                // Scene was created; activation setup failed. Surface a warning
-                // so the user knows to add it separately.
-                toasts.warn("Scene created", "Activation setup failed — add it later in Schedules or Automations.");
+                // Scene was saved; activation setup failed.
+                toasts.warn(
+                    isEdit ? "Scene updated" : "Scene created",
+                    "Activation setup failed — add it later in Schedules or Automations."
+                );
             }
 
             closeModal();
@@ -306,9 +318,8 @@
 
 <Modal title={modalTitle} subtitle={modalSubtitle} size="wide">
     {#snippet body()}
-        <!-- ── Wizard step indicator (new scenes only) ─────────────── -->
-        {#if !isEdit}
-            <div class="wizard-track" aria-label="Step {wizardStep} of 2">
+        <!-- ── Wizard step indicator ─────────────────────────────── -->
+        <div class="wizard-track" aria-label="Step {wizardStep} of 2">
                 <div class="wiz-step" class:wiz-active={wizardStep === 1} class:wiz-done={wizardStep > 1}>
                     <div class="wiz-dot">
                         {#if wizardStep > 1}
@@ -325,11 +336,10 @@
                     <span class="wiz-label">Activation</span>
                 </div>
             </div>
-        {/if}
 
-        <!-- ── Step 1 / Edit mode: Scene content ──────────────────── -->
-        {#if isEdit || wizardStep === 1}
-            <form onsubmit={(e) => { e.preventDefault(); isEdit ? save() : advanceToActivation(); }}>
+        <!-- ── Step 1: Scene content ──────────────────────────────── -->
+        {#if wizardStep === 1}
+            <form onsubmit={(e) => { e.preventDefault(); advanceToActivation(); }}>
                 <div class="field">
                     <label for="scn-name">Name</label>
                     <input id="scn-name" type="text" bind:value={name}
@@ -465,7 +475,7 @@
         {/if}
 
         <!-- ── Step 2: Activation method ──────────────────────────── -->
-        {#if !isEdit && wizardStep === 2}
+        {#if wizardStep === 2}
             <div class="act-section">
 
                 <!-- Method cards -->
@@ -688,22 +698,16 @@
     {/snippet}
 
     {#snippet actions()}
-        {#if !isEdit && wizardStep === 1}
+        {#if wizardStep === 1}
             <button class="btn btn-ghost" onclick={() => closeModal()}>Cancel</button>
             <button class="btn btn-primary" onclick={advanceToActivation}>
                 Next: Activation
                 <span class="next-arrow" aria-hidden="true"><Icon name="chevronDown" size={15} /></span>
             </button>
-        {:else if !isEdit && wizardStep === 2}
+        {:else}
             <button class="btn btn-ghost" onclick={() => wizardStep = 1}>← Back</button>
             <button class="btn btn-primary" onclick={save} disabled={saving}>
-                {saving ? "Creating…" : "Create scene"}
-            </button>
-        {:else}
-            <!-- Edit mode -->
-            <button class="btn btn-ghost" onclick={() => closeModal()}>Cancel</button>
-            <button class="btn btn-primary" onclick={save} disabled={saving}>
-                {saving ? "Saving…" : "Save"}
+                {saving ? (isEdit ? "Saving…" : "Creating…") : (isEdit ? "Save" : "Create scene")}
             </button>
         {/if}
     {/snippet}
