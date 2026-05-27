@@ -1,7 +1,7 @@
 <script lang="ts">
   import Icon from "./Icon.svelte";
   import ConfirmModal from "./ConfirmModal.svelte";
-  import { route, theme, data, session } from "../lib/stores.svelte";
+  import { route, theme, data, session, sidebar } from "../lib/stores.svelte";
   import { api } from "../lib/api";
   import { openModal, modalStack } from "../lib/modal.svelte";
   import { fade } from "svelte/transition";
@@ -100,6 +100,7 @@
       return;
     }
     if (e.key === "t") { toggleTheme(); e.preventDefault(); }
+    if (e.key === "[") { sidebar.toggle(); e.preventDefault(); }
   }
 
   // True when the active route is one of the overflow items — used to
@@ -206,15 +207,24 @@
 
 <svelte:window onkeydown={onKey} />
 
-<aside class="sidebar" aria-label="Primary">
+<aside class="sidebar" class:collapsed={sidebar.collapsed} aria-label="Primary">
   <div class="brand">
     <div class="mark" aria-hidden="true">
       <Icon name="bolt" size={20} />
     </div>
-    <div>
+    <div class="brand-text">
       <div class="name">HomeHub</div>
       <div class="sub">Smart Home</div>
     </div>
+    <!-- Floats at the right edge; absolute so it stays reachable in both
+         expanded and collapsed states without disrupting the flex row. -->
+    <button
+      class="collapse-btn"
+      aria-label={sidebar.collapsed ? "Expand sidebar" : "Collapse sidebar"}
+      onclick={() => sidebar.toggle()}
+    >
+      <Icon name="chevronLeft" size={16} />
+    </button>
   </div>
 
   <!-- Desktop: full list. Mobile: only the primary slice (the rest live in
@@ -224,6 +234,7 @@
       <a
         href="#/{item.route}"
         class="nav-item"
+        data-label={item.label}
         aria-current={route.current === item.route ? "page" : undefined}
       >
         <Icon name={item.icon} size={18} />
@@ -364,6 +375,10 @@
 {/if}
 
 <style>
+  /* ============================================================
+     Desktop sidebar — expanded (240px) and collapsed (64px)
+     ============================================================ */
+
   .sidebar {
     width: 240px;
     background: var(--bg-2);
@@ -375,13 +390,25 @@
     position: sticky;
     top: 0;
     height: 100vh;
+    /* Drives the flex layout in App.svelte — as width transitions the
+       main content area expands/contracts to fill the remaining space. */
+    transition: width 280ms cubic-bezier(0.4, 0, 0.2, 1);
+    /* overflow:visible (default) so the tooltip ::after can escape
+       the sidebar's boundary in collapsed mode. */
   }
+  .sidebar.collapsed {
+    /* 64px = sidebar padding (16×2) + 18px icon + 14px breathing room */
+    width: 64px;
+  }
+
+  /* ── Brand ──────────────────────────────────────────────── */
   .brand {
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: 4px 12px 22px;
+    padding: 4px 0 22px;      /* horizontal handled by sidebar padding */
     margin-bottom: var(--space-2);
+    position: relative;       /* anchor for the absolutely-placed toggle btn */
   }
   .mark {
     width: 28px;
@@ -393,18 +420,62 @@
     color: var(--bg);
     flex-shrink: 0;
   }
+  .brand-text {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;         /* keeps text from bleeding during transition */
+  }
   .name {
     font-size: 15px;
     font-weight: 600;
     letter-spacing: -0.02em;
     color: var(--text);
+    white-space: nowrap;
+    transition: opacity 180ms ease;
   }
   .sub {
     font-size: 10.5px;
     font-family: var(--font-mono);
     color: var(--text-mute);
+    white-space: nowrap;
+    transition: opacity 180ms ease;
+  }
+  .sidebar.collapsed .name,
+  .sidebar.collapsed .sub { opacity: 0; }
+
+  /* Toggle button — floats at the right edge of the brand row.
+     Absolutely positioned so it stays at `right: 0` (= inside sidebar padding)
+     regardless of whether text is showing, and tracks the sidebar's right
+     edge as the width animates (right: 0 relative to .brand). */
+  .collapse-btn {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 28px;
+    height: 28px;
+    display: grid;
+    place-items: center;
+    border: 1px solid var(--hairline);
+    background: transparent;
+    border-radius: var(--r-sm);
+    cursor: pointer;
+    color: var(--text-mute);
+    transition: background 150ms ease, color 150ms ease;
+    flex-shrink: 0;
+  }
+  .collapse-btn:hover {
+    background: var(--card-3);
+    color: var(--text);
+  }
+  /* Chevron rotates 180° (points right) to signal "expand" */
+  .collapse-btn :global(svg) {
+    transition: transform 280ms cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .sidebar.collapsed .collapse-btn :global(svg) {
+    transform: rotate(180deg);
   }
 
+  /* ── Nav ────────────────────────────────────────────────── */
   .nav {
     display: flex;
     flex-direction: column;
@@ -424,13 +495,17 @@
     font-weight: 500;
     transition:
       background 150ms ease,
-      color 150ms ease;
+      color 150ms ease,
+      padding 280ms cubic-bezier(0.4, 0, 0.2, 1),
+      gap 280ms cubic-bezier(0.4, 0, 0.2, 1);
     cursor: pointer;
     background: transparent;
     border: none;
     text-align: left;
     font-family: var(--font-sans);
     width: 100%;
+    /* Needed for the collapsed tooltip ::after */
+    position: relative;
   }
   .nav-item:hover {
     background: var(--card);
@@ -444,6 +519,22 @@
   .nav-item[aria-current="page"] :global(svg) {
     color: var(--on);
   }
+
+  /* Label: fade out and collapse width so the icon centres in the rail */
+  .nav-label {
+    overflow: hidden;
+    white-space: nowrap;
+    /* max-width collapses the label's contribution to the flex row,
+       letting justify-content:center pull the icon to the middle. */
+    max-width: 180px;
+    transition: max-width 280ms cubic-bezier(0.4, 0, 0.2, 1), opacity 200ms ease;
+  }
+  .sidebar.collapsed .nav-label {
+    max-width: 0;
+    opacity: 0;
+  }
+
+  /* Keyboard shortcut badges */
   .nav-key {
     margin-left: auto;
     font-family: var(--font-mono);
@@ -455,10 +546,50 @@
     background: var(--card-3);
     opacity: 0;
     transition: opacity 150ms ease;
+    flex-shrink: 0;
   }
   .sidebar:hover .nav-key { opacity: 1; }
   .nav-item[aria-current="page"] .nav-key { opacity: 1; color: var(--text-mute); }
+  .sidebar.collapsed .nav-key { display: none; }
 
+  /* Collapse nav item padding → centers the icon in the 32px inner rail */
+  .sidebar.collapsed .nav-desktop .nav-item {
+    padding-left: 0;
+    padding-right: 0;
+    gap: 0;
+    justify-content: center;
+  }
+
+  /* Tooltip — appears to the right of the sidebar in collapsed mode.
+     Uses content: attr(data-label) so no extra markup needed.
+     left: calc(100% + 20px) puts it 4px past the sidebar's right border
+     (inner width 32px + sidebar right padding 16px + gap 4px = 52px from
+     the nav item's left edge, 16+52=68px from sidebar left vs 64px wide). */
+  .sidebar.collapsed .nav-desktop .nav-item::after {
+    content: attr(data-label);
+    position: absolute;
+    left: calc(100% + 20px);
+    top: 50%;
+    transform: translateY(-50%);
+    padding: 5px 10px;
+    background: var(--card-3);
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-sm);
+    color: var(--text);
+    font-size: 13px;
+    font-weight: 500;
+    white-space: nowrap;
+    box-shadow: var(--shadow-md);
+    opacity: 0;
+    transition: opacity 120ms ease;
+    pointer-events: none;
+    z-index: 200;
+  }
+  .sidebar.collapsed .nav-desktop .nav-item:hover::after {
+    opacity: 1;
+  }
+
+  /* ── Footer ─────────────────────────────────────────────── */
   .footer {
     margin-top: auto;
     display: flex;
@@ -477,6 +608,12 @@
     color: var(--text-mute);
     font-size: 12.5px;
     min-width: 0;
+    transition: padding 280ms cubic-bezier(0.4, 0, 0.2, 1), gap 280ms cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .sidebar.collapsed .profile {
+    justify-content: center;
+    padding: 12px 0;
+    gap: 0;
   }
   .profile :global(svg) {
     color: var(--on);
@@ -485,11 +622,16 @@
   .profile-name {
     font-weight: 500;
     color: var(--text);
-    overflow: hidden;
-    text-overflow: ellipsis;
     white-space: nowrap;
     flex: 1;
     min-width: 0;
+    overflow: hidden;
+    max-width: 140px;
+    transition: max-width 280ms cubic-bezier(0.4, 0, 0.2, 1), opacity 200ms ease;
+  }
+  .sidebar.collapsed .profile-name {
+    max-width: 0;
+    opacity: 0;
   }
   .profile-tag {
     font-size: 10px;
@@ -501,6 +643,16 @@
     padding: 1px 6px;
     border-radius: var(--r-pill);
     flex-shrink: 0;
+    overflow: hidden;
+    max-width: 60px;
+    white-space: nowrap;
+    transition: max-width 280ms cubic-bezier(0.4, 0, 0.2, 1), opacity 200ms ease;
+  }
+  .sidebar.collapsed .profile-tag {
+    max-width: 0;
+    opacity: 0;
+    padding-left: 0;
+    padding-right: 0;
   }
   .theme-toggle {
     display: flex;
@@ -515,11 +667,29 @@
     font-size: 13px;
     transition:
       background 150ms ease,
-      color 150ms ease;
+      color 150ms ease,
+      padding 280ms cubic-bezier(0.4, 0, 0.2, 1),
+      gap 280ms cubic-bezier(0.4, 0, 0.2, 1);
   }
   .theme-toggle:hover {
     background: var(--card-3);
     color: var(--text);
+  }
+  .theme-toggle span {
+    overflow: hidden;
+    white-space: nowrap;
+    max-width: 120px;
+    transition: max-width 280ms cubic-bezier(0.4, 0, 0.2, 1), opacity 200ms ease;
+  }
+  .sidebar.collapsed .theme-toggle {
+    justify-content: center;
+    padding-left: 0;
+    padding-right: 0;
+    gap: 0;
+  }
+  .sidebar.collapsed .theme-toggle span {
+    max-width: 0;
+    opacity: 0;
   }
 
   .health {
@@ -529,6 +699,22 @@
     color: var(--text-mute);
     font-size: 11.5px;
     padding: 4px 12px 0;
+    transition: padding 280ms cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .sidebar.collapsed .health {
+    justify-content: center;
+    padding-left: 0;
+    padding-right: 0;
+  }
+  .health .label {
+    overflow: hidden;
+    white-space: nowrap;
+    max-width: 120px;
+    transition: max-width 280ms cubic-bezier(0.4, 0, 0.2, 1), opacity 200ms ease;
+  }
+  .sidebar.collapsed .health .label {
+    max-width: 0;
+    opacity: 0;
   }
   .dot {
     width: 7px;
@@ -560,9 +746,14 @@
   }
 
   /* ---------- Mobile bottom nav — warm-dark tab bar ---------- */
+  /* On mobile the sidebar becomes a fixed bottom bar — the desktop
+     collapse feature doesn't apply here. Reset everything. */
   @media (max-width: 900px) {
+    .collapse-btn { display: none; }
     .sidebar {
-      width: auto;
+      /* Reset collapse-specific overrides */
+      width: auto !important;
+      transition: none !important;
       position: fixed;
       bottom: 0;
       left: 0;
@@ -664,6 +855,10 @@
       line-height: 1;
       letter-spacing: 0.02em;
       text-transform: uppercase;
+      /* Reset desktop collapse styles that bleed in via .nav-label */
+      max-width: none !important;
+      opacity: 1 !important;
+      overflow: visible;
     }
   }
 

@@ -153,11 +153,14 @@
 <style>
     .boot { min-height: 100vh; background: var(--bg); }
     .app {
-        display: grid;
-        grid-template-columns: 248px 1fr;
+        /* Flex instead of grid so the sidebar's CSS width transition
+           naturally pushes the main content — no grid-template-columns
+           animation needed (which browsers don't support anyway). */
+        display: flex;
         min-height: 100vh;
     }
     .main {
+        flex: 1;
         min-width: 0;
         padding: var(--space-8);
         display: flex;
@@ -180,7 +183,6 @@
         gap: var(--space-6);
     }
     @media (max-width: 900px) {
-        .app { grid-template-columns: 1fr; }
         .main {
             padding: var(--space-4);
             padding-bottom: calc(var(--space-4) + 60px + env(safe-area-inset-bottom));

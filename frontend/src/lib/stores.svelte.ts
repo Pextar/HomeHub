@@ -189,8 +189,26 @@ function createSessionStore() {
   };
 }
 
+function createSidebarStore() {
+  const s = $state<{ collapsed: boolean }>({ collapsed: load() });
+
+  function load(): boolean {
+    try { return localStorage.getItem('sidebar-collapsed') === 'true'; }
+    catch { return false; }
+  }
+
+  return {
+    get collapsed() { return s.collapsed; },
+    toggle() {
+      s.collapsed = !s.collapsed;
+      try { localStorage.setItem('sidebar-collapsed', String(s.collapsed)); } catch { /* private browsing */ }
+    },
+  };
+}
+
 export const session = createSessionStore();
 export const data = createDataStore();
 export const toasts = createToastStore();
 export const route = createRouteStore();
 export const theme = createThemeStore();
+export const sidebar = createSidebarStore();
