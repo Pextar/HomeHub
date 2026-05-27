@@ -572,12 +572,15 @@
       flex-direction: row;
       align-items: stretch;
       border-right: none;
-      /* Warm-dark bar fading up into the page, matching the prototype tabbar */
-      background: linear-gradient(to top, var(--bg) 55%, rgba(20,19,15,0.85));
-      backdrop-filter: saturate(160%) blur(20px);
-      -webkit-backdrop-filter: saturate(160%) blur(20px);
+      /* Use the theme-aware --bg-bar token so this gradient renders correctly
+         in both dark and light modes (the old hardcoded rgba was near-black,
+         which looked broken on the warm cream light background in Safari). */
+      background: linear-gradient(to top, var(--bg) 60%, var(--bg-bar));
+      backdrop-filter: saturate(180%) blur(28px);
+      -webkit-backdrop-filter: saturate(180%) blur(28px);
       border-top: 1px solid var(--hairline);
-      box-shadow: none;
+      /* Subtle upward shadow gives the bar depth and separates it from content */
+      box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.07);
       padding: 8px 14px;
       padding-bottom: calc(8px + env(safe-area-inset-bottom));
       z-index: 100;
@@ -611,9 +614,12 @@
       font-weight: 500;
       letter-spacing: 0.02em;
       text-transform: uppercase;
-      color: var(--text-dim);
+      /* --text-mute is more legible than --text-dim at this tiny size,
+         especially on the warm-cream light background */
+      color: var(--text-mute);
       text-align: center;
       width: auto;
+      position: relative;
     }
     .nav-mobile .nav-item:hover {
       background: transparent;
@@ -622,18 +628,32 @@
     .nav-mobile .nav-item :global(svg) {
       width: 22px;
       height: 22px;
-      /* Spring easing gives the icon a subtle pop when a tab is selected. */
-      transition: transform 0.28s var(--spring);
+      /* Spring easing for the scale pop; ease for the amber glow fade */
+      transition: transform 0.28s var(--spring), filter 0.22s ease;
     }
-    /* Active = amber tint, no indicator line */
+    /* Active = amber tint + a short indicator bar at the top of the item */
     .nav-mobile .nav-item[aria-current="page"] {
       background: transparent;
       color: var(--on);
       box-shadow: none;
     }
+    /* Tiny amber pill that sits at the very top of the active tab */
+    .nav-mobile .nav-item[aria-current="page"]::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 22px;
+      height: 3px;
+      border-radius: 0 0 var(--r-pill) var(--r-pill);
+      background: var(--on);
+    }
     .nav-mobile .nav-item[aria-current="page"] :global(svg) {
       color: var(--on);
       transform: scale(1.1);
+      /* Warm glow mirrors the bulb-on design language used in tiles */
+      filter: drop-shadow(0 0 6px var(--on-glow));
     }
     /* Quick dip on press for tactile feedback. */
     .nav-mobile .nav-item:active :global(svg) {
