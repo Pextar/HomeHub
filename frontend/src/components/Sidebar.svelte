@@ -209,18 +209,25 @@
 
 <aside class="sidebar" class:collapsed={sidebar.collapsed} aria-label="Primary">
   <div class="brand">
-    <div class="mark" aria-hidden="true">
+    <!-- In collapsed mode the chevron button disappears and this mark
+         becomes the sole expand trigger, so make it a real button always. -->
+    <button
+      class="mark"
+      onclick={() => sidebar.toggle()}
+      aria-label={sidebar.collapsed ? "Expand sidebar" : "Collapse sidebar"}
+    >
       <Icon name="bolt" size={20} />
-    </div>
+    </button>
     <div class="brand-text">
       <div class="name">HomeHub</div>
       <div class="sub">Smart Home</div>
     </div>
-    <!-- Floats at the right edge; absolute so it stays reachable in both
-         expanded and collapsed states without disrupting the flex row. -->
+    <!-- Flows as the last flex item; transitions to width:0 in collapsed
+         mode so it takes no space and never overlaps the mark. -->
     <button
       class="collapse-btn"
-      aria-label={sidebar.collapsed ? "Expand sidebar" : "Collapse sidebar"}
+      tabindex={sidebar.collapsed ? -1 : 0}
+      aria-label="Collapse sidebar"
       onclick={() => sidebar.toggle()}
     >
       <Icon name="chevronLeft" size={16} />
@@ -406,10 +413,23 @@
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: 4px 0 22px;      /* horizontal handled by sidebar padding */
+    padding: 4px 0 22px;       /* horizontal handled by sidebar padding */
     margin-bottom: var(--space-2);
-    position: relative;       /* anchor for the absolutely-placed toggle btn */
+    /* Transition gap (removes space between mark and invisible elements)
+       and padding-left (slides mark to centre when collapsed). */
+    transition: gap 280ms cubic-bezier(0.4, 0, 0.2, 1),
+                padding-left 280ms cubic-bezier(0.4, 0, 0.2, 1);
   }
+  /* Centre the mark icon in the 32 px inner rail:
+     inner = 64px sidebar − 16px×2 padding = 32px
+     mark = 28px  →  offset = (32−28)/2 = 2px                 */
+  .sidebar.collapsed .brand {
+    gap: 0;
+    padding-left: 2px;
+  }
+
+  /* Mark: button-reset + amber square.  Acts as collapse trigger in
+     expanded mode and expand trigger once the chevron has hidden. */
   .mark {
     width: 28px;
     height: 28px;
@@ -419,11 +439,24 @@
     place-items: center;
     color: var(--bg);
     flex-shrink: 0;
+    /* button reset */
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    font: inherit;
+    transition: box-shadow 150ms ease, opacity 150ms ease;
   }
+  .mark:hover {
+    box-shadow: 0 0 0 3px var(--on-soft);
+  }
+  .mark:active {
+    opacity: 0.8;
+  }
+
   .brand-text {
     flex: 1;
     min-width: 0;
-    overflow: hidden;         /* keeps text from bleeding during transition */
+    overflow: hidden;          /* keeps text from bleeding during transition */
   }
   .name {
     font-size: 15px;
@@ -443,16 +476,16 @@
   .sidebar.collapsed .name,
   .sidebar.collapsed .sub { opacity: 0; }
 
-  /* Toggle button — floats at the right edge of the brand row.
-     Absolutely positioned so it stays at `right: 0` (= inside sidebar padding)
-     regardless of whether text is showing, and tracks the sidebar's right
-     edge as the width animates (right: 0 relative to .brand). */
+  /* Chevron button — flows as the last flex item (margin-left:auto pushes
+     it to the right edge in expanded mode).  Collapses to width:0 when
+     the sidebar is collapsed so it takes NO layout space and can never
+     overlap the mark icon. */
   .collapse-btn {
-    position: absolute;
-    top: 0;
-    right: 0;
+    margin-left: auto;
+    min-width: 0;              /* lets width transition below zero */
     width: 28px;
     height: 28px;
+    overflow: hidden;
     display: grid;
     place-items: center;
     border: 1px solid var(--hairline);
@@ -460,19 +493,22 @@
     border-radius: var(--r-sm);
     cursor: pointer;
     color: var(--text-mute);
-    transition: background 150ms ease, color 150ms ease;
     flex-shrink: 0;
+    transition:
+      width    280ms cubic-bezier(0.4, 0, 0.2, 1),
+      opacity  200ms ease,
+      background 150ms ease,
+      color    150ms ease;
   }
   .collapse-btn:hover {
     background: var(--card-3);
     color: var(--text);
   }
-  /* Chevron rotates 180° (points right) to signal "expand" */
-  .collapse-btn :global(svg) {
-    transition: transform 280ms cubic-bezier(0.4, 0, 0.2, 1);
-  }
-  .sidebar.collapsed .collapse-btn :global(svg) {
-    transform: rotate(180deg);
+  /* In collapsed mode: shrink to nothing — zero width, zero opacity */
+  .sidebar.collapsed .collapse-btn {
+    width: 0;
+    opacity: 0;
+    pointer-events: none;
   }
 
   /* ── Nav ────────────────────────────────────────────────── */
