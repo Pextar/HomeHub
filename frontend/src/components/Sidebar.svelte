@@ -1,7 +1,7 @@
 <script lang="ts">
   import Icon from "./Icon.svelte";
   import ConfirmModal from "./ConfirmModal.svelte";
-  import { route, theme, data, session } from "../lib/stores.svelte";
+  import { route, theme, data, session, sidebar } from "../lib/stores.svelte";
   import { api } from "../lib/api";
   import { openModal, modalStack } from "../lib/modal.svelte";
   import { fade } from "svelte/transition";
@@ -100,6 +100,7 @@
       return;
     }
     if (e.key === "t") { toggleTheme(); e.preventDefault(); }
+    if (e.key === "[") { sidebar.toggle(); e.preventDefault(); }
   }
 
   // True when the active route is one of the overflow items — used to
@@ -206,15 +207,31 @@
 
 <svelte:window onkeydown={onKey} />
 
-<aside class="sidebar" aria-label="Primary">
+<aside class="sidebar" class:collapsed={sidebar.collapsed} aria-label="Primary">
   <div class="brand">
-    <div class="mark" aria-hidden="true">
+    <!-- In collapsed mode the chevron button disappears and this mark
+         becomes the sole expand trigger, so make it a real button always. -->
+    <button
+      class="mark"
+      onclick={() => sidebar.toggle()}
+      aria-label={sidebar.collapsed ? "Expand sidebar" : "Collapse sidebar"}
+    >
       <Icon name="bolt" size={20} />
-    </div>
-    <div>
+    </button>
+    <div class="brand-text">
       <div class="name">HomeHub</div>
       <div class="sub">Smart Home</div>
     </div>
+    <!-- Flows as the last flex item; transitions to width:0 in collapsed
+         mode so it takes no space and never overlaps the mark. -->
+    <button
+      class="collapse-btn"
+      tabindex={sidebar.collapsed ? -1 : 0}
+      aria-label="Collapse sidebar"
+      onclick={() => sidebar.toggle()}
+    >
+      <Icon name="chevronLeft" size={16} />
+    </button>
   </div>
 
   <!-- Desktop: full list. Mobile: only the primary slice (the rest live in
@@ -224,6 +241,7 @@
       <a
         href="#/{item.route}"
         class="nav-item"
+        data-label={item.label}
         aria-current={route.current === item.route ? "page" : undefined}
       >
         <Icon name={item.icon} size={18} />
@@ -364,6 +382,10 @@
 {/if}
 
 <style>
+  /* ============================================================
+     Desktop sidebar — expanded (240px) and collapsed (64px)
+     ============================================================ */
+
   .sidebar {
     width: 240px;
     background: var(--bg-2);
@@ -375,14 +397,39 @@
     position: sticky;
     top: 0;
     height: 100vh;
+    /* Drives the flex layout in App.svelte — as width transitions the
+       main content area expands/contracts to fill the remaining space. */
+    transition: width 280ms cubic-bezier(0.4, 0, 0.2, 1);
+    /* overflow:visible (default) so the tooltip ::after can escape
+       the sidebar's boundary in collapsed mode. */
   }
+  .sidebar.collapsed {
+    /* 64px = sidebar padding (16×2) + 18px icon + 14px breathing room */
+    width: 64px;
+  }
+
+  /* ── Brand ──────────────────────────────────────────────── */
   .brand {
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: 4px 12px 22px;
+    padding: 4px 0 22px;       /* horizontal handled by sidebar padding */
     margin-bottom: var(--space-2);
+    /* Transition gap (removes space between mark and invisible elements)
+       and padding-left (slides mark to centre when collapsed). */
+    transition: gap 280ms cubic-bezier(0.4, 0, 0.2, 1),
+                padding-left 280ms cubic-bezier(0.4, 0, 0.2, 1);
   }
+  /* Centre the mark icon in the 32 px inner rail:
+     inner = 64px sidebar − 16px×2 padding = 32px
+     mark = 28px  →  offset = (32−28)/2 = 2px                 */
+  .sidebar.collapsed .brand {
+    gap: 0;
+    padding-left: 2px;
+  }
+
+  /* Mark: button-reset + amber square.  Acts as collapse trigger in
+     expanded mode and expand trigger once the chevron has hidden. */
   .mark {
     width: 28px;
     height: 28px;
@@ -392,19 +439,79 @@
     place-items: center;
     color: var(--bg);
     flex-shrink: 0;
+    /* button reset */
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    font: inherit;
+    transition: box-shadow 150ms ease, opacity 150ms ease;
+  }
+  .mark:hover {
+    box-shadow: 0 0 0 3px var(--on-soft);
+  }
+  .mark:active {
+    opacity: 0.8;
+  }
+
+  .brand-text {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;          /* keeps text from bleeding during transition */
   }
   .name {
     font-size: 15px;
     font-weight: 600;
     letter-spacing: -0.02em;
     color: var(--text);
+    white-space: nowrap;
+    transition: opacity 180ms ease;
   }
   .sub {
     font-size: 10.5px;
     font-family: var(--font-mono);
     color: var(--text-mute);
+    white-space: nowrap;
+    transition: opacity 180ms ease;
+  }
+  .sidebar.collapsed .name,
+  .sidebar.collapsed .sub { opacity: 0; }
+
+  /* Chevron button — flows as the last flex item (margin-left:auto pushes
+     it to the right edge in expanded mode).  Collapses to width:0 when
+     the sidebar is collapsed so it takes NO layout space and can never
+     overlap the mark icon. */
+  .collapse-btn {
+    margin-left: auto;
+    min-width: 0;              /* lets width transition below zero */
+    width: 28px;
+    height: 28px;
+    overflow: hidden;
+    display: grid;
+    place-items: center;
+    border: 1px solid var(--hairline);
+    background: transparent;
+    border-radius: var(--r-sm);
+    cursor: pointer;
+    color: var(--text-mute);
+    flex-shrink: 0;
+    transition:
+      width    280ms cubic-bezier(0.4, 0, 0.2, 1),
+      opacity  200ms ease,
+      background 150ms ease,
+      color    150ms ease;
+  }
+  .collapse-btn:hover {
+    background: var(--card-3);
+    color: var(--text);
+  }
+  /* In collapsed mode: shrink to nothing — zero width, zero opacity */
+  .sidebar.collapsed .collapse-btn {
+    width: 0;
+    opacity: 0;
+    pointer-events: none;
   }
 
+  /* ── Nav ────────────────────────────────────────────────── */
   .nav {
     display: flex;
     flex-direction: column;
@@ -424,13 +531,17 @@
     font-weight: 500;
     transition:
       background 150ms ease,
-      color 150ms ease;
+      color 150ms ease,
+      padding 280ms cubic-bezier(0.4, 0, 0.2, 1),
+      gap 280ms cubic-bezier(0.4, 0, 0.2, 1);
     cursor: pointer;
     background: transparent;
     border: none;
     text-align: left;
     font-family: var(--font-sans);
     width: 100%;
+    /* Needed for the collapsed tooltip ::after */
+    position: relative;
   }
   .nav-item:hover {
     background: var(--card);
@@ -444,6 +555,22 @@
   .nav-item[aria-current="page"] :global(svg) {
     color: var(--on);
   }
+
+  /* Label: fade out and collapse width so the icon centres in the rail */
+  .nav-label {
+    overflow: hidden;
+    white-space: nowrap;
+    /* max-width collapses the label's contribution to the flex row,
+       letting justify-content:center pull the icon to the middle. */
+    max-width: 180px;
+    transition: max-width 280ms cubic-bezier(0.4, 0, 0.2, 1), opacity 200ms ease;
+  }
+  .sidebar.collapsed .nav-label {
+    max-width: 0;
+    opacity: 0;
+  }
+
+  /* Keyboard shortcut badges */
   .nav-key {
     margin-left: auto;
     font-family: var(--font-mono);
@@ -455,10 +582,50 @@
     background: var(--card-3);
     opacity: 0;
     transition: opacity 150ms ease;
+    flex-shrink: 0;
   }
   .sidebar:hover .nav-key { opacity: 1; }
   .nav-item[aria-current="page"] .nav-key { opacity: 1; color: var(--text-mute); }
+  .sidebar.collapsed .nav-key { display: none; }
 
+  /* Collapse nav item padding → centers the icon in the 32px inner rail */
+  .sidebar.collapsed .nav-desktop .nav-item {
+    padding-left: 0;
+    padding-right: 0;
+    gap: 0;
+    justify-content: center;
+  }
+
+  /* Tooltip — appears to the right of the sidebar in collapsed mode.
+     Uses content: attr(data-label) so no extra markup needed.
+     left: calc(100% + 20px) puts it 4px past the sidebar's right border
+     (inner width 32px + sidebar right padding 16px + gap 4px = 52px from
+     the nav item's left edge, 16+52=68px from sidebar left vs 64px wide). */
+  .sidebar.collapsed .nav-desktop .nav-item::after {
+    content: attr(data-label);
+    position: absolute;
+    left: calc(100% + 20px);
+    top: 50%;
+    transform: translateY(-50%);
+    padding: 5px 10px;
+    background: var(--card-3);
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-sm);
+    color: var(--text);
+    font-size: 13px;
+    font-weight: 500;
+    white-space: nowrap;
+    box-shadow: var(--shadow-md);
+    opacity: 0;
+    transition: opacity 120ms ease;
+    pointer-events: none;
+    z-index: 200;
+  }
+  .sidebar.collapsed .nav-desktop .nav-item:hover::after {
+    opacity: 1;
+  }
+
+  /* ── Footer ─────────────────────────────────────────────── */
   .footer {
     margin-top: auto;
     display: flex;
@@ -477,6 +644,12 @@
     color: var(--text-mute);
     font-size: 12.5px;
     min-width: 0;
+    transition: padding 280ms cubic-bezier(0.4, 0, 0.2, 1), gap 280ms cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .sidebar.collapsed .profile {
+    justify-content: center;
+    padding: 12px 0;
+    gap: 0;
   }
   .profile :global(svg) {
     color: var(--on);
@@ -485,11 +658,16 @@
   .profile-name {
     font-weight: 500;
     color: var(--text);
-    overflow: hidden;
-    text-overflow: ellipsis;
     white-space: nowrap;
     flex: 1;
     min-width: 0;
+    overflow: hidden;
+    max-width: 140px;
+    transition: max-width 280ms cubic-bezier(0.4, 0, 0.2, 1), opacity 200ms ease;
+  }
+  .sidebar.collapsed .profile-name {
+    max-width: 0;
+    opacity: 0;
   }
   .profile-tag {
     font-size: 10px;
@@ -501,6 +679,16 @@
     padding: 1px 6px;
     border-radius: var(--r-pill);
     flex-shrink: 0;
+    overflow: hidden;
+    max-width: 60px;
+    white-space: nowrap;
+    transition: max-width 280ms cubic-bezier(0.4, 0, 0.2, 1), opacity 200ms ease;
+  }
+  .sidebar.collapsed .profile-tag {
+    max-width: 0;
+    opacity: 0;
+    padding-left: 0;
+    padding-right: 0;
   }
   .theme-toggle {
     display: flex;
@@ -515,11 +703,29 @@
     font-size: 13px;
     transition:
       background 150ms ease,
-      color 150ms ease;
+      color 150ms ease,
+      padding 280ms cubic-bezier(0.4, 0, 0.2, 1),
+      gap 280ms cubic-bezier(0.4, 0, 0.2, 1);
   }
   .theme-toggle:hover {
     background: var(--card-3);
     color: var(--text);
+  }
+  .theme-toggle span {
+    overflow: hidden;
+    white-space: nowrap;
+    max-width: 120px;
+    transition: max-width 280ms cubic-bezier(0.4, 0, 0.2, 1), opacity 200ms ease;
+  }
+  .sidebar.collapsed .theme-toggle {
+    justify-content: center;
+    padding-left: 0;
+    padding-right: 0;
+    gap: 0;
+  }
+  .sidebar.collapsed .theme-toggle span {
+    max-width: 0;
+    opacity: 0;
   }
 
   .health {
@@ -529,6 +735,22 @@
     color: var(--text-mute);
     font-size: 11.5px;
     padding: 4px 12px 0;
+    transition: padding 280ms cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .sidebar.collapsed .health {
+    justify-content: center;
+    padding-left: 0;
+    padding-right: 0;
+  }
+  .health .label {
+    overflow: hidden;
+    white-space: nowrap;
+    max-width: 120px;
+    transition: max-width 280ms cubic-bezier(0.4, 0, 0.2, 1), opacity 200ms ease;
+  }
+  .sidebar.collapsed .health .label {
+    max-width: 0;
+    opacity: 0;
   }
   .dot {
     width: 7px;
@@ -560,9 +782,14 @@
   }
 
   /* ---------- Mobile bottom nav — warm-dark tab bar ---------- */
+  /* On mobile the sidebar becomes a fixed bottom bar — the desktop
+     collapse feature doesn't apply here. Reset everything. */
   @media (max-width: 900px) {
+    .collapse-btn { display: none; }
     .sidebar {
-      width: auto;
+      /* Reset collapse-specific overrides */
+      width: auto !important;
+      transition: none !important;
       position: fixed;
       bottom: 0;
       left: 0;
@@ -572,12 +799,15 @@
       flex-direction: row;
       align-items: stretch;
       border-right: none;
-      /* Warm-dark bar fading up into the page, matching the prototype tabbar */
-      background: linear-gradient(to top, var(--bg) 55%, rgba(20,19,15,0.85));
-      backdrop-filter: saturate(160%) blur(20px);
-      -webkit-backdrop-filter: saturate(160%) blur(20px);
+      /* Use the theme-aware --bg-bar token so this gradient renders correctly
+         in both dark and light modes (the old hardcoded rgba was near-black,
+         which looked broken on the warm cream light background in Safari). */
+      background: linear-gradient(to top, var(--bg) 60%, var(--bg-bar));
+      backdrop-filter: saturate(180%) blur(28px);
+      -webkit-backdrop-filter: saturate(180%) blur(28px);
       border-top: 1px solid var(--hairline);
-      box-shadow: none;
+      /* Subtle upward shadow gives the bar depth and separates it from content */
+      box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.07);
       padding: 8px 14px;
       padding-bottom: calc(8px + env(safe-area-inset-bottom));
       z-index: 100;
@@ -611,9 +841,12 @@
       font-weight: 500;
       letter-spacing: 0.02em;
       text-transform: uppercase;
-      color: var(--text-dim);
+      /* --text-mute is more legible than --text-dim at this tiny size,
+         especially on the warm-cream light background */
+      color: var(--text-mute);
       text-align: center;
       width: auto;
+      position: relative;
     }
     .nav-mobile .nav-item:hover {
       background: transparent;
@@ -622,18 +855,32 @@
     .nav-mobile .nav-item :global(svg) {
       width: 22px;
       height: 22px;
-      /* Spring easing gives the icon a subtle pop when a tab is selected. */
-      transition: transform 0.28s var(--spring);
+      /* Spring easing for the scale pop; ease for the amber glow fade */
+      transition: transform 0.28s var(--spring), filter 0.22s ease;
     }
-    /* Active = amber tint, no indicator line */
+    /* Active = amber tint + a short indicator bar at the top of the item */
     .nav-mobile .nav-item[aria-current="page"] {
       background: transparent;
       color: var(--on);
       box-shadow: none;
     }
+    /* Tiny amber pill that sits at the very top of the active tab */
+    .nav-mobile .nav-item[aria-current="page"]::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 22px;
+      height: 3px;
+      border-radius: 0 0 var(--r-pill) var(--r-pill);
+      background: var(--on);
+    }
     .nav-mobile .nav-item[aria-current="page"] :global(svg) {
       color: var(--on);
       transform: scale(1.1);
+      /* Warm glow mirrors the bulb-on design language used in tiles */
+      filter: drop-shadow(0 0 6px var(--on-glow));
     }
     /* Quick dip on press for tactile feedback. */
     .nav-mobile .nav-item:active :global(svg) {
@@ -644,6 +891,10 @@
       line-height: 1;
       letter-spacing: 0.02em;
       text-transform: uppercase;
+      /* Reset desktop collapse styles that bleed in via .nav-label */
+      max-width: none !important;
+      opacity: 1 !important;
+      overflow: visible;
     }
   }
 
