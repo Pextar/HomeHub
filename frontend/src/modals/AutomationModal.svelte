@@ -13,6 +13,17 @@
         AutomationTriggerType, TargetType,
     } from "../lib/types";
 
+    const COLOURS: { hex: string; name: string }[] = [
+        { hex: "", name: "Auto" },
+        { hex: "f5bd6e", name: "Warm" },
+        { hex: "ffe9c4", name: "Soft" },
+        { hex: "ffffff", name: "Bright" },
+        { hex: "c4a4e0", name: "Lilac" },
+        { hex: "7aa4d9", name: "Cool" },
+    ];
+    const isSmart = (protocol: string) =>
+        protocol === "tasmota" || protocol === "matter" || protocol === "matter-thread";
+
     interface Props { existing?: Automation | null; }
     let { existing = null }: Props = $props();
     const isEdit = $derived(!!existing);
@@ -43,8 +54,8 @@
     let thenActions = $state<AutomationAction[]>(untrack(() => {
         const ex = existing?.actions;
         return ex && ex.length
-            ? ex.map((a): AutomationAction => ({ ...a }))
-            : [{ target_type: firstTargetType(), target_id: "", action: "on" } as AutomationAction];
+            ? ex.map((a): AutomationAction => ({ ...a, level: a.level ?? 100, color: a.color ?? "" }))
+            : [{ target_type: firstTargetType(), target_id: "", action: "on", level: 100, color: "" } as AutomationAction];
     }));
     let name = $state(untrack(() => existing?.name ?? ""));
     let enabled = $state(untrack(() => existing ? existing.enabled : true));
@@ -70,7 +81,7 @@
     });
 
     function addAction() {
-        thenActions = [...thenActions, { target_type: firstTargetType(), target_id: "", action: "on" }];
+        thenActions = [...thenActions, { target_type: firstTargetType(), target_id: "", action: "on", level: 100, color: "" }];
     }
     function removeAction(i: number) {
         thenActions = thenActions.filter((_, idx) => idx !== i);
@@ -106,11 +117,17 @@
                     ? { type: "device", socket_id: c.socket_id, state: c.state }
                     : { type: "time_range", after: c.after, before: c.before },
             ),
-            actions: thenActions.map(a => ({
-                target_type: a.target_type,
-                target_id: a.target_id,
-                action: a.target_type === "scene" ? "activate" : a.action,
-            })),
+            actions: thenActions.map(a => {
+                const base = {
+                    target_type: a.target_type,
+                    target_id: a.target_id,
+                    action: a.target_type === "scene" ? "activate" : a.action,
+                };
+                if (a.target_type === "socket" && a.action === "on") {
+                    return { ...base, level: a.level ?? 100, color: a.color ?? "" };
+                }
+                return base;
+            }),
         };
     }
 
@@ -314,6 +331,30 @@
                                 {/if}
                             </select>
                         </div>
+                        {#if a.target_type === "socket" && a.action === "on" && isSmart(v.sockets.find(s => s.id === a.target_id)?.protocol ?? "")}
+                            <div class="light-row">
+                                <div class="bright">
+                                    <span class="bright-ico"><Icon name="sun" size={14} /></span>
+                                    <input type="range" min="1" max="100" step="1"
+                                        bind:value={a.level}
+                                        aria-label="Brightness" />
+                                    <span class="bright-val mono">{a.level ?? 100}%</span>
+                                </div>
+                                <div class="swatches">
+                                    {#each COLOURS as c (c.name)}
+                                        <button type="button" class="swatch"
+                                            class:active={(a.color ?? "") === c.hex}
+                                            class:auto={c.hex === ""}
+                                            style={c.hex ? `background:#${c.hex}` : ""}
+                                            title={c.name}
+                                            aria-label="{c.name} color"
+                                            onclick={() => a.color = c.hex}>
+                                            {#if c.hex === ""}<Icon name="close" size={12} />{/if}
+                                        </button>
+                                    {/each}
+                                </div>
+                            </div>
+                        {/if}
                         {#if thenActions.length > 1}
                             <button type="button" class="remove" onclick={() => removeAction(i)} aria-label="Remove action">
                                 <Icon name="trash" size={14} /> Remove
@@ -389,5 +430,35 @@
 
     .enabled-row { flex-direction: row; align-items: center; gap: 12px; }
     .field-help.warn { color: var(--warn, var(--danger)); }
-    @media (pointer: coarse) { input[type="range"] { height: 28px; } }
+
+    /* ── Smart-light controls ──────────────────────────────── */
+    .light-row {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        padding: var(--space-2) 0 0;
+    }
+    .bright { display: flex; align-items: center; gap: 8px; }
+    .bright-ico { color: var(--on); display: inline-flex; flex-shrink: 0; }
+    .bright input[type="range"] { flex: 1; }
+    .bright-val { font-size: 12px; color: var(--text-mute); min-width: 38px; text-align: right; }
+    .swatches { display: flex; gap: 6px; flex-wrap: wrap; }
+    .swatch {
+        width: 24px; height: 24px;
+        border-radius: 50%;
+        border: 1px solid var(--hairline);
+        cursor: pointer;
+        display: grid; place-items: center;
+        padding: 0;
+        color: var(--text-mute);
+        touch-action: manipulation;
+        transition: box-shadow var(--t-fast);
+    }
+    .swatch.auto { background: var(--card-3); }
+    .swatch.active { box-shadow: 0 0 0 2px var(--on), 0 0 0 4px var(--bg); }
+
+    @media (pointer: coarse) {
+        input[type="range"] { height: 28px; }
+        .swatch { width: 30px; height: 30px; }
+    }
 </style>

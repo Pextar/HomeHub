@@ -160,6 +160,11 @@ func (e *autoEngine) execute(st *store.Store, a store.Automation, now time.Time,
 		if err := st.ExecuteAction(act.TargetType, act.TargetID, act.Action); err != nil && firstErr == nil {
 			firstErr = err
 		}
+		if act.Action == "on" && act.TargetType == "socket" && (act.Level != nil || act.Color != "") {
+			if sock, ok := st.Sockets[act.TargetID]; ok {
+				st.QueueLight(*sock, act.Level, act.Color)
+			}
+		}
 	}
 	st.SuppressStateChange = false
 

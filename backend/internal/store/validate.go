@@ -193,6 +193,21 @@ func (s *Store) ValidateAutomation(a *Automation) error {
 		} else if act.Action != "on" && act.Action != "off" && act.Action != "toggle" {
 			return errors.New("action must be on/off/toggle")
 		}
+		// Level/colour only apply to smart sockets being switched on.
+		if act.TargetType == "socket" && act.Action == "on" {
+			if act.Level != nil {
+				if *act.Level < 1 || *act.Level > 100 {
+					return errors.New("action level must be between 1 and 100")
+				}
+			}
+			act.Color = strings.TrimPrefix(strings.ToLower(strings.TrimSpace(act.Color)), "#")
+			if act.Color != "" && !isHex6(act.Color) {
+				return errors.New("action color must be a 6-digit RRGGBB hex")
+			}
+		} else {
+			act.Level = nil
+			act.Color = ""
+		}
 	}
 	return nil
 }

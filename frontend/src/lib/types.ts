@@ -227,6 +227,8 @@ export interface AutomationAction {
   target_type: TargetType;
   target_id: string;
   action: SocketAction | "activate";
+  level?: number;  // 1-100, smart lights only
+  color?: string;  // "RRGGBB", smart lights only
 }
 
 export interface Automation {

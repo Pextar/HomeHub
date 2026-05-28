@@ -90,7 +90,9 @@ type AutomationCondition struct {
 type AutomationAction struct {
 	TargetType string `json:"target_type"` // "socket" | "group" | "scene"
 	TargetID   string `json:"target_id"`
-	Action     string `json:"action"` // "on" | "off" | "toggle" | "activate"
+	Action     string `json:"action"`          // "on" | "off" | "toggle" | "activate"
+	Level      *int   `json:"level,omitempty"` // 1-100, smart lights only
+	Color      string `json:"color,omitempty"` // "RRGGBB", smart lights only
 }
 
 // Automation is a trigger → optional conditions → ordered actions rule.
