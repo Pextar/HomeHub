@@ -95,7 +95,7 @@
         sockets: Sockets,
         groups: Groups,
         scenes: Scenes,
-        schedules: Schedules,
+        schedules: Automations,
         automations: Automations,
         sensors: Sensors,
         insights: Insights,
