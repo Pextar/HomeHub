@@ -100,6 +100,7 @@
     }
     if (e.key === "t") { toggleTheme(); e.preventDefault(); }
     if (e.key === "[") { sidebar.toggle(); e.preventDefault(); }
+    if ((e.metaKey || e.ctrlKey) && e.key === "k") { route.go("sockets"); e.preventDefault(); }
   }
 
   // True when the active route is one of the overflow items — used to
@@ -275,24 +276,22 @@
 
   <div class="footer">
     {#if session.user?.username}
-      <div class="profile" title={session.user.username}>
-        <Icon name={session.user.admin ? "settings" : "socket"} size={14} />
-        <span class="profile-name">{session.user.username}</span>
-        {#if session.user.admin}<span class="profile-tag">Admin</span>{/if}
+      <div class="profile-card" title={session.user.username}>
+        <div class="profile-avatar">{session.user.username[0].toUpperCase()}</div>
+        <div class="profile-info">
+          <span class="profile-name">{session.user.username}</span>
+          <span class="profile-role">{session.user.admin ? "Admin" : "Limited"}</span>
+        </div>
+        <div class="profile-btns">
+          <button class="profile-btn" aria-label="Toggle theme" onclick={toggleTheme}>
+            <Icon name={theme.current === "dark" ? "moon" : "sun"} size={13} />
+          </button>
+          <button class="profile-btn" aria-label="Sign out" onclick={signOut}>
+            <Icon name="logout" size={13} />
+          </button>
+        </div>
       </div>
     {/if}
-    <button
-      class="theme-toggle"
-      aria-label="Toggle theme"
-      onclick={toggleTheme}
-    >
-      <Icon name={theme.current === "dark" ? "moon" : "sun"} size={14} />
-      <span>Theme</span>
-    </button>
-    <button class="theme-toggle" aria-label="Sign out" onclick={signOut}>
-      <Icon name="logout" size={14} />
-      <span>Sign out</span>
-    </button>
     <div class="health" aria-live="polite">
       <span class="dot" data-state={data.value.health}></span>
       <span class="label">{healthLabel}</span>
@@ -632,99 +631,96 @@
     gap: var(--space-2);
     padding-top: var(--space-3);
   }
-  .profile {
+
+  /* Profile card — avatar + name/role + action icon buttons */
+  .profile-card {
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: 12px;
+    padding: 10px 12px;
     background: var(--card);
     border: 1px solid var(--hairline);
     border-radius: var(--r-md);
-    color: var(--text-mute);
-    font-size: 12.5px;
     min-width: 0;
-    transition: padding 280ms cubic-bezier(0.4, 0, 0.2, 1), gap 280ms cubic-bezier(0.4, 0, 0.2, 1);
+    transition:
+      padding 280ms cubic-bezier(0.4, 0, 0.2, 1),
+      gap     280ms cubic-bezier(0.4, 0, 0.2, 1);
   }
-  .sidebar.collapsed .profile {
+  .sidebar.collapsed .profile-card {
     justify-content: center;
-    padding: 12px 0;
+    padding: 10px 0;
     gap: 0;
   }
-  .profile :global(svg) {
+
+  .profile-avatar {
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    background: var(--card-3);
+    display: grid;
+    place-items: center;
+    font-family: var(--font-mono);
+    font-weight: 600;
+    font-size: 12px;
     color: var(--on);
     flex-shrink: 0;
   }
-  .profile-name {
-    font-weight: 500;
-    color: var(--text);
-    white-space: nowrap;
+
+  .profile-info {
     flex: 1;
     min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
     overflow: hidden;
     max-width: 140px;
     transition: max-width 280ms cubic-bezier(0.4, 0, 0.2, 1), opacity 200ms ease;
   }
-  .sidebar.collapsed .profile-name {
+  .sidebar.collapsed .profile-info {
     max-width: 0;
     opacity: 0;
   }
-  .profile-tag {
-    font-size: 10px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    color: var(--on);
-    background: var(--on-soft);
-    padding: 1px 6px;
-    border-radius: var(--r-pill);
+  .profile-name {
+    font-size: 12.5px;
+    font-weight: 500;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .profile-role {
+    font-size: 10.5px;
+    color: var(--text-mute);
+    white-space: nowrap;
+  }
+
+  .profile-btns {
+    display: flex;
+    gap: 2px;
     flex-shrink: 0;
     overflow: hidden;
     max-width: 60px;
-    white-space: nowrap;
     transition: max-width 280ms cubic-bezier(0.4, 0, 0.2, 1), opacity 200ms ease;
   }
-  .sidebar.collapsed .profile-tag {
+  .sidebar.collapsed .profile-btns {
     max-width: 0;
     opacity: 0;
-    padding-left: 0;
-    padding-right: 0;
   }
-  .theme-toggle {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 9px 12px;
-    border: 1px solid var(--hairline);
-    background: var(--card-2);
+  .profile-btn {
+    width: 28px;
+    height: 28px;
+    display: grid;
+    place-items: center;
+    background: transparent;
+    border: none;
     border-radius: var(--r-sm);
-    cursor: pointer;
     color: var(--text-mute);
-    font-size: 13px;
-    transition:
-      background 150ms ease,
-      color 150ms ease,
-      padding 280ms cubic-bezier(0.4, 0, 0.2, 1),
-      gap 280ms cubic-bezier(0.4, 0, 0.2, 1);
+    cursor: pointer;
+    transition: background 150ms ease, color 150ms ease;
   }
-  .theme-toggle:hover {
+  .profile-btn:hover {
     background: var(--card-3);
     color: var(--text);
-  }
-  .theme-toggle span {
-    overflow: hidden;
-    white-space: nowrap;
-    max-width: 120px;
-    transition: max-width 280ms cubic-bezier(0.4, 0, 0.2, 1), opacity 200ms ease;
-  }
-  .sidebar.collapsed .theme-toggle {
-    justify-content: center;
-    padding-left: 0;
-    padding-right: 0;
-    gap: 0;
-  }
-  .sidebar.collapsed .theme-toggle span {
-    max-width: 0;
-    opacity: 0;
   }
 
   .health {
