@@ -66,6 +66,15 @@
         return upcoming[0] ?? items.sort((a, b) => a.min - b.min)[0];
     });
 
+    // Desktop device grid — filterable by room on the dashboard.
+    let deviceRoom = $state('');
+    const allDeviceRooms = $derived([...new Set(v.sockets.map(s => s.room || 'Unassigned'))].sort());
+    const filteredDevices = $derived.by(() => {
+        if (deviceRoom === 'on') return v.sockets.filter(s => s.state);
+        if (deviceRoom) return v.sockets.filter(s => (s.room || 'Unassigned') === deviceRoom);
+        return v.sockets;
+    });
+
     // Groups with a live on-count for the groups section.
     const groupsWithState = $derived(
         v.groups.map(g => ({
@@ -126,14 +135,16 @@
     </div>
     {#if session.isAdmin}
         <div class="greet-actions">
+            <button class="chip search-chip" onclick={() => route.go("sockets")} aria-label="Search devices and scenes">
+                <Icon name="search" size={14} />
+                Search devices, scenes…
+                <kbd class="search-key">⌘K</kbd>
+            </button>
             <button class="chip add-device" onclick={() => openModal(SocketModal, {})}>
                 <Icon name="plus" size={14} /> Add device
             </button>
             <button class="chip icon-chip" aria-label="Activity" onclick={() => route.go("activity")}>
                 <Icon name="activity" size={16} />
-            </button>
-            <button class="chip icon-chip" aria-label="Settings" onclick={() => route.go("settings")}>
-                <Icon name="settings" size={16} />
             </button>
         </div>
     {/if}
@@ -171,10 +182,17 @@
         {/if}
     </div>
 
+    {#if hasTemp}
+        <div class="stat tile">
+            <div class="stat-eyebrow mono">Temperature</div>
+            <div class="stat-value cool">{insideTemp}°</div>
+            <div class="stat-sub">{tempSensors[0]?.name ?? 'Inside'}</div>
+        </div>
+    {/if}
     {#if nextEvent}
         <div class="stat tile">
             <div class="stat-eyebrow mono">Next event</div>
-            <div class="stat-value cool">{nextEvent.time}</div>
+            <div class="stat-value">{nextEvent.time}</div>
             <div class="stat-sub">{nextEvent.label}</div>
         </div>
     {/if}
@@ -288,7 +306,7 @@
 {/if}
 
 <!-- ── Rooms ──────────────────────────────────────────────────────── -->
-<section class="home-section">
+<section class="home-section mobile-rooms">
     <div class="section-head"><h2><span class="section-ico"><Icon name="home" size={15} /></span>Rooms</h2></div>
     {#if liveRooms.length === 0}
         <p class="field-help">No rooms yet. Create devices and assign rooms to them.</p>
@@ -304,6 +322,31 @@
         </div>
     {/if}
 </section>
+
+<!-- ── Desktop: all devices with room filter ─────────────────────── -->
+{#if v.sockets.length > 0}
+    <section class="home-section desktop-devices">
+        <div class="section-head">
+            <h2>Devices</h2>
+            <div class="device-chips">
+                <button class="chip" class:active={deviceRoom === ''} onclick={() => deviceRoom = ''}>All</button>
+                <button class="chip" class:active={deviceRoom === 'on'} onclick={() => deviceRoom = 'on'}>On</button>
+                {#each allDeviceRooms as r}
+                    <button class="chip" class:active={deviceRoom === r} onclick={() => deviceRoom = r}>{r}</button>
+                {/each}
+            </div>
+        </div>
+        {#if filteredDevices.length === 0}
+            <p class="field-help">No devices match this filter.</p>
+        {:else}
+            <div class="device-grid">
+                {#each filteredDevices as socket (socket.id)}
+                    <SocketCard {socket} />
+                {/each}
+            </div>
+        {/if}
+    </section>
+{/if}
 
 <style>
     /* ── Greeting ───────────────────────────────────── */
@@ -328,18 +371,41 @@
         padding: 0;
         justify-content: center;
     }
-    /* The labelled "Add device" chip is desktop-only; the mockup's mobile
-       Home greeting keeps just the icon chips. */
+    /* Search chip and "Add device" are desktop-only labels */
+    .search-chip { display: none; }
     .add-device { display: none; }
     @media (min-width: 700px) { .add-device { display: inline-flex; } }
+    @media (min-width: 1024px) {
+        .search-chip {
+            display: inline-flex;
+            gap: 8px;
+            padding: 9px 14px;
+            color: var(--text-mute);
+        }
+    }
+    .search-key {
+        margin-left: 20px;
+        font-family: var(--font-mono);
+        font-size: 11px;
+        color: var(--text-dim);
+        background: none;
+        border: none;
+        padding: 0;
+        cursor: pointer;
+    }
 
     /* Hero spans full width on phones; on desktop it shares a row with the
        real-data stat tiles, matching the desktop dashboard mockup. */
     .top-grid { display: grid; grid-template-columns: 1fr; gap: var(--space-4); }
     .stat { display: none; }
     @media (min-width: 1024px) {
+        /* 2 stat tiles → 3 columns */
         .top-grid { grid-template-columns: 1.6fr 1fr 1fr; align-items: stretch; }
         .stat { display: flex; }
+    }
+    @media (min-width: 1280px) {
+        /* 3 stat tiles → 4 columns */
+        .top-grid { grid-template-columns: 1.6fr 1fr 1fr 1fr; }
     }
     .stat {
         padding: 18px;
@@ -353,7 +419,7 @@
         letter-spacing: 0.08em;
         text-transform: uppercase;
     }
-    .stat-value { font-size: 32px; font-weight: 600; letter-spacing: -0.02em; }
+    .stat-value { font-size: 32px; font-weight: 600; letter-spacing: -0.02em; font-family: var(--font-mono); }
     .stat-value.cool { color: var(--cool); }
     .stat-sub { color: var(--text-mute); font-size: 12px; }
 
@@ -507,5 +573,27 @@
     }
     .room-item { display: flex; min-width: 0; }
     .room-item > :global(.room) { flex: 1; min-width: 0; }
+
+    /* ── Desktop devices section ────────────────────── */
+    /* Rooms section hides on desktop (replaced by the filterable device grid) */
+    @media (min-width: 1024px) {
+        .mobile-rooms { display: none; }
+    }
+
+    .desktop-devices { display: none; }
+    @media (min-width: 1024px) {
+        .desktop-devices { display: flex; }
+    }
+
+    .device-chips { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; }
+
+    .device-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 12px;
+    }
+    @media (min-width: 1280px) {
+        .device-grid { grid-template-columns: repeat(4, 1fr); }
+    }
 
 </style>
