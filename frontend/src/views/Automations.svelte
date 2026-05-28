@@ -9,7 +9,6 @@
     import { formatDays } from "../lib/utils";
     import { openModal } from "../lib/modal.svelte";
     import AutomationModal from "../modals/AutomationModal.svelte";
-    import ScheduleModal from "../modals/ScheduleModal.svelte";
     import ConfirmModal from "../components/ConfirmModal.svelte";
     import { fly, scale } from "svelte/transition";
     import { flip } from "svelte/animate";
@@ -19,7 +18,7 @@
 
     const v = $derived(data.value);
 
-    // ── Filters ──────────────────────────────────────────────
+    // ── Filter ──────────────────────────────────────────────────────────
     type Filter = "all" | "time" | "sensor" | "device";
     let filter = $state<Filter>("all");
     const FILTERS: { id: Filter; label: string }[] = [
@@ -29,29 +28,23 @@
         { id: "device", label: "Device" },
     ];
 
-    // ── Subtitle ─────────────────────────────────────────────
-    const enabledCount = $derived(v.automations.filter(a => a.enabled).length);
-    const totalRuns    = $derived(v.automations.reduce((n, a) => n + (a.run_count ?? 0), 0));
-
-    // ── Filtered lists ────────────────────────────────────────
-    // Schedules only show in "all" and "time" filters.
+    // Schedules are time-only, so show them under "all" and "time" filters.
     const shownSchedules = $derived(
-        filter === "all" || filter === "time" ? v.schedules : []
+        filter === "all" || filter === "time" ? v.schedules : [],
     );
     const shownAutomations = $derived(
-        filter === "all"
-            ? v.automations
-            : v.automations.filter(a => a.trigger.type === filter)
+        filter === "all" ? v.automations : v.automations.filter(a => a.trigger.type === filter),
     );
-
-    // ── Schedule / "Pause all" logic ─────────────────────────
-    const anyEnabled = $derived(v.schedules.some(s => s.enabled));
+    const nothingToShow  = $derived(shownSchedules.length === 0 && shownAutomations.length === 0);
+    const totalRules     = $derived(v.schedules.length + v.automations.length);
+    const enabledCount   = $derived(v.automations.filter(a => a.enabled).length);
+    const anySchedEnabled = $derived(v.schedules.some(s => s.enabled));
     let pausing = $state(false);
 
     async function toggleAll() {
         if (pausing) return;
         pausing = true;
-        const enable = !anyEnabled;
+        const enable = !anySchedEnabled;
         try {
             const r = await api.setAllSchedules(enable);
             toasts.success(enable ? "Schedules resumed" : "Schedules paused",
@@ -64,7 +57,7 @@
         }
     }
 
-    // ── Today's timeline ─────────────────────────────────────
+    // ── Today's 24h timeline (schedules only) ───────────────────────────
     const now = new Date();
     const todayIdx = now.getDay();
     const nowMin = now.getHours() * 60 + now.getMinutes();
@@ -85,8 +78,7 @@
         if (action === "off") return "var(--text-mute)";
         return "var(--cool)";
     }
-
-    function targetLabel(s: Schedule): string {
+    function schedTargetLabel(s: Schedule): string {
         if (s.target_type === "socket" && s.target_id) return v.sockets.find(x => x.id === s.target_id)?.name ?? "Unknown";
         if (s.target_type === "group"  && s.target_id) return v.groups.find(x => x.id === s.target_id)?.name ?? "Unknown";
         if (s.target_type === "scene"  && s.target_id) return v.scenes.find(x => x.id === s.target_id)?.name ?? "Unknown";
@@ -100,12 +92,12 @@
             .filter(s => !s.days || s.days.length === 0 || s.days.includes(todayIdx))
             .map(s => ({ s, min: minutesOf(s) }))
             .filter((e): e is { s: Schedule; min: number } => e.min !== null)
-            .sort((a, b) => a.min - b.min)
+            .sort((a, b) => a.min - b.min),
     );
     const upcoming  = $derived(todayEvents.filter(e => e.min >= nowMin));
     const nextEvent = $derived(upcoming[0] ?? null);
 
-    // ── Automation helpers ────────────────────────────────────
+    // ── Automation display helpers ───────────────────────────────────────
     function socketName(id?: string) { return v.sockets.find(s => s.id === id)?.name ?? "device"; }
     function sensorById(id?: string) { return v.sensors.find(s => s.id === id); }
     function targetName(type: string, id: string) {
@@ -148,7 +140,7 @@
         return `last ${Math.round(h / 24)}d ago`;
     }
 
-    async function toggle(a: Automation, on: boolean) {
+    async function toggleAuto(a: Automation, on: boolean) {
         try {
             await api.updateAutomation(a.id, { ...a, enabled: on });
             await data.refresh();
@@ -181,7 +173,6 @@
         } catch (e) { toasts.error("Failed", (e as Error).message); }
     }
 
-    // ── Overflow menu ─────────────────────────────────────────
     let openId = $state<string | null>(null);
     let listEl = $state<HTMLElement>();
     $effect(() => {
@@ -192,26 +183,26 @@
     });
 </script>
 
-<Topbar title="Automations" subtitle="{v.schedules.length + v.automations.length} rules · {enabledCount} enabled · {totalRuns} runs">
+<Topbar title="Automations" subtitle="{totalRules} rule{totalRules === 1 ? '' : 's'} · {enabledCount} active">
     {#snippet actions()}
         {#if v.schedules.length > 0}
             <button class="btn btn-ghost pause-btn" onclick={toggleAll} disabled={pausing}>
-                {anyEnabled ? "Pause all" : "Resume all"}
+                {anySchedEnabled ? "Pause schedules" : "Resume schedules"}
             </button>
         {/if}
-        <button class="add-amber" aria-label="New automation" onclick={() => openModal(AutomationModal, {})}>
+        <button class="add-btn" aria-label="New automation" onclick={() => openModal(AutomationModal, {})}>
             <Icon name="plus" size={16} />
         </button>
     {/snippet}
 </Topbar>
 
-{#if v.schedules.length === 0 && v.automations.length === 0}
+{#if totalRules === 0}
     <EmptyState icon="automation" title="No automations yet"
-        message="Automations react to time, a sensor crossing a threshold, or a device turning on/off — then run actions. Create your first to get started.">
+        message="Automations react to time, a sensor crossing a threshold, or a device turning on/off — then run actions.">
         <button class="btn btn-primary" onclick={() => openModal(AutomationModal, {})}>New automation</button>
     </EmptyState>
 {:else}
-    <!-- ── Today's 24h timeline (only when schedules exist) ──────────── -->
+    <!-- ── 24h timeline (schedule events only) ────────────────── -->
     {#if v.schedules.length > 0}
         <div class="card timeline-card">
             <div class="tl-head">
@@ -233,14 +224,12 @@
                 {#each todayEvents as e (e.s.id)}
                     <div class="tl-mark" class:past={e.min < nowMin}
                         style="left: {(e.min / 1440) * 100}%; background: {eventColor(e.s.action)};"
-                        title="{hhmm(e.min)} · {targetLabel(e.s)} · {e.s.action} · {formatDays(e.s.days)}">
+                        title="{hhmm(e.min)} · {schedTargetLabel(e.s)} · {e.s.action} · {formatDays(e.s.days)}">
                     </div>
                 {/each}
-                {#if nowMin >= 0}
-                    <div class="tl-now" style="left: {(nowMin / 1440) * 100}%">
-                        <span class="tl-now-dot"></span>
-                    </div>
-                {/if}
+                <div class="tl-now" style="left: {(nowMin / 1440) * 100}%">
+                    <span class="tl-now-dot"></span>
+                </div>
             </div>
 
             <div class="tl-hours mono">
@@ -249,18 +238,19 @@
         </div>
     {/if}
 
-    <!-- ── Filter chips ──────────────────────────────────────── -->
+    <!-- ── Filter chips ───────────────────────────────────────── -->
     <div class="filters h-scroll">
         {#each FILTERS as f}
             <button class="chip" class:active={filter === f.id} onclick={() => filter = f.id}>{f.label}</button>
         {/each}
     </div>
 
-    {#if shownSchedules.length === 0 && shownAutomations.length === 0}
+    {#if nothingToShow}
         <p class="field-help">No items match this filter.</p>
     {:else}
         <div class="list" bind:this={listEl}>
-            <!-- Schedules section -->
+
+            <!-- ── Schedule rows ──────────────────────────────── -->
             {#if shownSchedules.length > 0}
                 <div class="section-label">Schedules</div>
                 {#each shownSchedules as s, i (s.id)}
@@ -273,7 +263,7 @@
                 {/each}
             {/if}
 
-            <!-- Automations section -->
+            <!-- ── Automation cards ────────────────────────────── -->
             {#if shownAutomations.length > 0}
                 {#if shownSchedules.length > 0}
                     <div class="section-label">Automations</div>
@@ -281,7 +271,7 @@
                 {#each shownAutomations as a, i (a.id)}
                     <div class="auto" class:disabled={!a.enabled}
                         animate:flip={{ duration: dur(280), easing: cubicOut }}
-                        in:fly={{ y: 12, duration: dur(220), delay: stagger(i), easing: cubicOut }}
+                        in:fly={{ y: 12, duration: dur(220), delay: stagger(shownSchedules.length + i), easing: cubicOut }}
                         out:scale={{ start: 0.97, opacity: 0, duration: dur(160) }}>
                         <button class="hit" onclick={() => openModal(AutomationModal, { existing: a })} aria-label="Edit {a.name}">
                             <span class="name-row">
@@ -301,7 +291,7 @@
                         </button>
 
                         <div class="right">
-                            <Switch checked={a.enabled} onChange={(c) => toggle(a, c)} ariaLabel="Enable {a.name}" />
+                            <Switch checked={a.enabled} onChange={(c) => toggleAuto(a, c)} ariaLabel="Enable {a.name}" />
                             <button class="more-btn" aria-label="Automation actions"
                                 onclick={(e) => { e.stopPropagation(); openId = openId === a.id ? null : a.id; }}>
                                 <Icon name="more" size={16} />
@@ -326,12 +316,15 @@
                     </div>
                 {/each}
             {/if}
+
         </div>
     {/if}
 {/if}
 
 <style>
-    .add-amber {
+    /* ── Topbar add button ──────────────────────────────────── */
+    .pause-btn { font-size: 13px; }
+    .add-btn {
         width: 38px; height: 38px;
         display: grid; place-items: center;
         border-radius: 50%;
@@ -342,24 +335,90 @@
         touch-action: manipulation;
         transition: transform var(--t-fast), box-shadow var(--t-fast);
     }
-    .add-amber:hover { box-shadow: 0 4px 14px var(--on-glow); }
-    .add-amber:active { transform: scale(0.94); }
+    .add-btn:hover { box-shadow: 0 4px 14px var(--on-glow); }
+    .add-btn:active { transform: scale(0.94); }
 
-    .pause-btn { font-size: 13px; }
+    /* ── 24h timeline card ──────────────────────────────────── */
+    .timeline-card { padding: 18px; gap: 0; }
+    .tl-head {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: var(--space-3);
+        margin-bottom: 14px;
+    }
+    .tl-eyebrow {
+        color: var(--text-mute);
+        font-size: 11.5px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+    }
+    .tl-title { font-size: 16px; font-weight: 600; margin-top: 2px; }
+    .tl-next { color: var(--text-mute); font-size: 12px; }
+    .tl-next-time { color: var(--on); }
 
+    .tl-rail { position: relative; height: 60px; }
+    .tl-grad {
+        position: absolute; inset: 0;
+        border-radius: 12px;
+        background: linear-gradient(90deg,
+            #1a1d28 0%, #1a1d28 22%, #2a2618 28%, #3a2e1e 50%,
+            #2a2618 72%, #1a1d28 78%, #1a1d28 100%);
+    }
+    :global([data-theme="light"]) .tl-grad {
+        background: linear-gradient(90deg,
+            #d9deec 0%, #d9deec 22%, #f0e4c4 28%, #ffe6b8 50%,
+            #f0e4c4 72%, #d9deec 78%, #d9deec 100%);
+    }
+    .tl-mark {
+        position: absolute;
+        top: 20px;
+        width: 10px; height: 20px;
+        border-radius: 3px;
+        transform: translateX(-50%);
+        box-shadow: 0 1px 3px rgba(0,0,0,0.35);
+    }
+    .tl-mark.past { opacity: 0.4; }
+    .tl-now {
+        position: absolute;
+        top: -6px; bottom: -6px;
+        width: 2px;
+        background: var(--text);
+        border-radius: 1px;
+        transform: translateX(-50%);
+    }
+    .tl-now-dot {
+        position: absolute;
+        top: -8px; left: 50%;
+        width: 8px; height: 8px;
+        border-radius: 50%;
+        background: var(--text);
+        transform: translateX(-50%);
+    }
+    .tl-hours {
+        display: flex;
+        justify-content: space-between;
+        margin-top: 8px;
+        color: var(--text-dim);
+        font-size: 10px;
+    }
+
+    /* ── Filter chips ───────────────────────────────────────── */
     .filters { gap: 6px; padding-bottom: 2px; }
+
+    /* ── List ───────────────────────────────────────────────── */
     .list { display: flex; flex-direction: column; gap: 10px; }
 
     .section-label {
-        font-size: 12px;
+        font-size: 11px;
         font-weight: 600;
         text-transform: uppercase;
-        letter-spacing: 0.08em;
+        letter-spacing: 0.09em;
         color: var(--text-mute);
-        padding: 4px 0;
+        padding: 4px 2px 0;
     }
 
-    /* ── Automation cards ────────────────────────────────────── */
+    /* ── Automation card ────────────────────────────────────── */
     .auto {
         position: relative;
         background: var(--card);
@@ -438,71 +497,5 @@
 
     @media (pointer: coarse) {
         .overflow-item { padding: 14px var(--space-4); font-size: 15px; min-height: 52px; }
-    }
-
-    /* ── Today's timeline card ──────────────────────────────── */
-    .timeline-card { padding: 18px; gap: 0; }
-    .tl-head {
-        display: flex;
-        align-items: baseline;
-        justify-content: space-between;
-        gap: var(--space-3);
-        margin-bottom: 14px;
-    }
-    .tl-eyebrow {
-        color: var(--text-mute);
-        font-size: 11.5px;
-        letter-spacing: 0.1em;
-        text-transform: uppercase;
-    }
-    .tl-title { font-size: 16px; font-weight: 600; margin-top: 2px; }
-    .tl-next { color: var(--text-mute); font-size: 12px; }
-    .tl-next-time { color: var(--on); }
-
-    .tl-rail { position: relative; height: 60px; }
-    .tl-grad {
-        position: absolute; inset: 0;
-        border-radius: 12px;
-        /* night → dawn → midday → dusk → night */
-        background: linear-gradient(90deg,
-            #1a1d28 0%, #1a1d28 22%, #2a2618 28%, #3a2e1e 50%,
-            #2a2618 72%, #1a1d28 78%, #1a1d28 100%);
-    }
-    :global([data-theme="light"]) .tl-grad {
-        background: linear-gradient(90deg,
-            #d9deec 0%, #d9deec 22%, #f0e4c4 28%, #ffe6b8 50%,
-            #f0e4c4 72%, #d9deec 78%, #d9deec 100%);
-    }
-    .tl-mark {
-        position: absolute;
-        top: 20px;
-        width: 10px; height: 20px;
-        border-radius: 3px;
-        transform: translateX(-50%);
-        box-shadow: 0 1px 3px rgba(0,0,0,0.35);
-    }
-    .tl-mark.past { opacity: 0.4; }
-    .tl-now {
-        position: absolute;
-        top: -6px; bottom: -6px;
-        width: 2px;
-        background: var(--text);
-        border-radius: 1px;
-        transform: translateX(-50%);
-    }
-    .tl-now-dot {
-        position: absolute;
-        top: -8px; left: 50%;
-        width: 8px; height: 8px;
-        border-radius: 50%;
-        background: var(--text);
-        transform: translateX(-50%);
-    }
-    .tl-hours {
-        display: flex;
-        justify-content: space-between;
-        margin-top: 8px;
-        color: var(--text-dim);
-        font-size: 10px;
     }
 </style>
