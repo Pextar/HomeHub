@@ -9,7 +9,8 @@
     import { sortedSockets } from "../lib/utils";
     import { untrack } from "svelte";
     import type {
-        Scene, SceneStep, ScheduleTimeMode, AutomationTriggerType,
+        Scene, SceneStep, AutomationTriggerType, AutomationTrigger,
+        AutomationAction, TargetType, Automation,
     } from "../lib/types";
 
     interface Props { existing?: Scene | null; }
@@ -22,7 +23,6 @@
     const isSmart = (protocol: string) =>
         protocol === "tasmota" || protocol === "matter" || protocol === "matter-thread";
 
-    // Colour presets mirror the light-detail mockup; "" means leave colour as-is.
     const COLOURS: { hex: string; name: string }[] = [
         { hex: "", name: "Auto" },
         { hex: "f5bd6e", name: "Warm" },
@@ -68,7 +68,6 @@
         if (existing?.steps?.length) {
             return existing.steps.map(stepFromSceneStep);
         }
-        // Legacy scene with flat actions
         if (existing?.actions?.length) {
             const step = blankStepState(0);
             for (const a of existing.actions) {
@@ -86,70 +85,150 @@
     let nameError = $state("");
     let stepsError = $state("");
 
-    // ── Wizard state (new scenes only) ─────────────────────────────────
-    let wizardStep = $state(1); // 1 = scene content, 2 = activation method
+    // ── Wizard state ───────────────────────────────────────────────────
+    let wizardStep = $state(1); // 1 = scene content, 2 = rules
 
-    type ActivationMode = "manual" | "schedule" | "trigger";
-    let activationMode = $state<ActivationMode>("manual");
+    // ── Rule draft types ───────────────────────────────────────────────
+    type RuleActionDraft = {
+        target_type: TargetType;
+        target_id: string;
+        action: string;
+        level: number;
+        color: string;
+    };
 
-    // ── Schedule activation fields ──────────────────────────────────────
-    let schedTimeMode = $state<ScheduleTimeMode>("fixed");
-    let schedTime = $state("08:00");
-    let schedSolarOffset = $state(0);
-    let schedDays = $state<number[]>([]);
-    let schedRandomOffset = $state(0);
-
-    // ── Trigger/automation activation fields ────────────────────────────
-    let autoName = $state("");
-    let trigType = $state<AutomationTriggerType>("time");
-    let trigTimeMode = $state("fixed");
-    let trigTime = $state("07:00");
-    let trigSolarOffset = $state(0);
-    let trigDays = $state<number[]>([]);
-    let trigSensorId = $state(untrack(() => v.sensors[0]?.id ?? ""));
-    let trigOp = $state<"above" | "below">("below");
-    let trigValue = $state<number>(20);
-    let trigSocketId = $state(untrack(() => v.sockets[0]?.id ?? ""));
-    let trigToState = $state<"on" | "off">("on");
+    type RuleDraft = {
+        _key: string;
+        automationId: string; // "" = new; non-empty = existing automation ID to update
+        trigType: AutomationTriggerType;
+        trigTimeMode: string;
+        trigTime: string;
+        trigSolarOffset: number;
+        trigDays: number[];
+        trigSensorId: string;
+        trigOp: "above" | "below";
+        trigValue: number;
+        trigSocketId: string;
+        trigToState: "on" | "off";
+        actions: RuleActionDraft[];
+    };
 
     const hasLocation = $derived(v.settings.latitude !== 0 || v.settings.longitude !== 0);
 
-    const schedSolarLabel = $derived.by(() => {
-        const m = schedSolarOffset;
-        const event = schedTimeMode === "sunrise" ? "sunrise" : "sunset";
-        if (m === 0) return `At ${event}`;
-        const abs = Math.abs(m);
+    function firstTargetType(): TargetType {
+        return v.sockets.length ? "socket" : v.groups.length ? "group" : "scene";
+    }
+
+    function targetsFor(type: string) {
+        if (type === "socket") return v.sockets.map(s => ({ id: s.id, label: s.name }));
+        if (type === "group") return v.groups.map(g => ({ id: g.id, label: g.name }));
+        return v.scenes.map(s => ({ id: s.id, label: s.name }));
+    }
+
+    function solarSummary(mode: string, offset: number): string {
+        const event = mode === "sunrise" ? "sunrise" : "sunset";
+        if (offset === 0) return `At ${event}`;
+        const abs = Math.abs(offset);
         const h = Math.floor(abs / 60);
         const mins = abs % 60;
         const parts = [h && `${h}h`, mins && `${mins}m`].filter(Boolean).join(" ");
-        return `${parts} ${m < 0 ? "before" : "after"} ${event}`;
+        return `${parts} ${offset < 0 ? "before" : "after"} ${event}`;
+    }
+
+    function blankRule(): RuleDraft {
+        return {
+            _key: Math.random().toString(36).slice(2),
+            automationId: "",
+            trigType: "time",
+            trigTimeMode: "fixed",
+            trigTime: "07:00",
+            trigSolarOffset: 0,
+            trigDays: [],
+            trigSensorId: v.sensors[0]?.id ?? "",
+            trigOp: "below",
+            trigValue: 20,
+            trigSocketId: v.sockets[0]?.id ?? "",
+            trigToState: "on",
+            actions: [{ target_type: firstTargetType(), target_id: "", action: "on", level: 100, color: "" }],
+        };
+    }
+
+    function ruleFromAutomation(a: Automation): RuleDraft {
+        const t = a.trigger;
+        return {
+            _key: Math.random().toString(36).slice(2),
+            automationId: a.id,
+            trigType: t.type as AutomationTriggerType,
+            trigTimeMode: t.time_mode ?? "fixed",
+            trigTime: t.time || "07:00",
+            trigSolarOffset: t.solar_offset_minutes ?? 0,
+            trigDays: [...(t.days ?? [])],
+            trigSensorId: t.sensor_id ?? v.sensors[0]?.id ?? "",
+            trigOp: (t.op ?? "below") as "above" | "below",
+            trigValue: t.value ?? 20,
+            trigSocketId: t.socket_id ?? v.sockets[0]?.id ?? "",
+            trigToState: (t.to_state ?? "on") as "on" | "off",
+            actions: (a.actions ?? []).map(act => ({
+                target_type: act.target_type as TargetType,
+                target_id: act.target_id,
+                action: act.action as string,
+                level: act.level ?? 100,
+                color: act.color ?? "",
+            })),
+        };
+    }
+
+    let rules = $state<RuleDraft[]>(untrack(() => {
+        if (existing) {
+            const owned = data.value.automations.filter(a => a.scene_id === existing!.id);
+            if (owned.length) return owned.map(ruleFromAutomation);
+        }
+        return [];
+    }));
+
+    // Seed stale/missing target IDs whenever rules change.
+    $effect(() => {
+        for (const rule of rules) {
+            for (const a of rule.actions) {
+                const opts = targetsFor(a.target_type);
+                if (!opts.find(o => o.id === a.target_id)) a.target_id = opts[0]?.id ?? "";
+                if (a.target_type === "scene") a.action = "activate";
+                else if (a.action === "activate") a.action = "on";
+            }
+        }
     });
 
-    const trigSolarLabel = $derived.by(() => {
-        const m = trigSolarOffset;
-        const event = trigTimeMode === "sunrise" ? "sunrise" : "sunset";
-        if (m === 0) return `At ${event}`;
-        const abs = Math.abs(m);
-        const h = Math.floor(abs / 60);
-        const mins = abs % 60;
-        const parts = [h && `${h}h`, mins && `${mins}m`].filter(Boolean).join(" ");
-        return `${parts} ${m < 0 ? "before" : "after"} ${event}`;
-    });
+    function addRule() {
+        rules = [...rules, blankRule()];
+    }
+
+    function removeRule(i: number) {
+        rules = rules.filter((_, idx) => idx !== i);
+    }
+
+    function addRuleAction(ri: number) {
+        rules[ri].actions = [
+            ...rules[ri].actions,
+            { target_type: firstTargetType(), target_id: "", action: "on", level: 100, color: "" },
+        ];
+    }
+
+    function removeRuleAction(ri: number, ai: number) {
+        rules[ri].actions = rules[ri].actions.filter((_, idx) => idx !== ai);
+    }
 
     // Dynamic modal title / subtitle per wizard step
     const modalTitle = $derived(
         wizardStep === 1
             ? (isEdit ? "Edit scene" : "New scene")
-            : "When should it run?"
+            : "Automated rules"
     );
     const modalSubtitle = $derived(
         wizardStep === 1
             ? (isEdit
                 ? "Adjust device settings and timing for this scene."
                 : "A scene can drive devices through multiple timed steps — even the same lamp at different dim levels.")
-            : (isEdit
-                ? "Add a new schedule or automation for this scene. Existing ones can be managed from the Schedules or Automations screens."
-                : "Choose how this scene gets triggered. You can always add more in Schedules or Automations later.")
+            : "Add rules that fire automatically. Each rule has its own trigger and device actions — they run independently."
     );
 
     // ── Step management ─────────────────────────────────────────────────
@@ -161,19 +240,6 @@
 
     function removeStep(i: number) {
         steps = steps.filter((_, idx) => idx !== i);
-    }
-
-    function stepLabel(i: number, delay: number): string {
-        if (i === 0) return "Runs immediately";
-        if (delay === 0) return "Also immediately";
-        if (delay % 60 === 0) {
-            const h = delay / 60;
-            return `After ${h} ${h === 1 ? "hour" : "hours"}`;
-        }
-        if (delay < 60) return `After ${delay} min`;
-        const h = Math.floor(delay / 60);
-        const m = delay % 60;
-        return `After ${h}h ${m}m`;
     }
 
     // ── Build steps payload ─────────────────────────────────────────────
@@ -195,16 +261,61 @@
         })).filter(s => s.actions.length > 0);
     }
 
+    // ── Build rule payload ──────────────────────────────────────────────
+    function buildRulePayload(rule: RuleDraft, sceneId: string, sceneName: string, idx: number): Partial<Automation> {
+        let trigger: AutomationTrigger;
+        if (rule.trigType === "time") {
+            trigger = {
+                type: "time",
+                time_mode: rule.trigTimeMode as AutomationTrigger["time_mode"],
+                time: rule.trigTimeMode === "fixed" ? rule.trigTime : "",
+                solar_offset_minutes: rule.trigTimeMode === "fixed" ? 0 : rule.trigSolarOffset,
+                days: rule.trigDays,
+            };
+        } else if (rule.trigType === "sensor") {
+            trigger = {
+                type: "sensor",
+                sensor_id: rule.trigSensorId,
+                op: rule.trigOp,
+                value: Number(rule.trigValue),
+            };
+        } else {
+            trigger = {
+                type: "device",
+                socket_id: rule.trigSocketId,
+                to_state: rule.trigToState,
+            };
+        }
+        const actions: AutomationAction[] = rule.actions.map(a => {
+            const base: AutomationAction = {
+                target_type: a.target_type,
+                target_id: a.target_id,
+                action: (a.target_type === "scene" ? "activate" : a.action) as AutomationAction["action"],
+            };
+            if (a.target_type === "socket" && a.action === "on") {
+                base.level = a.level ?? 100;
+                if (a.color) base.color = a.color;
+            }
+            return base;
+        });
+        return {
+            name: `${sceneName} – rule ${idx + 1}`,
+            enabled: true,
+            trigger,
+            conditions: [],
+            actions,
+            scene_id: sceneId,
+        };
+    }
+
     // ── Wizard navigation ───────────────────────────────────────────────
-    function advanceToActivation() {
+    function advanceToRules() {
         nameError = name.trim() ? "" : "Give the scene a name.";
         const builtSteps = buildSteps();
         stepsError = builtSteps.length === 0
             ? "Set at least one device to On or Off in any step."
             : "";
         if (nameError || stepsError) return;
-        // Pre-fill automation name from scene name
-        if (!autoName) autoName = `${name.trim()} trigger`;
         wizardStep = 2;
     }
 
@@ -217,7 +328,6 @@
         stepsError = builtSteps.length === 0
             ? "Set at least one device to On or Off in any step."
             : "";
-
         if (nameError || stepsError) {
             wizardStep = 1;
             return;
@@ -225,9 +335,9 @@
 
         saving = true;
         try {
-            const payload = { name: name.trim(), steps: builtSteps };
+            const sceneName = name.trim();
+            const payload = { name: sceneName, steps: builtSteps };
 
-            // Determine scene ID — update existing or create new
             let sceneId: string;
             if (isEdit) {
                 await api.updateScene(existing!.id, payload);
@@ -237,72 +347,42 @@
                 sceneId = created.id;
             }
 
-            // Optionally create activation (schedule or automation)
-            try {
-                if (activationMode === "schedule") {
-                    await api.createSchedule({
-                        target_type: "scene",
-                        target_id: sceneId,
-                        action: "activate",
-                        time_mode: schedTimeMode,
-                        time: schedTimeMode === "fixed" ? schedTime : "",
-                        solar_offset_minutes: schedTimeMode === "fixed" ? 0 : schedSolarOffset,
-                        days: schedDays,
-                        enabled: true,
-                        random_offset_minutes: schedRandomOffset,
-                    });
-                    toasts.success(
-                        isEdit ? "Scene updated" : "Scene created",
-                        `${payload.name} · schedule added`
-                    );
-                } else if (activationMode === "trigger") {
-                    // Build trigger payload
-                    let trigger: Record<string, unknown>;
-                    if (trigType === "time") {
-                        trigger = {
-                            type: "time",
-                            time_mode: trigTimeMode,
-                            time: trigTimeMode === "fixed" ? trigTime : "",
-                            solar_offset_minutes: trigTimeMode === "fixed" ? 0 : trigSolarOffset,
-                            days: trigDays,
-                        };
-                    } else if (trigType === "sensor") {
-                        trigger = {
-                            type: "sensor",
-                            sensor_id: trigSensorId,
-                            op: trigOp,
-                            value: Number(trigValue),
-                        };
-                    } else {
-                        trigger = {
-                            type: "device",
-                            socket_id: trigSocketId,
-                            to_state: trigToState,
-                        };
-                    }
-                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                    await api.createAutomation({
-                        name: autoName.trim() || `${payload.name} automation`,
-                        enabled: true,
-                        trigger: trigger as any,
-                        conditions: [],
-                        actions: [{ target_type: "scene", target_id: sceneId, action: "activate" }],
-                    });
-                    toasts.success(
-                        isEdit ? "Scene updated" : "Scene created",
-                        `${payload.name} · automation added`
-                    );
-                } else {
-                    toasts.success(
-                        isEdit ? "Scene updated" : "Scene created",
-                        payload.name
-                    );
+            // Delete automations owned by this scene that were removed
+            const survivingIds = new Set(rules.map(r => r.automationId).filter(Boolean));
+            for (const a of data.value.automations) {
+                if (a.scene_id === sceneId && !survivingIds.has(a.id)) {
+                    try { await api.deleteAutomation(a.id); } catch (_) { /* best-effort */ }
                 }
-            } catch (_activationErr) {
-                // Scene was saved; activation setup failed.
+            }
+
+            // Create / update each rule
+            let ruleSaveErrors = 0;
+            for (let i = 0; i < rules.length; i++) {
+                const rule = rules[i];
+                const rp = buildRulePayload(rule, sceneId, sceneName, i);
+                try {
+                    if (rule.automationId) {
+                        await api.updateAutomation(rule.automationId, rp);
+                    } else {
+                        await api.createAutomation(rp);
+                    }
+                } catch (_) {
+                    ruleSaveErrors++;
+                }
+            }
+
+            const ruleCount = rules.length;
+            if (ruleSaveErrors > 0) {
                 toasts.warn(
                     isEdit ? "Scene updated" : "Scene created",
-                    "Activation setup failed — add it later in Schedules or Automations."
+                    `${ruleCount - ruleSaveErrors} of ${ruleCount} rules saved — check Automations for details.`
+                );
+            } else {
+                toasts.success(
+                    isEdit ? "Scene updated" : "Scene created",
+                    ruleCount > 0
+                        ? `${sceneName} · ${ruleCount} rule${ruleCount > 1 ? "s" : ""}`
+                        : sceneName
                 );
             }
 
@@ -320,26 +400,26 @@
     {#snippet body()}
         <!-- ── Wizard step indicator ─────────────────────────────── -->
         <div class="wizard-track" aria-label="Step {wizardStep} of 2">
-                <div class="wiz-step" class:wiz-active={wizardStep === 1} class:wiz-done={wizardStep > 1}>
-                    <div class="wiz-dot">
-                        {#if wizardStep > 1}
-                            <Icon name="check" size={12} />
-                        {:else}
-                            <span class="mono">1</span>
-                        {/if}
-                    </div>
-                    <span class="wiz-label">Scene</span>
+            <div class="wiz-step" class:wiz-active={wizardStep === 1} class:wiz-done={wizardStep > 1}>
+                <div class="wiz-dot">
+                    {#if wizardStep > 1}
+                        <Icon name="check" size={12} />
+                    {:else}
+                        <span class="mono">1</span>
+                    {/if}
                 </div>
-                <div class="wiz-line" class:wiz-filled={wizardStep > 1}></div>
-                <div class="wiz-step" class:wiz-active={wizardStep === 2}>
-                    <div class="wiz-dot"><span class="mono">2</span></div>
-                    <span class="wiz-label">Activation</span>
-                </div>
+                <span class="wiz-label">Scene</span>
             </div>
+            <div class="wiz-line" class:wiz-filled={wizardStep > 1}></div>
+            <div class="wiz-step" class:wiz-active={wizardStep === 2}>
+                <div class="wiz-dot"><span class="mono">2</span></div>
+                <span class="wiz-label">Rules</span>
+            </div>
+        </div>
 
         <!-- ── Step 1: Scene content ──────────────────────────────── -->
         {#if wizardStep === 1}
-            <form onsubmit={(e) => { e.preventDefault(); advanceToActivation(); }}>
+            <form onsubmit={(e) => { e.preventDefault(); advanceToRules(); }}>
                 <div class="field">
                     <label for="scn-name">Name</label>
                     <input id="scn-name" type="text" bind:value={name}
@@ -474,225 +554,189 @@
             </form>
         {/if}
 
-        <!-- ── Step 2: Activation method ──────────────────────────── -->
+        <!-- ── Step 2: Automated rules ────────────────────────────── -->
         {#if wizardStep === 2}
-            <div class="act-section">
+            <div class="rules-section">
 
-                <!-- Method cards -->
-                <div class="act-cards" role="radiogroup" aria-label="Activation method">
-                    <button
-                        type="button"
-                        class="act-card"
-                        class:act-selected={activationMode === "manual"}
-                        aria-pressed={activationMode === "manual"}
-                        onclick={() => activationMode = "manual"}
-                    >
-                        <div class="act-icon act-icon-manual">
-                            <Icon name="scenes" size={20} />
-                        </div>
-                        <div class="act-card-body">
-                            <div class="act-title">Manually</div>
-                            <div class="act-desc">Activate from the Scenes screen whenever you want</div>
-                        </div>
-                    </button>
-
-                    <button
-                        type="button"
-                        class="act-card"
-                        class:act-selected={activationMode === "schedule"}
-                        aria-pressed={activationMode === "schedule"}
-                        onclick={() => activationMode = "schedule"}
-                    >
-                        <div class="act-icon act-icon-schedule">
-                            <Icon name="clock" size={20} />
-                        </div>
-                        <div class="act-card-body">
-                            <div class="act-title">On a schedule</div>
-                            <div class="act-desc">Runs automatically at set times or around sunrise/sunset</div>
-                        </div>
-                    </button>
-
-                    <button
-                        type="button"
-                        class="act-card"
-                        class:act-selected={activationMode === "trigger"}
-                        aria-pressed={activationMode === "trigger"}
-                        onclick={() => activationMode = "trigger"}
-                    >
-                        <div class="act-icon act-icon-trigger">
-                            <Icon name="automation" size={20} />
-                        </div>
-                        <div class="act-card-body">
-                            <div class="act-title">When triggered</div>
-                            <div class="act-desc">Fires based on a sensor reading, device state, or a time event</div>
-                        </div>
-                    </button>
-                </div>
-
-                <!-- ── Schedule config ──────────────────────────── -->
-                {#if activationMode === "schedule"}
-                    <div class="act-config">
-                        <div class="act-config-head">
-                            <Icon name="clock" size={15} />
-                            Schedule configuration
-                        </div>
-
-                        <div class="field">
-                            <span class="field-label">When</span>
-                            <Segmented name="scn-sched-mode" bind:value={schedTimeMode}
-                                options={[
-                                    { value: "fixed",   label: "Fixed time" },
-                                    { value: "sunrise", label: "Sunrise" },
-                                    { value: "sunset",  label: "Sunset" },
-                                ]} />
-                        </div>
-
-                        {#if schedTimeMode === "fixed"}
-                            <div class="field">
-                                <label for="scn-sched-time">Time</label>
-                                <input id="scn-sched-time" type="time" bind:value={schedTime} required />
-                                <div class="field-help">24-hour HH:MM in the server's local time.</div>
-                            </div>
-                        {:else}
-                            <div class="field">
-                                <label for="scn-sched-solar">Offset</label>
-                                <input id="scn-sched-solar" type="range" min="-120" max="120" step="5"
-                                    bind:value={schedSolarOffset}
-                                    aria-valuetext={schedSolarLabel} />
-                                <div class="solar-summary">{schedSolarLabel}</div>
-                                {#if !hasLocation}
-                                    <div class="field-help warn">Set the controller's latitude/longitude in Settings — without a location, this schedule cannot fire.</div>
-                                {:else}
-                                    <div class="field-help">Drag to pick how far before (−) or after (+) the event to fire.</div>
-                                {/if}
-                            </div>
-                        {/if}
-
-                        <div class="field">
-                            <span class="field-label">Days</span>
-                            <DayPicker bind:days={schedDays} />
-                            <div class="field-help">Leave empty to fire every day.</div>
-                        </div>
-
-                        <div class="field">
-                            <label for="scn-sched-rand">Random interval</label>
-                            <select id="scn-sched-rand" bind:value={schedRandomOffset}>
-                                <option value={0}>None – fire at exact time</option>
-                                <option value={5}>Up to 5 min after</option>
-                                <option value={10}>Up to 10 min after</option>
-                                <option value={15}>Up to 15 min after</option>
-                                <option value={30}>Up to 30 min after</option>
-                                <option value={60}>Up to 60 min after</option>
-                            </select>
-                            <div class="field-help">Fires at a random time within the chosen window.</div>
-                        </div>
+                {#if rules.length === 0}
+                    <div class="rules-empty">
+                        <div class="rules-empty-icon"><Icon name="automation" size={28} /></div>
+                        <div class="rules-empty-title">No rules yet</div>
+                        <div class="rules-empty-sub">Rules fire automatically — each with its own trigger and device actions. The scene can still be activated manually from the Scenes screen.</div>
                     </div>
                 {/if}
 
-                <!-- ── Trigger / automation config ─────────────── -->
-                {#if activationMode === "trigger"}
-                    <div class="act-config">
-                        <div class="act-config-head">
-                            <Icon name="automation" size={15} />
-                            Automation configuration
+                {#each rules as rule, ri (rule._key)}
+                    <div class="rule-card">
+                        <div class="rule-header">
+                            <span class="rule-badge">Rule {ri + 1}</span>
+                            <button type="button" class="rule-remove"
+                                onclick={() => removeRule(ri)}
+                                aria-label="Remove rule {ri + 1}">
+                                <Icon name="trash" size={14} />
+                            </button>
                         </div>
 
-                        <div class="field">
-                            <label for="scn-auto-name">Automation name</label>
-                            <input id="scn-auto-name" type="text" bind:value={autoName}
-                                placeholder="{name.trim() || 'My scene'} trigger"
-                                maxlength="60" autocomplete="off" />
-                        </div>
+                        <div class="rule-inner">
+                            <!-- WHEN block -->
+                            <div class="block when">
+                                <div class="block-head"><span class="tag cool">When</span></div>
+                                <Segmented name="rule-{ri}-trigtype" bind:value={rule.trigType}
+                                    options={[
+                                        { value: "time",   label: "Time" },
+                                        { value: "sensor", label: "Sensor", disabled: v.sensors.length === 0 },
+                                        { value: "device", label: "Device", disabled: v.sockets.length === 0 },
+                                    ]} />
 
-                        <div class="block when">
-                            <div class="block-head"><span class="tag cool">When</span></div>
-                            <Segmented name="scn-trig-type" bind:value={trigType}
-                                options={[
-                                    { value: "time",   label: "Time" },
-                                    { value: "sensor", label: "Sensor", disabled: v.sensors.length === 0 },
-                                    { value: "device", label: "Device", disabled: v.sockets.length === 0 },
-                                ]} />
-
-                            {#if trigType === "time"}
-                                <div class="field mt">
-                                    <Segmented name="scn-trig-timemode" bind:value={trigTimeMode}
-                                        options={[
-                                            { value: "fixed",   label: "Fixed" },
-                                            { value: "sunrise", label: "Sunrise" },
-                                            { value: "sunset",  label: "Sunset" },
-                                        ]} />
-                                </div>
-                                {#if trigTimeMode === "fixed"}
+                                {#if rule.trigType === "time"}
                                     <div class="field mt">
-                                        <label for="scn-trig-time">Time</label>
-                                        <input id="scn-trig-time" type="time" bind:value={trigTime} required />
+                                        <Segmented name="rule-{ri}-timemode" bind:value={rule.trigTimeMode}
+                                            options={[
+                                                { value: "fixed",   label: "Fixed" },
+                                                { value: "sunrise", label: "Sunrise" },
+                                                { value: "sunset",  label: "Sunset" },
+                                            ]} />
                                     </div>
-                                {:else}
-                                    <div class="field mt">
-                                        <label for="scn-trig-solar">Offset (minutes)</label>
-                                        <input id="scn-trig-solar" type="range"
-                                            min="-120" max="120" step="5"
-                                            bind:value={trigSolarOffset} />
-                                        <div class="solar-summary">
-                                            {trigSolarLabel}
+                                    {#if rule.trigTimeMode === "fixed"}
+                                        <div class="field mt">
+                                            <label for="rule-{ri}-time">Time</label>
+                                            <input id="rule-{ri}-time" type="time" bind:value={rule.trigTime} required />
                                         </div>
-                                        {#if !hasLocation}
-                                            <div class="field-help warn">Set a location in Settings for solar triggers to fire.</div>
+                                    {:else}
+                                        <div class="field mt">
+                                            <label for="rule-{ri}-solar">Offset</label>
+                                            <input id="rule-{ri}-solar" type="range" min="-120" max="120" step="5"
+                                                bind:value={rule.trigSolarOffset} />
+                                            <div class="solar-summary">{solarSummary(rule.trigTimeMode, rule.trigSolarOffset)}</div>
+                                            {#if !hasLocation}
+                                                <div class="field-help warn">Set a location in Settings for solar triggers to fire.</div>
+                                            {/if}
+                                        </div>
+                                    {/if}
+                                    <div class="field mt">
+                                        <span class="field-label">On days</span>
+                                        <DayPicker bind:days={rule.trigDays} />
+                                        <div class="field-help">Leave empty for every day.</div>
+                                    </div>
+
+                                {:else if rule.trigType === "sensor"}
+                                    <div class="field-row mt">
+                                        <div class="field">
+                                            <label for="rule-{ri}-sensor">Sensor</label>
+                                            <select id="rule-{ri}-sensor" bind:value={rule.trigSensorId}>
+                                                {#each v.sensors as s (s.id)}<option value={s.id}>{s.name}</option>{/each}
+                                            </select>
+                                        </div>
+                                        <div class="field">
+                                            <label for="rule-{ri}-op">Crosses</label>
+                                            <select id="rule-{ri}-op" bind:value={rule.trigOp}>
+                                                <option value="above">Above</option>
+                                                <option value="below">Below</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                    <div class="field mt">
+                                        <label for="rule-{ri}-val">Threshold{v.sensors.find(s => s.id === rule.trigSensorId)?.unit ? ` (${v.sensors.find(s => s.id === rule.trigSensorId)?.unit})` : ""}</label>
+                                        <input id="rule-{ri}-val" type="number" step="0.1" bind:value={rule.trigValue} />
+                                    </div>
+
+                                {:else}
+                                    <div class="field-row mt">
+                                        <div class="field">
+                                            <label for="rule-{ri}-dev">Device</label>
+                                            <select id="rule-{ri}-dev" bind:value={rule.trigSocketId}>
+                                                {#each v.sockets as s (s.id)}<option value={s.id}>{s.name}</option>{/each}
+                                            </select>
+                                        </div>
+                                        <div class="field">
+                                            <label for="rule-{ri}-state">Turns</label>
+                                            <select id="rule-{ri}-state" bind:value={rule.trigToState}>
+                                                <option value="on">On</option>
+                                                <option value="off">Off</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                {/if}
+                            </div>
+
+                            <!-- THEN block -->
+                            <div class="block then">
+                                <div class="block-head">
+                                    <span class="tag on">Then</span>
+                                    <button type="button" class="chip sm"
+                                        onclick={() => addRuleAction(ri)}>
+                                        <Icon name="plus" size={12} /> Action
+                                    </button>
+                                </div>
+                                {#each rule.actions as a, ai (ai)}
+                                    <div class="rowcard">
+                                        <div class="field-row">
+                                            <div class="field">
+                                                <select bind:value={a.target_type}>
+                                                    <option value="socket" disabled={v.sockets.length === 0}>Device</option>
+                                                    <option value="group"  disabled={v.groups.length === 0}>Group</option>
+                                                    <option value="scene"  disabled={v.scenes.length === 0}>Scene</option>
+                                                </select>
+                                            </div>
+                                            <div class="field">
+                                                <select bind:value={a.target_id}>
+                                                    {#each targetsFor(a.target_type) as t (t.id)}<option value={t.id}>{t.label}</option>{/each}
+                                                </select>
+                                            </div>
+                                        </div>
+                                        <div class="field mt-sm" style:opacity={a.target_type === "scene" ? 0.6 : 1}>
+                                            <select bind:value={a.action} disabled={a.target_type === "scene"}>
+                                                {#if a.target_type === "scene"}
+                                                    <option value="activate">Activate</option>
+                                                {:else}
+                                                    <option value="on">Turn on</option>
+                                                    <option value="off">Turn off</option>
+                                                    <option value="toggle">Toggle</option>
+                                                {/if}
+                                            </select>
+                                        </div>
+                                        {#if a.target_type === "socket" && a.action === "on" && isSmart(v.sockets.find(s => s.id === a.target_id)?.protocol ?? "")}
+                                            <div class="action-light-row">
+                                                <div class="bright">
+                                                    <span class="bright-ico"><Icon name="sun" size={14} /></span>
+                                                    <input type="range" min="1" max="100" step="1"
+                                                        bind:value={a.level}
+                                                        aria-label="Brightness" />
+                                                    <span class="bright-val mono">{a.level ?? 100}%</span>
+                                                </div>
+                                                <div class="swatches">
+                                                    {#each COLOURS as c (c.name)}
+                                                        <button type="button" class="swatch"
+                                                            class:active={(a.color ?? "") === c.hex}
+                                                            class:auto={c.hex === ""}
+                                                            style={c.hex ? `background:#${c.hex}` : ""}
+                                                            title={c.name}
+                                                            aria-label="{c.name} color"
+                                                            onclick={() => a.color = c.hex}>
+                                                            {#if c.hex === ""}<Icon name="close" size={12} />{/if}
+                                                        </button>
+                                                    {/each}
+                                                </div>
+                                            </div>
+                                        {/if}
+                                        {#if rule.actions.length > 1}
+                                            <button type="button" class="row-remove"
+                                                onclick={() => removeRuleAction(ri, ai)}
+                                                aria-label="Remove action">
+                                                <Icon name="trash" size={14} /> Remove
+                                            </button>
                                         {/if}
                                     </div>
-                                {/if}
-                                <div class="field mt">
-                                    <span class="field-label">On days</span>
-                                    <DayPicker bind:days={trigDays} />
-                                    <div class="field-help">Leave empty for every day.</div>
-                                </div>
-
-                            {:else if trigType === "sensor"}
-                                <div class="field-row mt">
-                                    <div class="field">
-                                        <label for="scn-trig-sensor">Sensor</label>
-                                        <select id="scn-trig-sensor" bind:value={trigSensorId}>
-                                            {#each v.sensors as s (s.id)}
-                                                <option value={s.id}>{s.name}</option>
-                                            {/each}
-                                        </select>
-                                    </div>
-                                    <div class="field">
-                                        <label for="scn-trig-op">Crosses</label>
-                                        <select id="scn-trig-op" bind:value={trigOp}>
-                                            <option value="above">Above</option>
-                                            <option value="below">Below</option>
-                                        </select>
-                                    </div>
-                                </div>
-                                <div class="field mt">
-                                    <label for="scn-trig-val">Threshold{v.sensors.find(s => s.id === trigSensorId)?.unit ? ` (${v.sensors.find(s => s.id === trigSensorId)?.unit})` : ""}</label>
-                                    <input id="scn-trig-val" type="number" step="0.1" bind:value={trigValue} />
-                                </div>
-
-                            {:else}
-                                <!-- device trigger -->
-                                <div class="field-row mt">
-                                    <div class="field">
-                                        <label for="scn-trig-dev">Device</label>
-                                        <select id="scn-trig-dev" bind:value={trigSocketId}>
-                                            {#each v.sockets as s (s.id)}
-                                                <option value={s.id}>{s.name}</option>
-                                            {/each}
-                                        </select>
-                                    </div>
-                                    <div class="field">
-                                        <label for="scn-trig-state">Turns</label>
-                                        <select id="scn-trig-state" bind:value={trigToState}>
-                                            <option value="on">On</option>
-                                            <option value="off">Off</option>
-                                        </select>
-                                    </div>
-                                </div>
-                            {/if}
+                                {/each}
+                            </div>
                         </div>
                     </div>
-                {/if}
+                {/each}
+
+                <button type="button" class="add-rule-btn" onclick={addRule}>
+                    <Icon name="plus" size={15} />
+                    Add rule
+                </button>
             </div>
         {/if}
     {/snippet}
@@ -700,8 +744,8 @@
     {#snippet actions()}
         {#if wizardStep === 1}
             <button class="btn btn-ghost" onclick={() => closeModal()}>Cancel</button>
-            <button class="btn btn-primary" onclick={advanceToActivation}>
-                Next: Activation
+            <button class="btn btn-primary" onclick={advanceToRules}>
+                Next: Rules
                 <span class="next-arrow" aria-hidden="true"><Icon name="chevronDown" size={15} /></span>
             </button>
         {:else}
@@ -803,7 +847,6 @@
         flex: 1;
         min-width: 0;
     }
-    /* Inline timing row for steps 2+ */
     .step-timing {
         display: flex;
         align-items: center;
@@ -845,15 +888,11 @@
         flex-direction: column;
         padding: 4px;
     }
-
-    /* Hairline separator between rows, indented past the bulb icon */
     .row-sep {
         height: 1px;
         background: var(--separator);
         margin: 0 12px 0 58px;
     }
-
-    /* Each device is a flex column: main row + optional light controls */
     .picker-row {
         display: flex;
         flex-direction: column;
@@ -862,8 +901,6 @@
         transition: background var(--t-fast);
     }
     .picker-row.row-on { background: var(--primary-soft); }
-
-    /* Inner flex row: bulb · info · state buttons */
     .row-main {
         display: flex;
         align-items: center;
@@ -871,8 +908,6 @@
         padding: 10px 12px;
         min-height: 48px;
     }
-
-    /* Circular bulb state indicator */
     .row-bulb {
         width: 30px;
         height: 30px;
@@ -893,7 +928,6 @@
         background: var(--surface-hover);
         color: var(--text-faint);
     }
-
     .row-info {
         flex: 1;
         min-width: 0;
@@ -945,26 +979,22 @@
         background: var(--surface-hover);
         color: var(--text);
     }
-    /* Default active state (ignore) */
     .state-btn.s-active {
         background: var(--card-3);
         color: var(--text);
         box-shadow: var(--shadow-sm);
     }
-    /* On active — amber tint */
     .state-btn.s-on.s-active {
         background: var(--primary-soft);
         color: var(--primary);
         box-shadow: none;
     }
-    /* Off active — neutral (uses .s-active base) */
 
-    /* ── Smart-light controls (lives inside .picker-row) ─────────── */
+    /* ── Smart-light controls (scene steps) ──────────────────────── */
     .light-row {
         display: flex;
         flex-direction: column;
         gap: 8px;
-        /* Indent to align with device name: 12px pad + 30px bulb + 12px gap */
         padding: 0 12px 12px 54px;
     }
     .bright { display: flex; align-items: center; gap: 8px; }
@@ -1009,93 +1039,146 @@
         color: var(--text);
         border-color: var(--text-muted);
     }
-
     .steps-err  { margin-top: 6px; }
     .steps-hint { margin-top: 6px; }
 
-    /* ── Activation section (step 2) ─────────────────────────────── */
-    .act-section {
+    /* ── Rules section (step 2) ───────────────────────────────────── */
+    .rules-section {
         display: flex;
         flex-direction: column;
-        gap: var(--space-4);
+        gap: 12px;
     }
 
-    .act-cards {
-        display: grid;
-        grid-template-columns: repeat(3, 1fr);
-        gap: 10px;
-    }
-    .act-card {
+    .rules-empty {
         display: flex;
         flex-direction: column;
-        align-items: flex-start;
-        gap: 10px;
-        padding: 14px;
-        border: 2px solid var(--border);
-        border-radius: var(--radius-md);
-        background: var(--surface);
-        cursor: pointer;
-        text-align: left;
-        transition: border-color var(--t-fast), background var(--t-fast), box-shadow var(--t-fast);
+        align-items: center;
+        text-align: center;
+        gap: 8px;
+        padding: 32px 24px;
+        border: 1px dashed var(--border);
+        border-radius: var(--r-md);
     }
-    .act-card:hover {
-        background: var(--surface-hover);
-        border-color: var(--border-strong);
-    }
-    .act-card.act-selected {
-        border-color: var(--primary);
-        background: var(--primary-soft);
-        box-shadow: 0 0 0 1px var(--primary);
+    .rules-empty-icon { color: var(--text-dim); }
+    .rules-empty-title { font-size: 14px; font-weight: 500; color: var(--text-mute); }
+    .rules-empty-sub {
+        font-size: 12.5px;
+        color: var(--text-dim);
+        line-height: 1.5;
+        max-width: 340px;
     }
 
-    .act-icon {
-        display: inline-flex;
-        padding: 8px;
-        border-radius: var(--radius-sm);
-        background: var(--card-3);
-        color: var(--text-muted);
-        flex-shrink: 0;
-        transition: background var(--t-fast), color var(--t-fast);
-    }
-    .act-card.act-selected .act-icon { background: var(--primary-soft); color: var(--primary); }
-
-    /* Subtle tint per method so the icons are recognisable at a glance */
-    .act-icon-schedule { background: var(--info-soft); color: var(--info); }
-    .act-card.act-selected .act-icon-schedule { background: var(--info-soft); color: var(--info); }
-    .act-icon-trigger  { background: var(--warn-soft); color: var(--warn); }
-    .act-card.act-selected .act-icon-trigger { background: var(--warn-soft); color: var(--warn); }
-
-    .act-card-body { display: flex; flex-direction: column; gap: 3px; }
-    .act-title {
-        font-size: 13px;
-        font-weight: 600;
-        color: var(--text);
-    }
-    .act-desc {
-        font-size: 12px;
-        color: var(--text-muted);
-        line-height: 1.45;
-    }
-
-    /* ── Activation config block ─────────────────────────────────── */
-    .act-config {
+    .rule-card {
         border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-        padding: var(--space-4);
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-4);
-        animation: slideDown 0.15s ease both;
+        border-radius: var(--r-md);
+        overflow: hidden;
     }
-    .act-config-head {
+    .rule-header {
         display: flex;
         align-items: center;
-        gap: 6px;
-        font-size: 12px;
+        justify-content: space-between;
+        padding: 8px 12px;
+        background: var(--card-3);
+        border-bottom: 1px solid var(--border);
+    }
+    .rule-badge {
+        font-family: var(--font-mono);
+        font-size: 11px;
         font-weight: 600;
-        color: var(--text-muted);
         text-transform: uppercase;
-        letter-spacing: 0.06em;
+        letter-spacing: 0.08em;
+        color: var(--text-mute);
+    }
+    .rule-remove {
+        background: transparent;
+        border: 0;
+        padding: 4px 6px;
+        cursor: pointer;
+        color: var(--text-dim);
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        border-radius: var(--r-sm);
+        font-size: 12px;
+        transition: background var(--t-fast), color var(--t-fast);
+        min-width: 32px;
+        min-height: 32px;
+        justify-content: center;
+    }
+    .rule-remove:hover { background: var(--surface-hover); color: var(--bad); }
+
+    .rule-inner {
+        padding: var(--space-3);
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-3);
+    }
+
+    /* ── Shared block styles (WHEN / THEN) ───────────────────────── */
+    .block {
+        border: 1px solid var(--hairline);
+        border-radius: var(--r-md);
+        padding: var(--space-3);
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-2);
+    }
+    .block.when { border-left: 3px solid var(--cool); }
+    .block.then { border-left: 3px solid var(--on); }
+    .block-head { display: flex; align-items: center; justify-content: space-between; }
+    .tag {
+        font-family: var(--font-mono);
+        font-size: 11px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--text-mute);
+    }
+    .tag.cool { color: var(--cool); }
+    .tag.on   { color: var(--on); }
+    .mt    { margin-top: var(--space-3); }
+    .mt-sm { margin-top: var(--space-2); }
+
+    .chip.sm {
+        padding: 4px 10px;
+        font-size: 12px;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        background: var(--card-2);
+        border: 1px solid var(--hairline);
+        border-radius: var(--r-pill);
+        color: var(--text-mute);
+        transition: background var(--t-fast), color var(--t-fast);
+    }
+    .chip.sm:hover { background: var(--card-3); color: var(--text); }
+
+    /* ── Action row cards ────────────────────────────────────────── */
+    .rowcard {
+        background: var(--card-2);
+        border: 1px solid var(--hairline);
+        border-radius: var(--r-sm);
+        padding: var(--space-3);
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-2);
+    }
+    .row-remove {
+        align-self: flex-end;
+        display: inline-flex; align-items: center; gap: 4px;
+        background: none; border: 0; cursor: pointer;
+        color: var(--text-mute); font-size: 12px; padding: 2px 4px;
+        border-radius: var(--r-sm);
+        transition: color var(--t-fast);
+    }
+    .row-remove:hover { color: var(--bad); }
+
+    /* ── Smart-light controls (rule actions) ─────────────────────── */
+    .action-light-row {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        padding-top: var(--space-2);
     }
 
     .solar-summary {
@@ -1106,71 +1189,60 @@
     }
     .field-help.warn { color: var(--warn, var(--danger)); }
 
-    /* Automation "when" block (matches AutomationModal style) */
-    .block {
-        border: 1px solid var(--hairline);
+    /* ── Add rule button ──────────────────────────────────────────── */
+    .add-rule-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 10px 14px;
+        border: 1px dashed var(--border-strong);
         border-radius: var(--r-md);
-        padding: var(--space-3);
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-2);
+        background: transparent;
+        color: var(--text-muted);
+        font-size: 13px;
+        cursor: pointer;
+        touch-action: manipulation;
+        width: 100%;
+        justify-content: center;
+        transition: background var(--t-fast), color var(--t-fast), border-color var(--t-fast);
+        min-height: 44px;
     }
-    .block.when { border-left: 3px solid var(--cool); }
-    .block-head { display: flex; align-items: center; justify-content: space-between; }
-    .tag {
-        font-family: var(--font-mono);
-        font-size: 11px;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
-        color: var(--text-mute);
+    .add-rule-btn:hover {
+        background: var(--surface-hover);
+        color: var(--text);
+        border-color: var(--text-muted);
     }
-    .tag.cool { color: var(--cool); }
-    .mt { margin-top: var(--space-3); }
 
-    /* Rotated chevron used on the "Next" button */
+    /* Rotated chevron on "Next" button */
     .next-arrow {
         display: inline-flex;
         transform: rotate(-90deg);
         margin-left: 4px;
     }
 
-    @keyframes slideDown {
-        from { opacity: 0; transform: translateY(-5px); }
-        to   { opacity: 1; transform: translateY(0);    }
-    }
+    /* ── Reduced motion ───────────────────────────────────────────── */
     @media (prefers-reduced-motion: reduce) {
-        .act-config { animation-duration: 0.001ms; }
-        .wiz-dot, .wiz-line, .act-card { transition-duration: 0.001ms; }
+        .wiz-dot, .wiz-line { transition-duration: 0.001ms; }
         .row-bulb, .picker-row, .state-btn { transition-duration: 0.001ms; }
+        .rule-card, .add-rule-btn, .add-step-btn { transition-duration: 0.001ms; }
     }
 
     /* ── Mobile layout ───────────────────────────────────────────── */
     @media (max-width: 600px) {
-        .act-cards { grid-template-columns: 1fr; gap: 8px; }
-        .act-card {
-            flex-direction: row;
-            align-items: center;
-            gap: 12px;
-            padding: 12px;
-        }
-        .act-card-body { gap: 2px; }
-        /* Picker rows: ensure 44px minimum touch target */
         .row-main { min-height: 52px; padding: 10px; }
-        /* 3-state buttons: bigger tap area on touch */
         .state-btn { padding: 7px 10px; font-size: 12px; min-height: 36px; }
-        /* Delay input: 16px prevents iOS zoom */
         .delay-input { font-size: 16px; padding: 5px 8px; }
         .remove-step { min-width: 44px; min-height: 44px; }
         .add-step-btn { min-height: 44px; }
         .swatch { width: 28px; height: 28px; }
         .bright input[type="range"] { height: 28px; }
-        /* Light controls: tighter indent on narrow screens */
         .light-row { padding: 0 10px 12px 52px; }
+        .rule-remove { min-width: 44px; min-height: 44px; }
     }
     @media (pointer: coarse) {
-        .act-card { min-height: 44px; }
         input[type="range"] { height: 28px; }
         .swatch { width: 30px; height: 30px; }
         .state-btn { min-height: 34px; }
+        .rule-remove { min-width: 44px; min-height: 44px; }
     }
 </style>

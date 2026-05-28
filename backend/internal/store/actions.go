@@ -236,6 +236,16 @@ func (s *Store) PruneAutomationsForTarget(targetType, targetID string) {
 	}
 }
 
+// DeleteAutomationsOwnedByScene removes all automations that were created as
+// rules for a specific scene (SceneID matches). Caller must hold Mu.
+func (s *Store) DeleteAutomationsOwnedByScene(sceneID string) {
+	for id, a := range s.Automations {
+		if a.SceneID == sceneID {
+			delete(s.Automations, id)
+		}
+	}
+}
+
 func filterActions(in []AutomationAction, targetType, targetID string) []AutomationAction {
 	out := in[:0]
 	for _, act := range in {

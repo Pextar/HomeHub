@@ -98,6 +98,9 @@ type AutomationAction struct {
 // Automation is a trigger → optional conditions → ordered actions rule.
 // Unlike a Schedule (time-only), an automation can react to sensor
 // thresholds and device-state changes. Evaluated by the scheduler tick.
+//
+// SceneID, when set, marks this automation as belonging to a specific scene.
+// These automations are deleted automatically when their parent scene is deleted.
 type Automation struct {
 	ID          string                `json:"id"`
 	Name        string                `json:"name"`
@@ -107,6 +110,7 @@ type Automation struct {
 	Actions     []AutomationAction    `json:"actions"`
 	LastFiredAt time.Time             `json:"last_fired_at,omitempty"`
 	RunCount    int                   `json:"run_count,omitempty"`
+	SceneID     string                `json:"scene_id,omitempty"`
 }
 
 // NotifPrefs controls which event categories trigger push notifications for
