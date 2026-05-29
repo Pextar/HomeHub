@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { onMount, tick } from "svelte";
     import Icon from "../components/Icon.svelte";
     import { data, toasts, route } from "../lib/stores.svelte";
     import { api } from "../lib/api";
@@ -37,6 +38,45 @@
         return `${ns}/${name}`;
     }
 
+    // ── Live brightness ───────────────────────────────────────────────
+    // Smart lights (Tasmota/Matter) carry a 0-100 level the base Socket type
+    // doesn't, so fetch it per-device and key it by socket id. Best-effort:
+    // unreachable lights simply drop out and fall back to a binary bar.
+    let levels = $state<Record<string, number>>({});
+    let levelsBusy = false;
+    async function refreshLevels() {
+        if (levelsBusy) return;
+        levelsBusy = true;
+        try {
+            const smart = v.sockets.filter((s) => s.protocol === "tasmota" || s.protocol.startsWith("matter"));
+            const results = await Promise.allSettled(smart.map(async (s) => {
+                if (s.protocol === "tasmota") {
+                    const st = await api.tasmotaGetState(s.id);
+                    return [s.id, st.dimmer ?? (st.on ? 100 : 0)] as const;
+                }
+                const st = await api.matterGetState(s.id);
+                return [s.id, st.level ?? (st.on ? 100 : 0)] as const;
+            }));
+            const next: Record<string, number> = {};
+            for (const r of results) if (r.status === "fulfilled" && r.value[1] != null) next[r.value[0]] = r.value[1];
+            levels = next;
+        } finally {
+            levelsBusy = false;
+        }
+    }
+    // Refetch on mount and whenever the smart-light set or on/off states
+    // change. Dimming keeps a light "on", so runLine also refetches directly.
+    $effect(() => {
+        const sig = v.sockets.filter((s) => s.protocol === "tasmota" || s.protocol.startsWith("matter"))
+            .map((s) => s.id + (s.state ? "1" : "0")).join(",");
+        void sig;
+        refreshLevels();
+    });
+    onMount(() => {
+        const id = setInterval(refreshLevels, 30_000);
+        return () => clearInterval(id);
+    });
+
     // ── Live event tail ───────────────────────────────────────────────
     // Server activity (real) plus a local echo of commands typed here, so
     // feedback is immediate without waiting for the next refresh.
@@ -69,11 +109,32 @@
             m: e.error ? `${e.label}: ${e.error}` : `${e.label}${e.action ? ` → ${e.action}` : ""}`,
         })),
     );
-    const tail = $derived([...localLog, ...serverLog].slice(0, 60));
+    // Most recent 60 events, oldest → newest so the freshest sits at the
+    // bottom, next to the prompt — like a real terminal.
+    const tail = $derived([...localLog, ...serverLog].slice(0, 60).reverse());
+
+    // Auto-scroll the log to the newest line, but only when the user is
+    // already parked near the bottom (so scrolling up to read isn't yanked).
+    let scrollEl = $state<HTMLElement>();
+    let stick = $state(false);
+    function onScroll() {
+        if (!scrollEl) return;
+        stick = scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight < 48;
+    }
+    async function scrollToBottom() {
+        await tick();
+        if (scrollEl) scrollEl.scrollTop = scrollEl.scrollHeight;
+    }
+    $effect(() => {
+        void tail;
+        if (stick) scrollToBottom();
+    });
 
     // ── Command bar ───────────────────────────────────────────────────
     let cmd = $state("");
     let busy = $state(false);
+    let focused = $state(false);
+    let inputEl = $state<HTMLInputElement>();
 
     type Action = "on" | "off" | "toggle";
 
@@ -387,6 +448,9 @@
             busy = false;
             cmd = "";
             acReset();
+            stick = true;
+            void scrollToBottom();
+            void refreshLevels();
         }
     }
 
@@ -472,23 +536,26 @@
         </div>
     </div>
 
-    <div class="scroll">
+    <div class="scroll" bind:this={scrollEl} onscroll={onScroll}>
         <!-- devices -->
         <div class="sec-head mono"># DEVICES</div>
         {#if devices.length === 0}
             <div class="muted mono">no devices configured</div>
         {:else}
             <div class="row head-row mono">
-                <span></span><span>HOST</span><span class="r">STATE</span><span>LEVEL</span>
+                <span></span><span>HOST</span><span class="r">VAL</span><span>LEVEL</span>
             </div>
             {#each devices as d (d.id)}
+                {@const lvl = levels[d.id]}
+                {@const pct = d.state ? (lvl ?? 100) : 0}
+                {@const filled = Math.round(pct / 10)}
                 <div class="row mono" class:dim={!d.state}>
                     <span class="led" data-on={d.state}>{d.state ? "●" : "○"}</span>
                     <span class="host">
                         <span class="proto" style:color={PROTO_COLOR[protoKey(d.protocol)]}>{protoKey(d.protocol).padEnd(6)}</span><span class="hostname">{hostOf(d)}</span>
                     </span>
-                    <span class="r state" data-on={d.state}>{d.state ? "ON" : "--"}</span>
-                    <span class="bar" data-on={d.state}>{d.state ? "██████████" : "░░░░░░░░░░"}</span>
+                    <span class="r state" data-on={d.state}>{!d.state ? "--" : lvl != null ? `${lvl}%` : "ON"}</span>
+                    <span class="bar" data-on={d.state}>{"█".repeat(filled)}{"░".repeat(10 - filled)}</span>
                 </div>
             {/each}
         {/if}
@@ -515,13 +582,18 @@
                 <button class="qchip mono" onclick={() => runLine(q)} disabled={busy}>{q}</button>
             {/each}
         </div>
-        <div class="cmdline">
+        <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+        <div class="cmdline" onclick={() => inputEl?.focus()}>
             <span class="caret mono">›</span>
+            {#if !focused && !cmd}<span class="blink" aria-hidden="true"></span>{/if}
             <input
+                bind:this={inputEl}
                 class="cmdinput mono"
                 type="text"
                 bind:value={cmd}
                 onkeydown={onKey}
+                onfocus={() => (focused = true)}
+                onblur={() => (focused = false)}
                 placeholder="set lamp 60% · kitchen off and hall off · ↑ history · Tab · help"
                 aria-label="Console command"
                 autocomplete="off"
@@ -678,14 +750,26 @@
     }
     .qchip:hover { background: var(--on-soft); }
     .qchip:disabled { opacity: 0.5; cursor: not-allowed; }
-    .cmdline { display: flex; align-items: center; gap: 8px; }
+    .cmdline { display: flex; align-items: center; gap: 8px; cursor: text; }
     .caret { color: var(--on); font-size: 14px; }
+    /* Idle terminal cursor — shown only when unfocused and empty. While the
+       field is focused the native (amber) caret takes over. */
+    .blink {
+        width: 8px;
+        height: 15px;
+        background: var(--on);
+        flex-shrink: 0;
+        animation: blink 1.1s steps(2) infinite;
+    }
+    @keyframes blink { 50% { opacity: 0; } }
+    @media (prefers-reduced-motion: reduce) { .blink { animation: none; } }
     .cmdinput {
         flex: 1;
         background: transparent;
         border: none;
         padding: 6px 0;
         color: var(--text);
+        caret-color: var(--on);
         font-size: 13px;
     }
     .cmdinput::placeholder { color: var(--text-dim); }
