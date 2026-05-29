@@ -32,7 +32,7 @@
         { hex: "7aa4d9", name: "Cool" },
     ];
 
-    // ── Scene step state ───────────────────────────────────────────────
+    // ── Snapshot (manual activation) state ────────────────────────────
     type StepState = {
         delay_minutes: number;
         perSocket: Record<string, "ignore" | "on" | "off">;
@@ -65,9 +65,7 @@
     }
 
     let steps = $state<StepState[]>(untrack(() => {
-        if (existing?.steps?.length) {
-            return existing.steps.map(stepFromSceneStep);
-        }
+        if (existing?.steps?.length) return existing.steps.map(stepFromSceneStep);
         if (existing?.actions?.length) {
             const step = blankStepState(0);
             for (const a of existing.actions) {
@@ -80,15 +78,44 @@
         return [blankStepState(0)];
     }));
 
-    let name = $state(untrack(() => existing?.name ?? ""));
-    let saving = $state(false);
-    let nameError = $state("");
-    let stepsError = $state("");
+    // Auto-expand snapshot section if the existing scene has configured devices.
+    const existingHasSnapshot = untrack(() =>
+        !!(existing?.steps?.some(s => s.actions.length > 0) || existing?.actions?.length)
+    );
+    let snapshotOpen = $state(existingHasSnapshot);
 
-    // ── Wizard state ───────────────────────────────────────────────────
-    let wizardStep = $state(1); // 1 = scene content, 2 = rules
+    const snapshotDeviceCount = $derived(
+        steps.flatMap(step => Object.values(step.perSocket).filter(v => v !== "ignore")).length
+    );
 
-    // ── Rule draft types ───────────────────────────────────────────────
+    function addStep() {
+        const last = steps[steps.length - 1]?.delay_minutes ?? 0;
+        steps = [...steps, blankStepState(last + 60)];
+    }
+
+    function removeStep(i: number) {
+        steps = steps.filter((_, idx) => idx !== i);
+    }
+
+    function buildSteps() {
+        return steps.map(step => ({
+            delay_minutes: step.delay_minutes,
+            actions: Object.entries(step.perSocket)
+                .filter(([, v]) => v !== "ignore")
+                .map(([socket_id, action]) => {
+                    const a: { socket_id: string; action: "on" | "off"; level?: number; color?: string } =
+                        { socket_id, action: action as "on" | "off" };
+                    const sock = sockets.find(s => s.id === socket_id);
+                    if (action === "on" && sock && isSmart(sock.protocol)) {
+                        a.level = step.levels[socket_id];
+                        if (step.colors[socket_id]) a.color = step.colors[socket_id];
+                    }
+                    return a;
+                }),
+        })).filter(s => s.actions.length > 0);
+    }
+
+    // ── Rule state ─────────────────────────────────────────────────────
     type RuleActionDraft = {
         target_type: TargetType;
         target_id: string;
@@ -99,7 +126,7 @@
 
     type RuleDraft = {
         _key: string;
-        automationId: string; // "" = new; non-empty = existing automation ID to update
+        automationId: string;
         trigType: AutomationTriggerType;
         trigTimeMode: string;
         trigTime: string;
@@ -186,7 +213,6 @@
         return [];
     }));
 
-    // Seed stale/missing target IDs whenever rules change.
     $effect(() => {
         for (const rule of rules) {
             for (const a of rule.actions) {
@@ -198,70 +224,16 @@
         }
     });
 
-    function addRule() {
-        rules = [...rules, blankRule()];
-    }
-
-    function removeRule(i: number) {
-        rules = rules.filter((_, idx) => idx !== i);
-    }
-
+    function addRule() { rules = [...rules, blankRule()]; }
+    function removeRule(i: number) { rules = rules.filter((_, idx) => idx !== i); }
     function addRuleAction(ri: number) {
-        rules[ri].actions = [
-            ...rules[ri].actions,
-            { target_type: firstTargetType(), target_id: "", action: "on", level: 100, color: "" },
-        ];
+        rules[ri].actions = [...rules[ri].actions,
+            { target_type: firstTargetType(), target_id: "", action: "on", level: 100, color: "" }];
     }
-
     function removeRuleAction(ri: number, ai: number) {
         rules[ri].actions = rules[ri].actions.filter((_, idx) => idx !== ai);
     }
 
-    // Dynamic modal title / subtitle per wizard step
-    const modalTitle = $derived(
-        wizardStep === 1
-            ? (isEdit ? "Edit scene" : "New scene")
-            : "Automated rules"
-    );
-    const modalSubtitle = $derived(
-        wizardStep === 1
-            ? (isEdit
-                ? "Adjust device settings and timing for this scene."
-                : "A scene can drive devices through multiple timed steps — even the same lamp at different dim levels.")
-            : "Add rules that fire automatically. Each rule has its own trigger and device actions — they run independently."
-    );
-
-    // ── Step management ─────────────────────────────────────────────────
-    function addStep() {
-        const last = steps[steps.length - 1]?.delay_minutes ?? 0;
-        steps = [...steps, blankStepState(last + 60)];
-        stepsError = "";
-    }
-
-    function removeStep(i: number) {
-        steps = steps.filter((_, idx) => idx !== i);
-    }
-
-    // ── Build steps payload ─────────────────────────────────────────────
-    function buildSteps() {
-        return steps.map(step => ({
-            delay_minutes: step.delay_minutes,
-            actions: Object.entries(step.perSocket)
-                .filter(([, v]) => v !== "ignore")
-                .map(([socket_id, action]) => {
-                    const a: { socket_id: string; action: "on" | "off"; level?: number; color?: string } =
-                        { socket_id, action: action as "on" | "off" };
-                    const sock = sockets.find(s => s.id === socket_id);
-                    if (action === "on" && sock && isSmart(sock.protocol)) {
-                        a.level = step.levels[socket_id];
-                        if (step.colors[socket_id]) a.color = step.colors[socket_id];
-                    }
-                    return a;
-                }),
-        })).filter(s => s.actions.length > 0);
-    }
-
-    // ── Build rule payload ──────────────────────────────────────────────
     function buildRulePayload(rule: RuleDraft, sceneId: string, sceneName: string, idx: number): Partial<Automation> {
         let trigger: AutomationTrigger;
         if (rule.trigType === "time") {
@@ -273,18 +245,9 @@
                 days: rule.trigDays,
             };
         } else if (rule.trigType === "sensor") {
-            trigger = {
-                type: "sensor",
-                sensor_id: rule.trigSensorId,
-                op: rule.trigOp,
-                value: Number(rule.trigValue),
-            };
+            trigger = { type: "sensor", sensor_id: rule.trigSensorId, op: rule.trigOp, value: Number(rule.trigValue) };
         } else {
-            trigger = {
-                type: "device",
-                socket_id: rule.trigSocketId,
-                to_state: rule.trigToState,
-            };
+            trigger = { type: "device", socket_id: rule.trigSocketId, to_state: rule.trigToState };
         }
         const actions: AutomationAction[] = rule.actions.map(a => {
             const base: AutomationAction = {
@@ -298,45 +261,28 @@
             }
             return base;
         });
-        return {
-            name: `${sceneName} – rule ${idx + 1}`,
-            enabled: true,
-            trigger,
-            conditions: [],
-            actions,
-            scene_id: sceneId,
-        };
+        return { name: `${sceneName} – rule ${idx + 1}`, enabled: true, trigger, conditions: [], actions, scene_id: sceneId };
     }
 
-    // ── Wizard navigation ───────────────────────────────────────────────
-    function advanceToRules() {
-        nameError = name.trim() ? "" : "Give the scene a name.";
-        const builtSteps = buildSteps();
-        stepsError = builtSteps.length === 0
-            ? "Set at least one device to On or Off in any step."
-            : "";
-        if (nameError || stepsError) return;
-        wizardStep = 2;
-    }
+    // ── Form state ─────────────────────────────────────────────────────
+    let name = $state(untrack(() => existing?.name ?? ""));
+    let saving = $state(false);
+    let nameError = $state("");
+
+    const modalTitle = $derived(isEdit ? "Edit scene" : "New scene");
+    const modalSubtitle = "Add automated rules and optionally set a manual activation snapshot.";
 
     // ── Save ────────────────────────────────────────────────────────────
     async function save() {
         if (saving) return;
-
         nameError = name.trim() ? "" : "Give the scene a name.";
-        const builtSteps = buildSteps();
-        stepsError = builtSteps.length === 0
-            ? "Set at least one device to On or Off in any step."
-            : "";
-        if (nameError || stepsError) {
-            wizardStep = 1;
-            return;
-        }
+        if (nameError) return;
 
         saving = true;
         try {
             const sceneName = name.trim();
-            const payload = { name: sceneName, steps: builtSteps };
+            // Snapshot steps are optional — send whatever is configured (may be []).
+            const payload = { name: sceneName, steps: buildSteps() };
 
             let sceneId: string;
             if (isEdit) {
@@ -347,45 +293,30 @@
                 sceneId = created.id;
             }
 
-            // Delete automations owned by this scene that were removed
+            // Delete removed rules, create / update surviving ones.
             const survivingIds = new Set(rules.map(r => r.automationId).filter(Boolean));
             for (const a of data.value.automations) {
                 if (a.scene_id === sceneId && !survivingIds.has(a.id)) {
                     try { await api.deleteAutomation(a.id); } catch (_) { /* best-effort */ }
                 }
             }
-
-            // Create / update each rule
             let ruleSaveErrors = 0;
             for (let i = 0; i < rules.length; i++) {
-                const rule = rules[i];
-                const rp = buildRulePayload(rule, sceneId, sceneName, i);
                 try {
-                    if (rule.automationId) {
-                        await api.updateAutomation(rule.automationId, rp);
-                    } else {
-                        await api.createAutomation(rp);
-                    }
-                } catch (_) {
-                    ruleSaveErrors++;
-                }
+                    const rp = buildRulePayload(rules[i], sceneId, sceneName, i);
+                    if (rules[i].automationId) await api.updateAutomation(rules[i].automationId, rp);
+                    else await api.createAutomation(rp);
+                } catch (_) { ruleSaveErrors++; }
             }
 
-            const ruleCount = rules.length;
+            const rc = rules.length;
             if (ruleSaveErrors > 0) {
-                toasts.warn(
-                    isEdit ? "Scene updated" : "Scene created",
-                    `${ruleCount - ruleSaveErrors} of ${ruleCount} rules saved — check Automations for details.`
-                );
+                toasts.warn(isEdit ? "Scene updated" : "Scene created",
+                    `${rc - ruleSaveErrors} of ${rc} rules saved.`);
             } else {
-                toasts.success(
-                    isEdit ? "Scene updated" : "Scene created",
-                    ruleCount > 0
-                        ? `${sceneName} · ${ruleCount} rule${ruleCount > 1 ? "s" : ""}`
-                        : sceneName
-                );
+                toasts.success(isEdit ? "Scene updated" : "Scene created",
+                    rc > 0 ? `${sceneName} · ${rc} rule${rc > 1 ? "s" : ""}` : sceneName);
             }
-
             closeModal();
             await data.refresh();
         } catch (e) {
@@ -398,171 +329,31 @@
 
 <Modal title={modalTitle} subtitle={modalSubtitle} size="wide">
     {#snippet body()}
-        <!-- ── Wizard step indicator ─────────────────────────────── -->
-        <div class="wizard-track" aria-label="Step {wizardStep} of 2">
-            <div class="wiz-step" class:wiz-active={wizardStep === 1} class:wiz-done={wizardStep > 1}>
-                <div class="wiz-dot">
-                    {#if wizardStep > 1}
-                        <Icon name="check" size={12} />
-                    {:else}
-                        <span class="mono">1</span>
-                    {/if}
-                </div>
-                <span class="wiz-label">Scene</span>
+        <div class="scene-form">
+
+            <!-- ── Name ─────────────────────────────────────────── -->
+            <div class="field">
+                <label for="scn-name">Name</label>
+                <input id="scn-name" type="text" bind:value={name}
+                    placeholder="e.g. Evening lighting" autocomplete="off"
+                    aria-invalid={nameError ? "true" : undefined}
+                    aria-describedby={nameError ? "scn-name-err" : undefined}
+                    oninput={() => nameError = ""} />
+                {#if nameError}<div id="scn-name-err" class="field-error">{nameError}</div>{/if}
             </div>
-            <div class="wiz-line" class:wiz-filled={wizardStep > 1}></div>
-            <div class="wiz-step" class:wiz-active={wizardStep === 2}>
-                <div class="wiz-dot"><span class="mono">2</span></div>
-                <span class="wiz-label">Rules</span>
-            </div>
-        </div>
 
-        <!-- ── Step 1: Scene content ──────────────────────────────── -->
-        {#if wizardStep === 1}
-            <form onsubmit={(e) => { e.preventDefault(); advanceToRules(); }}>
-                <div class="field">
-                    <label for="scn-name">Name</label>
-                    <input id="scn-name" type="text" bind:value={name}
-                        placeholder="e.g. Evening lighting" autocomplete="off" required
-                        aria-invalid={nameError ? "true" : undefined}
-                        aria-describedby={nameError ? "scn-name-err" : undefined}
-                        oninput={() => nameError = ""} />
-                    {#if nameError}<div id="scn-name-err" class="field-error">{nameError}</div>{/if}
+            <!-- ── Rules ─────────────────────────────────────────── -->
+            <div class="form-section">
+                <div class="form-sec-head">
+                    <span class="form-sec-label">Rules</span>
+                    <span class="form-sec-hint">Each rule fires independently on its own trigger</span>
                 </div>
-
-                <div class="steps-wrap" style="margin-top:var(--space-4)">
-                    {#each steps as step, i (i)}
-                        <div class="step-card">
-                            <div class="step-header">
-                                <span class="step-badge">Step {i + 1}</span>
-                                {#if i === 0}
-                                    <span class="step-when">Runs immediately</span>
-                                {:else}
-                                    <div class="step-timing">
-                                        <span class="timing-lbl">After</span>
-                                        <input
-                                            type="number"
-                                            class="delay-input mono"
-                                            min="1"
-                                            max="1440"
-                                            step="1"
-                                            value={step.delay_minutes}
-                                            oninput={(e) => {
-                                                const v = parseInt((e.target as HTMLInputElement).value, 10);
-                                                if (!isNaN(v) && v >= 0) step.delay_minutes = v;
-                                            }}
-                                            aria-label="Delay in minutes for step {i + 1}"
-                                        />
-                                        <span class="timing-lbl">min</span>
-                                    </div>
-                                    <button type="button" class="remove-step"
-                                        onclick={() => removeStep(i)}
-                                        aria-label="Remove step {i + 1}">
-                                        <Icon name="close" size={14} />
-                                    </button>
-                                {/if}
-                            </div>
-
-                            <div class="picker">
-                                {#each sockets as s, si (s.id)}
-                                    {@const state = step.perSocket[s.id]}
-                                    {#if si > 0}<div class="row-sep" aria-hidden="true"></div>{/if}
-                                    <div class="picker-row"
-                                        class:row-on={state === 'on'}
-                                        class:row-off={state === 'off'}>
-                                        <div class="row-main">
-                                            <div class="row-bulb"
-                                                class:bulb-on={state === 'on'}
-                                                class:bulb-off={state === 'off'}
-                                                aria-hidden="true">
-                                                <Icon name="light" size={14} />
-                                            </div>
-                                            <div class="row-info">
-                                                <span class="row-name">{s.name}</span>
-                                                <span class="row-room">{s.room || "Unassigned"}</span>
-                                            </div>
-                                            <div class="state-group" role="group"
-                                                aria-label="Action for {s.name} in step {i + 1}">
-                                                <button
-                                                    type="button"
-                                                    class="state-btn"
-                                                    class:s-active={state === 'ignore'}
-                                                    onclick={() => { step.perSocket[s.id] = 'ignore'; stepsError = ''; }}
-                                                    aria-pressed={state === 'ignore'}
-                                                    aria-label="Ignore {s.name} in step {i + 1}"
-                                                >—</button>
-                                                <button
-                                                    type="button"
-                                                    class="state-btn s-on"
-                                                    class:s-active={state === 'on'}
-                                                    onclick={() => { step.perSocket[s.id] = 'on'; stepsError = ''; }}
-                                                    aria-pressed={state === 'on'}
-                                                    aria-label="Turn {s.name} on in step {i + 1}"
-                                                >On</button>
-                                                <button
-                                                    type="button"
-                                                    class="state-btn s-off"
-                                                    class:s-active={state === 'off'}
-                                                    onclick={() => { step.perSocket[s.id] = 'off'; stepsError = ''; }}
-                                                    aria-pressed={state === 'off'}
-                                                    aria-label="Turn {s.name} off in step {i + 1}"
-                                                >Off</button>
-                                            </div>
-                                        </div>
-                                        {#if state === 'on' && isSmart(s.protocol)}
-                                            <div class="light-row">
-                                                <div class="bright">
-                                                    <span class="bright-ico"><Icon name="sun" size={14} /></span>
-                                                    <input type="range" min="1" max="100" step="1"
-                                                        bind:value={step.levels[s.id]}
-                                                        aria-label="Brightness for {s.name} in step {i + 1}" />
-                                                    <span class="bright-val mono">{step.levels[s.id]}%</span>
-                                                </div>
-                                                <div class="swatches">
-                                                    {#each COLOURS as c (c.name)}
-                                                        <button type="button" class="swatch"
-                                                            class:active={step.colors[s.id] === c.hex}
-                                                            class:auto={c.hex === ""}
-                                                            style={c.hex ? `background:#${c.hex}` : ""}
-                                                            title={c.name}
-                                                            aria-label="{c.name} for {s.name} in step {i + 1}"
-                                                            onclick={() => step.colors[s.id] = c.hex}>
-                                                            {#if c.hex === ""}<Icon name="close" size={12} />{/if}
-                                                        </button>
-                                                    {/each}
-                                                </div>
-                                            </div>
-                                        {/if}
-                                    </div>
-                                {/each}
-                            </div>
-                        </div>
-                    {/each}
-
-                    {#if stepsError}<div class="field-error steps-err">{stepsError}</div>{/if}
-
-                    <button type="button" class="add-step-btn" onclick={addStep}>
-                        <Icon name="plus" size={15} />
-                        Add another step
-                    </button>
-
-                    <div class="field-help steps-hint">
-                        Each step runs after its delay from when the scene is activated.
-                        Add multiple steps to ramp a lamp's brightness over time.
-                    </div>
-                </div>
-            </form>
-        {/if}
-
-        <!-- ── Step 2: Automated rules ────────────────────────────── -->
-        {#if wizardStep === 2}
-            <div class="rules-section">
 
                 {#if rules.length === 0}
                     <div class="rules-empty">
-                        <div class="rules-empty-icon"><Icon name="automation" size={28} /></div>
+                        <div class="rules-empty-icon"><Icon name="automation" size={26} /></div>
                         <div class="rules-empty-title">No rules yet</div>
-                        <div class="rules-empty-sub">Rules fire automatically — each with its own trigger and device actions. The scene can still be activated manually from the Scenes screen.</div>
+                        <div class="rules-empty-sub">Rules control devices automatically — at sunset, at a fixed time, when a sensor crosses a threshold, or when a device changes state.</div>
                     </div>
                 {/if}
 
@@ -576,9 +367,9 @@
                                 <Icon name="trash" size={14} />
                             </button>
                         </div>
-
                         <div class="rule-inner">
-                            <!-- WHEN block -->
+
+                            <!-- WHEN -->
                             <div class="block when">
                                 <div class="block-head"><span class="tag cool">When</span></div>
                                 <Segmented name="rule-{ri}-trigtype" bind:value={rule.trigType}
@@ -600,7 +391,7 @@
                                     {#if rule.trigTimeMode === "fixed"}
                                         <div class="field mt">
                                             <label for="rule-{ri}-time">Time</label>
-                                            <input id="rule-{ri}-time" type="time" bind:value={rule.trigTime} required />
+                                            <input id="rule-{ri}-time" type="time" bind:value={rule.trigTime} />
                                         </div>
                                     {:else}
                                         <div class="field mt">
@@ -659,12 +450,11 @@
                                 {/if}
                             </div>
 
-                            <!-- THEN block -->
+                            <!-- THEN -->
                             <div class="block then">
                                 <div class="block-head">
                                     <span class="tag on">Then</span>
-                                    <button type="button" class="chip sm"
-                                        onclick={() => addRuleAction(ri)}>
+                                    <button type="button" class="chip-sm" onclick={() => addRuleAction(ri)}>
                                         <Icon name="plus" size={12} /> Action
                                     </button>
                                 </div>
@@ -699,9 +489,7 @@
                                             <div class="action-light-row">
                                                 <div class="bright">
                                                     <span class="bright-ico"><Icon name="sun" size={14} /></span>
-                                                    <input type="range" min="1" max="100" step="1"
-                                                        bind:value={a.level}
-                                                        aria-label="Brightness" />
+                                                    <input type="range" min="1" max="100" step="1" bind:value={a.level} aria-label="Brightness" />
                                                     <span class="bright-val mono">{a.level ?? 100}%</span>
                                                 </div>
                                                 <div class="swatches">
@@ -729,345 +517,201 @@
                                     </div>
                                 {/each}
                             </div>
+
                         </div>
                     </div>
                 {/each}
 
-                <button type="button" class="add-rule-btn" onclick={addRule}>
-                    <Icon name="plus" size={15} />
-                    Add rule
+                <button type="button" class="add-dashed-btn" onclick={addRule}>
+                    <Icon name="plus" size={15} /> Add rule
                 </button>
             </div>
-        {/if}
+
+            <!-- ── Snapshot (manual activation) ─────────────────── -->
+            <div class="form-section">
+                <button type="button" class="snapshot-toggle"
+                    onclick={() => snapshotOpen = !snapshotOpen}
+                    aria-expanded={snapshotOpen}>
+                    <span class="snapshot-chevron" class:open={snapshotOpen}>
+                        <Icon name="chevronDown" size={14} />
+                    </span>
+                    <span class="form-sec-label">Manual activation snapshot</span>
+                    <span class="opt-pill">optional</span>
+                    {#if !snapshotOpen && snapshotDeviceCount > 0}
+                        <span class="snapshot-count mono">{snapshotDeviceCount} device{snapshotDeviceCount > 1 ? "s" : ""}</span>
+                    {/if}
+                </button>
+
+                {#if snapshotOpen}
+                    <div class="snapshot-body">
+                        <div class="field-help snapshot-hint">
+                            Set what happens when you tap this scene manually. Supports multi-step sequences with delays.
+                        </div>
+                        <div class="steps-wrap">
+                            {#each steps as step, i (i)}
+                                <div class="step-card">
+                                    <div class="step-header">
+                                        <span class="step-badge">Step {i + 1}</span>
+                                        {#if i === 0}
+                                            <span class="step-when">Runs immediately</span>
+                                        {:else}
+                                            <div class="step-timing">
+                                                <span class="timing-lbl">After</span>
+                                                <input type="number" class="delay-input mono"
+                                                    min="1" max="1440" step="1"
+                                                    value={step.delay_minutes}
+                                                    oninput={(e) => {
+                                                        const v = parseInt((e.target as HTMLInputElement).value, 10);
+                                                        if (!isNaN(v) && v >= 0) step.delay_minutes = v;
+                                                    }}
+                                                    aria-label="Delay in minutes for step {i + 1}" />
+                                                <span class="timing-lbl">min</span>
+                                            </div>
+                                            <button type="button" class="remove-step"
+                                                onclick={() => removeStep(i)}
+                                                aria-label="Remove step {i + 1}">
+                                                <Icon name="close" size={14} />
+                                            </button>
+                                        {/if}
+                                    </div>
+
+                                    <div class="picker">
+                                        {#each sockets as s, si (s.id)}
+                                            {@const state = step.perSocket[s.id]}
+                                            {#if si > 0}<div class="row-sep" aria-hidden="true"></div>{/if}
+                                            <div class="picker-row"
+                                                class:row-on={state === 'on'}
+                                                class:row-off={state === 'off'}>
+                                                <div class="row-main">
+                                                    <div class="row-bulb"
+                                                        class:bulb-on={state === 'on'}
+                                                        class:bulb-off={state === 'off'}
+                                                        aria-hidden="true">
+                                                        <Icon name="light" size={14} />
+                                                    </div>
+                                                    <div class="row-info">
+                                                        <span class="row-name">{s.name}</span>
+                                                        <span class="row-room">{s.room || "Unassigned"}</span>
+                                                    </div>
+                                                    <div class="state-group" role="group"
+                                                        aria-label="Action for {s.name} in step {i + 1}">
+                                                        <button type="button" class="state-btn"
+                                                            class:s-active={state === 'ignore'}
+                                                            onclick={() => step.perSocket[s.id] = 'ignore'}
+                                                            aria-pressed={state === 'ignore'}
+                                                            aria-label="Ignore {s.name}">—</button>
+                                                        <button type="button" class="state-btn s-on"
+                                                            class:s-active={state === 'on'}
+                                                            onclick={() => step.perSocket[s.id] = 'on'}
+                                                            aria-pressed={state === 'on'}
+                                                            aria-label="Turn {s.name} on">On</button>
+                                                        <button type="button" class="state-btn s-off"
+                                                            class:s-active={state === 'off'}
+                                                            onclick={() => step.perSocket[s.id] = 'off'}
+                                                            aria-pressed={state === 'off'}
+                                                            aria-label="Turn {s.name} off">Off</button>
+                                                    </div>
+                                                </div>
+                                                {#if state === 'on' && isSmart(s.protocol)}
+                                                    <div class="light-row">
+                                                        <div class="bright">
+                                                            <span class="bright-ico"><Icon name="sun" size={14} /></span>
+                                                            <input type="range" min="1" max="100" step="1"
+                                                                bind:value={step.levels[s.id]}
+                                                                aria-label="Brightness for {s.name}" />
+                                                            <span class="bright-val mono">{step.levels[s.id]}%</span>
+                                                        </div>
+                                                        <div class="swatches">
+                                                            {#each COLOURS as c (c.name)}
+                                                                <button type="button" class="swatch"
+                                                                    class:active={step.colors[s.id] === c.hex}
+                                                                    class:auto={c.hex === ""}
+                                                                    style={c.hex ? `background:#${c.hex}` : ""}
+                                                                    title={c.name}
+                                                                    aria-label="{c.name} for {s.name}"
+                                                                    onclick={() => step.colors[s.id] = c.hex}>
+                                                                    {#if c.hex === ""}<Icon name="close" size={12} />{/if}
+                                                                </button>
+                                                            {/each}
+                                                        </div>
+                                                    </div>
+                                                {/if}
+                                            </div>
+                                        {/each}
+                                    </div>
+                                </div>
+                            {/each}
+
+                            <button type="button" class="add-dashed-btn" onclick={addStep}>
+                                <Icon name="plus" size={15} /> Add another step
+                            </button>
+
+                            <div class="field-help" style="margin-top:6px">
+                                Each step runs after its delay. Add steps to ramp brightness over time.
+                            </div>
+                        </div>
+                    </div>
+                {/if}
+            </div>
+
+        </div>
     {/snippet}
 
     {#snippet actions()}
-        {#if wizardStep === 1}
-            <button class="btn btn-ghost" onclick={() => closeModal()}>Cancel</button>
-            <button class="btn btn-primary" onclick={advanceToRules}>
-                Next: Rules
-                <span class="next-arrow" aria-hidden="true"><Icon name="chevronDown" size={15} /></span>
-            </button>
-        {:else}
-            <button class="btn btn-ghost" onclick={() => wizardStep = 1}>← Back</button>
-            <button class="btn btn-primary" onclick={save} disabled={saving}>
-                {saving ? (isEdit ? "Saving…" : "Creating…") : (isEdit ? "Save" : "Create scene")}
-            </button>
-        {/if}
+        <button class="btn btn-ghost" onclick={() => closeModal()}>Cancel</button>
+        <button class="btn btn-primary" onclick={save} disabled={saving}>
+            {saving ? (isEdit ? "Saving…" : "Creating…") : (isEdit ? "Save" : "Create scene")}
+        </button>
     {/snippet}
 </Modal>
 
 <style>
-    /* ── Wizard step indicator ───────────────────────────────────── */
-    .wizard-track {
+    .scene-form {
         display: flex;
-        align-items: center;
-        gap: 0;
-        margin-bottom: var(--space-5);
+        flex-direction: column;
+        gap: var(--space-5);
     }
-    .wiz-step {
-        display: flex;
-        align-items: center;
-        gap: 7px;
-        flex-shrink: 0;
-    }
-    .wiz-dot {
-        width: 26px;
-        height: 26px;
-        border-radius: 50%;
-        border: 2px solid var(--border-strong);
-        display: grid;
-        place-items: center;
-        color: var(--text-muted);
-        transition: background var(--t-fast), border-color var(--t-fast), color var(--t-fast);
-        flex-shrink: 0;
-    }
-    .wiz-dot .mono { font-size: 11px; font-weight: 700; }
-    .wiz-active .wiz-dot {
-        background: var(--primary);
-        border-color: var(--primary);
-        color: var(--primary-fg);
-    }
-    .wiz-done .wiz-dot {
-        background: var(--primary-soft);
-        border-color: var(--primary);
-        color: var(--primary);
-    }
-    .wiz-label {
-        font-size: 12px;
-        color: var(--text-muted);
-        font-weight: 500;
-        transition: color var(--t-fast);
-    }
-    .wiz-active .wiz-label { color: var(--text); font-weight: 600; }
-    .wiz-done .wiz-label { color: var(--primary); }
-    .wiz-line {
-        flex: 1;
-        height: 2px;
-        background: var(--border-strong);
-        margin: 0 10px;
-        border-radius: 1px;
-        transition: background var(--t-med);
-    }
-    .wiz-line.wiz-filled { background: var(--primary); }
 
-    /* ── Step cards ──────────────────────────────────────────────── */
-    .steps-wrap {
+    /* ── Section heads ────────────────────────────────────────────── */
+    .form-section {
         display: flex;
         flex-direction: column;
         gap: 10px;
     }
-    .step-card {
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-        overflow: hidden;
-        background: var(--surface);
-    }
-    .step-header {
+    .form-sec-head {
         display: flex;
-        align-items: center;
+        align-items: baseline;
         gap: 8px;
-        padding: 8px 12px;
-        background: var(--card-3);
-        border-bottom: 1px solid var(--border);
-        flex-wrap: wrap;
     }
-    .step-badge {
+    .form-sec-label {
         font-family: var(--font-mono);
         font-size: 11px;
         font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 0.08em;
-        color: var(--text-muted);
-        flex-shrink: 0;
+        color: var(--text-mute);
     }
-    .step-when {
+    .form-sec-hint {
         font-size: 12px;
-        color: var(--text-muted);
-        flex: 1;
-        min-width: 0;
-    }
-    .step-timing {
-        display: flex;
-        align-items: center;
-        gap: 5px;
-        flex: 1;
-        min-width: 0;
-    }
-    .timing-lbl {
-        font-size: 12px;
-        color: var(--text-muted);
-        white-space: nowrap;
-    }
-    .delay-input {
-        width: 56px;
-        padding: 3px 7px;
-        text-align: right;
-        border-radius: var(--radius-sm);
-        font-size: 13px;
-    }
-    .remove-step {
-        position: relative;
-        background: transparent;
-        border: 0;
-        padding: 4px;
-        cursor: pointer;
-        color: var(--text-muted);
-        display: grid;
-        place-items: center;
-        border-radius: var(--radius-sm);
-        margin-left: auto;
-        flex-shrink: 0;
-        transition: background var(--t-fast), color var(--t-fast);
-    }
-    .remove-step:hover { background: var(--surface-hover); color: var(--bad); }
-
-    /* ── Device picker ────────────────────────────────────────────── */
-    .picker {
-        display: flex;
-        flex-direction: column;
-        padding: 4px;
-    }
-    .row-sep {
-        height: 1px;
-        background: var(--separator);
-        margin: 0 12px 0 58px;
-    }
-    .picker-row {
-        display: flex;
-        flex-direction: column;
-        border-radius: var(--radius-sm);
-        overflow: hidden;
-        transition: background var(--t-fast);
-    }
-    .picker-row.row-on { background: var(--primary-soft); }
-    .row-main {
-        display: flex;
-        align-items: center;
-        gap: 12px;
-        padding: 10px 12px;
-        min-height: 48px;
-    }
-    .row-bulb {
-        width: 30px;
-        height: 30px;
-        border-radius: 50%;
-        background: var(--card-3);
-        display: grid;
-        place-items: center;
-        color: var(--text-faint);
-        flex-shrink: 0;
-        transition: background var(--t-fast), color var(--t-fast), box-shadow var(--t-fast);
-    }
-    .row-bulb.bulb-on {
-        background: var(--primary);
-        color: var(--primary-fg);
-        box-shadow: 0 0 0 1px var(--primary), 0 0 14px 2px var(--primary-glow);
-    }
-    .row-bulb.bulb-off {
-        background: var(--surface-hover);
-        color: var(--text-faint);
-    }
-    .row-info {
-        flex: 1;
-        min-width: 0;
-        display: flex;
-        flex-direction: column;
-        gap: 1px;
-    }
-    .row-name {
-        font-size: 13.5px;
-        font-weight: 500;
-        color: var(--text);
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-    }
-    .row-room {
-        font-size: 11.5px;
-        color: var(--text-muted);
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
+        color: var(--text-dim);
     }
 
-    /* ── 3-state action control ──────────────────────────────────── */
-    .state-group {
-        display: flex;
-        background: var(--bg-elevated);
-        border: 1px solid var(--border);
-        border-radius: var(--r-pill);
-        padding: 2px;
-        gap: 1px;
-        flex-shrink: 0;
-    }
-    .state-btn {
-        padding: 5px 10px;
-        border-radius: var(--r-pill);
-        border: none;
-        background: transparent;
-        font-size: 12px;
-        font-weight: 500;
-        color: var(--text-muted);
-        cursor: pointer;
-        touch-action: manipulation;
-        transition: background var(--t-fast), color var(--t-fast), box-shadow var(--t-fast);
-        white-space: nowrap;
-        line-height: 1;
-    }
-    .state-btn:hover:not(.s-active) {
-        background: var(--surface-hover);
-        color: var(--text);
-    }
-    .state-btn.s-active {
-        background: var(--card-3);
-        color: var(--text);
-        box-shadow: var(--shadow-sm);
-    }
-    .state-btn.s-on.s-active {
-        background: var(--primary-soft);
-        color: var(--primary);
-        box-shadow: none;
-    }
-
-    /* ── Smart-light controls (scene steps) ──────────────────────── */
-    .light-row {
-        display: flex;
-        flex-direction: column;
-        gap: 8px;
-        padding: 0 12px 12px 54px;
-    }
-    .bright { display: flex; align-items: center; gap: 8px; }
-    .bright-ico { color: var(--on); display: inline-flex; flex-shrink: 0; }
-    .bright input[type="range"] { flex: 1; }
-    .bright-val { font-size: 12px; color: var(--text-muted); min-width: 38px; text-align: right; }
-    .swatches { display: flex; gap: 6px; flex-wrap: wrap; }
-    .swatch {
-        width: 24px; height: 24px;
-        border-radius: 50%;
-        border: 1px solid var(--hairline);
-        cursor: pointer;
-        display: grid; place-items: center;
-        padding: 0;
-        color: var(--text-muted);
-        touch-action: manipulation;
-        transition: box-shadow var(--t-fast);
-    }
-    .swatch.auto { background: var(--card-3); }
-    .swatch.active { box-shadow: 0 0 0 2px var(--on), 0 0 0 4px var(--bg-elevated); }
-
-    /* ── Add step button ──────────────────────────────────────────── */
-    .add-step-btn {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        padding: 7px 14px;
-        border: 1px dashed var(--border-strong);
-        border-radius: var(--radius-md);
-        background: transparent;
-        color: var(--text-muted);
-        font-size: 13px;
-        cursor: pointer;
-        touch-action: manipulation;
-        margin-top: 4px;
-        width: 100%;
-        justify-content: center;
-        transition: background var(--t-fast), color var(--t-fast), border-color var(--t-fast);
-    }
-    .add-step-btn:hover {
-        background: var(--surface-hover);
-        color: var(--text);
-        border-color: var(--text-muted);
-    }
-    .steps-err  { margin-top: 6px; }
-    .steps-hint { margin-top: 6px; }
-
-    /* ── Rules section (step 2) ───────────────────────────────────── */
-    .rules-section {
-        display: flex;
-        flex-direction: column;
-        gap: 12px;
-    }
-
+    /* ── Rules empty state ───────────────────────────────────────── */
     .rules-empty {
         display: flex;
         flex-direction: column;
         align-items: center;
         text-align: center;
         gap: 8px;
-        padding: 32px 24px;
+        padding: 28px 24px;
         border: 1px dashed var(--border);
         border-radius: var(--r-md);
     }
     .rules-empty-icon { color: var(--text-dim); }
-    .rules-empty-title { font-size: 14px; font-weight: 500; color: var(--text-mute); }
-    .rules-empty-sub {
-        font-size: 12.5px;
-        color: var(--text-dim);
-        line-height: 1.5;
-        max-width: 340px;
-    }
+    .rules-empty-title { font-size: 13.5px; font-weight: 500; color: var(--text-mute); }
+    .rules-empty-sub { font-size: 12.5px; color: var(--text-dim); line-height: 1.5; max-width: 340px; }
 
+    /* ── Rule cards ───────────────────────────────────────────────── */
     .rule-card {
         border: 1px solid var(--border);
         border-radius: var(--r-md);
@@ -1097,16 +741,13 @@
         color: var(--text-dim);
         display: inline-flex;
         align-items: center;
-        gap: 4px;
         border-radius: var(--r-sm);
-        font-size: 12px;
-        transition: background var(--t-fast), color var(--t-fast);
         min-width: 32px;
         min-height: 32px;
         justify-content: center;
+        transition: background var(--t-fast), color var(--t-fast);
     }
     .rule-remove:hover { background: var(--surface-hover); color: var(--bad); }
-
     .rule-inner {
         padding: var(--space-3);
         display: flex;
@@ -1114,7 +755,7 @@
         gap: var(--space-3);
     }
 
-    /* ── Shared block styles (WHEN / THEN) ───────────────────────── */
+    /* ── WHEN / THEN blocks ───────────────────────────────────────── */
     .block {
         border: 1px solid var(--hairline);
         border-radius: var(--r-md);
@@ -1138,7 +779,7 @@
     .mt    { margin-top: var(--space-3); }
     .mt-sm { margin-top: var(--space-2); }
 
-    .chip.sm {
+    .chip-sm {
         padding: 4px 10px;
         font-size: 12px;
         cursor: pointer;
@@ -1151,9 +792,8 @@
         color: var(--text-mute);
         transition: background var(--t-fast), color var(--t-fast);
     }
-    .chip.sm:hover { background: var(--card-3); color: var(--text); }
+    .chip-sm:hover { background: var(--card-3); color: var(--text); }
 
-    /* ── Action row cards ────────────────────────────────────────── */
     .rowcard {
         background: var(--card-2);
         border: 1px solid var(--hairline);
@@ -1173,14 +813,12 @@
     }
     .row-remove:hover { color: var(--bad); }
 
-    /* ── Smart-light controls (rule actions) ─────────────────────── */
     .action-light-row {
         display: flex;
         flex-direction: column;
         gap: 8px;
         padding-top: var(--space-2);
     }
-
     .solar-summary {
         margin-top: 5px;
         font-weight: 600;
@@ -1189,51 +827,172 @@
     }
     .field-help.warn { color: var(--warn, var(--danger)); }
 
-    /* ── Add rule button ──────────────────────────────────────────── */
-    .add-rule-btn {
-        display: inline-flex;
+    /* ── Snapshot toggle ─────────────────────────────────────────── */
+    .snapshot-toggle {
+        display: flex;
         align-items: center;
-        gap: 6px;
-        padding: 10px 14px;
-        border: 1px dashed var(--border-strong);
-        border-radius: var(--r-md);
-        background: transparent;
-        color: var(--text-muted);
-        font-size: 13px;
+        gap: 7px;
+        background: none;
+        border: none;
         cursor: pointer;
-        touch-action: manipulation;
+        padding: 6px 0;
+        color: var(--text-mute);
+        text-align: left;
         width: 100%;
-        justify-content: center;
+    }
+    .snapshot-toggle:hover .form-sec-label { color: var(--text); }
+    .snapshot-chevron {
+        display: inline-flex;
+        color: var(--text-dim);
+        transition: transform var(--t-fast);
+        flex-shrink: 0;
+    }
+    .snapshot-chevron.open { transform: rotate(0deg); }
+    .snapshot-chevron:not(.open) { transform: rotate(-90deg); }
+    .opt-pill {
+        font-size: 10.5px;
+        font-family: var(--font-mono);
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--text-dim);
+        background: var(--card-3);
+        border: 1px solid var(--hairline);
+        border-radius: var(--r-pill);
+        padding: 1px 7px;
+    }
+    .snapshot-count {
+        font-size: 11px;
+        color: var(--text-mute);
+        margin-left: auto;
+    }
+
+    .snapshot-body {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+    }
+    .snapshot-hint { margin-bottom: 2px; }
+
+    /* ── Steps (inside snapshot) ────────────────────────────────── */
+    .steps-wrap { display: flex; flex-direction: column; gap: 10px; }
+    .step-card {
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        overflow: hidden;
+        background: var(--surface);
+    }
+    .step-header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 12px;
+        background: var(--card-3);
+        border-bottom: 1px solid var(--border);
+        flex-wrap: wrap;
+    }
+    .step-badge {
+        font-family: var(--font-mono);
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--text-muted);
+        flex-shrink: 0;
+    }
+    .step-when { font-size: 12px; color: var(--text-muted); flex: 1; }
+    .step-timing { display: flex; align-items: center; gap: 5px; flex: 1; }
+    .timing-lbl { font-size: 12px; color: var(--text-muted); white-space: nowrap; }
+    .delay-input { width: 56px; padding: 3px 7px; text-align: right; border-radius: var(--radius-sm); font-size: 13px; }
+    .remove-step {
+        background: transparent; border: 0; padding: 4px; cursor: pointer;
+        color: var(--text-muted); display: grid; place-items: center;
+        border-radius: var(--radius-sm); margin-left: auto; flex-shrink: 0;
+        transition: background var(--t-fast), color var(--t-fast);
+    }
+    .remove-step:hover { background: var(--surface-hover); color: var(--bad); }
+
+    /* ── Device picker (inside steps) ────────────────────────────── */
+    .picker { display: flex; flex-direction: column; padding: 4px; }
+    .row-sep { height: 1px; background: var(--separator); margin: 0 12px 0 58px; }
+    .picker-row {
+        display: flex; flex-direction: column;
+        border-radius: var(--radius-sm); overflow: hidden;
+        transition: background var(--t-fast);
+    }
+    .picker-row.row-on { background: var(--primary-soft); }
+    .row-main { display: flex; align-items: center; gap: 12px; padding: 10px 12px; min-height: 48px; }
+    .row-bulb {
+        width: 30px; height: 30px; border-radius: 50%;
+        background: var(--card-3); display: grid; place-items: center;
+        color: var(--text-faint); flex-shrink: 0;
+        transition: background var(--t-fast), color var(--t-fast), box-shadow var(--t-fast);
+    }
+    .row-bulb.bulb-on {
+        background: var(--primary); color: var(--primary-fg);
+        box-shadow: 0 0 0 1px var(--primary), 0 0 14px 2px var(--primary-glow);
+    }
+    .row-bulb.bulb-off { background: var(--surface-hover); color: var(--text-faint); }
+    .row-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+    .row-name { font-size: 13.5px; font-weight: 500; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .row-room { font-size: 11.5px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+    .state-group {
+        display: flex; background: var(--bg-elevated); border: 1px solid var(--border);
+        border-radius: var(--r-pill); padding: 2px; gap: 1px; flex-shrink: 0;
+    }
+    .state-btn {
+        padding: 5px 10px; border-radius: var(--r-pill); border: none;
+        background: transparent; font-size: 12px; font-weight: 500;
+        color: var(--text-muted); cursor: pointer; touch-action: manipulation;
+        transition: background var(--t-fast), color var(--t-fast), box-shadow var(--t-fast);
+        white-space: nowrap; line-height: 1;
+    }
+    .state-btn:hover:not(.s-active) { background: var(--surface-hover); color: var(--text); }
+    .state-btn.s-active { background: var(--card-3); color: var(--text); box-shadow: var(--shadow-sm); }
+    .state-btn.s-on.s-active { background: var(--primary-soft); color: var(--primary); box-shadow: none; }
+
+    /* ── Smart-light controls ────────────────────────────────────── */
+    .light-row { display: flex; flex-direction: column; gap: 8px; padding: 0 12px 12px 54px; }
+    .bright { display: flex; align-items: center; gap: 8px; }
+    .bright-ico { color: var(--on); display: inline-flex; flex-shrink: 0; }
+    .bright input[type="range"] { flex: 1; }
+    .bright-val { font-size: 12px; color: var(--text-muted); min-width: 38px; text-align: right; }
+    .swatches { display: flex; gap: 6px; flex-wrap: wrap; }
+    .swatch {
+        width: 24px; height: 24px; border-radius: 50%;
+        border: 1px solid var(--hairline); cursor: pointer;
+        display: grid; place-items: center; padding: 0;
+        color: var(--text-muted); touch-action: manipulation;
+        transition: box-shadow var(--t-fast);
+    }
+    .swatch.auto { background: var(--card-3); }
+    .swatch.active { box-shadow: 0 0 0 2px var(--on), 0 0 0 4px var(--bg-elevated); }
+
+    /* ── Add (dashed) button — used for both rules and steps ─────── */
+    .add-dashed-btn {
+        display: inline-flex; align-items: center; gap: 6px;
+        padding: 10px 14px; border: 1px dashed var(--border-strong);
+        border-radius: var(--r-md); background: transparent;
+        color: var(--text-muted); font-size: 13px; cursor: pointer;
+        touch-action: manipulation; width: 100%; justify-content: center;
         transition: background var(--t-fast), color var(--t-fast), border-color var(--t-fast);
         min-height: 44px;
     }
-    .add-rule-btn:hover {
-        background: var(--surface-hover);
-        color: var(--text);
-        border-color: var(--text-muted);
-    }
-
-    /* Rotated chevron on "Next" button */
-    .next-arrow {
-        display: inline-flex;
-        transform: rotate(-90deg);
-        margin-left: 4px;
-    }
+    .add-dashed-btn:hover { background: var(--surface-hover); color: var(--text); border-color: var(--text-muted); }
 
     /* ── Reduced motion ───────────────────────────────────────────── */
     @media (prefers-reduced-motion: reduce) {
-        .wiz-dot, .wiz-line { transition-duration: 0.001ms; }
-        .row-bulb, .picker-row, .state-btn { transition-duration: 0.001ms; }
-        .rule-card, .add-rule-btn, .add-step-btn { transition-duration: 0.001ms; }
+        .snapshot-chevron, .row-bulb, .picker-row, .state-btn,
+        .rule-card, .add-dashed-btn { transition-duration: 0.001ms; }
     }
 
-    /* ── Mobile layout ───────────────────────────────────────────── */
+    /* ── Mobile ──────────────────────────────────────────────────── */
     @media (max-width: 600px) {
         .row-main { min-height: 52px; padding: 10px; }
         .state-btn { padding: 7px 10px; font-size: 12px; min-height: 36px; }
         .delay-input { font-size: 16px; padding: 5px 8px; }
         .remove-step { min-width: 44px; min-height: 44px; }
-        .add-step-btn { min-height: 44px; }
+        .add-dashed-btn { min-height: 48px; }
         .swatch { width: 28px; height: 28px; }
         .bright input[type="range"] { height: 28px; }
         .light-row { padding: 0 10px 12px 52px; }

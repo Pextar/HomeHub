@@ -264,11 +264,8 @@ func (s *Store) ValidateScene(sc *Scene) error {
 		sc.Actions = nil
 	}
 
-	if len(sc.Steps) == 0 {
-		return errors.New("at least one step with an action is required")
-	}
-
-	hasAction := false
+	// Steps are optional — a scene without steps can still be useful as a
+	// named container for automated rules. Validate each step that is present.
 	for si := range sc.Steps {
 		step := &sc.Steps[si]
 		if step.DelayMinutes < 0 {
@@ -310,9 +307,6 @@ func (s *Store) ValidateScene(sc *Scene) error {
 			out = append(out, a)
 		}
 		step.Actions = out
-		if len(out) > 0 {
-			hasAction = true
-		}
 	}
 
 	// Drop empty steps (steps that had only blank/duplicate socket IDs).
@@ -324,9 +318,6 @@ func (s *Store) ValidateScene(sc *Scene) error {
 	}
 	sc.Steps = active
 
-	if !hasAction {
-		return errors.New("at least one step must have an action")
-	}
 	return nil
 }
 
