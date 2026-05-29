@@ -240,6 +240,8 @@ export interface Automation {
   actions: AutomationAction[];
   last_fired_at?: string;
   run_count?: number;
+  /** Set when this automation was created as a rule inside a scene wizard. */
+  scene_id?: string;
 }
 
 export interface BulkResult {

@@ -125,6 +125,7 @@ func (s *Server) deleteScene(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	s.Store.PruneAutomationsForTarget("scene", id)
+	s.Store.DeleteAutomationsOwnedByScene(id)
 	if err := s.Store.Save(); err != nil {
 		s.Store.Mu.Unlock()
 		writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
