@@ -77,6 +77,60 @@
         return () => clearInterval(id);
     });
 
+    // ── Interactive brightness bar (smart lights) ─────────────────────
+    // Drag or click along a light's LEVEL bar to set it; arrow keys nudge
+    // by 10%. Snapped to 10% so the value matches the 10-cell block display.
+    const isDimmable = (s: Socket) => s.protocol === "tasmota" || s.protocol.startsWith("matter");
+    let drag = $state<{ id: string; pct: number } | null>(null);
+
+    function pctFromX(clientX: number, el: HTMLElement): number {
+        const rect = el.getBoundingClientRect();
+        const ratio = rect.width ? (clientX - rect.left) / rect.width : 0;
+        return Math.max(0, Math.min(100, Math.round(ratio * 10) * 10));
+    }
+
+    // Optimistically reflect the new level (and on/off), push it to the
+    // device, then reconcile from the server.
+    async function commitLevel(s: Socket, pct: number) {
+        levels = { ...levels, [s.id]: pct };
+        if (pct > 0 && !s.state) data.applySocket({ ...s, state: true });
+        if (pct <= 0 && s.state) data.applySocket({ ...s, state: false });
+        try {
+            await setLevel(s, pct);
+        } catch (e) {
+            toasts.error("Set level failed", (e as Error).message);
+        }
+        await data.refresh();
+        void refreshLevels();
+    }
+
+    function onBarDown(e: PointerEvent, s: Socket) {
+        e.preventDefault();
+        const el = e.currentTarget as HTMLElement;
+        el.setPointerCapture(e.pointerId);
+        drag = { id: s.id, pct: pctFromX(e.clientX, el) };
+    }
+    function onBarMove(e: PointerEvent, s: Socket) {
+        if (drag?.id !== s.id) return;
+        drag = { id: s.id, pct: pctFromX(e.clientX, e.currentTarget as HTMLElement) };
+    }
+    async function onBarUp(e: PointerEvent, s: Socket) {
+        if (drag?.id !== s.id) return;
+        const pct = drag.pct;
+        drag = null;
+        await commitLevel(s, pct);
+    }
+    function onBarKey(e: KeyboardEvent, s: Socket, cur: number) {
+        let next: number | null = null;
+        if (e.key === "ArrowRight" || e.key === "ArrowUp") next = cur + 10;
+        else if (e.key === "ArrowLeft" || e.key === "ArrowDown") next = cur - 10;
+        else if (e.key === "Home") next = 0;
+        else if (e.key === "End") next = 100;
+        else return;
+        e.preventDefault();
+        void commitLevel(s, Math.max(0, Math.min(100, next)));
+    }
+
     // ── Live event tail ───────────────────────────────────────────────
     // Server activity (real) plus a local echo of commands typed here, so
     // feedback is immediate without waiting for the next refresh.
@@ -326,7 +380,7 @@
         } else if (first === "clear" || first === "cls") {
             localLog = [];
         } else if (first === "help" || first === "?") {
-            echo("in", "on|off|toggle <device|group|room> · turn off <name> · <name> off · X in <room> · set <name> 60% · set <name> warm · scene <name> · all off · and/then chains · ls·rooms·groups·scenes·status·clear · ↑↓ history · Tab complete");
+            echo("in", "on|off|toggle <device|group|room> · turn off <name> · <name> off · X in <room> · set <name> 60% · set <name> warm · scene <name> · all off · and/then chains · ls·rooms·groups·scenes·status·clear · ↑↓ history · Tab complete · drag a LEVEL bar to dim");
         } else return false;
         return true;
     }
@@ -546,16 +600,37 @@
                 <span></span><span>HOST</span><span class="r">VAL</span><span>LEVEL</span>
             </div>
             {#each devices as d (d.id)}
-                {@const lvl = levels[d.id]}
-                {@const pct = d.state ? (lvl ?? 100) : 0}
+                {@const dimmable = isDimmable(d)}
+                {@const dragging = drag?.id === d.id}
+                {@const lvl = dragging ? drag.pct : levels[d.id]}
+                {@const pct = dragging ? drag.pct : d.state ? (lvl ?? 100) : 0}
                 {@const filled = Math.round(pct / 10)}
                 <div class="row mono" class:dim={!d.state}>
                     <span class="led" data-on={d.state}>{d.state ? "●" : "○"}</span>
                     <span class="host">
                         <span class="proto" style:color={PROTO_COLOR[protoKey(d.protocol)]}>{protoKey(d.protocol).padEnd(6)}</span><span class="hostname">{hostOf(d)}</span>
                     </span>
-                    <span class="r state" data-on={d.state}>{!d.state ? "--" : lvl != null ? `${lvl}%` : "ON"}</span>
-                    <span class="bar" data-on={d.state}>{"█".repeat(filled)}{"░".repeat(10 - filled)}</span>
+                    <span class="r state" data-on={d.state}>{dragging ? `${pct}%` : !d.state ? "--" : lvl != null ? `${lvl}%` : "ON"}</span>
+                    {#if dimmable}
+                        <span
+                            class="bar interactive"
+                            class:dragging
+                            data-on={d.state || pct > 0}
+                            role="slider"
+                            tabindex="0"
+                            aria-label={`${d.name} brightness`}
+                            aria-valuemin="0"
+                            aria-valuemax="100"
+                            aria-valuenow={pct}
+                            onpointerdown={(e) => onBarDown(e, d)}
+                            onpointermove={(e) => onBarMove(e, d)}
+                            onpointerup={(e) => onBarUp(e, d)}
+                            onpointercancel={() => (drag = null)}
+                            onkeydown={(e) => onBarKey(e, d, pct)}
+                        >{"█".repeat(filled)}{"░".repeat(10 - filled)}</span>
+                    {:else}
+                        <span class="bar" data-on={d.state}>{"█".repeat(filled)}{"░".repeat(10 - filled)}</span>
+                    {/if}
                 </div>
             {/each}
         {/if}
@@ -721,8 +796,25 @@
     .r { text-align: right; }
     .state { color: var(--on); }
     .state[data-on="false"] { color: var(--text-dim); }
-    .bar { letter-spacing: -0.5px; color: var(--on); }
+    .bar { letter-spacing: -0.5px; color: var(--on); white-space: nowrap; }
     .bar[data-on="false"] { color: var(--text-dim); }
+    /* Draggable brightness bar for smart lights. */
+    .bar.interactive {
+        cursor: ew-resize;
+        touch-action: none;
+        user-select: none;
+        -webkit-user-select: none;
+        padding: 4px 2px;
+        margin: -4px 0;
+        border-radius: 4px;
+    }
+    .bar.interactive:hover { background: var(--surface); }
+    .bar.interactive.dragging { background: var(--surface-hover); }
+    .bar.interactive:focus-visible { outline: 1px solid var(--on); outline-offset: 1px; box-shadow: none; }
+    /* Bigger touch target on coarse pointers without changing the row much. */
+    @media (pointer: coarse) {
+        .bar.interactive { padding: 10px 4px; margin: -10px 0; }
+    }
 
     .tail { font-size: 10.5px; line-height: 1.6; color: var(--text-mute); }
     .tail .ts { color: var(--text-dim); }
