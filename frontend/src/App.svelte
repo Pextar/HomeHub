@@ -16,6 +16,7 @@
     import Activity from "./views/Activity.svelte";
     import Users from "./views/Users.svelte";
     import Settings from "./views/Settings.svelte";
+    import Console from "./views/Console.svelte";
     import KidHome from "./views/KidHome.svelte";
     import { data, route, toasts, session } from "./lib/stores.svelte";
     import { fly, fade } from "svelte/transition";
@@ -102,11 +103,12 @@
         activity: Activity,
         users: Users,
         settings: Settings,
+        console: Console,
     };
 
     // Routes a non-admin profile is allowed to open. Everything else is
     // admin-only; deep-linking elsewhere bounces back to the dashboard.
-    const ADMIN_ONLY: Route[] = ["floorplan", "groups", "scenes", "schedules", "automations", "sensors", "insights", "activity", "users", "settings"];
+    const ADMIN_ONLY: Route[] = ["floorplan", "groups", "scenes", "schedules", "automations", "sensors", "insights", "activity", "users", "settings", "console"];
     const effectiveRoute = $derived(
         !session.isAdmin && ADMIN_ONLY.includes(route.current) ? "dashboard" : route.current,
     );
