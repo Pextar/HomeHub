@@ -112,7 +112,7 @@ function createToastStore() {
 }
 
 function createRouteStore() {
-  const valid: Route[] = ["dashboard", "floorplan", "sockets", "groups", "scenes", "schedules", "sensors", "automations", "insights", "activity", "users", "settings"];
+  const valid: Route[] = ["dashboard", "floorplan", "sockets", "groups", "scenes", "schedules", "sensors", "automations", "insights", "activity", "users", "settings", "console"];
   const current = $state<{ route: Route; query: Record<string, string> }>({ route: parse(), query: parseQuery() });
 
   function parse(): Route {

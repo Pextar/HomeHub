@@ -2,7 +2,7 @@
     import Topbar from "../components/Topbar.svelte";
     import { untrack } from "svelte";
     import { api } from "../lib/api";
-    import { data, toasts, session, theme } from "../lib/stores.svelte";
+    import { data, toasts, session, theme, route } from "../lib/stores.svelte";
     import { openModal } from "../lib/modal.svelte";
     import Icon from "../components/Icon.svelte";
     import ShortcutsModal from "../modals/ShortcutsModal.svelte";
@@ -421,7 +421,50 @@
     </div>
 </section>
 
+<section class="card">
+    <header>
+        <h2>System</h2>
+        <p>Power-user tools for inspecting and driving the hub directly.</p>
+    </header>
+    <button type="button" class="system-row" onclick={() => route.go("console")}>
+        <span class="system-icon"><Icon name="monitor" size={18} /></span>
+        <span class="system-text">
+            <span class="system-title">Console</span>
+            <span class="system-sub">Live device table, event tail and a command line.</span>
+        </span>
+        <Icon name="chevronDown" size={16} />
+    </button>
+</section>
+
 <style>
+    .system-row {
+        display: flex;
+        align-items: center;
+        gap: var(--space-3);
+        width: 100%;
+        padding: var(--space-3) var(--space-2);
+        background: transparent;
+        border: none;
+        border-radius: var(--r-md);
+        cursor: pointer;
+        text-align: left;
+        color: var(--text);
+        transition: background var(--t-fast);
+    }
+    .system-row:hover { background: var(--surface-hover); }
+    .system-row :global(svg:last-child) { color: var(--text-mute); transform: rotate(-90deg); flex-shrink: 0; }
+    .system-icon {
+        width: 36px; height: 36px;
+        display: grid; place-items: center;
+        border-radius: var(--r-sm);
+        background: var(--surface);
+        color: var(--on);
+        flex-shrink: 0;
+    }
+    .system-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+    .system-title { font-weight: 600; font-size: 14px; }
+    .system-sub { color: var(--text-mute); font-size: 12.5px; }
+
     .profile-card {
         display: flex;
         align-items: center;
