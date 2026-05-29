@@ -1,11 +1,16 @@
 <script lang="ts">
     import Topbar from "../components/Topbar.svelte";
-    import { data } from "../lib/stores.svelte";
+    import Icon from "../components/Icon.svelte";
+    import ConfirmModal from "../components/ConfirmModal.svelte";
+    import RoomModal from "../modals/RoomModal.svelte";
+    import { data, toasts } from "../lib/stores.svelte";
+    import { openModal } from "../lib/modal.svelte";
+    import { api } from "../lib/api";
     import { socketAction } from "../lib/utils";
     import { fly } from "svelte/transition";
     import { cubicOut } from "svelte/easing";
     import { dur } from "../lib/motion";
-    import type { Socket } from "../lib/types";
+    import type { Socket, RoomSummary } from "../lib/types";
 
     const v = $derived(data.value);
 
@@ -177,6 +182,32 @@
     function shortName(name: string): string {
         return name.length > 12 ? name.slice(0, 11) + "…" : name;
     }
+
+    // ── Room management ──────────────────────────────────────────────
+    async function addRoom() {
+        await openModal(RoomModal, {});
+    }
+
+    async function editRoom(room: RoomSummary) {
+        await openModal(RoomModal, { existing: { id: room.id, name: room.name } });
+    }
+
+    async function deleteRoom(room: RoomSummary) {
+        const confirmed = await openModal<boolean>(ConfirmModal, {
+            title: "Delete room",
+            message: `Remove "${room.name}"? The ${room.sockets} device${room.sockets === 1 ? "" : "s"} in this room will become unassigned.`,
+            confirmLabel: "Delete",
+            danger: true,
+        });
+        if (!confirmed) return;
+        try {
+            await api.deleteRoom(room.id);
+            toasts.success("Room deleted", room.name);
+            await data.refresh();
+        } catch (e) {
+            toasts.error("Delete failed", (e as Error).message);
+        }
+    }
 </script>
 
 <Topbar title="Floor plan" subtitle={`${totalOn} on · ${roomCount} room${roomCount === 1 ? "" : "s"}`}>
@@ -324,6 +355,41 @@
             </div>
         {/if}
     {/if}
+
+    <!-- room management -->
+    <div class="rooms-section">
+        <div class="rooms-head">
+            <span class="rooms-label mono">ROOMS</span>
+            <button class="btn btn-ghost btn-sm" onclick={addRoom} aria-label="Add room">
+                <Icon name="plus" size={14} />
+                Add
+            </button>
+        </div>
+        {#if v.rooms.length === 0}
+            <div class="rooms-empty">
+                No rooms yet — add one to organise your devices by location.
+            </div>
+        {:else}
+            <ul class="rooms-list" role="list">
+                {#each [...v.rooms].sort((a, b) => a.name.localeCompare(b.name)) as room (room.id)}
+                    <li class="room-row">
+                        <div class="room-info">
+                            <span class="room-name">{room.name}</span>
+                            <span class="room-count mono">{room.sockets} device{room.sockets === 1 ? "" : "s"}</span>
+                        </div>
+                        <div class="room-actions">
+                            <button class="icon-btn" onclick={() => editRoom(room)} aria-label="Rename {room.name}">
+                                <Icon name="edit" size={15} />
+                            </button>
+                            <button class="icon-btn danger" onclick={() => deleteRoom(room)} aria-label="Delete {room.name}">
+                                <Icon name="trash" size={15} />
+                            </button>
+                        </div>
+                    </li>
+                {/each}
+            </ul>
+        {/if}
+    </div>
 </div>
 
 <style>
@@ -436,5 +502,103 @@
 
     @media (max-width: 600px) {
         .active-card { min-height: 44px; }
+    }
+
+    /* room management */
+    .rooms-section {
+        margin-top: var(--space-2);
+        border: 1px solid var(--hairline);
+        border-radius: var(--r-lg);
+        overflow: hidden;
+    }
+
+    .rooms-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 10px 14px;
+        border-bottom: 1px solid var(--hairline);
+    }
+
+    .rooms-label {
+        font-size: 9px;
+        letter-spacing: 0.18em;
+        color: var(--text-mute);
+    }
+
+    .btn-sm {
+        font-size: 12px;
+        padding: 4px 10px;
+        height: 28px;
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+    }
+
+    .rooms-empty {
+        padding: 20px 16px;
+        font-size: 13px;
+        color: var(--text-faint);
+        text-align: center;
+    }
+
+    .rooms-list {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+    }
+
+    .room-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 10px 14px;
+        border-bottom: 1px solid var(--hairline);
+        gap: 8px;
+    }
+    .room-row:last-child { border-bottom: none; }
+
+    .room-info {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        min-width: 0;
+    }
+    .room-name {
+        font-size: 14px;
+        font-weight: 500;
+        color: var(--text);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .room-count {
+        font-size: 11px;
+        color: var(--text-mute);
+    }
+
+    .room-actions {
+        display: flex;
+        gap: 4px;
+        flex-shrink: 0;
+    }
+
+    .icon-btn {
+        width: 32px;
+        height: 32px;
+        display: grid;
+        place-items: center;
+        border: 1px solid var(--hairline);
+        border-radius: var(--r-sm);
+        background: transparent;
+        color: var(--text-mute);
+        cursor: pointer;
+        transition: background var(--t-fast), color var(--t-fast), border-color var(--t-fast);
+    }
+    .icon-btn:hover { background: var(--surface-hover); color: var(--text); border-color: var(--border-strong); }
+    .icon-btn.danger:hover { background: var(--danger-soft, #3d1a1a); color: var(--danger, #e05252); border-color: var(--danger, #e05252); }
+
+    @media (max-width: 600px) {
+        .icon-btn { min-width: 44px; min-height: 44px; width: 44px; height: 44px; }
     }
 </style>

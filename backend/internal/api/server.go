@@ -145,6 +145,9 @@ func (s *Server) Handler() http.Handler {
 	api.HandleFunc("/sockets/{id}/favorite", s.toggleFavorite).Methods("POST")
 
 	api.HandleFunc("/rooms", s.getRooms).Methods("GET")
+	api.HandleFunc("/rooms", s.requireAdmin(s.createRoom)).Methods("POST")
+	api.HandleFunc("/rooms/{id}", s.requireAdmin(s.updateRoom)).Methods("PUT")
+	api.HandleFunc("/rooms/{id}", s.requireAdmin(s.deleteRoom)).Methods("DELETE")
 	api.HandleFunc("/rooms/{room}/on", s.roomSetState(true)).Methods("POST")
 	api.HandleFunc("/rooms/{room}/off", s.roomSetState(false)).Methods("POST")
 

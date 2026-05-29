@@ -4,6 +4,7 @@ import type {
   Group,
   Scene,
   Timer,
+  Room,
   RoomSummary,
   BulkResult,
   TargetType,
@@ -116,6 +117,9 @@ export const api = {
 
   // Rooms
   listRooms() { return req<RoomSummary[]>("/rooms"); },
+  createRoom(body: { name: string }) { return req<Room>("/rooms", { method: "POST", body: json(body) }); },
+  updateRoom(id: string, body: { name: string }) { return req<Room>(`/rooms/${encodeURIComponent(id)}`, { method: "PUT", body: json(body) }); },
+  deleteRoom(id: string) { return req<void>(`/rooms/${encodeURIComponent(id)}`, { method: "DELETE" }); },
   roomOn(room: string) { return req<BulkResult>(`/rooms/${encodeURIComponent(room)}/on`, { method: "POST" }); },
   roomOff(room: string) { return req<BulkResult>(`/rooms/${encodeURIComponent(room)}/off`, { method: "POST" }); },
 

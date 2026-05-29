@@ -186,14 +186,15 @@
                 </div>
                 <div class="field" style="margin-top:var(--space-4)">
                     <label for="sock-room">Room <span class="opt">(optional)</span></label>
-                    <input id="sock-room" type="text" bind:value={room}
-                        placeholder="e.g. Living room" autocomplete="off"
-                        list="sock-room-list" />
-                    <datalist id="sock-room-list">
-                        {#each data.value.rooms as r (r.name)}
-                            <option value={r.name}></option>
+                    <select id="sock-room" bind:value={room}>
+                        <option value="">No room</option>
+                        {#each [...data.value.rooms].sort((a, b) => a.name.localeCompare(b.name)) as r (r.id)}
+                            <option value={r.name}>{r.name}</option>
                         {/each}
-                    </datalist>
+                        {#if room && !data.value.rooms.some(r => r.name === room)}
+                            <option value={room}>{room}</option>
+                        {/if}
+                    </select>
                 </div>
                 <div class="field" style="margin-top:var(--space-4)">
                     <span class="field-label">Icon <span class="opt">(for kid mode)</span></span>

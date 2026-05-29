@@ -174,6 +174,7 @@ export interface SceneStep {
 export interface Scene {
   id: string;
   name: string;
+  room?: string;
   steps: SceneStep[];
   /** @deprecated legacy field; migrated to steps on the server */
   actions?: SceneAction[];
@@ -189,8 +190,12 @@ export interface Timer {
   note?: string;
 }
 
-export interface RoomSummary {
+export interface Room {
+  id: string;
   name: string;
+}
+
+export interface RoomSummary extends Room {
   sockets: number;
   on: number;
 }

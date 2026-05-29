@@ -44,6 +44,7 @@ type Store struct {
 	Timers      map[string]*Timer
 	Automations map[string]*Automation
 	Sensors     map[string]*Sensor
+	Rooms       map[string]*Room
 	// Readings is a rolling window of recent values per sensor id.
 	// Trimmed to ReadingsHistorySize on each append.
 	Readings  map[string][]SensorReading
@@ -102,6 +103,7 @@ const (
 	readingsFile    = "readings.json"
 	settingsFile    = "settings.json"
 	usersFile       = "users.json"
+	roomsFile       = "rooms.json"
 
 	// ReadingsHistorySize caps how many readings are kept per sensor.
 	// At one sample per minute that's ~16 hours; at one per five minutes
@@ -120,6 +122,7 @@ func New(dataDir string, rf RFSender) *Store {
 		Timers:      make(map[string]*Timer),
 		Automations: make(map[string]*Automation),
 		Sensors:     make(map[string]*Sensor),
+		Rooms:       make(map[string]*Room),
 		Readings:    make(map[string][]SensorReading),
 		Users:       make(map[string]*User),
 		Settings:    &Settings{},
@@ -164,6 +167,12 @@ func (s *Store) Load() error {
 	if err := readJSON(filepath.Join(s.DataDir, usersFile), &s.Users); err != nil {
 		return fmt.Errorf("loading users: %w", err)
 	}
+	// Rooms: nil means rooms.json doesn't exist yet (first run).
+	// In that case derive Room entities from the room strings already on sockets
+	// and sensors so existing installations get a clean migration automatically.
+	if err := readJSON(filepath.Join(s.DataDir, roomsFile), &s.Rooms); err != nil {
+		return fmt.Errorf("loading rooms: %w", err)
+	}
 	if s.Settings == nil {
 		s.Settings = &Settings{}
 	}
@@ -193,6 +202,30 @@ func (s *Store) Load() error {
 	}
 	if s.Readings == nil {
 		s.Readings = make(map[string][]SensorReading)
+	}
+	if s.Rooms == nil {
+		// First run: rooms.json absent — derive rooms from socket/sensor strings.
+		s.Rooms = make(map[string]*Room)
+		seen := make(map[string]bool)
+		counter := 1
+		for _, sock := range s.Sockets {
+			name := strings.TrimSpace(sock.Room)
+			if name != "" && !seen[strings.ToLower(name)] {
+				seen[strings.ToLower(name)] = true
+				id := fmt.Sprintf("room_%d", counter)
+				counter++
+				s.Rooms[id] = &Room{ID: id, Name: name}
+			}
+		}
+		for _, sn := range s.Sensors {
+			name := strings.TrimSpace(sn.Room)
+			if name != "" && !seen[strings.ToLower(name)] {
+				seen[strings.ToLower(name)] = true
+				id := fmt.Sprintf("room_%d", counter)
+				counter++
+				s.Rooms[id] = &Room{ID: id, Name: name}
+			}
+		}
 	}
 
 	for _, sch := range s.Schedules {
@@ -243,6 +276,9 @@ func (s *Store) Save() error {
 	}
 	if err := writeJSON(filepath.Join(s.DataDir, usersFile), s.Users); err != nil {
 		return fmt.Errorf("saving users: %w", err)
+	}
+	if err := writeJSON(filepath.Join(s.DataDir, roomsFile), s.Rooms); err != nil {
+		return fmt.Errorf("saving rooms: %w", err)
 	}
 	return nil
 }

@@ -266,6 +266,7 @@
 
     // ── Form state ─────────────────────────────────────────────────────
     let name = $state(untrack(() => existing?.name ?? ""));
+    let room = $state(untrack(() => existing?.room ?? ""));
     let saving = $state(false);
     let nameError = $state("");
 
@@ -282,7 +283,7 @@
         try {
             const sceneName = name.trim();
             // Snapshot steps are optional — send whatever is configured (may be []).
-            const payload = { name: sceneName, steps: buildSteps() };
+            const payload = { name: sceneName, room: room || undefined, steps: buildSteps() };
 
             let sceneId: string;
             if (isEdit) {
@@ -331,15 +332,26 @@
     {#snippet body()}
         <div class="scene-form">
 
-            <!-- ── Name ─────────────────────────────────────────── -->
-            <div class="field">
-                <label for="scn-name">Name</label>
-                <input id="scn-name" type="text" bind:value={name}
-                    placeholder="e.g. Evening lighting" autocomplete="off"
-                    aria-invalid={nameError ? "true" : undefined}
-                    aria-describedby={nameError ? "scn-name-err" : undefined}
-                    oninput={() => nameError = ""} />
-                {#if nameError}<div id="scn-name-err" class="field-error">{nameError}</div>{/if}
+            <!-- ── Name + Room ──────────────────────────────────── -->
+            <div class="field-row">
+                <div class="field" style="flex:2">
+                    <label for="scn-name">Name</label>
+                    <input id="scn-name" type="text" bind:value={name}
+                        placeholder="e.g. Evening lighting" autocomplete="off"
+                        aria-invalid={nameError ? "true" : undefined}
+                        aria-describedby={nameError ? "scn-name-err" : undefined}
+                        oninput={() => nameError = ""} />
+                    {#if nameError}<div id="scn-name-err" class="field-error">{nameError}</div>{/if}
+                </div>
+                <div class="field" style="flex:1">
+                    <label for="scn-room">Room <span class="opt">(optional)</span></label>
+                    <select id="scn-room" bind:value={room}>
+                        <option value="">No room</option>
+                        {#each [...v.rooms].sort((a, b) => a.name.localeCompare(b.name)) as r (r.id)}
+                            <option value={r.name}>{r.name}</option>
+                        {/each}
+                    </select>
+                </div>
             </div>
 
             <!-- ── Rules ─────────────────────────────────────────── -->
@@ -985,6 +997,8 @@
         .snapshot-chevron, .row-bulb, .picker-row, .state-btn,
         .rule-card, .add-dashed-btn { transition-duration: 0.001ms; }
     }
+
+    .opt { color: var(--text-muted); font-weight: 400; font-size: 12px; }
 
     /* ── Mobile ──────────────────────────────────────────────────── */
     @media (max-width: 600px) {
