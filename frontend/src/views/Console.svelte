@@ -601,9 +601,10 @@
             </div>
             {#each devices as d (d.id)}
                 {@const dimmable = isDimmable(d)}
-                {@const dragging = drag?.id === d.id}
-                {@const lvl = dragging ? drag.pct : levels[d.id]}
-                {@const pct = dragging ? drag.pct : d.state ? (lvl ?? 100) : 0}
+                {@const dragPct = drag && drag.id === d.id ? drag.pct : null}
+                {@const dragging = dragPct != null}
+                {@const lvl = dragPct ?? levels[d.id]}
+                {@const pct = dragPct ?? (d.state ? (levels[d.id] ?? 100) : 0)}
                 {@const filled = Math.round(pct / 10)}
                 <div class="row mono" class:dim={!d.state}>
                     <span class="led" data-on={d.state}>{d.state ? "●" : "○"}</span>
