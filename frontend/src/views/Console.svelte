@@ -3,7 +3,7 @@
     import { data, toasts, route } from "../lib/stores.svelte";
     import { api } from "../lib/api";
     import { socketAction } from "../lib/utils";
-    import type { Socket } from "../lib/types";
+    import type { Socket, Group } from "../lib/types";
 
     const v = $derived(data.value);
 
@@ -75,14 +75,67 @@
     let cmd = $state("");
     let busy = $state(false);
 
-    function findSocket(q: string): Socket | undefined {
-        const n = q.trim().toLowerCase();
-        if (!n) return undefined;
-        return (
-            v.sockets.find((s) => s.name.toLowerCase() === n) ??
-            v.sockets.find((s) => hostOf(s) === n) ??
-            v.sockets.find((s) => s.name.toLowerCase().includes(n))
-        );
+    type Action = "on" | "off" | "toggle";
+
+    // A command target can be a device, a group, or a room. on/off/toggle all
+    // resolve against the same name pool so you don't have to remember which
+    // kind a name is.
+    type Target =
+        | { kind: "device"; socket: Socket }
+        | { kind: "group"; group: Group }
+        | { kind: "room"; name: string };
+
+    function roomNames(): string[] {
+        return [...new Set(v.sockets.map((s) => s.room?.trim()).filter(Boolean) as string[])];
+    }
+
+    // Resolve a free-text query to a target. Exact matches (device → group →
+    // room) win; otherwise fall back to a substring match in the same order.
+    function resolveTarget(raw: string): Target | undefined {
+        const q = raw.trim().toLowerCase().replace(/^(the|my)\s+/, "");
+        if (!q) return undefined;
+        const rooms = roomNames();
+
+        const sEx = v.sockets.find((s) => s.name.toLowerCase() === q) ?? v.sockets.find((s) => hostOf(s) === q);
+        if (sEx) return { kind: "device", socket: sEx };
+        const gEx = v.groups.find((g) => g.name.toLowerCase() === q);
+        if (gEx) return { kind: "group", group: gEx };
+        const rEx = rooms.find((r) => r.toLowerCase() === q);
+        if (rEx) return { kind: "room", name: rEx };
+
+        const sIn = v.sockets.find((s) => s.name.toLowerCase().includes(q));
+        if (sIn) return { kind: "device", socket: sIn };
+        const gIn = v.groups.find((g) => g.name.toLowerCase().includes(q));
+        if (gIn) return { kind: "group", group: gIn };
+        const rIn = rooms.find((r) => r.toLowerCase().includes(q));
+        if (rIn) return { kind: "room", name: rIn };
+
+        return undefined;
+    }
+
+    // Apply an action to a resolved target; returns a label for the log.
+    async function applyAction(t: Target, action: Action): Promise<string> {
+        if (t.kind === "device") {
+            await socketAction(t.socket, action);
+            return `${hostOf(t.socket)} → ${action}`;
+        }
+        if (t.kind === "group") {
+            await api.groupAction(t.group.id, action);
+            await data.refresh();
+            return `group:${t.group.name} → ${action}`;
+        }
+        // room — backend has no toggle, only on/off
+        if (action === "toggle") throw new Error("rooms can only be turned on or off");
+        if (action === "on") await api.roomOn(t.name); else await api.roomOff(t.name);
+        await data.refresh();
+        return `room:${t.name} → ${action}`;
+    }
+
+    async function doAction(action: Action, targetStr: string) {
+        if (!targetStr.trim()) { echo("err", `usage: ${action} <device | group | room>`); return; }
+        const t = resolveTarget(targetStr);
+        if (!t) { echo("err", `nothing matching "${targetStr.trim()}"`); return; }
+        echo("set", await applyAction(t, action));
     }
 
     async function run(raw: string) {
@@ -95,32 +148,39 @@
             const verb = parts[0].toLowerCase();
             const rest = parts.slice(1).join(" ");
 
-            if (verb === "all" && (parts[1] === "off" || parts[1] === "on")) {
-                if (parts[1] === "off") await api.allOff(); else await api.allOn();
-                echo("ok", `all ${parts[1]}`);
+            // everything on/off
+            if (verb === "all" && (parts[1]?.toLowerCase() === "off" || parts[1]?.toLowerCase() === "on")) {
+                const on = parts[1].toLowerCase() === "on";
+                if (on) await api.allOn(); else await api.allOff();
+                echo("ok", `all ${on ? "on" : "off"}`);
                 await data.refresh();
+
+            // bare action verb: on/off/toggle <target>
             } else if (verb === "on" || verb === "off" || verb === "toggle") {
-                const s = findSocket(rest);
-                if (!s) { echo("err", `no device matching "${rest}"`); }
-                else {
-                    await socketAction(s, verb as "on" | "off" | "toggle");
-                    echo("set", `${hostOf(s)} → ${verb}`);
-                }
-            } else if (verb === "scene") {
+                await doAction(verb, rest);
+
+            // natural phrasing: "turn off …" / "switch on …"
+            } else if (verb === "turn" || verb === "switch") {
+                const st = parts[1]?.toLowerCase();
+                if (st === "on" || st === "off") await doAction(st, parts.slice(2).join(" "));
+                else echo("err", `usage: ${verb} on|off <device | group | room>`);
+
+            // scene activation
+            } else if (verb === "scene" || verb === "activate") {
                 const sc = v.scenes.find((x) => x.name.toLowerCase() === rest.toLowerCase())
                     ?? v.scenes.find((x) => x.name.toLowerCase().includes(rest.toLowerCase()));
                 if (!sc) { echo("err", `no scene matching "${rest}"`); }
                 else { await api.activateScene(sc.id); echo("ok", `scene.${sc.name} activated`); await data.refresh(); }
+
+            // explicit room verb (kept for clarity): "room <name> on|off"
             } else if (verb === "room") {
                 const m = rest.match(/^(.*)\s+(on|off)$/i);
                 if (!m) { echo("err", "usage: room <name> on|off"); }
-                else {
-                    if (m[2].toLowerCase() === "on") await api.roomOn(m[1]); else await api.roomOff(m[1]);
-                    echo("ok", `room ${m[1]} → ${m[2].toLowerCase()}`);
-                    await data.refresh();
-                }
+                else { echo("set", await applyAction({ kind: "room", name: m[1].trim() }, m[2].toLowerCase() as Action)); }
+
             } else if (verb === "help" || verb === "?") {
-                echo("in", "all on|off · on|off|toggle <device> · scene <name> · room <name> on|off");
+                echo("in", "turn on|off <name> · on|off|toggle <device|group|room> · scene <name> · all on|off");
+
             } else {
                 echo("err", `unknown command: ${verb} (try "help")`);
             }
@@ -220,7 +280,7 @@
                 type="text"
                 bind:value={cmd}
                 onkeydown={onKey}
-                placeholder="on living lamp · scene evening · all off · help"
+                placeholder="turn off lamp · on kitchen · scene evening · all off · help"
                 aria-label="Console command"
                 autocomplete="off"
                 autocapitalize="off"
