@@ -120,15 +120,15 @@
             return `${hostOf(t.socket)} → ${action}`;
         }
         if (t.kind === "group") {
-            await api.groupAction(t.group.id, action);
+            const r = await api.groupAction(t.group.id, action);
             await data.refresh();
-            return `group:${t.group.name} → ${action}`;
+            return `group:${t.group.name} → ${action} (${r.updated})`;
         }
         // room — backend has no toggle, only on/off
         if (action === "toggle") throw new Error("rooms can only be turned on or off");
-        if (action === "on") await api.roomOn(t.name); else await api.roomOff(t.name);
+        const r = action === "on" ? await api.roomOn(t.name) : await api.roomOff(t.name);
         await data.refresh();
-        return `room:${t.name} → ${action}`;
+        return `room:${t.name} → ${action} (${r.updated})`;
     }
 
     // Match a room name leniently in both directions ("living room" ↔ "Living").
@@ -172,7 +172,7 @@
     function extractAction(tokens: string[]): { action: Action; rest: string[] } | null {
         const lead = tokens[0];
         const last = tokens[tokens.length - 1];
-        if (lead === "turn" || lead === "switch" || lead === "set") {
+        if (lead === "turn" || lead === "switch") {
             if (tokens[1] === "on" || tokens[1] === "off") return { action: tokens[1] as Action, rest: tokens.slice(2) };
             if (last === "on" || last === "off") return { action: last as Action, rest: tokens.slice(1, -1) };
             return null;
@@ -191,73 +191,194 @@
 
     async function allOnOff(action: Action) {
         if (action === "toggle") { echo("err", `say "all on" or "all off"`); return; }
-        if (action === "on") await api.allOn(); else await api.allOff();
-        echo("ok", `all ${action}`);
+        const r = action === "on" ? await api.allOn() : await api.allOff();
+        echo("ok", `all ${action} (${r.updated})`);
         await data.refresh();
     }
 
-    async function run(raw: string) {
+    // ── Brightness & colour (smart lights only) ───────────────────────
+    const COLORS: Record<string, string> = {
+        red: "ff3b30", orange: "ff9500", amber: "ffb84d", warm: "ffd9a0",
+        yellow: "ffd60a", lime: "a8e060", green: "34c759", teal: "40c8c0",
+        cyan: "32ade6", blue: "0a84ff", indigo: "5e5ce6", violet: "bf5af2",
+        purple: "bf5af2", magenta: "ff2d9b", pink: "ff375f", white: "ffffff",
+    };
+    const isSmart = (s: Socket) => s.protocol === "tasmota" || s.protocol.startsWith("matter");
+
+    // Expand a target to the concrete sockets it covers.
+    function socketsForTarget(t: Target): Socket[] {
+        if (t.kind === "device") return [t.socket];
+        if (t.kind === "group") return t.group.socket_ids.map((id) => v.sockets.find((s) => s.id === id)).filter(Boolean) as Socket[];
+        return v.sockets.filter((s) => (s.room?.trim() ?? "") === t.name);
+    }
+    function labelOf(t: Target): string {
+        return t.kind === "device" ? hostOf(t.socket) : t.kind === "group" ? `group:${t.group.name}` : `room:${t.name}`;
+    }
+    async function setLevel(s: Socket, pct: number) {
+        if (pct <= 0) { await socketAction(s, "off"); return; }
+        if (s.protocol === "tasmota") await api.tasmotaSetState(s.id, { dimmer: pct, on: true });
+        else await api.matterSetState(s.id, { level: pct, on: true });
+    }
+    async function setColor(s: Socket, hex: string) {
+        if (s.protocol === "tasmota") await api.tasmotaSetState(s.id, { color: hex, on: true });
+        else await api.matterSetState(s.id, { color: hex, on: true });
+    }
+    // Apply a per-light mutation across a target, skipping non-smart members.
+    async function applySmart(targetStr: string, verb: string, fn: (s: Socket) => Promise<void>) {
+        const t = resolveTarget(targetStr);
+        if (!t) { echo("err", `nothing matching "${targetStr.trim()}"`); return; }
+        const socks = socketsForTarget(t);
+        let done = 0, skipped = 0;
+        for (const s of socks) {
+            if (!isSmart(s)) { skipped++; continue; }
+            try { await fn(s); done++; } catch { skipped++; }
+        }
+        await data.refresh();
+        if (done === 0) echo("err", `no dimmable lights in "${targetStr.trim()}"`);
+        else echo("set", `${labelOf(t)} → ${verb}${skipped ? ` (${skipped} skipped)` : ""}`);
+    }
+    const applyLevel = (target: string, pct: number) =>
+        applySmart(target, `${Math.max(0, Math.min(100, pct))}%`, (s) => setLevel(s, Math.max(0, Math.min(100, pct))));
+    const applyColor = (target: string, name: string) =>
+        applySmart(target, name, (s) => setColor(s, COLORS[name]));
+
+    // ── Query / info commands (print to the tail, change nothing) ─────
+    function runQuery(first: string): boolean {
+        if (first === "status") {
+            echo("in", `${totalOn}/${totalSockets} on · ${roomCount} rooms · hub:${hubUp ? "up" : "down"}`);
+        } else if (first === "ls" || first === "list" || first === "devices") {
+            const items = devices.slice(0, 16).map((d) => `${d.name}=${d.state ? "on" : "off"}`);
+            echo("in", `devices: ${items.join(" · ")}${devices.length > 16 ? ` · +${devices.length - 16}` : ""}` || "devices: none");
+        } else if (first === "rooms") {
+            const rs = roomNames().map((r) => {
+                const ss = v.sockets.filter((s) => (s.room?.trim() ?? "") === r);
+                return `${r} ${ss.filter((s) => s.state).length}/${ss.length}`;
+            });
+            echo("in", rs.length ? `rooms: ${rs.join(" · ")}` : "rooms: none");
+        } else if (first === "groups") {
+            echo("in", v.groups.length ? `groups: ${v.groups.map((g) => `${g.name}(${g.socket_ids.length})`).join(" · ")}` : "groups: none");
+        } else if (first === "scenes") {
+            echo("in", v.scenes.length ? `scenes: ${v.scenes.map((s) => s.name).join(" · ")}` : "scenes: none");
+        } else if (first === "on?" || first === "lit") {
+            const on = v.sockets.filter((s) => s.state).map((s) => s.name);
+            echo("in", on.length ? `on: ${on.join(" · ")}` : "on: nothing");
+        } else if (first === "clear" || first === "cls") {
+            localLog = [];
+        } else if (first === "help" || first === "?") {
+            echo("in", "on|off|toggle <device|group|room> · turn off <name> · <name> off · X in <room> · set <name> 60% · set <name> warm · scene <name> · all off · and/then chains · ls·rooms·groups·scenes·status·clear · ↑↓ history · Tab complete");
+        } else return false;
+        return true;
+    }
+
+    // Execute one command segment. Returns the action it applied (so the next
+    // bare segment in an "and" chain can inherit it), or undefined.
+    async function execSegment(raw: string, inherited?: Action): Promise<Action | undefined> {
         const line = raw.trim();
-        if (!line || busy) return;
+        if (!line) return undefined;
+        const lower = line.toLowerCase().replace(/[.!?,]+$/g, "");
+        const first = lower.split(/\s+/)[0];
+
+        if (runQuery(first)) return undefined;
+
+        // scene activation
+        if (first === "scene" || first === "activate") {
+            const q = line.slice(first.length).trim();
+            const sc = v.scenes.find((x) => x.name.toLowerCase() === q.toLowerCase())
+                ?? v.scenes.find((x) => x.name.toLowerCase().includes(q.toLowerCase()));
+            if (!sc) echo("err", `no scene matching "${q}"`);
+            else { await api.activateScene(sc.id); echo("ok", `scene.${sc.name} activated`); await data.refresh(); }
+            return undefined;
+        }
+
+        // explicit "room <name> on|off"
+        if (first === "room") {
+            const m = line.slice(4).trim().match(/^(.+?)\s+(on|off)$/i);
+            const room = m && resolveRoom(m[1]);
+            if (!m) echo("err", "usage: room <name> on|off");
+            else if (!room) echo("err", `no room matching "${m[1].trim()}"`);
+            else { echo("set", await applyAction({ kind: "room", name: room }, m[2].toLowerCase() as Action)); return m[2].toLowerCase() as Action; }
+            return undefined;
+        }
+        // explicit "group <name> on|off|toggle"
+        if (first === "group") {
+            const m = line.slice(5).trim().match(/^(.+?)\s+(on|off|toggle)$/i);
+            const g = m && resolveGroup(m[1]);
+            if (!m) echo("err", "usage: group <name> on|off|toggle");
+            else if (!g) echo("err", `no group matching "${m[1].trim()}"`);
+            else { echo("set", await applyAction({ kind: "group", group: g }, m[2].toLowerCase() as Action)); return m[2].toLowerCase() as Action; }
+            return undefined;
+        }
+
+        // "set <target> <value>" / "dim|brighten <target> [to] <pct>"
+        if (first === "set" || first === "dim" || first === "brighten") {
+            const body = line.slice(first.length).trim().replace(/\bto\b/gi, " ").replace(/\s+/g, " ").trim();
+            const parts = body.split(" ");
+            const value = parts[parts.length - 1]?.toLowerCase() ?? "";
+            const target = parts.slice(0, -1).join(" ");
+            if (first === "dim" && !/^\d/.test(value)) await applyLevel(body, 25);
+            else if (first === "brighten" && !/^\d/.test(value)) await applyLevel(body, 100);
+            else if (!target) echo("err", `usage: ${first} <name> <0-100 | colour | on|off>`);
+            else if (value === "on" || value === "off" || value === "toggle") await doAction(value as Action, target);
+            else if (/^\d{1,3}%?$/.test(value)) await applyLevel(target, parseInt(value, 10));
+            else if (COLORS[value]) await applyColor(target, value);
+            else echo("err", `don't know "${value}" — use 0-100, a colour, or on/off`);
+            return undefined;
+        }
+
+        // trailing "<target> 60%" or "<target> to <colour>"
+        const pctM = line.match(/^(.+?)\s+(?:to\s+)?(\d{1,3})\s*%$/i) ?? line.match(/^(.+?)\s+to\s+(\d{1,3})$/i);
+        if (pctM) { await applyLevel(pctM[1], parseInt(pctM[2], 10)); return undefined; }
+        const colM = line.match(/^(.+?)\s+to\s+([a-z]+)$/i);
+        if (colM && COLORS[colM[2].toLowerCase()]) { await applyColor(colM[1], colM[2].toLowerCase()); return undefined; }
+
+        // natural on/off/toggle phrasing
+        const tokens = norm(line).split(" ").filter(Boolean);
+        let ext = extractAction(tokens);
+        if (!ext && inherited) ext = { action: inherited, rest: tokens }; // inherit verb in a chain
+        if (!ext) { echo("err", `didn't understand "${line}" (try "help")`); return undefined; }
+
+        const { action, rest } = ext;
+        const inIdx = rest.indexOf("in");
+        if (inIdx >= 0) {
+            const subject = rest.slice(0, inIdx).join(" ").trim();
+            const roomPhrase = rest.slice(inIdx + 1).join(" ");
+            const room = resolveRoom(roomPhrase);
+            if (!room) echo("err", `no room matching "${roomPhrase.trim()}"`);
+            else if (!subject || WHOLE.has(subject)) echo("set", await applyAction({ kind: "room", name: room }, action));
+            else {
+                const dev = deviceInRoom(subject, room);
+                if (!dev) echo("err", `no device "${subject}" in ${room}`);
+                else echo("set", await applyAction({ kind: "device", socket: dev }, action));
+            }
+        } else {
+            const phrase = rest.join(" ").trim();
+            if (!phrase || WHOLE.has(phrase)) await allOnOff(action);
+            else await doAction(action, phrase);
+        }
+        return action;
+    }
+
+    // ── Command history ───────────────────────────────────────────────
+    let history = $state<string[]>([]);
+    let hi = $state(-1); // -1 = current (unsubmitted) line
+
+    // Split a line into segments on connectors so several commands can run
+    // at once: "turn off the kitchen and the hall", "lamp on, tv off".
+    const CONNECTORS = /\s*(?:,|;|&|\band\b|\bthen\b|\bplus\b)\s*/i;
+
+    async function runLine(raw: string) {
+        const whole = raw.trim();
+        if (!whole || busy) return;
         busy = true;
-        echo("in", `› ${line}`);
+        history = [whole, ...history.filter((h) => h !== whole)].slice(0, 50);
+        hi = -1;
+        echo("in", `› ${whole}`);
         try {
-            const lower = line.toLowerCase().replace(/[.!?,]+$/g, "");
-            const first = lower.split(/\s+/)[0];
-
-            // scene activation — "scene <name>" / "activate <name>"
-            if (first === "scene" || first === "activate") {
-                const q = line.slice(first.length).trim();
-                const sc = v.scenes.find((x) => x.name.toLowerCase() === q.toLowerCase())
-                    ?? v.scenes.find((x) => x.name.toLowerCase().includes(q.toLowerCase()));
-                if (!sc) echo("err", `no scene matching "${q}"`);
-                else { await api.activateScene(sc.id); echo("ok", `scene.${sc.name} activated`); await data.refresh(); }
-
-            } else if (first === "help" || first === "?") {
-                echo("in", "turn on|off <name> · <name> off · on <device|group|room> · <thing> in <room> · scene <name> · all off");
-
-            // explicit qualifier: "room <name> on|off" (kept for the type hint)
-            } else if (first === "room") {
-                const m = line.slice(4).trim().match(/^(.+?)\s+(on|off)$/i);
-                const room = m && resolveRoom(m[1]);
-                if (!m) echo("err", "usage: room <name> on|off");
-                else if (!room) echo("err", `no room matching "${m[1].trim()}"`);
-                else echo("set", await applyAction({ kind: "room", name: room }, m[2].toLowerCase() as Action));
-
-            // explicit qualifier: "group <name> on|off|toggle"
-            } else if (first === "group") {
-                const m = line.slice(5).trim().match(/^(.+?)\s+(on|off|toggle)$/i);
-                const g = m && resolveGroup(m[1]);
-                if (!m) echo("err", "usage: group <name> on|off|toggle");
-                else if (!g) echo("err", `no group matching "${m[1].trim()}"`);
-                else echo("set", await applyAction({ kind: "group", group: g }, m[2].toLowerCase() as Action));
-
-            // everything else: natural action phrasing in many shapes
-            } else {
-                const tokens = norm(line).split(" ").filter(Boolean);
-                const ext = extractAction(tokens);
-                if (!ext) { echo("err", `didn't understand "${line}" (try "help")`); }
-                else {
-                    const { action, rest } = ext;
-                    const inIdx = rest.indexOf("in");
-                    if (inIdx >= 0) {
-                        // "<subject> in <room>" — scope to a room
-                        const subject = rest.slice(0, inIdx).join(" ").trim();
-                        const roomPhrase = rest.slice(inIdx + 1).join(" ");
-                        const room = resolveRoom(roomPhrase);
-                        if (!room) echo("err", `no room matching "${roomPhrase.trim()}"`);
-                        else if (!subject || WHOLE.has(subject)) echo("set", await applyAction({ kind: "room", name: room }, action));
-                        else {
-                            const dev = deviceInRoom(subject, room);
-                            if (!dev) echo("err", `no device "${subject}" in ${room}`);
-                            else echo("set", await applyAction({ kind: "device", socket: dev }, action));
-                        }
-                    } else {
-                        const phrase = rest.join(" ").trim();
-                        if (!phrase || WHOLE.has(phrase)) await allOnOff(action);
-                        else await doAction(action, phrase);
-                    }
-                }
+            const segs = whole.split(CONNECTORS).map((s) => s.trim()).filter(Boolean);
+            let last: Action | undefined;
+            for (const seg of segs) {
+                const used = await execSegment(seg, last);
+                if (used) last = used;
             }
         } catch (e) {
             echo("err", (e as Error).message);
@@ -265,18 +386,64 @@
         } finally {
             busy = false;
             cmd = "";
+            acReset();
         }
     }
 
-    // Quick chips: a couple of always-useful commands plus the first scenes.
+    // Quick chips: always-useful commands plus the first scenes.
     const quick = $derived([
         "all off",
         "all on",
+        "ls",
         ...v.scenes.slice(0, 3).map((s) => `scene ${s.name}`),
     ]);
 
+    // ── Tab completion ────────────────────────────────────────────────
+    const VERBS = [
+        "turn on ", "turn off ", "toggle ", "on ", "off ", "set ", "scene ",
+        "all off", "all on", "status", "list", "rooms", "groups", "scenes", "help", "clear",
+    ];
+    const vocab = $derived([
+        ...v.sockets.map((s) => s.name),
+        ...v.groups.map((g) => g.name),
+        ...roomNames(),
+        ...v.scenes.map((s) => s.name),
+    ]);
+    let acMatches: string[] = [];
+    let acIdx = 0;
+    let acHead = "";
+    let acLast = "";
+    function acReset() { acMatches = []; acIdx = 0; acLast = ""; }
+    function tabComplete() {
+        if (acMatches.length && cmd === acLast) {
+            acIdx = (acIdx + 1) % acMatches.length;
+        } else {
+            const m = cmd.match(/^(\s*(?:(?:turn|switch)\s+(?:on|off)|on|off|toggle|set|dim|brighten|scene|activate|room|group)\s+)(.*)$/i);
+            acHead = m ? m[1] : "";
+            const frag = (m ? m[2] : cmd).replace(/^\s+/, "").toLowerCase();
+            const pool = m ? vocab : [...VERBS, ...vocab];
+            acMatches = pool.filter((x) => x.toLowerCase().startsWith(frag) && x.toLowerCase() !== frag);
+            acIdx = 0;
+        }
+        if (!acMatches.length) return;
+        cmd = acHead + acMatches[acIdx];
+        acLast = cmd;
+    }
+
     function onKey(e: KeyboardEvent) {
-        if (e.key === "Enter") { e.preventDefault(); run(cmd); }
+        if (e.key === "Enter") { e.preventDefault(); runLine(cmd); return; }
+        if (e.key === "Tab") { e.preventDefault(); tabComplete(); return; }
+        if (e.key === "ArrowUp") {
+            e.preventDefault();
+            if (history.length) { hi = Math.min(hi + 1, history.length - 1); cmd = history[hi]; }
+            return;
+        }
+        if (e.key === "ArrowDown") {
+            e.preventDefault();
+            if (hi >= 0) { hi -= 1; cmd = hi < 0 ? "" : history[hi]; }
+            return;
+        }
+        acReset();
     }
 </script>
 
@@ -345,7 +512,7 @@
     <div class="cmdbar">
         <div class="quick h-scroll">
             {#each quick as q (q)}
-                <button class="qchip mono" onclick={() => run(q)} disabled={busy}>{q}</button>
+                <button class="qchip mono" onclick={() => runLine(q)} disabled={busy}>{q}</button>
             {/each}
         </div>
         <div class="cmdline">
@@ -355,7 +522,7 @@
                 type="text"
                 bind:value={cmd}
                 onkeydown={onKey}
-                placeholder="turn off the lamp · everything in kitchen off · all off · help"
+                placeholder="set lamp 60% · kitchen off and hall off · ↑ history · Tab · help"
                 aria-label="Console command"
                 autocomplete="off"
                 autocapitalize="off"
