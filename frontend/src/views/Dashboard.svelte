@@ -14,18 +14,25 @@
     import { fly, scale } from "svelte/transition";
     import { flip } from "svelte/animate";
     import { cubicOut } from "svelte/easing";
+    import { Tween } from "svelte/motion";
     import { dur, stagger } from "../lib/motion";
 
     const v = $derived(data.value);
 
-    // ── Greeting ────────────────────────────────────────────────────────────
-    const now = new Date();
-    const greeting =
+    // ── Live clock ───────────────────────────────────────────────────────────
+    let now = $state(new Date());
+    $effect(() => {
+        const id = setInterval(() => { now = new Date(); }, 1000);
+        return () => clearInterval(id);
+    });
+    const greeting = $derived(
         now.getHours() < 12 ? "Good morning" :
-        now.getHours() < 18 ? "Good afternoon" : "Good evening";
-    const dateLabel =
+        now.getHours() < 18 ? "Good afternoon" : "Good evening"
+    );
+    const dateLabel = $derived(
         now.toLocaleDateString([], { weekday: "long" }) + ", " +
-        now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+        now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })
+    );
     const name = $derived(session.user?.username || "there");
 
     // ── Whole-home hero ─────────────────────────────────────────────────────
@@ -33,6 +40,15 @@
     const totalSockets = $derived(v.sockets.length);
     const onSockets = $derived(v.sockets.filter(s => s.state).length);
     const heroOn = $derived(onSockets > 0);
+
+    // Animated on-count: tween to avoid jarring jumps on toggle.
+    const tweenedOn = new Tween(0);
+    let _onInit = true;
+    $effect(() => {
+        const d = _onInit ? 0 : dur(500);
+        _onInit = false;
+        tweenedOn.set(onSockets, { duration: d, easing: cubicOut });
+    });
 
     const powerSensors = $derived(v.sensors.filter(s => s.kind === "power" && s.last_value != null));
     const hasPower = $derived(powerSensors.length > 0);
@@ -158,7 +174,7 @@
             <div class="hero-lead">
                 <div class="hero-eyebrow mono">Whole home</div>
                 <div class="hero-count">
-                    <span class="num-display">{onSockets}</span>
+                    <span class="num-display">{Math.round(tweenedOn.current)}</span>
                     <span class="hero-of">of {totalSockets} on</span>
                 </div>
             </div>
