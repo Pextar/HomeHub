@@ -379,6 +379,20 @@ func defaultUnitForKind(kind string) string {
 	return ""
 }
 
+// ValidateRoom normalizes and validates a room. Caller must hold Mu.
+func (s *Store) ValidateRoom(r *Room) error {
+	r.Name = strings.TrimSpace(r.Name)
+	if r.Name == "" {
+		return errors.New("name is required")
+	}
+	for _, existing := range s.Rooms {
+		if existing.ID != r.ID && strings.EqualFold(existing.Name, r.Name) {
+			return errors.New("a room with that name already exists")
+		}
+	}
+	return nil
+}
+
 // ValidateSocket normalizes and validates a socket. The Nexa/Proove protocol
 // requires the code to be in "houseID:unit" format; this is checked so that
 // malformed codes are rejected at save time rather than discovered later when

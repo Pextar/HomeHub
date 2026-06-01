@@ -202,6 +202,14 @@ func (s *Settings) HasLocation() bool {
 	return s.Latitude != 0 || s.Longitude != 0
 }
 
+// Room is a named physical space. Sockets and sensors carry the room name
+// as a string; Room entities are the canonical list of valid names. When a
+// room is renamed or deleted the cascade handler updates those strings.
+type Room struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
 // Group is a manually curated collection of sockets that can be
 // controlled together. A socket may belong to any number of groups.
 type Group struct {
@@ -239,8 +247,9 @@ type SceneStep struct {
 // slice. On first load those are migrated to a single step with
 // DelayMinutes=0; the Actions field is then cleared.
 type Scene struct {
-	ID    string      `json:"id"`
-	Name  string      `json:"name"`
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Room string `json:"room,omitempty"` // optional room tag for organisation
 	Steps []SceneStep `json:"steps"`
 	// Actions is the legacy single-step field kept for on-disk
 	// backward-compatibility. Populated by old scenes; migrated to

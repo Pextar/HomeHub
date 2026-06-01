@@ -85,6 +85,7 @@ func (s *Server) updateScene(w http.ResponseWriter, r *http.Request) {
 	if name := strings.TrimSpace(updates.Name); name != "" {
 		merged.Name = name
 	}
+	merged.Room = strings.TrimSpace(updates.Room)
 	if updates.Steps != nil {
 		merged.Steps = updates.Steps
 		merged.Actions = nil // clear legacy field when steps are provided
