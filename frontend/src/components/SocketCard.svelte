@@ -39,10 +39,10 @@
         }
     });
 
-    // Brightness drives the read-only rail + "On · NN%" label. Lazy-loaded from
+    // Brightness drives the inline slider + "On · NN%" label. Lazy-loaded from
     // the bridge once the tile scrolls into view (a wall of smart lights would
-    // otherwise fire a burst of requests on mount). Full control lives in the
-    // light modal opened from the actions menu.
+    // otherwise fire a burst of requests on mount). Full control (colour, CT,
+    // presets) lives in the light modal opened by tapping the card body.
     let brightness = $state<number | null>(null);
     let cardEl = $state<HTMLElement>();
     let visible = $state(false);
@@ -62,6 +62,18 @@
             api.matterGetState(socket.id).then(s => { if (s.level != null) brightness = s.level; }).catch(() => {});
         }
     });
+
+    let brightnessTimer: ReturnType<typeof setTimeout> | undefined;
+    function setBrightness(v: number) {
+        brightness = v;
+        clearTimeout(brightnessTimer);
+        brightnessTimer = setTimeout(async () => {
+            try {
+                if (isTasmota) await api.tasmotaSetState(socket.id, { dimmer: v });
+                else if (isMatter) await api.matterSetState(socket.id, { level: v });
+            } catch (e) { toasts.error("Brightness", (e as Error).message); }
+        }, 120);
+    }
 
     const statusText = $derived(
         socket.state ? (isSmartLight && brightness != null ? `On · ${brightness}%` : "On") : "Off"
@@ -162,11 +174,20 @@
                     <Icon name={protoIcon} size={11} />{protoLabel}
                 </span>
             </span>
-            {#if showRail}
-                <span class="rail"><i style="width:{brightness}%"></i></span>
-            {/if}
         </span>
     </button>
+
+    {#if showRail}
+        <input
+            type="range"
+            class="brightness-slider"
+            min="1" max="100"
+            value={brightness ?? 100}
+            style="--pct:{brightness ?? 100}%"
+            aria-label="Brightness {brightness}%"
+            oninput={(e) => setBrightness((e.currentTarget as HTMLInputElement).valueAsNumber)}
+        />
+    {/if}
 
     <button class="more-corner" aria-label="Device actions" bind:this={moreBtnEl}
         onclick={(e) => { e.stopPropagation(); moreOpen = !moreOpen; }}>
@@ -316,7 +337,94 @@
     .protocol-badge { flex-shrink: 0; }
     .tile.on .meta { color: var(--on); }
 
-    .rail { margin-top: 6px; }
+    /* Interactive brightness slider — replaces the old read-only .rail.
+       Positioned as a flex sibling to .tile-hit so tapping the slider
+       never triggers openControls(). margin-right clears the .more-corner. */
+    .brightness-slider {
+        -webkit-appearance: none;
+        appearance: none;
+        display: block;
+        width: 100%;
+        height: 6px;
+        border-radius: 3px;
+        /* Fallback for browsers where track pseudo-element doesn't inherit --pct */
+        background: linear-gradient(to right, var(--on) var(--pct, 100%), var(--card-3) var(--pct, 100%));
+        cursor: pointer;
+        padding: 0;
+        margin-top: 4px;
+        margin-right: 32px;
+        touch-action: pan-y;
+    }
+    /* WebKit / Blink track */
+    .brightness-slider::-webkit-slider-runnable-track {
+        height: 6px;
+        border-radius: 3px;
+        background: linear-gradient(to right, var(--on) var(--pct, 100%), var(--card-3) var(--pct, 100%));
+    }
+    /* WebKit thumb */
+    .brightness-slider::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        width: 16px;
+        height: 16px;
+        margin-top: -5px;
+        border-radius: 50%;
+        background: var(--on);
+        box-shadow: 0 1px 6px rgba(0, 0, 0, 0.5);
+        cursor: grab;
+        transition: transform 80ms ease;
+    }
+    .brightness-slider:active::-webkit-slider-thumb {
+        transform: scale(1.2);
+        cursor: grabbing;
+    }
+    .brightness-slider:focus-visible { outline: none; }
+    .brightness-slider:focus-visible::-webkit-slider-thumb {
+        box-shadow: 0 0 0 3px var(--on-soft), 0 1px 6px rgba(0, 0, 0, 0.5);
+    }
+    /* Firefox track + progress */
+    .brightness-slider::-moz-range-track {
+        height: 6px;
+        border-radius: 3px;
+        background: var(--card-3);
+    }
+    .brightness-slider::-moz-range-progress {
+        height: 6px;
+        border-radius: 3px;
+        background: var(--on);
+    }
+    .brightness-slider::-moz-range-thumb {
+        width: 16px;
+        height: 16px;
+        border-radius: 50%;
+        border: none;
+        background: var(--on);
+        box-shadow: 0 1px 6px rgba(0, 0, 0, 0.5);
+        cursor: grab;
+        transition: transform 80ms ease;
+    }
+    .brightness-slider:active::-moz-range-thumb {
+        transform: scale(1.2);
+        cursor: grabbing;
+    }
+    .brightness-slider:focus-visible::-moz-range-thumb {
+        box-shadow: 0 0 0 3px var(--on-soft), 0 1px 6px rgba(0, 0, 0, 0.5);
+    }
+    /* Larger thumb on touch for a ≥ 44 px effective hit area */
+    @media (pointer: coarse) {
+        .brightness-slider::-webkit-slider-thumb {
+            width: 22px;
+            height: 22px;
+            margin-top: -8px;
+        }
+        .brightness-slider::-moz-range-thumb {
+            width: 22px;
+            height: 22px;
+        }
+    }
+    @media (prefers-reduced-motion: reduce) {
+        .brightness-slider::-webkit-slider-thumb,
+        .brightness-slider::-moz-range-thumb { transition-duration: 0.001ms; }
+    }
 
     /* Subtle ⋯ affordance, bottom-right. Hover-revealed on desktop, always on
        touch so management actions stay discoverable on the cleaner tile. */
