@@ -254,7 +254,7 @@ export interface BulkResult {
   failures: { socket_id: string; error: string }[];
 }
 
-export type Route = "dashboard" | "floorplan" | "sockets" | "groups" | "scenes" | "schedules" | "sensors" | "automations" | "insights" | "activity" | "users" | "settings" | "console";
+export type Route = "dashboard" | "rooms" | "floorplan" | "sockets" | "groups" | "scenes" | "schedules" | "sensors" | "automations" | "insights" | "activity" | "users" | "settings" | "console";
 
 export type SensorKind = "temperature" | "humidity" | "motion" | "light" | "power" | "custom";
 

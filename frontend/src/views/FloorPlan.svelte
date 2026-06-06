@@ -1,16 +1,12 @@
 <script lang="ts">
     import Topbar from "../components/Topbar.svelte";
     import Icon from "../components/Icon.svelte";
-    import ConfirmModal from "../components/ConfirmModal.svelte";
-    import RoomModal from "../modals/RoomModal.svelte";
-    import { data, toasts } from "../lib/stores.svelte";
-    import { openModal } from "../lib/modal.svelte";
-    import { api } from "../lib/api";
+    import { data, route } from "../lib/stores.svelte";
     import { socketAction } from "../lib/utils";
     import { fly } from "svelte/transition";
     import { cubicOut } from "svelte/easing";
     import { dur } from "../lib/motion";
-    import type { Socket, RoomSummary } from "../lib/types";
+    import type { Socket } from "../lib/types";
 
     const v = $derived(data.value);
 
@@ -183,31 +179,6 @@
         return name.length > 12 ? name.slice(0, 11) + "…" : name;
     }
 
-    // ── Room management ──────────────────────────────────────────────
-    async function addRoom() {
-        await openModal(RoomModal, {});
-    }
-
-    async function editRoom(room: RoomSummary) {
-        await openModal(RoomModal, { existing: { id: room.id, name: room.name } });
-    }
-
-    async function deleteRoom(room: RoomSummary) {
-        const confirmed = await openModal<boolean>(ConfirmModal, {
-            title: "Delete room",
-            message: `Remove "${room.name}"? The ${room.sockets} device${room.sockets === 1 ? "" : "s"} in this room will become unassigned.`,
-            confirmLabel: "Delete",
-            danger: true,
-        });
-        if (!confirmed) return;
-        try {
-            await api.deleteRoom(room.id);
-            toasts.success("Room deleted", room.name);
-            await data.refresh();
-        } catch (e) {
-            toasts.error("Delete failed", (e as Error).message);
-        }
-    }
 </script>
 
 <Topbar title="Floor plan" subtitle={`${totalOn} on · ${roomCount} room${roomCount === 1 ? "" : "s"}`}>
@@ -356,40 +327,19 @@
         {/if}
     {/if}
 
-    <!-- room management -->
-    <div class="rooms-section">
-        <div class="rooms-head">
-            <span class="rooms-label mono">ROOMS</span>
-            <button class="btn btn-ghost btn-sm" onclick={addRoom} aria-label="Add room">
-                <Icon name="plus" size={14} />
-                Add
-            </button>
-        </div>
-        {#if v.rooms.length === 0}
-            <div class="rooms-empty">
-                No rooms yet — add one to organise your devices by location.
-            </div>
-        {:else}
-            <ul class="rooms-list" role="list">
-                {#each [...v.rooms].sort((a, b) => a.name.localeCompare(b.name)) as room (room.id)}
-                    <li class="room-row">
-                        <div class="room-info">
-                            <span class="room-name">{room.name}</span>
-                            <span class="room-count mono">{room.sockets} device{room.sockets === 1 ? "" : "s"}</span>
-                        </div>
-                        <div class="room-actions">
-                            <button class="icon-btn" onclick={() => editRoom(room)} aria-label="Rename {room.name}">
-                                <Icon name="edit" size={15} />
-                            </button>
-                            <button class="icon-btn danger" onclick={() => deleteRoom(room)} aria-label="Delete {room.name}">
-                                <Icon name="trash" size={15} />
-                            </button>
-                        </div>
-                    </li>
-                {/each}
-            </ul>
-        {/if}
-    </div>
+    <!-- Room management lives on its own first-class screen. -->
+    <button class="rooms-link" onclick={() => route.go("rooms")}>
+        <span class="rl-ico"><Icon name="couch" size={18} /></span>
+        <span class="rl-text">
+            <span class="rl-title">Rooms</span>
+            <span class="rl-sub mono">
+                {v.rooms.length === 0
+                    ? "Set up rooms to organise your devices"
+                    : `${v.rooms.length} room${v.rooms.length === 1 ? "" : "s"} · add, rename or remove`}
+            </span>
+        </span>
+        <span class="rl-chev"><Icon name="chevronDown" size={18} /></span>
+    </button>
 </div>
 
 <style>
@@ -504,101 +454,55 @@
         .active-card { min-height: 44px; }
     }
 
-    /* room management */
-    .rooms-section {
+    /* Link out to the first-class Rooms screen */
+    .rooms-link {
         margin-top: var(--space-2);
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        width: 100%;
+        padding: 14px;
+        background: var(--card);
         border: 1px solid var(--hairline);
         border-radius: var(--r-lg);
-        overflow: hidden;
+        cursor: pointer;
+        text-align: left;
+        touch-action: manipulation;
+        transition: border-color var(--t-fast), background var(--t-fast), transform var(--t-fast);
     }
-
-    .rooms-head {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding: 10px 14px;
-        border-bottom: 1px solid var(--hairline);
+    @media (hover: hover) {
+        .rooms-link:hover { border-color: var(--border-strong); background: var(--card-2); }
     }
+    .rooms-link:active { transform: scale(0.99); }
+    .rooms-link:focus-visible { box-shadow: var(--focus-ring); }
 
-    .rooms-label {
-        font-size: 9px;
-        letter-spacing: 0.18em;
+    .rl-ico {
+        width: 40px; height: 40px;
+        border-radius: 12px;
+        background: var(--on-soft);
+        color: var(--on);
+        display: grid; place-items: center;
+        flex-shrink: 0;
+    }
+    .rl-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+    .rl-title { font-size: 15px; font-weight: 600; color: var(--text); }
+    .rl-sub {
+        font-size: 11px;
         color: var(--text-mute);
-    }
-
-    .btn-sm {
-        font-size: 12px;
-        padding: 4px 10px;
-        height: 28px;
-        display: inline-flex;
-        align-items: center;
-        gap: 4px;
-    }
-
-    .rooms-empty {
-        padding: 20px 16px;
-        font-size: 13px;
-        color: var(--text-faint);
-        text-align: center;
-    }
-
-    .rooms-list {
-        list-style: none;
-        margin: 0;
-        padding: 0;
-    }
-
-    .room-row {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding: 10px 14px;
-        border-bottom: 1px solid var(--hairline);
-        gap: 8px;
-    }
-    .room-row:last-child { border-bottom: none; }
-
-    .room-info {
-        display: flex;
-        flex-direction: column;
-        gap: 2px;
-        min-width: 0;
-    }
-    .room-name {
-        font-size: 14px;
-        font-weight: 500;
-        color: var(--text);
+        letter-spacing: 0.02em;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
     }
-    .room-count {
-        font-size: 11px;
-        color: var(--text-mute);
-    }
-
-    .room-actions {
-        display: flex;
-        gap: 4px;
+    .rl-chev {
         flex-shrink: 0;
-    }
-
-    .icon-btn {
-        width: 32px;
-        height: 32px;
+        color: var(--text-dim);
         display: grid;
         place-items: center;
-        border: 1px solid var(--hairline);
-        border-radius: var(--r-sm);
-        background: transparent;
-        color: var(--text-mute);
-        cursor: pointer;
-        transition: background var(--t-fast), color var(--t-fast), border-color var(--t-fast);
+        transform: rotate(-90deg);
     }
-    .icon-btn:hover { background: var(--surface-hover); color: var(--text); border-color: var(--border-strong); }
-    .icon-btn.danger:hover { background: var(--danger-soft, #3d1a1a); color: var(--danger, #e05252); border-color: var(--danger, #e05252); }
 
     @media (max-width: 600px) {
-        .icon-btn { min-width: 44px; min-height: 44px; width: 44px; height: 44px; }
+        .rooms-link { min-height: 64px; }
     }
 </style>
