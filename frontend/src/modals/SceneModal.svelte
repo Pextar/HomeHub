@@ -33,6 +33,24 @@
         { hex: "7aa4d9", name: "Cool" },
     ];
 
+    // Matter lamp presets — same palette as MatterLightModal. White presets
+    // carry a CT-approximated hex for display and to nudge the RGB mode toward
+    // the right temperature on lamps that don't expose CT via this bridge path.
+    type MatterPreset = { label: string; level: number; color: string; cssColor: string };
+    const MATTER_PRESETS: MatterPreset[] = [
+        { label: "Reading",     level: 100, color: "dcdbd6", cssColor: "#dcdbd6" },
+        { label: "Concentrate", level: 100, color: "d2e5f4", cssColor: "#d2e5f4" },
+        { label: "Daylight",    level: 100, color: "d5e2eb", cssColor: "#d5e2eb" },
+        { label: "Warm",        level: 80,  color: "edcaa2", cssColor: "#edcaa2" },
+        { label: "Relax",       level: 40,  color: "f1c696", cssColor: "#f1c696" },
+        { label: "Night",       level: 12,  color: "f9bf7f", cssColor: "#f9bf7f" },
+        { label: "Sunset",      level: 70,  color: "ff6a3d", cssColor: "#ff6a3d" },
+        { label: "Forest",      level: 60,  color: "3dbf6a", cssColor: "#3dbf6a" },
+        { label: "Ocean",       level: 70,  color: "3dafff", cssColor: "#3dafff" },
+        { label: "Lavender",    level: 60,  color: "b47cff", cssColor: "#b47cff" },
+        { label: "Rose",        level: 60,  color: "ff6fa3", cssColor: "#ff6fa3" },
+    ];
+
     // Scene tile identity. Icons come from the shared icon set; accent keys map
     // to design tokens so the tile stays theme-aware.
     const SCENE_ICONS = [
@@ -307,9 +325,18 @@
                 target_id: a.target_id,
                 action: (a.target_type === "scene" ? "activate" : a.action) as AutomationAction["action"],
             };
-            if (a.target_type === "socket" && a.action === "on") {
-                base.level = a.level ?? 100;
-                if (a.color) base.color = a.color;
+            if (a.action === "on") {
+                if (a.target_type === "socket") {
+                    base.level = a.level ?? 100;
+                    if (a.color) base.color = a.color;
+                } else if (a.target_type === "group" || a.target_type === "room") {
+                    // Only include lighting info when the user explicitly chose a preset
+                    // (any color set, or brightness moved from the default 100%).
+                    if (a.color || a.level !== 100) {
+                        base.level = a.level ?? 100;
+                        if (a.color) base.color = a.color;
+                    }
+                }
             }
             return base;
         });
@@ -682,27 +709,58 @@
                                                 {/if}
                                             </select>
                                         </div>
-                                        {#if a.target_type === "socket" && a.action === "on" && isSmart(v.sockets.find(s => s.id === a.target_id)?.protocol ?? "")}
-                                            <div class="action-light-row">
-                                                <div class="bright">
-                                                    <span class="bright-ico"><Icon name="sun" size={14} /></span>
-                                                    <input type="range" min="1" max="100" step="1" bind:value={a.level} aria-label="Brightness" />
-                                                    <span class="bright-val mono">{a.level ?? 100}%</span>
+                                        {#if a.action === "on"}
+                                            {#if a.target_type === "socket" && isSmart(v.sockets.find(s => s.id === a.target_id)?.protocol ?? "")}
+                                                <div class="action-light-row">
+                                                    <div class="bright">
+                                                        <span class="bright-ico"><Icon name="sun" size={14} /></span>
+                                                        <input type="range" min="1" max="100" step="1" bind:value={a.level} aria-label="Brightness" />
+                                                        <span class="bright-val mono">{a.level ?? 100}%</span>
+                                                    </div>
+                                                    <div class="swatches">
+                                                        {#each COLOURS as c (c.name)}
+                                                            <button type="button" class="swatch"
+                                                                class:active={(a.color ?? "") === c.hex}
+                                                                class:auto={c.hex === ""}
+                                                                style={c.hex ? `background:#${c.hex}` : ""}
+                                                                title={c.name}
+                                                                aria-label="{c.name} color"
+                                                                onclick={() => a.color = c.hex}>
+                                                                {#if c.hex === ""}<Icon name="close" size={12} />{/if}
+                                                            </button>
+                                                        {/each}
+                                                    </div>
                                                 </div>
-                                                <div class="swatches">
-                                                    {#each COLOURS as c (c.name)}
-                                                        <button type="button" class="swatch"
-                                                            class:active={(a.color ?? "") === c.hex}
-                                                            class:auto={c.hex === ""}
-                                                            style={c.hex ? `background:#${c.hex}` : ""}
-                                                            title={c.name}
-                                                            aria-label="{c.name} color"
-                                                            onclick={() => a.color = c.hex}>
-                                                            {#if c.hex === ""}<Icon name="close" size={12} />{/if}
+                                            {:else if a.target_type === "group" || a.target_type === "room"}
+                                                {@const activeIdx = MATTER_PRESETS.findIndex(p => p.color === a.color && p.level === a.level)}
+                                                <div class="action-light-row">
+                                                    <div class="bright">
+                                                        <span class="bright-ico"><Icon name="sun" size={14} /></span>
+                                                        <input type="range" min="1" max="100" step="1" bind:value={a.level} aria-label="Brightness" />
+                                                        <span class="bright-val mono">{a.level ?? 100}%</span>
+                                                    </div>
+                                                    <div class="preset-chips" role="group" aria-label="Lighting preset">
+                                                        <button type="button" class="preset-chip auto"
+                                                            class:active={activeIdx === -1}
+                                                            title="No preset — turn on at previous brightness"
+                                                            aria-label="No lighting preset" aria-pressed={activeIdx === -1}
+                                                            onclick={() => { a.color = ""; a.level = 100; }}>
+                                                            —
                                                         </button>
-                                                    {/each}
+                                                        {#each MATTER_PRESETS as p, pi (p.label)}
+                                                            <button type="button" class="preset-chip"
+                                                                class:active={activeIdx === pi}
+                                                                style="--pc: {p.cssColor}"
+                                                                title="{p.label} · {p.level}%"
+                                                                aria-label="{p.label} preset" aria-pressed={activeIdx === pi}
+                                                                onclick={() => { a.level = p.level; a.color = p.color; }}>
+                                                                <span class="preset-dot" style="background:{p.cssColor}"></span>
+                                                                {p.label}
+                                                            </button>
+                                                        {/each}
+                                                    </div>
                                                 </div>
-                                            </div>
+                                            {/if}
                                         {/if}
                                         {#if rule.actions.length > 1}
                                             <button type="button" class="row-remove"
@@ -1050,6 +1108,46 @@
         flex-direction: column;
         gap: 8px;
         padding-top: var(--space-2);
+    }
+
+    /* ── Matter preset chips (group/room rule actions) ────────────── */
+    .preset-chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 5px;
+    }
+    .preset-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        padding: 3px 9px;
+        font-size: 12px;
+        background: var(--card-2);
+        border: 1px solid var(--hairline);
+        border-radius: var(--r-pill);
+        color: var(--text-mute);
+        cursor: pointer;
+        touch-action: manipulation;
+        transition: background var(--t-fast), color var(--t-fast), box-shadow var(--t-fast);
+        white-space: nowrap;
+    }
+    .preset-chip:hover { background: var(--card-3); color: var(--text); }
+    .preset-chip.active {
+        background: var(--card-3);
+        color: var(--text);
+        box-shadow: 0 0 0 1px var(--border-strong) inset;
+    }
+    .preset-chip.auto { color: var(--text-dim); font-size: 13px; }
+    .preset-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        flex-shrink: 0;
+        border: 1px solid rgba(255,255,255,0.15);
+    }
+    @media (pointer: coarse) {
+        .preset-chip { padding: 6px 12px; font-size: 13px; min-height: 36px; }
+        .preset-dot { width: 12px; height: 12px; }
     }
     .solar-summary {
         margin-top: 5px;
