@@ -39,9 +39,14 @@
         `${Math.min(...dimLevels)}–${Math.max(...dimLevels)}%`,
     );
     const sceneColors = $derived([...new Set(allActions.filter(a => a.color).map(a => a.color as string))]);
+    const ruleCount = $derived(
+        data.value.automations.filter(a => a.scene_id === scene.id).length
+    );
+
     const sub = $derived(
-        allActions.length === 0 ? "No devices" :
-        [onCount ? `${onCount} on` : "", offCount ? `${offCount} off` : ""].filter(Boolean).join(" · ")
+        allActions.length === 0
+            ? (ruleCount > 0 ? `${ruleCount} rule${ruleCount === 1 ? "" : "s"}` : "No devices")
+            : [onCount ? `${onCount} on` : "", offCount ? `${offCount} off` : ""].filter(Boolean).join(" · ")
     );
 
     function activate() {
@@ -97,8 +102,12 @@
                 </span>
             {/if}
             <span class="count mono">
-                {allActions.length} {allActions.length === 1 ? "device" : "devices"}
-                {#if stepCount > 1}<span class="step-hint">· {stepCount} steps</span>{/if}
+                {#if allActions.length > 0}
+                    {allActions.length} {allActions.length === 1 ? "device" : "devices"}
+                    {#if stepCount > 1}<span class="step-hint">· {stepCount} steps</span>{/if}
+                {:else}
+                    {ruleCount} {ruleCount === 1 ? "rule" : "rules"}
+                {/if}
             </span>
         </span>
     </button>
