@@ -5,6 +5,7 @@
     import ModalRoot from "./components/ModalRoot.svelte";
     import LoginGate from "./components/LoginGate.svelte";
     import Dashboard from "./views/Dashboard.svelte";
+    import Rooms from "./views/Rooms.svelte";
     import FloorPlan from "./views/FloorPlan.svelte";
     import Sockets from "./views/Sockets.svelte";
     import Schedules from "./views/Schedules.svelte";
@@ -92,6 +93,7 @@
 
     const views: Record<Route, any> = {
         dashboard: Dashboard,
+        rooms: Rooms,
         floorplan: FloorPlan,
         sockets: Sockets,
         groups: Groups,
@@ -108,7 +110,7 @@
 
     // Routes a non-admin profile is allowed to open. Everything else is
     // admin-only; deep-linking elsewhere bounces back to the dashboard.
-    const ADMIN_ONLY: Route[] = ["floorplan", "groups", "scenes", "schedules", "automations", "sensors", "insights", "activity", "users", "settings", "console"];
+    const ADMIN_ONLY: Route[] = ["rooms", "floorplan", "groups", "scenes", "schedules", "automations", "sensors", "insights", "activity", "users", "settings", "console"];
     const effectiveRoute = $derived(
         !session.isAdmin && ADMIN_ONLY.includes(route.current) ? "dashboard" : route.current,
     );
