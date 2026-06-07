@@ -248,14 +248,20 @@ type SceneStep struct {
 // slice. On first load those are migrated to a single step with
 // DelayMinutes=0; the Actions field is then cleared.
 type Scene struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-	Room string `json:"room,omitempty"` // optional room tag for organisation
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Room  string `json:"room,omitempty"`  // optional room tag for organisation
+	Icon  string `json:"icon,omitempty"`  // optional icon name for the tile (frontend icon set)
+	Color string `json:"color,omitempty"` // optional accent preset key (amber|cool|violet|orange|green|gold)
 	Steps []SceneStep `json:"steps"`
 	// Actions is the legacy single-step field kept for on-disk
 	// backward-compatibility. Populated by old scenes; migrated to
 	// Steps on first load. Omitted when empty so new scenes don't carry it.
 	Actions []SceneAction `json:"actions,omitempty"`
+	// Activation telemetry, updated on every manual activation so the UI can
+	// show "ran N× · 2h ago". Omitted until the scene has run at least once.
+	LastActivatedAt time.Time `json:"last_activated_at,omitempty"`
+	ActivateCount   int       `json:"activate_count,omitempty"`
 }
 
 // Timer fires once at FiresAt and is then deleted. Used for "off in 30

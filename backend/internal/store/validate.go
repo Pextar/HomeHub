@@ -257,6 +257,18 @@ func (s *Store) ValidateScene(sc *Scene) error {
 		return errors.New("name is required")
 	}
 
+	// Optional tile identity. Icon is a frontend icon-set name (format-checked
+	// only — unknown names simply don't render); colour is one of a fixed set
+	// of accent presets that map to design tokens on the client.
+	sc.Icon = strings.TrimSpace(sc.Icon)
+	if sc.Icon != "" && !isIconName(sc.Icon) {
+		return errors.New("scene icon must be a short alphanumeric name")
+	}
+	sc.Color = strings.ToLower(strings.TrimSpace(sc.Color))
+	if sc.Color != "" && !sceneAccents[sc.Color] {
+		return errors.New("scene color must be one of: amber, cool, violet, orange, green, gold")
+	}
+
 	// Migrate legacy flat-actions format to steps so the rest of the
 	// validation only has to handle one shape.
 	if len(sc.Steps) == 0 && len(sc.Actions) > 0 {
@@ -349,6 +361,34 @@ func (s *Store) ValidateSensor(sn *Sensor) error {
 		sn.Unit = defaultUnitForKind(sn.Kind)
 	}
 	return nil
+}
+
+// sceneAccents is the allow-list of scene tile accent presets. Each key maps
+// to a design token on the client (amber→--on, cool→--cool, etc.), so the
+// stored value stays theme-aware rather than baking in a hex.
+var sceneAccents = map[string]bool{
+	"amber": true, "cool": true, "violet": true,
+	"orange": true, "green": true, "gold": true,
+}
+
+// isIconName reports whether s is a plausible frontend icon name: it must start
+// with a letter and contain only letters/digits, max 32 chars. The actual icon
+// set lives in the frontend; we only guard against junk being persisted.
+func isIconName(s string) bool {
+	if len(s) == 0 || len(s) > 32 {
+		return false
+	}
+	for i, c := range s {
+		isLetter := (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+		isDigit := c >= '0' && c <= '9'
+		if i == 0 && !isLetter {
+			return false
+		}
+		if !isLetter && !isDigit {
+			return false
+		}
+	}
+	return true
 }
 
 func isHex6(s string) bool {

@@ -86,6 +86,8 @@ func (s *Server) updateScene(w http.ResponseWriter, r *http.Request) {
 		merged.Name = name
 	}
 	merged.Room = strings.TrimSpace(updates.Room)
+	merged.Icon = strings.TrimSpace(updates.Icon)
+	merged.Color = strings.TrimSpace(updates.Color)
 	if updates.Steps != nil {
 		merged.Steps = updates.Steps
 		merged.Actions = nil // clear legacy field when steps are provided
@@ -182,6 +184,9 @@ func (s *Server) activateScene(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	s.Store.SuppressStateChange = false
+	// Record activation telemetry so the UI can show "ran N× · 2h ago".
+	scene.LastActivatedAt = time.Now().UTC()
+	scene.ActivateCount++
 	entry := store.ActivityEntry{Kind: "scene", Source: "manual", Action: "activate", Label: scene.Name}
 	if len(failures) > 0 {
 		entry.Status = "error"
