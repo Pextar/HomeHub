@@ -193,8 +193,9 @@ func (s *Store) ValidateAutomation(a *Automation) error {
 		} else if act.Action != "on" && act.Action != "off" && act.Action != "toggle" {
 			return errors.New("action must be on/off/toggle")
 		}
-		// Level/colour only apply to smart sockets being switched on.
-		if act.TargetType == "socket" && act.Action == "on" {
+		// Level/colour apply to smart sockets, groups, and rooms being switched on.
+		// Scheduler fans out QueueLight to each smart socket inside the target.
+		if act.Action == "on" && (act.TargetType == "socket" || act.TargetType == "group" || act.TargetType == "room") {
 			if act.Level != nil {
 				if *act.Level < 1 || *act.Level > 100 {
 					return errors.New("action level must be between 1 and 100")
@@ -255,6 +256,18 @@ func (s *Store) ValidateScene(sc *Scene) error {
 	sc.Name = strings.TrimSpace(sc.Name)
 	if sc.Name == "" {
 		return errors.New("name is required")
+	}
+
+	// Optional tile identity. Icon is a frontend icon-set name (format-checked
+	// only — unknown names simply don't render); colour is one of a fixed set
+	// of accent presets that map to design tokens on the client.
+	sc.Icon = strings.TrimSpace(sc.Icon)
+	if sc.Icon != "" && !isIconName(sc.Icon) {
+		return errors.New("scene icon must be a short alphanumeric name")
+	}
+	sc.Color = strings.ToLower(strings.TrimSpace(sc.Color))
+	if sc.Color != "" && !sceneAccents[sc.Color] {
+		return errors.New("scene color must be one of: amber, cool, violet, orange, green, gold")
 	}
 
 	// Migrate legacy flat-actions format to steps so the rest of the
@@ -349,6 +362,34 @@ func (s *Store) ValidateSensor(sn *Sensor) error {
 		sn.Unit = defaultUnitForKind(sn.Kind)
 	}
 	return nil
+}
+
+// sceneAccents is the allow-list of scene tile accent presets. Each key maps
+// to a design token on the client (amber→--on, cool→--cool, etc.), so the
+// stored value stays theme-aware rather than baking in a hex.
+var sceneAccents = map[string]bool{
+	"amber": true, "cool": true, "violet": true,
+	"orange": true, "green": true, "gold": true,
+}
+
+// isIconName reports whether s is a plausible frontend icon name: it must start
+// with a letter and contain only letters/digits, max 32 chars. The actual icon
+// set lives in the frontend; we only guard against junk being persisted.
+func isIconName(s string) bool {
+	if len(s) == 0 || len(s) > 32 {
+		return false
+	}
+	for i, c := range s {
+		isLetter := (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+		isDigit := c >= '0' && c <= '9'
+		if i == 0 && !isLetter {
+			return false
+		}
+		if !isLetter && !isDigit {
+			return false
+		}
+	}
+	return true
 }
 
 func isHex6(s string) bool {
@@ -466,6 +507,10 @@ func (s *Store) VerifyTarget(tt, tid string) error {
 	case "group":
 		if _, ok := s.Groups[tid]; !ok {
 			return errors.New("target group does not exist")
+		}
+	case "room":
+		if _, ok := s.Rooms[tid]; !ok {
+			return errors.New("target room does not exist")
 		}
 	case "scene":
 		if _, ok := s.Scenes[tid]; !ok {

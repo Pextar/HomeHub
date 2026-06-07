@@ -1,7 +1,7 @@
 <script lang="ts">
     import Icon from "./Icon.svelte";
     import { api } from "../lib/api";
-    import { runAction, automationsUsingTarget, plural } from "../lib/utils";
+    import { runAction, automationsUsingTarget, plural, formatAgo } from "../lib/utils";
     import { openModal } from "../lib/modal.svelte";
     import { data, toasts } from "../lib/stores.svelte";
     import SceneModal from "../modals/SceneModal.svelte";
@@ -20,7 +20,18 @@
         for (let i = 0; i < s.length; i++) h = ((h << 5) + h) ^ s.charCodeAt(i);
         return Math.abs(h);
     }
-    const hue = $derived(PALETTE[nameHash(scene.name) % PALETTE.length]);
+    // Accent presets map to design tokens; fall back to the name-hash hue.
+    const ACCENTS: Record<string, string> = {
+        amber: "var(--on)", cool: "var(--cool)", violet: "var(--p-matter)",
+        orange: "var(--p-rf)", green: "var(--good)", gold: "var(--p-mqtt)",
+    };
+    const hue = $derived(
+        scene.color && ACCENTS[scene.color] ? ACCENTS[scene.color] : PALETTE[nameHash(scene.name) % PALETTE.length],
+    );
+
+    // Activation telemetry, surfaced so a scene shows it actually runs.
+    const ranCount = $derived(scene.activate_count ?? 0);
+    const ranAgo = $derived(formatAgo(scene.last_activated_at));
 
     // Flatten all actions across all steps for summary display.
     const allActions = $derived((scene.steps ?? []).flatMap(s => s.actions));
@@ -85,7 +96,13 @@
 <div class="scene" bind:this={el}>
     <button class="scene-hit" onclick={activate} aria-label="Activate {scene.name}">
         <span class="top">
-            <span class="hue-chip"><span class="hue" style="background:{hue}"></span></span>
+            <span class="hue-chip" style:color={hue}>
+                {#if scene.icon}
+                    <Icon name={scene.icon as never} size={16} />
+                {:else}
+                    <span class="hue" style="background:{hue}"></span>
+                {/if}
+            </span>
             <span class="run">Run</span>
         </span>
         <span class="meta">
@@ -109,6 +126,9 @@
                     {ruleCount} {ruleCount === 1 ? "rule" : "rules"}
                 {/if}
             </span>
+            {#if ranCount > 0}
+                <span class="ran mono" title="Manual activations">Ran {ranCount}×{ranAgo ? ` · ${ranAgo}` : ""}</span>
+            {/if}
         </span>
     </button>
 
@@ -197,6 +217,7 @@
     }
     .count { color: var(--text-dim); font-size: 11.5px; margin-top: 6px; }
     .step-hint { color: var(--on); }
+    .ran { color: var(--text-dim); font-size: 11px; margin-top: 3px; }
 
     .more-corner {
         position: absolute;

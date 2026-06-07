@@ -19,6 +19,7 @@ type Socket struct {
 // Targets:
 //   - target_type "socket": fires action ("on"|"off"|"toggle") on a socket
 //   - target_type "group":  fires action ("on"|"off"|"toggle") on every member
+//   - target_type "room":   fires action ("on"|"off"|"toggle") on every socket in the room
 //   - target_type "scene":  activates the scene (action ignored, treated as "activate")
 //
 // For backwards compatibility, schedules with socket_id set and no
@@ -88,7 +89,7 @@ type AutomationCondition struct {
 // AutomationAction is one step run when an automation fires. Targets and
 // actions mirror Schedule/Timer semantics and go through ExecuteAction.
 type AutomationAction struct {
-	TargetType string `json:"target_type"` // "socket" | "group" | "scene"
+	TargetType string `json:"target_type"` // "socket" | "group" | "room" | "scene"
 	TargetID   string `json:"target_id"`
 	Action     string `json:"action"`          // "on" | "off" | "toggle" | "activate"
 	Level      *int   `json:"level,omitempty"` // 1-100, smart lights only
@@ -247,21 +248,27 @@ type SceneStep struct {
 // slice. On first load those are migrated to a single step with
 // DelayMinutes=0; the Actions field is then cleared.
 type Scene struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-	Room string `json:"room,omitempty"` // optional room tag for organisation
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Room  string `json:"room,omitempty"`  // optional room tag for organisation
+	Icon  string `json:"icon,omitempty"`  // optional icon name for the tile (frontend icon set)
+	Color string `json:"color,omitempty"` // optional accent preset key (amber|cool|violet|orange|green|gold)
 	Steps []SceneStep `json:"steps"`
 	// Actions is the legacy single-step field kept for on-disk
 	// backward-compatibility. Populated by old scenes; migrated to
 	// Steps on first load. Omitted when empty so new scenes don't carry it.
 	Actions []SceneAction `json:"actions,omitempty"`
+	// Activation telemetry, updated on every manual activation so the UI can
+	// show "ran N× · 2h ago". Omitted until the scene has run at least once.
+	LastActivatedAt time.Time `json:"last_activated_at,omitempty"`
+	ActivateCount   int       `json:"activate_count,omitempty"`
 }
 
 // Timer fires once at FiresAt and is then deleted. Used for "off in 30
 // minutes" style quick actions. Persisted so they survive restarts.
 type Timer struct {
 	ID         string    `json:"id"`
-	TargetType string    `json:"target_type"` // "socket" | "group" | "scene"
+	TargetType string    `json:"target_type"` // "socket" | "group" | "room" | "scene"
 	TargetID   string    `json:"target_id"`
 	Action     string    `json:"action"` // "on" | "off" | "toggle" | "activate"
 	FiresAt    time.Time `json:"fires_at"`

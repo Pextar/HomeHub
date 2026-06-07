@@ -9,7 +9,7 @@ export interface Socket {
   emoji?: string; // shown big in kid mode
 }
 
-export type TargetType = "socket" | "group" | "scene";
+export type TargetType = "socket" | "group" | "room" | "scene";
 export type SocketAction = "on" | "off" | "toggle";
 export type SceneActionKind = "on" | "off";
 
@@ -171,13 +171,22 @@ export interface SceneStep {
   actions: SceneAction[];
 }
 
+/** Accent preset keys for a scene tile; each maps to a design token. */
+export type SceneAccent = "amber" | "cool" | "violet" | "orange" | "green" | "gold";
+
 export interface Scene {
   id: string;
   name: string;
   room?: string;
+  /** Optional icon name from the shared icon set, shown on the tile. */
+  icon?: string;
+  /** Optional accent preset; empty = auto hue derived from the name. */
+  color?: SceneAccent | "";
   steps: SceneStep[];
   /** @deprecated legacy field; migrated to steps on the server */
   actions?: SceneAction[];
+  last_activated_at?: string;
+  activate_count?: number;
 }
 
 export interface Timer {

@@ -160,9 +160,28 @@ func (e *autoEngine) execute(st *store.Store, a store.Automation, now time.Time,
 		if err := st.ExecuteAction(act.TargetType, act.TargetID, act.Action); err != nil && firstErr == nil {
 			firstErr = err
 		}
-		if act.Action == "on" && act.TargetType == "socket" && (act.Level != nil || act.Color != "") {
-			if sock, ok := st.Sockets[act.TargetID]; ok {
-				st.QueueLight(*sock, act.Level, act.Color)
+		if act.Action == "on" && (act.Level != nil || act.Color != "") {
+			switch act.TargetType {
+			case "socket":
+				if sock, ok := st.Sockets[act.TargetID]; ok {
+					st.QueueLight(*sock, act.Level, act.Color)
+				}
+			case "group":
+				if grp, ok := st.Groups[act.TargetID]; ok {
+					for _, sid := range grp.SocketIDs {
+						if sock, ok := st.Sockets[sid]; ok {
+							st.QueueLight(*sock, act.Level, act.Color)
+						}
+					}
+				}
+			case "room":
+				if rm, ok := st.Rooms[act.TargetID]; ok {
+					for _, sock := range st.Sockets {
+						if sock.Room == rm.Name {
+							st.QueueLight(*sock, act.Level, act.Color)
+						}
+					}
+				}
 			}
 		}
 	}

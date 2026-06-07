@@ -2,15 +2,16 @@
     import Modal from "../components/Modal.svelte";
     import Icon from "../components/Icon.svelte";
     import Segmented from "../components/Segmented.svelte";
+    import Switch from "../components/Switch.svelte";
     import DayPicker from "../components/DayPicker.svelte";
     import { closeModal } from "../lib/modal.svelte";
     import { api } from "../lib/api";
     import { data, toasts } from "../lib/stores.svelte";
-    import { sortedSockets } from "../lib/utils";
+    import { sortedSockets, formatAgo } from "../lib/utils";
     import { untrack } from "svelte";
     import type {
         Scene, SceneStep, AutomationTriggerType, AutomationTrigger,
-        AutomationAction, TargetType, Automation,
+        AutomationAction, AutomationCondition, TargetType, Automation, SceneAccent,
     } from "../lib/types";
 
     interface Props { existing?: Scene | null; }
@@ -30,6 +31,39 @@
         { hex: "ffffff", name: "Bright" },
         { hex: "c4a4e0", name: "Lilac" },
         { hex: "7aa4d9", name: "Cool" },
+    ];
+
+    // Matter lamp presets — same palette as MatterLightModal. White presets
+    // carry a CT-approximated hex for display and to nudge the RGB mode toward
+    // the right temperature on lamps that don't expose CT via this bridge path.
+    type MatterPreset = { label: string; level: number; color: string; cssColor: string };
+    const MATTER_PRESETS: MatterPreset[] = [
+        { label: "Reading",     level: 100, color: "dcdbd6", cssColor: "#dcdbd6" },
+        { label: "Concentrate", level: 100, color: "d2e5f4", cssColor: "#d2e5f4" },
+        { label: "Daylight",    level: 100, color: "d5e2eb", cssColor: "#d5e2eb" },
+        { label: "Warm",        level: 80,  color: "edcaa2", cssColor: "#edcaa2" },
+        { label: "Relax",       level: 40,  color: "f1c696", cssColor: "#f1c696" },
+        { label: "Night",       level: 12,  color: "f9bf7f", cssColor: "#f9bf7f" },
+        { label: "Sunset",      level: 70,  color: "ff6a3d", cssColor: "#ff6a3d" },
+        { label: "Forest",      level: 60,  color: "3dbf6a", cssColor: "#3dbf6a" },
+        { label: "Ocean",       level: 70,  color: "3dafff", cssColor: "#3dafff" },
+        { label: "Lavender",    level: 60,  color: "b47cff", cssColor: "#b47cff" },
+        { label: "Rose",        level: 60,  color: "ff6fa3", cssColor: "#ff6fa3" },
+    ];
+
+    // Scene tile identity. Icons come from the shared icon set; accent keys map
+    // to design tokens so the tile stays theme-aware.
+    const SCENE_ICONS = [
+        "scenes", "light", "sun", "moon", "sunrise", "sunset",
+        "bed", "couch", "utensils", "home", "power", "bolt", "clock", "star",
+    ] as const;
+    const SCENE_ACCENTS: { key: SceneAccent; token: string }[] = [
+        { key: "amber",  token: "var(--on)" },
+        { key: "cool",   token: "var(--cool)" },
+        { key: "violet", token: "var(--p-matter)" },
+        { key: "orange", token: "var(--p-rf)" },
+        { key: "green",  token: "var(--good)" },
+        { key: "gold",   token: "var(--p-mqtt)" },
     ];
 
     // ── Snapshot (manual activation) state ────────────────────────────
@@ -97,6 +131,20 @@
         steps = steps.filter((_, idx) => idx !== i);
     }
 
+    // Fill a step from the live on/off state of every device, so a scene can be
+    // built from "how the room looks right now" in one tap. Brightness/colour
+    // aren't part of the base socket model, so existing per-device values are
+    // left untouched.
+    function captureCurrentState(stepIndex: number) {
+        const step = steps[stepIndex];
+        if (!step) return;
+        for (const s of sockets) {
+            step.perSocket[s.id] = s.state ? "on" : "off";
+        }
+        toasts.info("Captured current state",
+            `${sockets.length} device${sockets.length === 1 ? "" : "s"} set to their current on/off state`);
+    }
+
     function buildSteps() {
         return steps.map(step => ({
             delay_minutes: step.delay_minutes,
@@ -127,6 +175,7 @@
     type RuleDraft = {
         _key: string;
         automationId: string;
+        enabled: boolean;
         trigType: AutomationTriggerType;
         trigTimeMode: string;
         trigTime: string;
@@ -137,18 +186,20 @@
         trigValue: number;
         trigSocketId: string;
         trigToState: "on" | "off";
+        conditions: AutomationCondition[];
         actions: RuleActionDraft[];
     };
 
     const hasLocation = $derived(v.settings.latitude !== 0 || v.settings.longitude !== 0);
 
     function firstTargetType(): TargetType {
-        return v.sockets.length ? "socket" : v.groups.length ? "group" : "scene";
+        return v.sockets.length ? "socket" : v.groups.length ? "group" : v.rooms.length ? "room" : "scene";
     }
 
     function targetsFor(type: string) {
         if (type === "socket") return v.sockets.map(s => ({ id: s.id, label: s.name }));
-        if (type === "group") return v.groups.map(g => ({ id: g.id, label: g.name }));
+        if (type === "group")  return v.groups.map(g => ({ id: g.id, label: g.name }));
+        if (type === "room")   return [...v.rooms].sort((a, b) => a.name.localeCompare(b.name)).map(r => ({ id: r.id, label: r.name }));
         return v.scenes.map(s => ({ id: s.id, label: s.name }));
     }
 
@@ -166,6 +217,7 @@
         return {
             _key: Math.random().toString(36).slice(2),
             automationId: "",
+            enabled: true,
             trigType: "time",
             trigTimeMode: "fixed",
             trigTime: "07:00",
@@ -176,6 +228,7 @@
             trigValue: 20,
             trigSocketId: v.sockets[0]?.id ?? "",
             trigToState: "on",
+            conditions: [],
             actions: [{ target_type: firstTargetType(), target_id: "", action: "on", level: 100, color: "" }],
         };
     }
@@ -185,6 +238,7 @@
         return {
             _key: Math.random().toString(36).slice(2),
             automationId: a.id,
+            enabled: a.enabled,
             trigType: t.type as AutomationTriggerType,
             trigTimeMode: t.time_mode ?? "fixed",
             trigTime: t.time || "07:00",
@@ -195,6 +249,7 @@
             trigValue: t.value ?? 20,
             trigSocketId: t.socket_id ?? v.sockets[0]?.id ?? "",
             trigToState: (t.to_state ?? "on") as "on" | "off",
+            conditions: (a.conditions ?? []).map(c => ({ ...c })),
             actions: (a.actions ?? []).map(act => ({
                 target_type: act.target_type as TargetType,
                 target_id: act.target_id,
@@ -233,6 +288,21 @@
     function removeRuleAction(ri: number, ai: number) {
         rules[ri].actions = rules[ri].actions.filter((_, idx) => idx !== ai);
     }
+    function addCondition(ri: number) {
+        rules[ri].conditions = [...rules[ri].conditions,
+            { type: "device", socket_id: v.sockets[0]?.id ?? "", state: "on" }];
+    }
+    function removeCondition(ri: number, ci: number) {
+        rules[ri].conditions = rules[ri].conditions.filter((_, idx) => idx !== ci);
+    }
+
+    // Owned automation backing a rule, used to surface last-fired / run-count.
+    function ruleStats(automationId: string): { count: number; ago: string } | null {
+        if (!automationId) return null;
+        const a = data.value.automations.find(x => x.id === automationId);
+        if (!a) return null;
+        return { count: a.run_count ?? 0, ago: formatAgo(a.last_fired_at) };
+    }
 
     function buildRulePayload(rule: RuleDraft, sceneId: string, sceneName: string, idx: number): Partial<Automation> {
         let trigger: AutomationTrigger;
@@ -255,23 +325,58 @@
                 target_id: a.target_id,
                 action: (a.target_type === "scene" ? "activate" : a.action) as AutomationAction["action"],
             };
-            if (a.target_type === "socket" && a.action === "on") {
-                base.level = a.level ?? 100;
-                if (a.color) base.color = a.color;
+            if (a.action === "on") {
+                if (a.target_type === "socket") {
+                    base.level = a.level ?? 100;
+                    if (a.color) base.color = a.color;
+                } else if (a.target_type === "group" || a.target_type === "room") {
+                    // Only include lighting info when the user explicitly chose a preset
+                    // (any color set, or brightness moved from the default 100%).
+                    if (a.color || a.level !== 100) {
+                        base.level = a.level ?? 100;
+                        if (a.color) base.color = a.color;
+                    }
+                }
             }
             return base;
         });
-        return { name: `${sceneName} – rule ${idx + 1}`, enabled: true, trigger, conditions: [], actions, scene_id: sceneId };
+        const conditions: AutomationCondition[] = rule.conditions.map(c =>
+            c.type === "device"
+                ? { type: "device", socket_id: c.socket_id, state: c.state }
+                : { type: "time_range", after: c.after, before: c.before },
+        );
+        return { name: `${sceneName} – rule ${idx + 1}`, enabled: rule.enabled, trigger, conditions, actions, scene_id: sceneId };
     }
 
     // ── Form state ─────────────────────────────────────────────────────
     let name = $state(untrack(() => existing?.name ?? ""));
     let room = $state(untrack(() => existing?.room ?? ""));
+    let icon = $state<string>(untrack(() => existing?.icon ?? ""));
+    let color = $state<SceneAccent | "">(untrack(() => existing?.color ?? ""));
     let saving = $state(false);
+    let testing = $state(false);
     let nameError = $state("");
 
     const modalTitle = $derived(isEdit ? "Edit scene" : "New scene");
     const modalSubtitle = "Add automated rules and optionally set a manual activation snapshot.";
+
+    // ── Test ────────────────────────────────────────────────────────────
+    // Runs the saved scene immediately so you can preview it. Only available
+    // when editing — a brand-new scene must be saved first.
+    async function testRun() {
+        if (!existing || testing) return;
+        testing = true;
+        try {
+            const res = await api.activateScene(existing.id);
+            toasts.success("Scene activated",
+                `${res.updated} device${res.updated === 1 ? "" : "s"} updated`);
+            await data.refresh();
+        } catch (e) {
+            toasts.error("Test failed", (e as Error).message);
+        } finally {
+            testing = false;
+        }
+    }
 
     // ── Save ────────────────────────────────────────────────────────────
     async function save() {
@@ -283,7 +388,7 @@
         try {
             const sceneName = name.trim();
             // Snapshot steps are optional — send whatever is configured (may be []).
-            const payload = { name: sceneName, room: room || undefined, steps: buildSteps() };
+            const payload = { name: sceneName, room: room || undefined, icon: icon || undefined, color: color || undefined, steps: buildSteps() };
 
             let sceneId: string;
             if (isEdit) {
@@ -354,6 +459,51 @@
                 </div>
             </div>
 
+            <!-- ── Icon + accent ────────────────────────────────── -->
+            <div class="field-row identity-row">
+                <div class="field" style="flex:2">
+                    <span class="field-label">Icon <span class="opt">(optional)</span></span>
+                    <div class="icon-picker" role="group" aria-label="Scene icon">
+                        <button type="button" class="icon-opt"
+                            class:active={icon === ""}
+                            title="No icon"
+                            aria-label="No icon" aria-pressed={icon === ""}
+                            onclick={() => icon = ""}>
+                            <Icon name="close" size={15} />
+                        </button>
+                        {#each SCENE_ICONS as ic (ic)}
+                            <button type="button" class="icon-opt"
+                                class:active={icon === ic}
+                                title={ic}
+                                aria-label="{ic} icon" aria-pressed={icon === ic}
+                                onclick={() => icon = ic}>
+                                <Icon name={ic} size={16} />
+                            </button>
+                        {/each}
+                    </div>
+                </div>
+                <div class="field" style="flex:1">
+                    <span class="field-label">Accent <span class="opt">(optional)</span></span>
+                    <div class="accent-picker" role="group" aria-label="Scene accent">
+                        <button type="button" class="accent-opt auto"
+                            class:active={color === ""}
+                            title="Auto"
+                            aria-label="Auto accent" aria-pressed={color === ""}
+                            onclick={() => color = ""}>
+                            <Icon name="close" size={12} />
+                        </button>
+                        {#each SCENE_ACCENTS as a (a.key)}
+                            <button type="button" class="accent-opt"
+                                class:active={color === a.key}
+                                style="background:{a.token}"
+                                title={a.key}
+                                aria-label="{a.key} accent" aria-pressed={color === a.key}
+                                onclick={() => color = a.key}></button>
+                        {/each}
+                    </div>
+                </div>
+            </div>
+
             <!-- ── Rules ─────────────────────────────────────────── -->
             <div class="form-section">
                 <div class="form-sec-head">
@@ -373,11 +523,22 @@
                     <div class="rule-card">
                         <div class="rule-header">
                             <span class="rule-badge">Rule {ri + 1}</span>
-                            <button type="button" class="rule-remove"
-                                onclick={() => removeRule(ri)}
-                                aria-label="Remove rule {ri + 1}">
-                                <Icon name="trash" size={14} />
-                            </button>
+                            {#if !rule.enabled}<span class="rule-muted">Off</span>{/if}
+                            {#if ruleStats(rule.automationId)}
+                                {@const st = ruleStats(rule.automationId)}
+                                <span class="rule-stats mono" title="How often this rule has fired">
+                                    Ran {st!.count}×{st!.ago ? ` · ${st!.ago}` : ""}
+                                </span>
+                            {/if}
+                            <div class="rule-head-actions">
+                                <Switch bind:checked={rule.enabled}
+                                    ariaLabel="Enable rule {ri + 1}" />
+                                <button type="button" class="rule-remove"
+                                    onclick={() => removeRule(ri)}
+                                    aria-label="Remove rule {ri + 1}">
+                                    <Icon name="trash" size={14} />
+                                </button>
+                            </div>
                         </div>
                         <div class="rule-inner">
 
@@ -462,6 +623,56 @@
                                 {/if}
                             </div>
 
+                            <!-- ONLY IF (conditions) -->
+                            <div class="block iff">
+                                <div class="block-head">
+                                    <span class="tag">Only if</span>
+                                    <button type="button" class="chip-sm" onclick={() => addCondition(ri)}>
+                                        <Icon name="plus" size={12} /> Condition
+                                    </button>
+                                </div>
+                                {#if rule.conditions.length === 0}
+                                    <div class="field-help">Optional — without conditions the rule runs every time it triggers.</div>
+                                {/if}
+                                {#each rule.conditions as c, ci (ci)}
+                                    <div class="rowcard">
+                                        <div class="field-row">
+                                            <div class="field">
+                                                <select bind:value={c.type}>
+                                                    <option value="device">Device is</option>
+                                                    <option value="time_range">Time between</option>
+                                                </select>
+                                            </div>
+                                            {#if c.type === "device"}
+                                                <div class="field">
+                                                    <select bind:value={c.socket_id}>
+                                                        {#each v.sockets as s (s.id)}<option value={s.id}>{s.name}</option>{/each}
+                                                    </select>
+                                                </div>
+                                            {/if}
+                                        </div>
+                                        {#if c.type === "device"}
+                                            <div class="field mt-sm">
+                                                <select bind:value={c.state}>
+                                                    <option value="on">On</option>
+                                                    <option value="off">Off</option>
+                                                </select>
+                                            </div>
+                                        {:else}
+                                            <div class="field-row mt-sm">
+                                                <div class="field"><input type="time" bind:value={c.after} aria-label="After" /></div>
+                                                <div class="field"><input type="time" bind:value={c.before} aria-label="Before" /></div>
+                                            </div>
+                                        {/if}
+                                        <button type="button" class="row-remove"
+                                            onclick={() => removeCondition(ri, ci)}
+                                            aria-label="Remove condition">
+                                            <Icon name="trash" size={14} /> Remove
+                                        </button>
+                                    </div>
+                                {/each}
+                            </div>
+
                             <!-- THEN -->
                             <div class="block then">
                                 <div class="block-head">
@@ -477,6 +688,7 @@
                                                 <select bind:value={a.target_type}>
                                                     <option value="socket" disabled={v.sockets.length === 0}>Device</option>
                                                     <option value="group"  disabled={v.groups.length === 0}>Group</option>
+                                                    <option value="room"   disabled={v.rooms.length === 0}>Room</option>
                                                     <option value="scene"  disabled={v.scenes.length === 0}>Scene</option>
                                                 </select>
                                             </div>
@@ -497,27 +709,58 @@
                                                 {/if}
                                             </select>
                                         </div>
-                                        {#if a.target_type === "socket" && a.action === "on" && isSmart(v.sockets.find(s => s.id === a.target_id)?.protocol ?? "")}
-                                            <div class="action-light-row">
-                                                <div class="bright">
-                                                    <span class="bright-ico"><Icon name="sun" size={14} /></span>
-                                                    <input type="range" min="1" max="100" step="1" bind:value={a.level} aria-label="Brightness" />
-                                                    <span class="bright-val mono">{a.level ?? 100}%</span>
+                                        {#if a.action === "on"}
+                                            {#if a.target_type === "socket" && isSmart(v.sockets.find(s => s.id === a.target_id)?.protocol ?? "")}
+                                                <div class="action-light-row">
+                                                    <div class="bright">
+                                                        <span class="bright-ico"><Icon name="sun" size={14} /></span>
+                                                        <input type="range" min="1" max="100" step="1" bind:value={a.level} aria-label="Brightness" />
+                                                        <span class="bright-val mono">{a.level ?? 100}%</span>
+                                                    </div>
+                                                    <div class="swatches">
+                                                        {#each COLOURS as c (c.name)}
+                                                            <button type="button" class="swatch"
+                                                                class:active={(a.color ?? "") === c.hex}
+                                                                class:auto={c.hex === ""}
+                                                                style={c.hex ? `background:#${c.hex}` : ""}
+                                                                title={c.name}
+                                                                aria-label="{c.name} color"
+                                                                onclick={() => a.color = c.hex}>
+                                                                {#if c.hex === ""}<Icon name="close" size={12} />{/if}
+                                                            </button>
+                                                        {/each}
+                                                    </div>
                                                 </div>
-                                                <div class="swatches">
-                                                    {#each COLOURS as c (c.name)}
-                                                        <button type="button" class="swatch"
-                                                            class:active={(a.color ?? "") === c.hex}
-                                                            class:auto={c.hex === ""}
-                                                            style={c.hex ? `background:#${c.hex}` : ""}
-                                                            title={c.name}
-                                                            aria-label="{c.name} color"
-                                                            onclick={() => a.color = c.hex}>
-                                                            {#if c.hex === ""}<Icon name="close" size={12} />{/if}
+                                            {:else if a.target_type === "group" || a.target_type === "room"}
+                                                {@const activeIdx = MATTER_PRESETS.findIndex(p => p.color === a.color && p.level === a.level)}
+                                                <div class="action-light-row">
+                                                    <div class="bright">
+                                                        <span class="bright-ico"><Icon name="sun" size={14} /></span>
+                                                        <input type="range" min="1" max="100" step="1" bind:value={a.level} aria-label="Brightness" />
+                                                        <span class="bright-val mono">{a.level ?? 100}%</span>
+                                                    </div>
+                                                    <div class="preset-chips" role="group" aria-label="Lighting preset">
+                                                        <button type="button" class="preset-chip auto"
+                                                            class:active={activeIdx === -1}
+                                                            title="No preset — turn on at previous brightness"
+                                                            aria-label="No lighting preset" aria-pressed={activeIdx === -1}
+                                                            onclick={() => { a.color = ""; a.level = 100; }}>
+                                                            —
                                                         </button>
-                                                    {/each}
+                                                        {#each MATTER_PRESETS as p, pi (p.label)}
+                                                            <button type="button" class="preset-chip"
+                                                                class:active={activeIdx === pi}
+                                                                style="--pc: {p.cssColor}"
+                                                                title="{p.label} · {p.level}%"
+                                                                aria-label="{p.label} preset" aria-pressed={activeIdx === pi}
+                                                                onclick={() => { a.level = p.level; a.color = p.color; }}>
+                                                                <span class="preset-dot" style="background:{p.cssColor}"></span>
+                                                                {p.label}
+                                                            </button>
+                                                        {/each}
+                                                    </div>
                                                 </div>
-                                            </div>
+                                            {/if}
                                         {/if}
                                         {#if rule.actions.length > 1}
                                             <button type="button" class="row-remove"
@@ -579,6 +822,13 @@
                                                     aria-label="Delay in minutes for step {i + 1}" />
                                                 <span class="timing-lbl">min</span>
                                             </div>
+                                        {/if}
+                                        <button type="button" class="step-capture"
+                                            onclick={() => captureCurrentState(i)}
+                                            title="Set every device to its current on/off state">
+                                            <Icon name="bolt" size={13} /> Capture now
+                                        </button>
+                                        {#if i !== 0}
                                             <button type="button" class="remove-step"
                                                 onclick={() => removeStep(i)}
                                                 aria-label="Remove step {i + 1}">
@@ -670,6 +920,12 @@
     {/snippet}
 
     {#snippet actions()}
+        {#if isEdit}
+            <button class="btn btn-ghost" onclick={testRun} disabled={testing || saving}
+                title="Run the saved scene now to preview it">
+                {testing ? "Testing…" : "Test"}
+            </button>
+        {/if}
         <button class="btn btn-ghost" onclick={() => closeModal()}>Cancel</button>
         <button class="btn btn-primary" onclick={save} disabled={saving}>
             {saving ? (isEdit ? "Saving…" : "Creating…") : (isEdit ? "Save" : "Create scene")}
@@ -732,11 +988,33 @@
     .rule-header {
         display: flex;
         align-items: center;
-        justify-content: space-between;
+        gap: 8px;
         padding: 8px 12px;
         background: var(--card-3);
         border-bottom: 1px solid var(--border);
     }
+    .rule-head-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-left: auto;
+    }
+    .rule-muted {
+        font-family: var(--font-mono);
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--text-dim);
+        background: var(--card-2);
+        border: 1px solid var(--hairline);
+        border-radius: var(--r-pill);
+        padding: 1px 7px;
+    }
+    .rule-stats {
+        font-size: 11px;
+        color: var(--text-dim);
+    }
+    .block.iff { border-left: 3px solid var(--border-strong); }
     .rule-badge {
         font-family: var(--font-mono);
         font-size: 11px;
@@ -831,6 +1109,46 @@
         gap: 8px;
         padding-top: var(--space-2);
     }
+
+    /* ── Matter preset chips (group/room rule actions) ────────────── */
+    .preset-chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 5px;
+    }
+    .preset-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        padding: 3px 9px;
+        font-size: 12px;
+        background: var(--card-2);
+        border: 1px solid var(--hairline);
+        border-radius: var(--r-pill);
+        color: var(--text-mute);
+        cursor: pointer;
+        touch-action: manipulation;
+        transition: background var(--t-fast), color var(--t-fast), box-shadow var(--t-fast);
+        white-space: nowrap;
+    }
+    .preset-chip:hover { background: var(--card-3); color: var(--text); }
+    .preset-chip.active {
+        background: var(--card-3);
+        color: var(--text);
+        box-shadow: 0 0 0 1px var(--border-strong) inset;
+    }
+    .preset-chip.auto { color: var(--text-dim); font-size: 13px; }
+    .preset-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        flex-shrink: 0;
+        border: 1px solid rgba(255,255,255,0.15);
+    }
+    @media (pointer: coarse) {
+        .preset-chip { padding: 6px 12px; font-size: 13px; min-height: 36px; }
+        .preset-dot { width: 12px; height: 12px; }
+    }
     .solar-summary {
         margin-top: 5px;
         font-weight: 600;
@@ -838,6 +1156,49 @@
         color: var(--text);
     }
     .field-help.warn { color: var(--warn, var(--danger)); }
+
+    /* ── Icon + accent pickers ───────────────────────────────────── */
+    .identity-row { align-items: flex-start; }
+    .icon-picker { display: flex; flex-wrap: wrap; gap: 6px; }
+    .icon-opt {
+        width: 34px; height: 34px;
+        display: grid; place-items: center;
+        background: var(--card-2);
+        border: 1px solid var(--hairline);
+        border-radius: var(--r-sm);
+        color: var(--text-mute);
+        cursor: pointer; touch-action: manipulation;
+        transition: background var(--t-fast), color var(--t-fast), box-shadow var(--t-fast);
+    }
+    .icon-opt:hover { background: var(--card-3); color: var(--text); }
+    .icon-opt.active {
+        color: var(--on);
+        border-color: rgba(245,189,110,0.35);
+        box-shadow: 0 0 0 1px var(--on) inset;
+    }
+    .accent-picker { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .accent-opt {
+        width: 26px; height: 26px; border-radius: 50%;
+        border: 1px solid var(--hairline); padding: 0;
+        cursor: pointer; touch-action: manipulation;
+        display: grid; place-items: center; color: var(--text-mute);
+        transition: box-shadow var(--t-fast);
+    }
+    .accent-opt.auto { background: var(--card-3); }
+    .accent-opt.active { box-shadow: 0 0 0 2px var(--on), 0 0 0 4px var(--bg-elevated); }
+
+    /* ── Capture-current-state ───────────────────────────────────── */
+    .step-capture {
+        display: inline-flex; align-items: center; gap: 4px;
+        padding: 4px 10px; font-size: 12px;
+        background: var(--card-2); border: 1px solid var(--hairline);
+        border-radius: var(--r-pill); color: var(--text-mute);
+        cursor: pointer; touch-action: manipulation; white-space: nowrap;
+        margin-left: auto;
+        transition: background var(--t-fast), color var(--t-fast);
+    }
+    .step-capture:hover { background: var(--card-3); color: var(--text); }
+    .step-capture :global(svg) { color: var(--on); }
 
     /* ── Snapshot toggle ─────────────────────────────────────────── */
     .snapshot-toggle {
