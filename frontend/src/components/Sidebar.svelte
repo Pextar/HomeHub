@@ -35,10 +35,10 @@
   const PRIMARY_COUNT = 4;
   const allItems: NavItem[] = [
     { route: "dashboard", icon: "home", label: "Home" },
-    { route: "rooms", icon: "couch", label: "Rooms", admin: true },
     { route: "sockets", icon: "socket", label: "Devices" },
     { route: "groups", icon: "groups", label: "Groups", admin: true },
     { route: "automations", icon: "automation", label: "Automations", admin: true },
+    { route: "rooms", icon: "couch", label: "Rooms", admin: true },
     { route: "floorplan", icon: "map", label: "Floor plan", admin: true },
     { route: "sensors", icon: "sensor", label: "Sensors", admin: true },
     { route: "insights", icon: "chart", label: "Insights", admin: true },
