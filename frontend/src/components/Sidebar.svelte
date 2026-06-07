@@ -259,7 +259,7 @@
         class="nav-item"
         aria-current={route.current === item.route ? "page" : undefined}
       >
-        <Icon name={item.icon} size={20} />
+        <span class="nav-icon"><Icon name={item.icon} size={20} /></span>
         <span class="nav-label">{item.label}</span>
       </a>
     {/each}
@@ -270,7 +270,7 @@
       aria-current={moreActive && !moreOpen ? "page" : undefined}
       onclick={() => (moreOpen = !moreOpen)}
     >
-      <Icon name="more" size={20} />
+      <span class="nav-icon"><Icon name="more" size={20} /></span>
       <span class="nav-label">More</span>
     </button>
   </nav>
@@ -860,23 +860,24 @@
       color: var(--on);
       box-shadow: none;
     }
-    /* Tiny amber pill that sits at the very top of the active tab */
-    .nav-mobile .nav-item[aria-current="page"]::before {
-      content: '';
-      position: absolute;
-      top: 0;
-      left: 50%;
-      transform: translateX(-50%);
-      width: 22px;
-      height: 3px;
-      border-radius: 0 0 var(--r-pill) var(--r-pill);
-      background: var(--on);
+    /* Icon bubble — pill housing that lights up like a lamp when active */
+    .nav-mobile .nav-icon {
+      width: 52px;
+      height: 30px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: var(--r-pill);
+      transition: background 0.22s ease, box-shadow 0.22s ease;
+    }
+    .nav-mobile .nav-item[aria-current="page"] .nav-icon {
+      background: var(--on-soft);
+      box-shadow: 0 0 0 1px var(--on-soft), 0 0 20px 4px var(--on-glow);
     }
     .nav-mobile .nav-item[aria-current="page"] :global(svg) {
       color: var(--on);
       transform: scale(1.1);
-      /* Warm glow mirrors the bulb-on design language used in tiles */
-      filter: drop-shadow(0 0 6px var(--on-glow));
+      filter: drop-shadow(0 0 8px var(--on-glow));
     }
     /* Quick dip on press for tactile feedback. */
     .nav-mobile .nav-item:active :global(svg) {
