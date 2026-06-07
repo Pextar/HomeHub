@@ -854,13 +854,30 @@
       /* Spring easing for the scale pop; ease for the amber glow fade */
       transition: transform 0.28s var(--spring), filter 0.22s ease;
     }
-    /* Active = amber tint + a short indicator bar at the top of the item */
+    /* Active = amber text color */
     .nav-mobile .nav-item[aria-current="page"] {
       background: transparent;
       color: var(--on);
       box-shadow: none;
     }
-    /* Icon bubble — pill housing that lights up like a lamp when active */
+    /* Lamp fixture: amber bar at the very top with a two-layer glow —
+       first layer hugs the bar itself, second fans downward onto the icon */
+    .nav-mobile .nav-item[aria-current="page"]::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 28px;
+      height: 3px;
+      border-radius: 0 0 var(--r-pill) var(--r-pill);
+      background: var(--on);
+      box-shadow:
+        0 0 10px 4px var(--on-glow),
+        0 22px 36px 6px var(--on-glow);
+    }
+    /* Icon bubble — the lit surface beneath the lamp; softer glow
+       so it reads as receiving light rather than emitting it */
     .nav-mobile .nav-icon {
       width: 52px;
       height: 30px;
@@ -872,7 +889,7 @@
     }
     .nav-mobile .nav-item[aria-current="page"] .nav-icon {
       background: var(--on-soft);
-      box-shadow: 0 0 0 1px var(--on-soft), 0 0 20px 4px var(--on-glow);
+      box-shadow: 0 0 0 1px var(--on-soft), 0 0 14px 3px var(--on-glow);
     }
     .nav-mobile .nav-item[aria-current="page"] :global(svg) {
       color: var(--on);
