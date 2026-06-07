@@ -68,6 +68,21 @@ func (s *Store) ExecuteAction(targetType, targetID, action string) error {
 		}
 		return firstErr
 
+	case "room":
+		room, ok := s.Rooms[targetID]
+		if !ok {
+			return fmt.Errorf("room %q no longer exists", targetID)
+		}
+		var firstErr error
+		for _, sock := range s.Sockets {
+			if sock.Room == room.Name {
+				if err := s.ExecuteAction("socket", sock.ID, action); err != nil && firstErr == nil {
+					firstErr = err
+				}
+			}
+		}
+		return firstErr
+
 	case "scene":
 		scene, ok := s.Scenes[targetID]
 		if !ok {

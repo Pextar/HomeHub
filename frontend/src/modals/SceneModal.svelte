@@ -143,12 +143,13 @@
     const hasLocation = $derived(v.settings.latitude !== 0 || v.settings.longitude !== 0);
 
     function firstTargetType(): TargetType {
-        return v.sockets.length ? "socket" : v.groups.length ? "group" : "scene";
+        return v.sockets.length ? "socket" : v.groups.length ? "group" : v.rooms.length ? "room" : "scene";
     }
 
     function targetsFor(type: string) {
         if (type === "socket") return v.sockets.map(s => ({ id: s.id, label: s.name }));
-        if (type === "group") return v.groups.map(g => ({ id: g.id, label: g.name }));
+        if (type === "group")  return v.groups.map(g => ({ id: g.id, label: g.name }));
+        if (type === "room")   return [...v.rooms].sort((a, b) => a.name.localeCompare(b.name)).map(r => ({ id: r.id, label: r.name }));
         return v.scenes.map(s => ({ id: s.id, label: s.name }));
     }
 
@@ -477,6 +478,7 @@
                                                 <select bind:value={a.target_type}>
                                                     <option value="socket" disabled={v.sockets.length === 0}>Device</option>
                                                     <option value="group"  disabled={v.groups.length === 0}>Group</option>
+                                                    <option value="room"   disabled={v.rooms.length === 0}>Room</option>
                                                     <option value="scene"  disabled={v.scenes.length === 0}>Scene</option>
                                                 </select>
                                             </div>

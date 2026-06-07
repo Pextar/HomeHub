@@ -9,7 +9,7 @@ export interface Socket {
   emoji?: string; // shown big in kid mode
 }
 
-export type TargetType = "socket" | "group" | "scene";
+export type TargetType = "socket" | "group" | "room" | "scene";
 export type SocketAction = "on" | "off" | "toggle";
 export type SceneActionKind = "on" | "off";
 

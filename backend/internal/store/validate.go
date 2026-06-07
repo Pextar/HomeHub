@@ -467,6 +467,10 @@ func (s *Store) VerifyTarget(tt, tid string) error {
 		if _, ok := s.Groups[tid]; !ok {
 			return errors.New("target group does not exist")
 		}
+	case "room":
+		if _, ok := s.Rooms[tid]; !ok {
+			return errors.New("target room does not exist")
+		}
 	case "scene":
 		if _, ok := s.Scenes[tid]; !ok {
 			return errors.New("target scene does not exist")

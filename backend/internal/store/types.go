@@ -19,6 +19,7 @@ type Socket struct {
 // Targets:
 //   - target_type "socket": fires action ("on"|"off"|"toggle") on a socket
 //   - target_type "group":  fires action ("on"|"off"|"toggle") on every member
+//   - target_type "room":   fires action ("on"|"off"|"toggle") on every socket in the room
 //   - target_type "scene":  activates the scene (action ignored, treated as "activate")
 //
 // For backwards compatibility, schedules with socket_id set and no
@@ -88,7 +89,7 @@ type AutomationCondition struct {
 // AutomationAction is one step run when an automation fires. Targets and
 // actions mirror Schedule/Timer semantics and go through ExecuteAction.
 type AutomationAction struct {
-	TargetType string `json:"target_type"` // "socket" | "group" | "scene"
+	TargetType string `json:"target_type"` // "socket" | "group" | "room" | "scene"
 	TargetID   string `json:"target_id"`
 	Action     string `json:"action"`          // "on" | "off" | "toggle" | "activate"
 	Level      *int   `json:"level,omitempty"` // 1-100, smart lights only
@@ -261,7 +262,7 @@ type Scene struct {
 // minutes" style quick actions. Persisted so they survive restarts.
 type Timer struct {
 	ID         string    `json:"id"`
-	TargetType string    `json:"target_type"` // "socket" | "group" | "scene"
+	TargetType string    `json:"target_type"` // "socket" | "group" | "room" | "scene"
 	TargetID   string    `json:"target_id"`
 	Action     string    `json:"action"` // "on" | "off" | "toggle" | "activate"
 	FiresAt    time.Time `json:"fires_at"`
