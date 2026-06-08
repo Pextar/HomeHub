@@ -18,13 +18,37 @@ type scheduleResponse struct {
 	EffectiveTime string `json:"effective_time,omitempty"`
 }
 
+// scheduleSocketID returns the socket ID a schedule targets, handling both the
+// legacy socket_id field and the newer target_type/target_id fields. Returns ""
+// when the schedule does not target a plain socket.
+func scheduleSocketID(s *store.Schedule) string {
+	if s.TargetType == "socket" && s.TargetID != "" {
+		return s.TargetID
+	}
+	// Legacy schedules had no TargetType; the socket_id field carried the target.
+	if s.TargetType == "" && s.SocketID != "" {
+		return s.SocketID
+	}
+	return ""
+}
+
 func (s *Server) getSchedules(w http.ResponseWriter, r *http.Request) {
+	user := currentUser(r)
+	admin := isAdmin(user)
 	now := time.Now()
+
 	s.Store.Mu.RLock()
 	raw := make([]*store.Schedule, 0, len(s.Store.Schedules))
 	keys := make(map[string]string, len(s.Store.Schedules))
 	effective := make(map[string]string, len(s.Store.Schedules))
 	for _, sch := range s.Store.Schedules {
+		// Non-admins only see schedules targeting their own sockets.
+		if !admin {
+			sockID := scheduleSocketID(sch)
+			if sockID == "" || !user.CanAccessSocket(sockID) {
+				continue
+			}
+		}
 		raw = append(raw, sch)
 		k, ok := sch.EffectiveHHMM(now, s.Store.Settings)
 		if !ok {
@@ -60,6 +84,24 @@ func (s *Server) createSchedule(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&schedule); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return
+	}
+
+	user := currentUser(r)
+	if !isAdmin(user) {
+		// Non-admins can only schedule their own sockets — not groups, scenes, or rooms.
+		tt := strings.TrimSpace(schedule.TargetType)
+		if tt != "" && tt != "socket" {
+			writeError(w, http.StatusForbidden, "you can only schedule your own devices")
+			return
+		}
+		sockID := strings.TrimSpace(schedule.TargetID)
+		if sockID == "" {
+			sockID = strings.TrimSpace(schedule.SocketID)
+		}
+		if !user.CanAccessSocket(sockID) {
+			writeError(w, http.StatusForbidden, "you don't have access to that device")
+			return
+		}
 	}
 
 	s.Store.Mu.Lock()
@@ -101,6 +143,15 @@ func (s *Server) updateSchedule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	user := currentUser(r)
+	if !isAdmin(user) {
+		// The user must own the existing schedule (it must target their socket).
+		if sockID := scheduleSocketID(existing); !user.CanAccessSocket(sockID) {
+			writeError(w, http.StatusForbidden, "you don't own that schedule")
+			return
+		}
+	}
+
 	// Build merged schedule and validate it whole.
 	merged := *existing
 	if v := strings.TrimSpace(updates.SocketID); v != "" {
@@ -127,6 +178,19 @@ func (s *Server) updateSchedule(w http.ResponseWriter, r *http.Request) {
 	merged.Enabled = updates.Enabled
 	merged.RandomOffsetMinutes = updates.RandomOffsetMinutes
 	merged.SolarOffsetMinutes = updates.SolarOffsetMinutes
+
+	if !isAdmin(user) {
+		// After merge, the target must still be the user's own socket.
+		tt := strings.TrimSpace(merged.TargetType)
+		if tt != "" && tt != "socket" {
+			writeError(w, http.StatusForbidden, "you can only schedule your own devices")
+			return
+		}
+		if sockID := scheduleSocketID(&merged); !user.CanAccessSocket(sockID) {
+			writeError(w, http.StatusForbidden, "you don't have access to that device")
+			return
+		}
+	}
 
 	if err := s.Store.ValidateSchedule(&merged); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -170,11 +234,24 @@ func (s *Server) deleteSchedule(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
 
 	s.Store.Mu.Lock()
-	if _, ok := s.Store.Schedules[id]; !ok {
+
+	sch, ok := s.Store.Schedules[id]
+	if !ok {
 		s.Store.Mu.Unlock()
 		writeError(w, http.StatusNotFound, "schedule not found")
 		return
 	}
+
+	user := currentUser(r)
+	if !isAdmin(user) {
+		sockID := scheduleSocketID(sch)
+		if !user.CanAccessSocket(sockID) {
+			s.Store.Mu.Unlock()
+			writeError(w, http.StatusForbidden, "you don't own that schedule")
+			return
+		}
+	}
+
 	delete(s.Store.Schedules, id)
 	if err := s.Store.Save(); err != nil {
 		s.Store.Mu.Unlock()
