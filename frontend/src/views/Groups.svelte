@@ -154,6 +154,9 @@
         flex-direction: column;
         gap: 3px;
         min-width: 0;
+        /* more-corner is absolute at bottom:10px right:10px (28px wide),
+           its left edge sits 22px into the content area — clear it. */
+        padding-right: 28px;
     }
     .body:focus-visible { box-shadow: var(--focus-ring); border-radius: var(--r-sm); }
     .name { font-weight: 600; font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

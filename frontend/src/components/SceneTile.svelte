@@ -103,7 +103,7 @@
     });
 </script>
 
-<div class="scene" bind:this={el}>
+<div class="scene" class:manage bind:this={el}>
     <button class="scene-hit" onclick={activate} aria-label="Activate {scene.name}">
         <span class="top">
             <span class="hue-chip" style:color={hue}>
@@ -198,6 +198,10 @@
         justify-content: space-between;
         gap: 10px;
     }
+    /* In manage mode the more-corner (26px wide, right:10px) sits in the
+       top-right corner — widen the right padding so the "Run" label and
+       any top-right content can't slide under it. */
+    .scene.manage .scene-hit { padding-right: 40px; }
     .scene-hit:active { transform: scale(0.98); }
     .scene-hit:focus-visible { box-shadow: var(--focus-ring); border-radius: var(--r-md); }
 
