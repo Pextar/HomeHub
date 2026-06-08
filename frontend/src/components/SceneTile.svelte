@@ -137,7 +137,7 @@
                 {/if}
             </span>
             {#if ranCount > 0}
-                <span class="ran mono" title="Manual activations">Ran {ranCount}×{ranAgo ? ` · ${ranAgo}` : ""}</span>
+                <span class="ran mono" title={scene.last_activated_at ? `Last activated: ${new Date(scene.last_activated_at).toLocaleString()}` : undefined}>Ran {ranCount}×{ranAgo ? ` · ${ranAgo}` : ""}</span>
             {/if}
             {#if solarSchedules.length > 0}
                 <span class="solar-times">

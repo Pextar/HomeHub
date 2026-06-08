@@ -286,7 +286,7 @@
                                 <span class="val">{thenText(a)}</span>
                             </span>
                             {#if (a.run_count ?? 0) > 0}
-                                <span class="runs mono">ran {a.run_count}× · {lastFiredText(a)}</span>
+                                <span class="runs mono" title={a.last_fired_at ? new Date(a.last_fired_at).toLocaleString() : undefined}>ran {a.run_count}× · {lastFiredText(a)}</span>
                             {/if}
                         </button>
 
@@ -497,5 +497,6 @@
 
     @media (pointer: coarse) {
         .overflow-item { padding: 14px var(--space-4); font-size: 15px; min-height: 52px; }
+        .more-btn { width: 44px; height: 44px; }
     }
 </style>

@@ -274,9 +274,11 @@
                     <div class="group-actions">
                         <button class="btn btn-success"
                             disabled={g.on === g.socket_ids.length}
+                            title={g.on === g.socket_ids.length ? "All already on" : undefined}
                             onclick={() => runAction(() => api.groupAction(g.id, 'on'), `${g.name} on`)}>On</button>
                         <button class="btn btn-danger"
                             disabled={g.on === 0}
+                            title={g.on === 0 ? "All already off" : undefined}
                             onclick={() => runAction(() => api.groupAction(g.id, 'off'), `${g.name} off`)}>Off</button>
                     </div>
                 </div>
