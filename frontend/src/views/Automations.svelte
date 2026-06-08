@@ -110,6 +110,7 @@
         const t = a.trigger;
         if (t.type === "time") {
             if (t.time_mode === "sunrise" || t.time_mode === "sunset") {
+                if (a.effective_trigger_time) return `≈ ${a.effective_trigger_time}`;
                 const off = t.solar_offset_minutes ?? 0;
                 const suffix = off ? ` ${off < 0 ? "−" : "+"}${Math.abs(off)}m` : "";
                 return `${t.time_mode}${suffix}`;

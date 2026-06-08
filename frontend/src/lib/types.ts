@@ -256,6 +256,9 @@ export interface Automation {
   run_count?: number;
   /** Set when this automation was created as a rule inside a scene wizard. */
   scene_id?: string;
+  /** Server-computed HH:MM for solar time triggers (sunrise/sunset + offset).
+   *  Absent when the trigger is not solar or the location is not configured. */
+  effective_trigger_time?: string;
 }
 
 export interface BulkResult {
