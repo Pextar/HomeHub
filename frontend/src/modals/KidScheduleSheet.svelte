@@ -5,7 +5,7 @@
     import { api } from "../lib/api";
     import { data, toasts } from "../lib/stores.svelte";
     import { DAY_SHORT, DAY_NAMES } from "../lib/utils";
-    import type { Socket, Schedule } from "../lib/types";
+    import type { Socket, Schedule, TargetType, ScheduleTimeMode } from "../lib/types";
 
     interface Props {
         onClose: () => void;
@@ -45,11 +45,11 @@
         if (saving || !selectedId) return;
         saving = true;
         try {
-            const payload = {
-                target_type: "socket",
+            const payload: Partial<Schedule> = {
+                target_type: "socket" as TargetType,
                 target_id: selectedId,
                 action,
-                time_mode: "fixed",
+                time_mode: "fixed" as ScheduleTimeMode,
                 time,
                 solar_offset_minutes: 0,
                 days,
