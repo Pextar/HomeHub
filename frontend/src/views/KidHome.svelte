@@ -4,14 +4,62 @@
     import { backOut } from "svelte/easing";
     import { api } from "../lib/api";
     import { data, toasts, session } from "../lib/stores.svelte";
-    import type { Socket } from "../lib/types";
+    import { formatDays } from "../lib/utils";
+    import type { Socket, Schedule } from "../lib/types";
     import KidLampPanel from "./KidLampPanel.svelte";
+    import KidScheduleSheet from "../modals/KidScheduleSheet.svelte";
 
     // Matter/Tasmota bulbs get the colour + brightness playground; plain RF
     // sockets just flip on/off on tap.
     const isSmart = (lamp: Socket) => lamp.protocol.startsWith("matter") || lamp.protocol === "tasmota";
     let active = $state<Socket | null>(null);
     let confirmExit = $state(false);
+
+    // ── Schedules ──────────────────────────────────────────────────────────
+    let showScheduleSheet = $state(false);
+    let editingSchedule = $state<Schedule | null>(null);
+    // pendingDelete holds the ID awaiting a second tap to confirm deletion.
+    let pendingDelete = $state<string | null>(null);
+    let pendingDeleteTimer = $state<ReturnType<typeof setTimeout> | null>(null);
+
+    function openNewSchedule() {
+        editingSchedule = null;
+        showScheduleSheet = true;
+    }
+
+    function openEditSchedule(s: Schedule) {
+        editingSchedule = s;
+        showScheduleSheet = true;
+    }
+
+    function closeSheet() {
+        showScheduleSheet = false;
+        editingSchedule = null;
+    }
+
+    function requestDelete(id: string) {
+        if (pendingDelete === id) {
+            doDelete(id);
+        } else {
+            pendingDelete = id;
+            if (pendingDeleteTimer) clearTimeout(pendingDeleteTimer);
+            pendingDeleteTimer = setTimeout(() => {
+                pendingDelete = null;
+            }, 3000);
+        }
+    }
+
+    async function doDelete(id: string) {
+        pendingDelete = null;
+        if (pendingDeleteTimer) { clearTimeout(pendingDeleteTimer); pendingDeleteTimer = null; }
+        try {
+            await api.deleteSchedule(id);
+            await data.refresh();
+            toasts.success("Schedule removed!");
+        } catch (e) {
+            toasts.error("Couldn't delete", (e as Error).message);
+        }
+    }
 
     function onTap(lamp: Socket) {
         if (isSmart(lamp)) {
@@ -26,6 +74,25 @@
     // Kid profiles only ever receive their assigned lamps from the API, so
     // the whole socket list is theirs to show.
     const lamps = $derived(data.value.sockets);
+
+    // Schedules filtered to this kid's sockets (backend already does this,
+    // but guard here too in case stale data slips through).
+    const lampIds = $derived(new Set(lamps.map(l => l.id)));
+    const kidSchedules = $derived(
+        data.value.schedules.filter(s => {
+            const id = s.target_id || s.socket_id || "";
+            return id && lampIds.has(id);
+        })
+    );
+
+    function schedSocket(s: Schedule): Socket | null {
+        const id = s.target_id || s.socket_id || "";
+        return lamps.find(l => l.id === id) ?? null;
+    }
+
+    function lampEmoji(lamp: Socket): string {
+        return lamp.emoji && lamp.emoji.trim() ? lamp.emoji : "💡";
+    }
 
     // ── Welcome splash + confetti ───────────────────────────────────────
     const GREETED_KEY = "kid-greeted";
@@ -77,10 +144,6 @@
         sessionStorage.removeItem(GREETED_KEY);
         window.location.reload();
     }
-
-    function lampEmoji(lamp: Socket): string {
-        return lamp.emoji && lamp.emoji.trim() ? lamp.emoji : "💡";
-    }
 </script>
 
 {#if showWelcome}
@@ -130,10 +193,62 @@
             {/each}
         </div>
     {/if}
+
+    <!-- ── Schedules section ─────────────────────────────────────────── -->
+    {#if lamps.length > 0}
+        <div class="sched-section">
+            <div class="sched-head">
+                <h3>⏰ My schedules</h3>
+                <button class="sched-new" onclick={openNewSchedule} aria-label="Add schedule">
+                    + New
+                </button>
+            </div>
+
+            {#if kidSchedules.length === 0}
+                <div class="sched-empty">
+                    <span class="sched-empty-icon">🗓️</span>
+                    <p>No schedules yet!<br>Tap <strong>+ New</strong> to set one up.</p>
+                </div>
+            {:else}
+                <div class="sched-list">
+                    {#each kidSchedules as s (s.id)}
+                        {@const sock = schedSocket(s)}
+                        <div class="sched-row">
+                            <button class="sched-main" onclick={() => openEditSchedule(s)}
+                                aria-label="Edit schedule for {sock?.name ?? 'lamp'}">
+                                <span class="sched-emoji">{sock ? lampEmoji(sock) : "💡"}</span>
+                                <div class="sched-info">
+                                    <span class="sched-name">{sock?.name ?? "Lamp"}</span>
+                                    <div class="sched-meta">
+                                        <span class="sched-time">{s.time}</span>
+                                        <span class="sched-badge" class:badge-on={s.action === "on"}>
+                                            {s.action === "on" ? "ON" : "OFF"}
+                                        </span>
+                                        <span class="sched-days">{formatDays(s.days)}</span>
+                                    </div>
+                                </div>
+                            </button>
+                            <button
+                                class="sched-del"
+                                class:pending={pendingDelete === s.id}
+                                onclick={() => requestDelete(s.id)}
+                                aria-label={pendingDelete === s.id ? "Confirm delete" : "Delete schedule"}>
+                                {pendingDelete === s.id ? "✓?" : "✕"}
+                            </button>
+                        </div>
+                    {/each}
+                </div>
+            {/if}
+        </div>
+    {/if}
 </div>
 
 {#if active}
     <KidLampPanel socket={active} onClose={() => (active = null)} />
+{/if}
+
+{#if showScheduleSheet}
+    <KidScheduleSheet onClose={closeSheet} existing={editingSchedule} />
 {/if}
 
 {#if confirmExit}
@@ -270,6 +385,159 @@
     .none-emoji { font-size: 4rem; margin-bottom: var(--space-3); }
     .none p { font-size: 1.25rem; font-weight: 700; }
 
+    /* ── Schedules section ── */
+    .sched-section {
+        margin-top: var(--space-6);
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-4);
+    }
+    .sched-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-3);
+    }
+    .sched-head h3 {
+        font-size: clamp(1.2rem, 4vw, 1.6rem);
+        font-weight: 800;
+        letter-spacing: -0.02em;
+    }
+    .sched-new {
+        font-size: 0.95rem;
+        font-weight: 800;
+        padding: 10px 18px;
+        min-height: 44px;
+        border-radius: 999px;
+        border: 2px solid #ffd23f;
+        background: transparent;
+        color: #ffd23f;
+        cursor: pointer;
+        flex-shrink: 0;
+        transition: background 0.15s ease, color 0.15s ease, transform 0.12s ease;
+        -webkit-tap-highlight-color: transparent;
+    }
+    .sched-new:active {
+        transform: scale(0.95);
+        background: rgba(255, 210, 63, 0.15);
+    }
+
+    .sched-empty {
+        text-align: center;
+        color: var(--text-muted);
+        padding: var(--space-6) var(--space-4);
+    }
+    .sched-empty-icon { font-size: 3rem; display: block; margin-bottom: var(--space-3); }
+    .sched-empty p { font-size: 1rem; font-weight: 600; line-height: 1.5; }
+
+    .sched-list {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-3);
+    }
+
+    /* Each schedule row: main tap target + delete button */
+    .sched-row {
+        display: flex;
+        align-items: stretch;
+        gap: var(--space-2);
+    }
+    .sched-main {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        gap: var(--space-3);
+        padding: var(--space-3) var(--space-4);
+        border-radius: var(--radius-lg);
+        border: 2px solid var(--border);
+        background: var(--bg-elevated);
+        cursor: pointer;
+        text-align: left;
+        transition: border-color 0.15s ease, transform 0.12s ease;
+        -webkit-tap-highlight-color: transparent;
+    }
+    .sched-main:active { transform: scale(0.98); border-color: #ffd23f55; }
+
+    .sched-emoji { font-size: 2.2rem; line-height: 1; flex-shrink: 0; }
+    .sched-info {
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+        min-width: 0;
+    }
+    .sched-name {
+        font-size: 1rem;
+        font-weight: 800;
+        color: var(--text);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .sched-meta {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        flex-wrap: wrap;
+    }
+    .sched-time {
+        font-family: var(--font-mono);
+        font-size: 0.9rem;
+        font-weight: 700;
+        color: var(--text-muted);
+        letter-spacing: -0.01em;
+    }
+    .sched-badge {
+        font-size: 0.7rem;
+        font-weight: 800;
+        letter-spacing: 0.1em;
+        padding: 2px 7px;
+        border-radius: 999px;
+        background: var(--bg);
+        color: var(--text-muted);
+        border: 1.5px solid var(--border);
+    }
+    .sched-badge.badge-on {
+        background: rgba(255, 210, 63, 0.15);
+        border-color: #ffd23f;
+        color: #ffd23f;
+    }
+    .sched-days {
+        font-size: 0.78rem;
+        font-weight: 600;
+        color: var(--text-faint);
+    }
+
+    .sched-del {
+        min-width: 48px;
+        min-height: 48px;
+        border-radius: var(--radius-lg);
+        border: 2px solid var(--border);
+        background: var(--bg-elevated);
+        color: var(--text-muted);
+        font-size: 1rem;
+        font-weight: 800;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+        transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease, transform 0.12s ease;
+        -webkit-tap-highlight-color: transparent;
+    }
+    .sched-del:active { transform: scale(0.9); }
+    .sched-del.pending {
+        background: #ff5d8f;
+        border-color: #ff5d8f;
+        color: #fff;
+        animation: shake 0.35s ease;
+    }
+
+    @keyframes shake {
+        0%, 100% { transform: translateX(0); }
+        25%  { transform: translateX(-4px); }
+        75%  { transform: translateX(4px); }
+    }
+
     /* ── Welcome overlay ── */
     .welcome {
         position: fixed;
@@ -317,6 +585,7 @@
     @media (prefers-reduced-motion: reduce) {
         .confetti span { display: none; }
         .greeting .wave { animation: none; }
+        .sched-del.pending { animation: none; }
     }
 
     /* ── Exit confirmation ── */

@@ -154,12 +154,15 @@ func (s *Server) Handler() http.Handler {
 	// Everything below is admin-only: a non-admin's app is just their
 	// devices and the dashboard, so groups/scenes/schedules/sensors/
 	// settings management never reaches them.
-	api.HandleFunc("/schedules", s.requireAdmin(s.getSchedules)).Methods("GET")
-	api.HandleFunc("/schedules", s.requireAdmin(s.createSchedule)).Methods("POST")
+	// Schedule read/write is open to all authenticated users; handlers filter
+	// results to the caller's own sockets for non-admins. The bulk
+	// enable/disable ("vacation mode") remains admin-only.
+	api.HandleFunc("/schedules", s.getSchedules).Methods("GET")
+	api.HandleFunc("/schedules", s.createSchedule).Methods("POST")
 	api.HandleFunc("/schedules/all/enable", s.requireAdmin(s.setAllSchedules(true))).Methods("POST")
 	api.HandleFunc("/schedules/all/disable", s.requireAdmin(s.setAllSchedules(false))).Methods("POST")
-	api.HandleFunc("/schedules/{id}", s.requireAdmin(s.updateSchedule)).Methods("PUT")
-	api.HandleFunc("/schedules/{id}", s.requireAdmin(s.deleteSchedule)).Methods("DELETE")
+	api.HandleFunc("/schedules/{id}", s.updateSchedule).Methods("PUT")
+	api.HandleFunc("/schedules/{id}", s.deleteSchedule).Methods("DELETE")
 
 	api.HandleFunc("/automations", s.requireAdmin(s.getAutomations)).Methods("GET")
 	api.HandleFunc("/automations", s.requireAdmin(s.createAutomation)).Methods("POST")

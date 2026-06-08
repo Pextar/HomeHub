@@ -23,16 +23,20 @@ function createDataStore() {
 
   async function refresh() {
     try {
-      // Sockets and rooms are visible to every profile (filtered server-side
-      // to the caller's allowed set). The rest are admin-only — fetching them
-      // as a non-admin would 401/403, so we skip them entirely.
-      const [sockets, rooms] = await Promise.all([api.listSockets(), api.listRooms()]);
+      // Sockets, rooms, and schedules are visible to every authenticated
+      // profile. Schedules are filtered server-side to the caller's own
+      // sockets for non-admins. The rest are admin-only.
+      const [sockets, rooms, schedules] = await Promise.all([
+        api.listSockets(),
+        api.listRooms(),
+        api.listSchedules(),
+      ]);
       data.sockets = sockets ?? [];
       data.rooms = rooms ?? [];
+      data.schedules = schedules ?? [];
 
       if (session.isAdmin) {
-        const [schedules, groups, scenes, timers, automations, activity, sensors, settings] = await Promise.all([
-          api.listSchedules(),
+        const [groups, scenes, timers, automations, activity, sensors, settings] = await Promise.all([
           api.listGroups(),
           api.listScenes(),
           api.listTimers(),
@@ -41,7 +45,6 @@ function createDataStore() {
           api.listSensors(),
           api.getSettings(),
         ]);
-        data.schedules = schedules ?? [];
         data.groups = groups ?? [];
         data.scenes = scenes ?? [];
         data.timers = timers ?? [];
