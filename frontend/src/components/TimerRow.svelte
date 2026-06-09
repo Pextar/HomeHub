@@ -45,7 +45,7 @@
   >
   <div class="info">
     <div class="target">{target.kind}: {target.label}</div>
-    <div class="when">{firesAtLabel}</div>
+    <div class="when" title={firesAt.toLocaleString()}>{firesAtLabel}</div>
   </div>
   <span class="countdown">{countdown}</span>
   <button class="icon-btn danger" aria-label="Cancel timer" onclick={cancel}>

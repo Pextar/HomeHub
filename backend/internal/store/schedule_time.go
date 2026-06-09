@@ -15,6 +15,38 @@ const (
 	ModeSunset  = "sunset"
 )
 
+// TriggerEffectiveHHMM returns the "HH:MM" a solar time-type automation
+// trigger fires at on the local date of now, with any offset applied.
+// ok is false when the trigger is not a solar time trigger, or the
+// location is not configured, or polar day/night conditions apply.
+func TriggerEffectiveHHMM(t *AutomationTrigger, now time.Time, settings *Settings) (string, bool) {
+	if t.Type != "time" {
+		return "", false
+	}
+	mode := t.TimeMode
+	if mode == "" || mode == ModeFixed {
+		return "", false
+	}
+	if !settings.HasLocation() {
+		return "", false
+	}
+	sunrise, sunset, ok := solar.Times(now, settings.Latitude, settings.Longitude)
+	if !ok {
+		return "", false
+	}
+	var base time.Time
+	switch mode {
+	case ModeSunrise:
+		base = sunrise
+	case ModeSunset:
+		base = sunset
+	default:
+		return "", false
+	}
+	result := base.Add(time.Duration(t.SolarOffsetMinutes) * time.Minute)
+	return result.Format("15:04"), true
+}
+
 // EffectiveHHMM returns the "HH:MM" the schedule should fire at on the
 // local date of now. ok is false when the trigger cannot be determined
 // (e.g. sunrise/sunset requested but no location configured, or polar

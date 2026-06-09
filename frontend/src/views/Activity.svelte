@@ -109,7 +109,7 @@
                                 <div class="body">
                                     <div class="top">
                                         <span class="what">{e.label}</span>
-                                        <time class="mono when">{time(e.time)}</time>
+                                        <time class="mono when" datetime={e.time} title={new Date(e.time).toLocaleString()}>{time(e.time)}</time>
                                     </div>
                                     <div class="sub">
                                         <span class="who" style="color: {isErr ? 'var(--bad)' : META[cat].color}">{sourceLabel(e.source)}</span>

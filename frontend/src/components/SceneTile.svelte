@@ -54,6 +54,16 @@
         data.value.automations.filter(a => a.scene_id === scene.id).length
     );
 
+    // Solar schedules that fire this scene at sunrise/sunset.
+    const solarSchedules = $derived(
+        data.value.schedules.filter(s =>
+            s.target_type === "scene" &&
+            s.target_id === scene.id &&
+            (s.time_mode === "sunrise" || s.time_mode === "sunset") &&
+            s.enabled
+        )
+    );
+
     const sub = $derived(
         allActions.length === 0
             ? (ruleCount > 0 ? `${ruleCount} rule${ruleCount === 1 ? "" : "s"}` : "No devices")
@@ -93,7 +103,7 @@
     });
 </script>
 
-<div class="scene" bind:this={el}>
+<div class="scene" class:manage bind:this={el}>
     <button class="scene-hit" onclick={activate} aria-label="Activate {scene.name}">
         <span class="top">
             <span class="hue-chip" style:color={hue}>
@@ -127,7 +137,17 @@
                 {/if}
             </span>
             {#if ranCount > 0}
-                <span class="ran mono" title="Manual activations">Ran {ranCount}×{ranAgo ? ` · ${ranAgo}` : ""}</span>
+                <span class="ran mono" title={scene.last_activated_at ? `Last activated: ${new Date(scene.last_activated_at).toLocaleString()}` : undefined}>Ran {ranCount}×{ranAgo ? ` · ${ranAgo}` : ""}</span>
+            {/if}
+            {#if solarSchedules.length > 0}
+                <span class="solar-times">
+                    {#each solarSchedules as s (s.id)}
+                        <span class="solar-badge">
+                            <Icon name={s.time_mode === "sunrise" ? "sunrise" : "sunset"} size={11} />
+                            <span class="mono">{s.effective_time ? `≈ ${s.effective_time}` : (s.time_mode === "sunrise" ? "Sunrise" : "Sunset")}</span>
+                        </span>
+                    {/each}
+                </span>
             {/if}
         </span>
     </button>
@@ -178,6 +198,10 @@
         justify-content: space-between;
         gap: 10px;
     }
+    /* In manage mode the more-corner (26px wide, right:10px) sits in the
+       top-right corner — widen the right padding so the "Run" label and
+       any top-right content can't slide under it. */
+    .scene.manage .scene-hit { padding-right: 40px; }
     .scene-hit:active { transform: scale(0.98); }
     .scene-hit:focus-visible { box-shadow: var(--focus-ring); border-radius: var(--r-md); }
 
@@ -256,6 +280,13 @@
     .overflow-item:hover { background: var(--surface-hover); }
     .overflow-item.danger { color: var(--danger); }
     .overflow-item.danger :global(svg) { color: var(--danger); }
+
+    .solar-times { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; align-items: center; }
+    .solar-badge {
+        display: inline-flex; align-items: center; gap: 3px;
+        font-size: 11px; color: var(--text-dim);
+    }
+    .solar-badge :global(svg) { color: var(--text-mute); flex-shrink: 0; }
 
     @media (pointer: coarse) {
         .more-corner { width: 32px; height: 32px; }

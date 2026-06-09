@@ -12,11 +12,24 @@ import (
 	"rf-socket-controller/internal/store"
 )
 
+type automationResponse struct {
+	*store.Automation
+	// EffectiveTriggerTime is the resolved HH:MM for solar time triggers
+	// (sunrise/sunset + offset). Empty when the trigger is not solar or
+	// the location is not configured.
+	EffectiveTriggerTime string `json:"effective_trigger_time,omitempty"`
+}
+
 func (s *Server) getAutomations(w http.ResponseWriter, r *http.Request) {
+	now := time.Now()
 	s.Store.Mu.RLock()
 	list := make([]*store.Automation, 0, len(s.Store.Automations))
+	effective := make(map[string]string, len(s.Store.Automations))
 	for _, a := range s.Store.Automations {
 		list = append(list, a)
+		if eff, ok := store.TriggerEffectiveHHMM(&a.Trigger, now, s.Store.Settings); ok {
+			effective[a.ID] = eff
+		}
 	}
 	s.Store.Mu.RUnlock()
 
@@ -26,7 +39,12 @@ func (s *Server) getAutomations(w http.ResponseWriter, r *http.Request) {
 		}
 		return list[i].ID < list[j].ID
 	})
-	writeJSON(w, http.StatusOK, list)
+
+	result := make([]automationResponse, len(list))
+	for i, a := range list {
+		result[i] = automationResponse{Automation: a, EffectiveTriggerTime: effective[a.ID]}
+	}
+	writeJSON(w, http.StatusOK, result)
 }
 
 func (s *Server) createAutomation(w http.ResponseWriter, r *http.Request) {
