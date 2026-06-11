@@ -113,17 +113,24 @@ func Run(ctx context.Context, st *store.Store, pushSvc *push.Service) {
 
 // executeTimer fires a one-shot timer and removes it from the persistent
 // store regardless of success — the user already saw it scheduled and
-// will see the resulting state on the next refresh.
+// will see the resulting state on the next refresh. Device I/O runs between
+// the two lock acquisitions (staged flow) so a slow device can't stall the
+// scheduler tick or the API.
 func executeTimer(st *store.Store, t store.Timer, pushSvc *push.Service) error {
 	st.Mu.Lock()
-	defer st.FlushLights() // off-lock bridge calls for scene brightness/colour
-	defer st.Mu.Unlock()
-
 	delete(st.Timers, t.ID)
 	label := targetLabel(st, t.TargetType, t.TargetID)
+	staged, err := st.StageAction(t.TargetType, t.TargetID, t.Action)
+	st.Mu.Unlock()
+
+	st.SendStaged(staged)
+
+	st.Mu.Lock()
 	// Suppress per-socket state-change pushes; the timer summary below covers it.
 	st.SuppressStateChange = true
-	err := st.ExecuteAction(t.TargetType, t.TargetID, t.Action)
+	if applyErr := st.ApplyStaged(staged); err == nil {
+		err = applyErr
+	}
 	st.SuppressStateChange = false
 	entry := store.ActivityEntry{Kind: t.TargetType, Source: "timer", Action: t.Action, Label: label}
 	if err != nil {
@@ -134,6 +141,8 @@ func executeTimer(st *store.Store, t store.Timer, pushSvc *push.Service) error {
 	if saveErr := st.Save(); err == nil && saveErr != nil {
 		err = saveErr
 	}
+	st.Mu.Unlock()
+	st.FlushLights() // off-lock bridge calls for scene brightness/colour
 	if err == nil {
 		log.Printf("timer fired: %s on %s/%s", t.Action, t.TargetType, t.TargetID)
 		if pushSvc != nil {
@@ -148,18 +157,24 @@ func executeTimer(st *store.Store, t store.Timer, pushSvc *push.Service) error {
 }
 
 func executeSchedule(st *store.Store, s store.Schedule, pushSvc *push.Service) error {
-	st.Mu.Lock()
-	defer st.FlushLights() // off-lock bridge calls for scene brightness/colour
-	defer st.Mu.Unlock()
-
 	tt, tid, action := s.TargetType, s.TargetID, s.Action
 	if tt == "" && s.SocketID != "" {
 		tt, tid = "socket", s.SocketID
 	}
+
+	st.Mu.Lock()
 	label := targetLabel(st, tt, tid)
+	staged, err := st.StageAction(tt, tid, action)
+	st.Mu.Unlock()
+
+	st.SendStaged(staged)
+
+	st.Mu.Lock()
 	// Suppress per-socket state-change pushes; the schedule summary below covers it.
 	st.SuppressStateChange = true
-	err := st.ExecuteAction(tt, tid, action)
+	if applyErr := st.ApplyStaged(staged); err == nil {
+		err = applyErr
+	}
 	st.SuppressStateChange = false
 	entry := store.ActivityEntry{Kind: tt, Source: "schedule", Action: action, Label: label}
 	if err != nil {
@@ -167,15 +182,20 @@ func executeSchedule(st *store.Store, s store.Schedule, pushSvc *push.Service) e
 		entry.Error = err.Error()
 	}
 	st.Activity.Add(entry)
+	var saveErr error
+	if err == nil {
+		if existing, ok := st.Schedules[s.ID]; ok {
+			existing.LastFiredAt = time.Now().UTC()
+		}
+		saveErr = st.Save()
+	}
+	st.Mu.Unlock()
+	st.FlushLights() // off-lock bridge calls for scene brightness/colour
 	if err != nil {
 		return err
 	}
-
-	if existing, ok := st.Schedules[s.ID]; ok {
-		existing.LastFiredAt = time.Now().UTC()
-	}
-	if err := st.Save(); err != nil {
-		return err
+	if saveErr != nil {
+		return saveErr
 	}
 	log.Printf("scheduler: %s %s (%s/%s)", action, s.ID, tt, tid)
 	if pushSvc != nil {

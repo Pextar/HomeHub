@@ -15,7 +15,7 @@ func (s *Store) ApplyState(socket *Socket, target *bool) error {
 	} else {
 		socket.State = *target
 	}
-	if err := s.RF.Send(socket.Code, socket.Protocol, socket.State); err != nil {
+	if err := s.Transmit(socket.Code, socket.Protocol, socket.State); err != nil {
 		socket.State = previous
 		return err
 	}
@@ -133,7 +133,9 @@ func (s *Store) FlushLights() {
 	}
 }
 
-// execStepLocked executes all actions in a single SceneStep.
+// execStepLocked executes all actions in a single SceneStep, transmitting
+// synchronously under the lock. Multi-socket callers should prefer the staged
+// flow (stageStep/SendStaged/ApplyStaged — keep stageStep in sync with this).
 // Caller must hold Mu (write lock). Smart-light brightness/colour
 // commands are queued via QueueLight; drain them with FlushLights
 // after releasing the lock.
@@ -154,16 +156,20 @@ func (s *Store) execStepLocked(step SceneStep) error {
 	return firstErr
 }
 
-// ScheduleStep launches a goroutine that waits for step.DelayMinutes
-// and then acquires the lock, executes the step, saves, and flushes
-// smart-light commands. Fire-and-forget: errors are silently ignored
-// (matching scheduler/automation behaviour for scene steps).
+// ScheduleStep launches a goroutine that waits for step.DelayMinutes and then
+// runs the step through the staged flow (device I/O happens off-lock), saves,
+// and flushes smart-light commands. Fire-and-forget: errors are silently
+// ignored (matching scheduler/automation behaviour for scene steps).
 // Caller may or may not hold Mu — the goroutine acquires it when it wakes up.
 func (s *Store) ScheduleStep(step SceneStep) {
 	delay := time.Duration(step.DelayMinutes) * time.Minute
 	time.AfterFunc(delay, func() {
 		s.Mu.Lock()
-		_ = s.execStepLocked(step)
+		staged := s.stageStep(step)
+		s.Mu.Unlock()
+		s.SendStaged(staged)
+		s.Mu.Lock()
+		_ = s.ApplyStaged(staged)
 		_ = s.Save()
 		s.Mu.Unlock()
 		s.FlushLights()

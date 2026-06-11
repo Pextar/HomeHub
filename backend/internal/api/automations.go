@@ -139,41 +139,59 @@ func (s *Server) runAutomation(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
 
 	s.Store.Mu.Lock()
-	defer s.Store.Mu.Unlock()
-
 	a, ok := s.Store.Automations[id]
+	var kind, name string
+	var staged []store.StagedSend
+	if ok {
+		name = a.Name
+		kind = "bulk"
+		if len(a.Actions) == 1 {
+			kind = a.Actions[0].TargetType
+		}
+		staged = s.Store.StageAutomationActions(a.Actions)
+	}
+	s.Store.Mu.Unlock()
 	if !ok {
 		writeError(w, http.StatusNotFound, "automation not found")
 		return
 	}
 
+	s.Store.SendStaged(staged)
+
+	s.Store.Mu.Lock()
 	s.Store.SuppressStateChange = true
-	var firstErr error
-	for _, act := range a.Actions {
-		if err := s.Store.ExecuteAction(act.TargetType, act.TargetID, act.Action); err != nil && firstErr == nil {
-			firstErr = err
-		}
-	}
+	firstErr := s.Store.ApplyStaged(staged)
 	s.Store.SuppressStateChange = false
 
-	kind := "bulk"
-	if len(a.Actions) == 1 {
-		kind = a.Actions[0].TargetType
-	}
-	entry := store.ActivityEntry{Kind: kind, Source: "automation", Action: "run", Label: a.Name}
+	entry := store.ActivityEntry{Kind: kind, Source: "automation", Action: "run", Label: name}
 	if firstErr != nil {
 		entry.Status = "error"
 		entry.Error = firstErr.Error()
 	}
 	s.Store.Activity.Add(entry)
-	a.LastFiredAt = time.Now().UTC()
-	a.RunCount++
+	// Re-fetch: the automation may have been deleted while sends were in flight.
+	var result *store.Automation
+	if cur, still := s.Store.Automations[id]; still {
+		cur.LastFiredAt = time.Now().UTC()
+		cur.RunCount++
+		result = cur
+	}
+	var body []byte
+	if result != nil {
+		body, _ = json.Marshal(result)
+	}
 	if err := s.Store.Save(); err != nil && firstErr == nil {
 		firstErr = err
 	}
+	s.Store.Mu.Unlock()
+	s.Store.FlushLights()
 	if firstErr != nil {
 		writeError(w, http.StatusInternalServerError, firstErr.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, a)
+	if body == nil {
+		writeError(w, http.StatusNotFound, "automation not found")
+		return
+	}
+	writeJSONBytes(w, http.StatusOK, body)
 }

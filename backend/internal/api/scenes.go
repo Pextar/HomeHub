@@ -155,65 +155,54 @@ func (s *Server) deleteScene(w http.ResponseWriter, r *http.Request) {
 func (s *Server) activateScene(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
 
+	// Stage the first step (delayed steps are scheduled as background
+	// goroutines by StageAction), transmit off-lock, then fold the results
+	// back in. Smart-light brightness/colour is queued during staging and
+	// drained by FlushLights at the end.
 	s.Store.Mu.Lock()
-	// Drains queued smart-light commands after the lock is released (LIFO:
-	// Unlock runs first, then FlushLights), keeping bridge I/O off the lock.
-	defer s.Store.FlushLights()
-	defer s.Store.Mu.Unlock()
-
 	scene, ok := s.Store.Scenes[id]
+	var name string
+	var staged []store.StagedSend
+	if ok {
+		name = scene.Name
+		staged, _ = s.Store.StageAction("scene", id, "activate")
+	}
+	s.Store.Mu.Unlock()
 	if !ok {
 		writeError(w, http.StatusNotFound, "scene not found")
 		return
 	}
 
-	var okCount int
-	failures := make([]map[string]string, 0)
+	s.Store.SendStaged(staged)
 
-	// Execute only the first step immediately (with per-socket notifications
-	// suppressed so we send a single summary). Remaining steps are scheduled
-	// as background goroutines by scheduleStep.
+	s.Store.Mu.Lock()
+	// Per-socket notifications suppressed so we send a single summary.
 	s.Store.SuppressStateChange = true
-	if len(scene.Steps) > 0 {
-		for _, a := range scene.Steps[0].Actions {
-			if err := s.Store.ExecuteAction("socket", a.SocketID, a.Action); err != nil {
-				failures = append(failures, map[string]string{
-					"socket_id": a.SocketID,
-					"error":     err.Error(),
-				})
-				continue
-			}
-			// Queue scene brightness/colour for smart lights switched on; the
-			// bridge call runs in FlushLights once the lock is released.
-			if a.Action == "on" && (a.Level != nil || a.Color != "") {
-				if sock, ok := s.Store.Sockets[a.SocketID]; ok {
-					s.Store.QueueLight(*sock, a.Level, a.Color)
-				}
-			}
-			okCount++
-		}
-		// Schedule any delayed steps as background goroutines.
-		for _, step := range scene.Steps[1:] {
-			s.Store.ScheduleStep(step)
-		}
-	}
+	_ = s.Store.ApplyStaged(staged)
 	s.Store.SuppressStateChange = false
+	okCount, failures := stagedFailures(staged)
 	// Record activation telemetry so the UI can show "ran N× · 2h ago".
-	scene.LastActivatedAt = time.Now().UTC()
-	scene.ActivateCount++
-	entry := store.ActivityEntry{Kind: "scene", Source: "manual", Action: "activate", Label: scene.Name}
+	// Re-fetch: the scene may have been deleted while the sends were in flight.
+	if sc, still := s.Store.Scenes[id]; still {
+		sc.LastActivatedAt = time.Now().UTC()
+		sc.ActivateCount++
+	}
+	entry := store.ActivityEntry{Kind: "scene", Source: "manual", Action: "activate", Label: name}
 	if len(failures) > 0 {
 		entry.Status = "error"
 		entry.Error = fmt.Sprintf("%d of %d failed", len(failures), okCount+len(failures))
 	}
 	s.Store.Activity.Add(entry)
-	if err := s.Store.Save(); err != nil {
+	err := s.Store.Save()
+	s.Store.Mu.Unlock()
+	s.Store.FlushLights()
+	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
 		return
 	}
-	s.notifyBulkState(fmt.Sprintf("Scene activated: %s", scene.Name), okCount)
+	s.notifyBulkState(fmt.Sprintf("Scene activated: %s", name), okCount)
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"scene":    scene.Name,
+		"scene":    name,
 		"updated":  okCount,
 		"failures": failures,
 	})

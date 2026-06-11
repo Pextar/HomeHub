@@ -73,7 +73,17 @@ is already up-to-date it's skipped.
 - **`CascadeDeleteSocket`** must be kept in sync with any new field that
   references a socket ID.
 - Scheduler ticks every 5 s; automation engine runs inside the same
-  tick. Both call `ExecuteAction` which must stay lock-safe.
+  tick. Both use the staged flow below.
+- **Multi-socket fan-out** (bulk, group, room, scene, scheduler,
+  automations) uses the staged flow in `store/staged.go`:
+  `StageAction`/`StageSocketSend` under `Mu` → `SendStaged` off-lock →
+  `ApplyStaged` under `Mu`, then `Save()` and `FlushLights()`. Device I/O
+  must never run while `Mu` is held. Single-socket toggles use
+  `ApplyState`, which transmits synchronously so the HTTP response can
+  report the device error directly.
+- All transmissions go through `store.Transmit` — never `RF.Send`
+  directly. It serializes 433 MHz sends (`txMu`) so concurrent
+  transmissions can't overlap on air.
 - Smart-light bridge calls (Tasmota, Matter) are always deferred to
   `FlushLights()` so they never block the store lock.
 

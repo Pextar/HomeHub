@@ -84,6 +84,12 @@ type Store struct {
 	// while executing a scene under Mu. They are drained by FlushLights after
 	// the lock is released, so the (network) bridge calls never block the lock.
 	pendingLights []lightCmd
+
+	// txMu serializes 433 MHz transmissions (see Transmit). Concurrent RF
+	// sends would overlap on air and garble both frames; network protocols
+	// (Tasmota/Matter/MQTT) don't take it. Never acquired while waiting on Mu,
+	// so the Mu → txMu order in ApplyState cannot deadlock.
+	txMu sync.Mutex
 }
 
 type lightCmd struct {

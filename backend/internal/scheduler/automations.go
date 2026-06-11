@@ -150,41 +150,18 @@ func (e *autoEngine) conditionsHold(conds []store.AutomationCondition, curSocket
 }
 
 func (e *autoEngine) execute(st *store.Store, a store.Automation, now time.Time, pushSvc *push.Service) error {
+	// Stage under the lock (this also queues smart-light brightness/colour),
+	// transmit off-lock, then fold the results back in — a slow device can't
+	// stall the scheduler tick or the API.
 	st.Mu.Lock()
-	defer st.FlushLights() // off-lock bridge calls for scene brightness/colour
-	defer st.Mu.Unlock()
+	staged := st.StageAutomationActions(a.Actions)
+	st.Mu.Unlock()
 
+	st.SendStaged(staged)
+
+	st.Mu.Lock()
 	st.SuppressStateChange = true
-	var firstErr error
-	for _, act := range a.Actions {
-		if err := st.ExecuteAction(act.TargetType, act.TargetID, act.Action); err != nil && firstErr == nil {
-			firstErr = err
-		}
-		if act.Action == "on" && (act.Level != nil || act.Color != "") {
-			switch act.TargetType {
-			case "socket":
-				if sock, ok := st.Sockets[act.TargetID]; ok {
-					st.QueueLight(*sock, act.Level, act.Color)
-				}
-			case "group":
-				if grp, ok := st.Groups[act.TargetID]; ok {
-					for _, sid := range grp.SocketIDs {
-						if sock, ok := st.Sockets[sid]; ok {
-							st.QueueLight(*sock, act.Level, act.Color)
-						}
-					}
-				}
-			case "room":
-				if rm, ok := st.Rooms[act.TargetID]; ok {
-					for _, sock := range st.Sockets {
-						if sock.Room == rm.Name {
-							st.QueueLight(*sock, act.Level, act.Color)
-						}
-					}
-				}
-			}
-		}
-	}
+	firstErr := st.ApplyStaged(staged)
 	st.SuppressStateChange = false
 
 	kind := "bulk"
@@ -205,6 +182,9 @@ func (e *autoEngine) execute(st *store.Store, a store.Automation, now time.Time,
 	if err := st.Save(); err != nil && firstErr == nil {
 		firstErr = err
 	}
+	st.Mu.Unlock()
+	st.FlushLights() // off-lock bridge calls for scene brightness/colour
+
 	if firstErr == nil {
 		log.Printf("automation fired: %s (%s)", a.Name, a.ID)
 		if pushSvc != nil {
