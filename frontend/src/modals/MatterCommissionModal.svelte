@@ -10,12 +10,22 @@
   The wizard owns the whole flow so the regular SocketModal stays clean.
 -->
 <script lang="ts">
+    import { onDestroy } from "svelte";
     import Modal from "../components/Modal.svelte";
     import Icon from "../components/Icon.svelte";
     import QRScanner from "../components/QRScanner.svelte";
     import { closeModal } from "../lib/modal.svelte";
     import { api } from "../lib/api";
     import { toasts, data } from "../lib/stores.svelte";
+
+    // Closing the modal mid-commission must stop the progress animation and
+    // the up-to-3-minute job polling loop — the bridge job itself keeps
+    // running server-side and the device shows up in the list when done.
+    let destroyed = false;
+    onDestroy(() => {
+        destroyed = true;
+        stopProgress();
+    });
 
     type Step = "input" | "commissioning" | "details";
     type InputMode = "scan" | "manual";
@@ -126,9 +136,11 @@
             jobId = r.job_id;
         } catch (e) {
             stopProgress();
+            if (destroyed) return;
             commissionError = (e as Error).message;
             return;
         }
+        if (destroyed) return;
 
         // Poll the job status until the bridge finishes (or errors). The
         // POST above returns immediately so the long-running commission
@@ -136,6 +148,7 @@
         // can't kill us anymore.
         try {
             const job = await pollJob(jobId);
+            if (destroyed) return;
             if (job.status === "error") {
                 stopProgress();
                 commissionError = job.error || "Commissioning failed";
@@ -157,6 +170,7 @@
             step = "details";
         } catch (e) {
             stopProgress();
+            if (destroyed) return;
             commissionError = (e as Error).message;
         }
     }
@@ -167,6 +181,7 @@
         // since the polling fetches themselves are short.
         for (let i = 0; i < 90; i++) {
             await sleep(2000);
+            if (destroyed) throw new Error("cancelled");
             const j = await api.matterCommissionJob(jobId);
             if (j.status !== "pending") return j;
         }

@@ -1,6 +1,6 @@
 <script lang="ts">
     import Icon from "./Icon.svelte";
-    import { untrack, onMount } from "svelte";
+    import { untrack, onMount, onDestroy } from "svelte";
     import { api } from "../lib/api";
     import { socketAction, automationsUsingSocket, plural } from "../lib/utils";
     import { openModal } from "../lib/modal.svelte";
@@ -64,6 +64,7 @@
     });
 
     let brightnessTimer: ReturnType<typeof setTimeout> | undefined;
+    onDestroy(() => clearTimeout(brightnessTimer));
     function setBrightness(v: number) {
         brightness = v;
         clearTimeout(brightnessTimer);

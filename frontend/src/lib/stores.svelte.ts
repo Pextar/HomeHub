@@ -27,6 +27,9 @@ function createDataStore() {
   // optimistic applySocket) and overwrite fresh state with stale values. Each
   // call takes the next ticket and only writes if it's still the latest.
   let refreshSeq = 0;
+  // One toast per outage, not one per failed 30s poll: set on the first
+  // failure, cleared by the next successful refresh.
+  let refreshFailed = false;
 
   async function refresh() {
     const seq = ++refreshSeq;
@@ -65,8 +68,13 @@ function createDataStore() {
         data.settings = settings ?? { latitude: 0, longitude: 0 };
       }
       data.loaded = true;
+      refreshFailed = false;
     } catch (e) {
-      toasts.error("Failed to load data", (e as Error).message);
+      if (seq !== refreshSeq) return; // a newer refresh owns the outcome
+      if (!refreshFailed) {
+        toasts.error("Failed to load data", (e as Error).message);
+      }
+      refreshFailed = true;
     }
   }
 

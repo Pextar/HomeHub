@@ -7,6 +7,7 @@
     import { closeModal } from "../lib/modal.svelte";
     import { api } from "../lib/api";
     import { data, toasts } from "../lib/stores.svelte";
+    import { isSmartProtocol } from "../lib/utils";
     import { untrack } from "svelte";
     import type {
         Automation, AutomationTrigger, AutomationCondition, AutomationAction,
@@ -21,8 +22,7 @@
         { hex: "c4a4e0", name: "Lilac" },
         { hex: "7aa4d9", name: "Cool" },
     ];
-    const isSmart = (protocol: string) =>
-        protocol === "tasmota" || protocol === "matter" || protocol === "matter-thread";
+    const isSmart = isSmartProtocol;
 
     interface Props { existing?: Automation | null; }
     let { existing = null }: Props = $props();
@@ -154,14 +154,18 @@
         }
     }
 
+    let running = $state(false);
     async function runNow() {
-        if (!existing) return;
+        if (!existing || running) return; // double-click must not fire twice
+        running = true;
         try {
             await api.runAutomation(existing.id);
             toasts.success("Automation ran", existing.name);
             await data.refresh();
         } catch (e) {
             toasts.error("Run failed", (e as Error).message);
+        } finally {
+            running = false;
         }
     }
 </script>
@@ -374,7 +378,7 @@
     {/snippet}
     {#snippet actions()}
         {#if isEdit}
-            <button class="btn btn-ghost" onclick={runNow}>Run now</button>
+            <button class="btn btn-ghost" onclick={runNow} disabled={running}>{running ? "Running…" : "Run now"}</button>
         {/if}
         <button class="btn btn-ghost" onclick={() => closeModal()}>Cancel</button>
         <button class="btn btn-primary" onclick={save} disabled={saving}>

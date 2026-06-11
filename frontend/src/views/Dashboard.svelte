@@ -62,8 +62,11 @@
     // Desktop stat strip (wide screens only): real metrics that complement the
     // hero — how many automations are active and the next scheduled event.
     const enabledAutomations = $derived(v.automations.filter(a => a.enabled).length);
+    // Derive from the minute, not the 1-second clock tick — otherwise the
+    // whole schedule list is re-parsed and re-sorted every second.
+    const nowMinute = $derived(now.getHours() * 60 + now.getMinutes());
     const nextEvent = $derived.by(() => {
-        const nowMin = now.getHours() * 60 + now.getMinutes();
+        const nowMin = nowMinute;
         const parse = (s?: string) => {
             if (!s || !/^\d\d:\d\d/.test(s)) return -1;
             const [h, m] = s.split(":").map(Number);
@@ -349,7 +352,7 @@
             <div class="device-chips">
                 <button class="chip" class:active={deviceRoom === ''} onclick={() => deviceRoom = ''}>All</button>
                 <button class="chip" class:active={deviceRoom === 'on'} onclick={() => deviceRoom = 'on'}>On</button>
-                {#each allDeviceRooms as r}
+                {#each allDeviceRooms as r (r)}
                     <button class="chip" class:active={deviceRoom === r} onclick={() => deviceRoom = r}>{r}</button>
                 {/each}
             </div>

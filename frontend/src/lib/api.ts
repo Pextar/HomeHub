@@ -145,7 +145,7 @@ export const api = {
   updateGroup(id: string, body: Partial<Group>) { return req<Group>(`/groups/${encodeURIComponent(id)}`, { method: "PUT", body: json(body) }); },
   deleteGroup(id: string) { return req<void>(`/groups/${encodeURIComponent(id)}`, { method: "DELETE" }); },
   groupAction(id: string, action: SocketAction) {
-    return req<{ group: string; updated: number; failures: unknown[] }>(`/groups/${encodeURIComponent(id)}/${action}`, { method: "POST" });
+    return req<BulkResult & { group: string }>(`/groups/${encodeURIComponent(id)}/${action}`, { method: "POST" });
   },
 
   // Scenes
@@ -154,7 +154,7 @@ export const api = {
   updateScene(id: string, body: Partial<Scene>) { return req<Scene>(`/scenes/${encodeURIComponent(id)}`, { method: "PUT", body: json(body) }); },
   deleteScene(id: string) { return req<void>(`/scenes/${encodeURIComponent(id)}`, { method: "DELETE" }); },
   activateScene(id: string) {
-    return req<{ scene: string; updated: number; failures: unknown[] }>(`/scenes/${encodeURIComponent(id)}/activate`, { method: "POST" });
+    return req<BulkResult & { scene: string }>(`/scenes/${encodeURIComponent(id)}/activate`, { method: "POST" });
   },
 
   // Activity

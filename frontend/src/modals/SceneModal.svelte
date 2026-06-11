@@ -7,7 +7,7 @@
     import { closeModal } from "../lib/modal.svelte";
     import { api } from "../lib/api";
     import { data, toasts } from "../lib/stores.svelte";
-    import { sortedSockets, formatAgo } from "../lib/utils";
+    import { sortedSockets, formatAgo, isSmartProtocol } from "../lib/utils";
     import { untrack } from "svelte";
     import type {
         Scene, SceneStep, AutomationTriggerType, AutomationTrigger,
@@ -21,8 +21,7 @@
     const sockets = $derived(sortedSockets(data.value.sockets));
     const v = data.value;
 
-    const isSmart = (protocol: string) =>
-        protocol === "tasmota" || protocol === "matter" || protocol === "matter-thread";
+    const isSmart = isSmartProtocol;
 
     const COLOURS: { hex: string; name: string }[] = [
         { hex: "", name: "Auto" },
@@ -817,7 +816,7 @@
                                                     value={step.delay_minutes}
                                                     oninput={(e) => {
                                                         const v = parseInt((e.target as HTMLInputElement).value, 10);
-                                                        if (!isNaN(v) && v >= 0) step.delay_minutes = v;
+                                                        if (!isNaN(v) && v >= 1) step.delay_minutes = v;
                                                     }}
                                                     aria-label="Delay in minutes for step {i + 1}" />
                                                 <span class="timing-lbl">min</span>

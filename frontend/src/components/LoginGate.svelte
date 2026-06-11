@@ -8,7 +8,7 @@
     }
     let { onAuthed, children }: Props = $props();
 
-    type Phase = "checking" | "needs-login" | "authed" | "logging-in"
+    type Phase = "checking" | "needs-login" | "authed" | "logging-in" | "offline"
                | "invite-lookup" | "invite-set-password" | "invite-submitting" | "invite-invalid";
     let phase: Phase = $state("checking");
     // "code" is the default for everyday (limited) users; "admin" reveals the
@@ -52,20 +52,22 @@
             return;
         }
 
-        // Normal auth probe
+        await probeAuth();
+    });
+
+    // Normal auth probe. 401 → show the login form; any other failure means
+    // the backend is unreachable — show a retry screen instead of booting a
+    // broken app that cascades error toasts.
+    async function probeAuth() {
+        phase = "checking";
         try {
             await api.health();
             phase = "authed";
             onAuthed?.();
         } catch (e) {
-            if (e instanceof ApiError && e.status === 401) {
-                phase = "needs-login";
-                return;
-            }
-            phase = "authed";
-            onAuthed?.();
+            phase = e instanceof ApiError && e.status === 401 ? "needs-login" : "offline";
         }
-    });
+    }
 
     async function submit(e: Event) {
         e.preventDefault();
@@ -128,6 +130,19 @@
     {@render children?.()}
 {:else if phase === "checking" || phase === "invite-lookup"}
     <div class="screen"><div class="splash">Loading…</div></div>
+{:else if phase === "offline"}
+    <div class="screen">
+        <div class="card">
+            <div class="head">
+                <h1>HomeHub</h1>
+                <p class="sub">Can't reach the server</p>
+            </div>
+            <div class="error" role="alert">
+                The HomeHub server isn't responding. Check that it's running and that you're on the right network.
+            </div>
+            <button class="btn btn-primary" onclick={probeAuth}>Try again</button>
+        </div>
+    </div>
 {:else if phase === "invite-invalid"}
     <div class="screen">
         <div class="card">

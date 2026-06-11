@@ -3,7 +3,7 @@
     import Icon from "../components/Icon.svelte";
     import { data, toasts, route } from "../lib/stores.svelte";
     import { api } from "../lib/api";
-    import { socketAction } from "../lib/utils";
+    import { socketAction, protocolKind, isSmartProtocol } from "../lib/utils";
     import type { Socket, Group } from "../lib/types";
 
     const v = $derived(data.value);
@@ -13,12 +13,7 @@
     const roomCount = $derived(new Set(v.sockets.map((s) => s.room?.trim() || "Unassigned")).size);
     const hubUp = $derived(v.health === "ok");
 
-    function protoKey(p: string): "rf" | "wifi" | "matter" | "mqtt" {
-        if (p === "tasmota" || p === "wifi") return "wifi";
-        if (p.startsWith("matter")) return "matter";
-        if (p === "mqtt") return "mqtt";
-        return "rf";
-    }
+    const protoKey = protocolKind;
     const PROTO_COLOR: Record<string, string> = {
         rf: "var(--p-rf)", wifi: "var(--p-wifi)", matter: "var(--p-matter)", mqtt: "var(--p-mqtt)",
     };
@@ -66,10 +61,15 @@
     }
     // Refetch on mount and whenever the smart-light set or on/off states
     // change. Dimming keeps a light "on", so runLine also refetches directly.
+    // The signature comparison matters: every 30s poll/SSE refresh replaces
+    // the sockets array (new identity), which re-runs this effect — without
+    // the early return each refresh would re-query every bridge device.
+    let lastLevelsSig: string | null = null;
     $effect(() => {
         const sig = v.sockets.filter((s) => s.protocol === "tasmota" || s.protocol.startsWith("matter"))
             .map((s) => s.id + (s.state ? "1" : "0")).join(",");
-        void sig;
+        if (sig === lastLevelsSig) return;
+        lastLevelsSig = sig;
         refreshLevels();
     });
     onMount(() => {
@@ -80,7 +80,7 @@
     // ── Interactive brightness bar (smart lights) ─────────────────────
     // Drag or click along a light's LEVEL bar to set it; arrow keys nudge
     // by 10%. Snapped to 10% so the value matches the 10-cell block display.
-    const isDimmable = (s: Socket) => s.protocol === "tasmota" || s.protocol.startsWith("matter");
+    const isDimmable = (s: Socket) => isSmartProtocol(s.protocol);
     let drag = $state<{ id: string; pct: number } | null>(null);
 
     function pctFromX(clientX: number, el: HTMLElement): number {
@@ -318,7 +318,7 @@
         cyan: "32ade6", blue: "0a84ff", indigo: "5e5ce6", violet: "bf5af2",
         purple: "bf5af2", magenta: "ff2d9b", pink: "ff375f", white: "ffffff",
     };
-    const isSmart = (s: Socket) => s.protocol === "tasmota" || s.protocol.startsWith("matter");
+    const isSmart = (s: Socket) => isSmartProtocol(s.protocol);
 
     // Expand a target to the concrete sockets it covers.
     function socketsForTarget(t: Target): Socket[] {

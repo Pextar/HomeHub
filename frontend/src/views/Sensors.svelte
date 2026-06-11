@@ -35,21 +35,35 @@
 
     const selected = $derived<Sensor | undefined>(v.sensors.find(s => s.id === selectedId));
 
+    // Key the fetch on id+range, not on `selected` itself — the derived gets
+    // a new object identity on every 30s store refresh, which would re-fetch
+    // the chart each time without this comparison.
+    let lastDetailKey = "";
     $effect(() => {
+        const key = selected ? `${selected.id}|${range}` : "";
+        if (key === lastDetailKey) return;
+        lastDetailKey = key;
         if (!selected) { detailReadings = []; return; }
         loadDetail(selected.id, range);
     });
 
+    // Monotonic ticket: rapidly switching sensor or range must not let a
+    // slower, older response land after a newer one and win.
+    let detailSeq = 0;
     async function loadDetail(id: string, r: typeof range) {
+        const seq = ++detailSeq;
         const minutes = r === "1h" ? 60 : r === "24h" ? 24 * 60 : 7 * 24 * 60;
         detailLoading = true;
         try {
-            detailReadings = await api.sensorReadings(id, { since_minutes: minutes, limit: 500 });
+            const readings = await api.sensorReadings(id, { since_minutes: minutes, limit: 500 });
+            if (seq !== detailSeq) return;
+            detailReadings = readings;
         } catch (e) {
+            if (seq !== detailSeq) return;
             toasts.error("Couldn't load readings", (e as Error).message);
             detailReadings = [];
         } finally {
-            detailLoading = false;
+            if (seq === detailSeq) detailLoading = false;
         }
     }
 
