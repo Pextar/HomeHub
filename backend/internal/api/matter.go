@@ -135,13 +135,12 @@ func (s *Server) matterSetState(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Mirror the on/off back to the stored socket so the dashboard reflects
-	// the truth without waiting for the next refresh.
+	// the truth without waiting for the next refresh. MirrorState also fires
+	// OnChange/OnStateChange so SSE clients and push subscribers stay live.
 	if update.On != nil {
 		s.Store.Mu.Lock()
-		if sock, found := s.Store.Sockets[mux.Vars(r)["socketId"]]; found {
-			sock.State = *update.On
-			_ = s.Store.Save()
-		}
+		s.Store.MirrorState(mux.Vars(r)["socketId"], *update.On)
+		_ = s.Store.Save()
 		s.Store.Mu.Unlock()
 	}
 	w.WriteHeader(http.StatusNoContent)

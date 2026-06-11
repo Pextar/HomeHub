@@ -68,6 +68,10 @@ func (s *Server) createGroup(w http.ResponseWriter, r *http.Request) {
 	}
 	if g.ID == "" {
 		g.ID = fmt.Sprintf("group_%d", time.Now().UnixNano())
+	} else if _, exists := s.Store.Groups[g.ID]; exists {
+		// A client-supplied ID must not silently replace an existing record.
+		writeError(w, http.StatusConflict, "a group with that id already exists")
+		return
 	}
 	s.Store.Groups[g.ID] = &g
 	if err := s.Store.Save(); err != nil {

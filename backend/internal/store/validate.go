@@ -52,6 +52,16 @@ func (s *Store) ValidateSchedule(sch *Schedule) error {
 		if sch.Action != "on" && sch.Action != "off" && sch.Action != "toggle" {
 			return errors.New("group action must be on/off/toggle")
 		}
+	case "room":
+		if sch.TargetID == "" {
+			return errors.New("target_id is required for room schedules")
+		}
+		if _, ok := s.Rooms[sch.TargetID]; !ok {
+			return errors.New("target room does not exist")
+		}
+		if sch.Action != "on" && sch.Action != "off" && sch.Action != "toggle" {
+			return errors.New("room action must be on/off/toggle")
+		}
 	case "scene":
 		if sch.TargetID == "" {
 			return errors.New("target_id is required for scene schedules")
@@ -61,7 +71,7 @@ func (s *Store) ValidateSchedule(sch *Schedule) error {
 		}
 		sch.Action = "activate"
 	default:
-		return errors.New("target_type must be socket, group, or scene")
+		return errors.New("target_type must be socket, group, room, or scene")
 	}
 
 	switch sch.TimeMode {

@@ -76,6 +76,10 @@ func (s *Server) createRoom(w http.ResponseWriter, r *http.Request) {
 
 	if rm.ID == "" {
 		rm.ID = fmt.Sprintf("room_%d", time.Now().UnixNano())
+	} else if _, exists := s.Store.Rooms[rm.ID]; exists {
+		// A client-supplied ID must not silently replace an existing record.
+		writeError(w, http.StatusConflict, "a room with that id already exists")
+		return
 	}
 	if err := s.Store.ValidateRoom(&rm); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -162,6 +166,9 @@ func (s *Server) deleteRoom(w http.ResponseWriter, r *http.Request) {
 
 	name := existing.Name
 	delete(s.Store.Rooms, id)
+	// Cascade: drop schedules/timers targeting the room and prune room
+	// actions from automations.
+	s.Store.CascadeDeleteRoom(id)
 
 	// Cascade: clear room name from sockets, sensors, and scenes.
 	for _, sock := range s.Store.Sockets {

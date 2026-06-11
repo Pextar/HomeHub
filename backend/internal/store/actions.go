@@ -2,6 +2,7 @@ package store
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -28,6 +29,25 @@ func (s *Store) ApplyState(socket *Socket, target *bool) error {
 		}
 	}
 	return nil
+}
+
+// MirrorState records a state change that already happened on the device —
+// e.g. applied through the Tasmota/Matter bridge endpoints — without
+// transmitting anything. Fires OnChange/OnStateChange like ApplyState so SSE
+// clients and push subscribers see bridge-driven changes too. Caller must
+// hold Mu (write lock).
+func (s *Store) MirrorState(socketID string, on bool) {
+	sock, ok := s.Sockets[socketID]
+	if !ok || sock.State == on {
+		return
+	}
+	sock.State = on
+	if s.OnChange != nil {
+		s.OnChange()
+	}
+	if s.OnStateChange != nil && !s.SuppressStateChange {
+		s.OnStateChange(*sock, on)
+	}
 }
 
 // ExecuteAction runs the given action against the given target. Caller
@@ -75,7 +95,9 @@ func (s *Store) ExecuteAction(targetType, targetID, action string) error {
 		}
 		var firstErr error
 		for _, sock := range s.Sockets {
-			if sock.Room == room.Name {
+			// Room names are matched case-insensitively everywhere else
+			// (rename cascade, the rooms API); keep execution consistent.
+			if strings.EqualFold(sock.Room, room.Name) {
 				if err := s.ExecuteAction("socket", sock.ID, action); err != nil && firstErr == nil {
 					firstErr = err
 				}
@@ -208,6 +230,24 @@ func (s *Store) CascadeDeleteSocket(socketID string) {
 		u.SocketIDs = filterStrings(u.SocketIDs, socketID)
 	}
 	s.pruneAutomationsForSocket(socketID)
+}
+
+// CascadeDeleteRoom removes schedules and timers that target a deleted room
+// and prunes room actions from automations — mirroring CascadeDeleteSocket.
+// (Clearing the room name from sockets/sensors/scenes is handled by the API
+// layer, which owns the name-based association.) Caller must hold Mu.
+func (s *Store) CascadeDeleteRoom(roomID string) {
+	for sid, sch := range s.Schedules {
+		if sch.TargetType == "room" && sch.TargetID == roomID {
+			delete(s.Schedules, sid)
+		}
+	}
+	for tid, t := range s.Timers {
+		if t.TargetType == "room" && t.TargetID == roomID {
+			delete(s.Timers, tid)
+		}
+	}
+	s.PruneAutomationsForTarget("room", roomID)
 }
 
 // pruneAutomationsForSocket cleans automations that reference a deleted

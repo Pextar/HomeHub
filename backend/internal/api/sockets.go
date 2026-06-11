@@ -56,11 +56,18 @@ func (s *Server) createSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if socket.ID == "" {
+	hadID := socket.ID != ""
+	if !hadID {
 		socket.ID = fmt.Sprintf("socket_%d", time.Now().UnixNano())
 	}
 
 	s.Store.Mu.Lock()
+	if _, exists := s.Store.Sockets[socket.ID]; exists && hadID {
+		// A client-supplied ID must not silently replace an existing record.
+		s.Store.Mu.Unlock()
+		writeError(w, http.StatusConflict, "a socket with that id already exists")
+		return
+	}
 	s.Store.Sockets[socket.ID] = &socket
 	if err := s.Store.Save(); err != nil {
 		delete(s.Store.Sockets, socket.ID)

@@ -220,6 +220,10 @@ func targetLabel(st *store.Store, kind, id string) string {
 		if v, ok := st.Groups[id]; ok {
 			return v.Name
 		}
+	case "room":
+		if v, ok := st.Rooms[id]; ok {
+			return v.Name
+		}
 	case "scene":
 		if v, ok := st.Scenes[id]; ok {
 			return v.Name

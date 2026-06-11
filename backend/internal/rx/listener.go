@@ -18,6 +18,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"sort"
 	"strings"
 	"time"
 
@@ -187,7 +188,7 @@ func stringifyID(v interface{}) string {
 }
 
 // extractValue reads the requested field as a float64. When field is
-// empty it returns the first numeric field that isn't a known identifier,
+// empty it picks a numeric field deterministically (see pickNumeric),
 // which covers simple "one number per packet" sensors.
 func extractValue(packet map[string]interface{}, field string) (float64, bool) {
 	if field != "" {
@@ -197,11 +198,39 @@ func extractValue(packet map[string]interface{}, field string) (float64, bool) {
 		}
 		return toFloat(v)
 	}
-	for k, v := range packet {
-		if isIdentifierField(k) {
-			continue
+	return pickNumeric(packet)
+}
+
+// preferredFields ranks the measurement names rtl_433 commonly emits.
+// Without this, multi-field packets (temperature + humidity + battery_ok…)
+// would record a random field per packet, since Go map iteration order is
+// randomized.
+var preferredFields = []string{
+	"temperature_C", "temperature_F", "temperature",
+	"humidity", "moisture", "pressure_hPa", "pressure",
+	"illuminance", "lux", "power", "energy",
+}
+
+// pickNumeric deterministically selects a measurement when no field is
+// configured: well-known measurement names first, then the alphabetically
+// first remaining non-identifier numeric field.
+func pickNumeric(obj map[string]interface{}) (float64, bool) {
+	for _, k := range preferredFields {
+		if v, ok := obj[k]; ok {
+			if f, ok := toFloat(v); ok {
+				return f, true
+			}
 		}
-		if f, ok := toFloat(v); ok {
+	}
+	keys := make([]string, 0, len(obj))
+	for k := range obj {
+		if !isIdentifierField(k) {
+			keys = append(keys, k)
+		}
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		if f, ok := toFloat(obj[k]); ok {
 			return f, true
 		}
 	}

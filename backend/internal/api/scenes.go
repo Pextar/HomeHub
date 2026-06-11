@@ -68,6 +68,10 @@ func (s *Server) createScene(w http.ResponseWriter, r *http.Request) {
 	}
 	if sc.ID == "" {
 		sc.ID = fmt.Sprintf("scene_%d", time.Now().UnixNano())
+	} else if _, exists := s.Store.Scenes[sc.ID]; exists {
+		// A client-supplied ID must not silently replace an existing record.
+		writeError(w, http.StatusConflict, "a scene with that id already exists")
+		return
 	}
 	s.Store.Scenes[sc.ID] = &sc
 	if err := s.Store.Save(); err != nil {

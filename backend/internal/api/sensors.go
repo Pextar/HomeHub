@@ -52,6 +52,10 @@ func (s *Server) createSensor(w http.ResponseWriter, r *http.Request) {
 	}
 	if sn.ID == "" {
 		sn.ID = fmt.Sprintf("sensor_%d", time.Now().UnixNano())
+	} else if _, exists := s.Store.Sensors[sn.ID]; exists {
+		// A client-supplied ID must not silently replace an existing record.
+		writeError(w, http.StatusConflict, "a sensor with that id already exists")
+		return
 	}
 	s.Store.Sensors[sn.ID] = &sn
 	if err := s.Store.Save(); err != nil {

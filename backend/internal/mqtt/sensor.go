@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -177,17 +178,45 @@ func extractValue(payload []byte, field string) (float64, bool) {
 			}
 			return toFloat(v)
 		}
-		for k, v := range obj {
-			if isIdentifierField(k) {
-				continue
-			}
+		return pickNumeric(obj)
+	}
+	return parseScalar(string(trimmed))
+}
+
+// preferredFields ranks the measurement names Zigbee2MQTT/Tasmota commonly
+// emit. Without this, multi-field payloads (temperature + humidity +
+// battery…) would record a random field per message, since Go map iteration
+// order is randomized.
+var preferredFields = []string{
+	"temperature_C", "temperature_F", "temperature",
+	"humidity", "moisture", "pressure_hPa", "pressure",
+	"illuminance", "lux", "power", "energy",
+}
+
+// pickNumeric deterministically selects a measurement when no field is
+// configured: well-known measurement names first, then the alphabetically
+// first remaining non-identifier numeric field.
+func pickNumeric(obj map[string]interface{}) (float64, bool) {
+	for _, k := range preferredFields {
+		if v, ok := obj[k]; ok {
 			if f, ok := toFloat(v); ok {
 				return f, true
 			}
 		}
-		return 0, false
 	}
-	return parseScalar(string(trimmed))
+	keys := make([]string, 0, len(obj))
+	for k := range obj {
+		if !isIdentifierField(k) {
+			keys = append(keys, k)
+		}
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		if f, ok := toFloat(obj[k]); ok {
+			return f, true
+		}
+	}
+	return 0, false
 }
 
 // parseScalar parses a non-JSON payload as a number, or maps a common

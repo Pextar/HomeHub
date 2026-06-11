@@ -69,6 +69,10 @@ func (s *Server) createAutomation(w http.ResponseWriter, r *http.Request) {
 	}
 	if a.ID == "" {
 		a.ID = fmt.Sprintf("automation_%d", time.Now().UnixNano())
+	} else if _, exists := s.Store.Automations[a.ID]; exists {
+		// A client-supplied ID must not silently replace an existing record.
+		writeError(w, http.StatusConflict, "an automation with that id already exists")
+		return
 	}
 	s.Store.Automations[a.ID] = &a
 	if err := s.Store.Save(); err != nil {

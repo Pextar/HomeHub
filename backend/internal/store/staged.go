@@ -93,7 +93,8 @@ func (s *Store) StageAction(targetType, targetID, action string) ([]StagedSend, 
 		}
 		var out []StagedSend
 		for _, sock := range s.Sockets {
-			if sock.Room == room.Name {
+			// Case-insensitive, matching the rooms API and rename cascade.
+			if strings.EqualFold(sock.Room, room.Name) {
 				out = append(out, s.stageSocket(sock.ID, action))
 			}
 		}
@@ -209,7 +210,7 @@ func (s *Store) StageAutomationActions(actions []AutomationAction) []StagedSend 
 			case "room":
 				if rm, ok := s.Rooms[act.TargetID]; ok {
 					for _, sock := range s.Sockets {
-						if sock.Room == rm.Name {
+						if strings.EqualFold(sock.Room, rm.Name) {
 							s.QueueLight(*sock, act.Level, act.Color)
 						}
 					}

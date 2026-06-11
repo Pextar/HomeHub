@@ -50,14 +50,14 @@ func (req *timerRequest) toTimer() (*store.Timer, error) {
 		return nil, errors.New("target_type and target_id are required")
 	}
 	switch tt {
-	case "socket", "group":
+	case "socket", "group", "room":
 		if action != "on" && action != "off" && action != "toggle" {
 			return nil, errors.New("action must be on/off/toggle")
 		}
 	case "scene":
 		action = "activate"
 	default:
-		return nil, errors.New("target_type must be socket, group, or scene")
+		return nil, errors.New("target_type must be socket, group, room, or scene")
 	}
 
 	var firesAt time.Time
