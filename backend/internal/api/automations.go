@@ -31,8 +31,6 @@ func (s *Server) getAutomations(w http.ResponseWriter, r *http.Request) {
 			effective[a.ID] = eff
 		}
 	}
-	s.Store.Mu.RUnlock()
-
 	sort.Slice(list, func(i, j int) bool {
 		if list[i].Name != list[j].Name {
 			return list[i].Name < list[j].Name
@@ -44,7 +42,15 @@ func (s *Server) getAutomations(w http.ResponseWriter, r *http.Request) {
 	for i, a := range list {
 		result[i] = automationResponse{Automation: a, EffectiveTriggerTime: effective[a.ID]}
 	}
-	writeJSON(w, http.StatusOK, result)
+	// Snapshot under the lock — result still holds live *store.Automation
+	// pointers that writers mutate in place.
+	b, err := json.Marshal(result)
+	s.Store.Mu.RUnlock()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to encode response")
+		return
+	}
+	writeJSONBytes(w, http.StatusOK, b)
 }
 
 func (s *Server) createAutomation(w http.ResponseWriter, r *http.Request) {

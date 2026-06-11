@@ -61,8 +61,6 @@ func (s *Server) getSchedules(w http.ResponseWriter, r *http.Request) {
 		}
 		keys[sch.ID] = k
 	}
-	s.Store.Mu.RUnlock()
-
 	sort.Slice(raw, func(i, j int) bool {
 		ki, kj := keys[raw[i].ID], keys[raw[j].ID]
 		if ki != kj {
@@ -75,8 +73,16 @@ func (s *Server) getSchedules(w http.ResponseWriter, r *http.Request) {
 	for i, sch := range raw {
 		result[i] = scheduleResponse{Schedule: sch, EffectiveTime: effective[sch.ID]}
 	}
+	// Snapshot under the lock — result still holds live *store.Schedule
+	// pointers that writers mutate in place.
+	b, err := json.Marshal(result)
+	s.Store.Mu.RUnlock()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to encode response")
+		return
+	}
 
-	writeJSON(w, http.StatusOK, result)
+	writeJSONBytes(w, http.StatusOK, b)
 }
 
 func (s *Server) createSchedule(w http.ResponseWriter, r *http.Request) {

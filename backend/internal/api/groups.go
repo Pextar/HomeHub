@@ -19,23 +19,37 @@ func (s *Server) getGroups(w http.ResponseWriter, r *http.Request) {
 	for _, g := range s.Store.Groups {
 		out = append(out, g)
 	}
-	s.Store.Mu.RUnlock()
 	sort.Slice(out, func(i, j int) bool {
 		return strings.ToLower(out[i].Name) < strings.ToLower(out[j].Name)
 	})
-	writeJSON(w, http.StatusOK, out)
+	b, err := json.Marshal(out)
+	s.Store.Mu.RUnlock()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to encode response")
+		return
+	}
+	writeJSONBytes(w, http.StatusOK, b)
 }
 
 func (s *Server) getGroup(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
 	s.Store.Mu.RLock()
 	g, ok := s.Store.Groups[id]
+	var b []byte
+	var err error
+	if ok {
+		b, err = json.Marshal(g)
+	}
 	s.Store.Mu.RUnlock()
 	if !ok {
 		writeError(w, http.StatusNotFound, "group not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, g)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to encode response")
+		return
+	}
+	writeJSONBytes(w, http.StatusOK, b)
 }
 
 func (s *Server) createGroup(w http.ResponseWriter, r *http.Request) {

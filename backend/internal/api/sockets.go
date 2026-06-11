@@ -25,16 +25,23 @@ func (s *Server) getSockets(w http.ResponseWriter, r *http.Request) {
 		}
 		result = append(result, sock)
 	}
-	s.Store.Mu.RUnlock()
-
 	sort.Slice(result, func(i, j int) bool {
 		if result[i].Room != result[j].Room {
 			return strings.ToLower(result[i].Room) < strings.ToLower(result[j].Room)
 		}
 		return strings.ToLower(result[i].Name) < strings.ToLower(result[j].Name)
 	})
+	// Marshal under the lock so we snapshot the sockets consistently rather
+	// than handing live *store.Socket pointers to the encoder after unlocking
+	// (writers mutate those structs in place).
+	b, err := json.Marshal(result)
+	s.Store.Mu.RUnlock()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to encode response")
+		return
+	}
 
-	writeJSON(w, http.StatusOK, result)
+	writeJSONBytes(w, http.StatusOK, b)
 }
 
 func (s *Server) createSocket(w http.ResponseWriter, r *http.Request) {
@@ -74,12 +81,21 @@ func (s *Server) getSocket(w http.ResponseWriter, r *http.Request) {
 
 	s.Store.Mu.RLock()
 	socket, ok := s.Store.Sockets[id]
+	var b []byte
+	var err error
+	if ok {
+		b, err = json.Marshal(socket)
+	}
 	s.Store.Mu.RUnlock()
 	if !ok {
 		writeError(w, http.StatusNotFound, "socket not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, socket)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to encode response")
+		return
+	}
+	writeJSONBytes(w, http.StatusOK, b)
 }
 
 func (s *Server) updateSocket(w http.ResponseWriter, r *http.Request) {

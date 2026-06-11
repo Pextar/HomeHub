@@ -51,11 +51,13 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// lookupUser returns the stored user with the given ID, or nil.
+// lookupUser returns a copy of the stored user with the given ID, or nil.
+// A copy (not the live pointer) is returned because the result is stashed in
+// the request context and read concurrently with user-mutating handlers.
 func (s *Server) lookupUser(id string) *store.User {
 	s.Store.Mu.RLock()
 	defer s.Store.Mu.RUnlock()
-	return s.Store.UserByID(id)
+	return s.Store.UserByID(id).Clone()
 }
 
 // verifyCredentials returns the user if username/password match a stored

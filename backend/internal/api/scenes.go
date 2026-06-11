@@ -19,23 +19,37 @@ func (s *Server) getScenes(w http.ResponseWriter, r *http.Request) {
 	for _, sc := range s.Store.Scenes {
 		out = append(out, sc)
 	}
-	s.Store.Mu.RUnlock()
 	sort.Slice(out, func(i, j int) bool {
 		return strings.ToLower(out[i].Name) < strings.ToLower(out[j].Name)
 	})
-	writeJSON(w, http.StatusOK, out)
+	b, err := json.Marshal(out)
+	s.Store.Mu.RUnlock()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to encode response")
+		return
+	}
+	writeJSONBytes(w, http.StatusOK, b)
 }
 
 func (s *Server) getScene(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
 	s.Store.Mu.RLock()
 	sc, ok := s.Store.Scenes[id]
+	var b []byte
+	var err error
+	if ok {
+		b, err = json.Marshal(sc)
+	}
 	s.Store.Mu.RUnlock()
 	if !ok {
 		writeError(w, http.StatusNotFound, "scene not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, sc)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to encode response")
+		return
+	}
+	writeJSONBytes(w, http.StatusOK, b)
 }
 
 func (s *Server) createScene(w http.ResponseWriter, r *http.Request) {

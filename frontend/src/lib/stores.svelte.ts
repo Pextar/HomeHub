@@ -21,7 +21,15 @@ function createDataStore() {
     health: "unknown" as "ok" | "error" | "unknown",
   });
 
+  // Monotonic ticket for refresh(). refresh() is fired concurrently from the
+  // 30s poll, the SSE debounce, and after most user actions; without this guard
+  // a slow earlier response can resolve after a newer one (or after an
+  // optimistic applySocket) and overwrite fresh state with stale values. Each
+  // call takes the next ticket and only writes if it's still the latest.
+  let refreshSeq = 0;
+
   async function refresh() {
+    const seq = ++refreshSeq;
     try {
       // Sockets, rooms, and schedules are visible to every authenticated
       // profile. Schedules are filtered server-side to the caller's own
@@ -31,6 +39,8 @@ function createDataStore() {
         api.listRooms(),
         api.listSchedules(),
       ]);
+      // A newer refresh started while we were awaiting — discard this result.
+      if (seq !== refreshSeq) return;
       data.sockets = sockets ?? [];
       data.rooms = rooms ?? [];
       data.schedules = schedules ?? [];
@@ -45,6 +55,7 @@ function createDataStore() {
           api.listSensors(),
           api.getSettings(),
         ]);
+        if (seq !== refreshSeq) return;
         data.groups = groups ?? [];
         data.scenes = scenes ?? [];
         data.timers = timers ?? [];

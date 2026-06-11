@@ -20,16 +20,20 @@ func (s *Server) getSensors(w http.ResponseWriter, r *http.Request) {
 	for _, sn := range s.Store.Sensors {
 		result = append(result, sn)
 	}
-	s.Store.Mu.RUnlock()
-
 	sort.Slice(result, func(i, j int) bool {
 		if result[i].Room != result[j].Room {
 			return result[i].Room < result[j].Room
 		}
 		return result[i].Name < result[j].Name
 	})
+	b, err := json.Marshal(result)
+	s.Store.Mu.RUnlock()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to encode response")
+		return
+	}
 
-	writeJSON(w, http.StatusOK, result)
+	writeJSONBytes(w, http.StatusOK, b)
 }
 
 func (s *Server) createSensor(w http.ResponseWriter, r *http.Request) {

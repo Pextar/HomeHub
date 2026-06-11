@@ -288,6 +288,17 @@ func writeJSON(w http.ResponseWriter, status int, v interface{}) {
 	}
 }
 
+// writeJSONBytes writes an already-encoded JSON body. Used together with a
+// json.Marshal performed under the store lock: the marshal produces a
+// consistent snapshot while the lock is held (it does no network I/O), and the
+// potentially slow client write happens here after the lock is released, so the
+// store is never held across client I/O.
+func writeJSONBytes(w http.ResponseWriter, status int, b []byte) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_, _ = w.Write(b)
+}
+
 // writeError responds with a JSON {"error": "..."} body.
 func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})

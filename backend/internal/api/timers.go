@@ -20,9 +20,14 @@ func (s *Server) getTimers(w http.ResponseWriter, r *http.Request) {
 	for _, t := range s.Store.Timers {
 		out = append(out, t)
 	}
-	s.Store.Mu.RUnlock()
 	sort.Slice(out, func(i, j int) bool { return out[i].FiresAt.Before(out[j].FiresAt) })
-	writeJSON(w, http.StatusOK, out)
+	b, err := json.Marshal(out)
+	s.Store.Mu.RUnlock()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to encode response")
+		return
+	}
+	writeJSONBytes(w, http.StatusOK, b)
 }
 
 // timerRequest is the JSON shape clients use to schedule a one-shot
