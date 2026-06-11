@@ -179,7 +179,8 @@
     const kelvinLabel = $derived(`${Math.round(1_000_000 / ct / 50) * 50}K`);
 </script>
 
-<Modal title={socket.name} subtitle={socket.room || "Unassigned"}>
+<!-- Controls apply live — nothing to "discard" on dismiss. -->
+<Modal title={socket.name} subtitle={socket.room || "Unassigned"} guardUnsaved={false}>
     {#snippet body()}
         {#if loading}
             <div class="note">Loading device state…</div>
