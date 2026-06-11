@@ -94,7 +94,7 @@ export async function startController(): Promise<MatterController> {
     console.log(`[matter-bridge] controller started — data dir: ${DATA_DIR}`);
 
     function key(id: NodeId | bigint): string {
-        return typeof id === "bigint" ? id.toString() : (id as unknown as bigint).toString();
+        return (id as bigint).toString();
     }
 
     async function getPaired(id: string) {
@@ -184,6 +184,11 @@ export async function startController(): Promise<MatterController> {
         if (update.color !== undefined) {
             const color = ep.getClusterClient(ColorControl.Cluster);
             if (!color) throw new Error("device does not expose ColorControl");
+            if (!/^#?[0-9a-fA-F]{6}$/.test(update.color)) {
+                // Reject early — a malformed hex would otherwise turn into
+                // NaN hue/saturation in the cluster command.
+                throw new Error(`invalid color ${JSON.stringify(update.color)} — want RRGGBB hex`);
+            }
             const { hue, sat } = hexToHs(update.color);
             await color.commands.moveToHueAndSaturation({
                 hue, saturation: sat, transitionTime: 0, optionsMask: {}, optionsOverride: {},
@@ -192,8 +197,11 @@ export async function startController(): Promise<MatterController> {
         if (update.ct !== undefined) {
             const color = ep.getClusterClient(ColorControl.Cluster);
             if (!color) throw new Error("device does not expose ColorControl");
+            // Clamp to the mired range the rest of the stack uses (Tasmota
+            // convention, also the bounds most bulbs accept).
+            const ct = Math.max(153, Math.min(500, Math.round(update.ct)));
             await color.commands.moveToColorTemperature({
-                colorTemperatureMireds: update.ct,
+                colorTemperatureMireds: ct,
                 transitionTime: 0, optionsMask: {}, optionsOverride: {},
             });
         }
@@ -205,11 +213,20 @@ export async function startController(): Promise<MatterController> {
         },
         async list() {
             const ids = commissioning.getCommissionedNodes().map((n) => key(n));
-            const out: DeviceState[] = [];
-            for (const id of ids) {
-                try { out.push(await readState(id)); }
-                catch { out.push({ id, reachable: false }); }
+            // Bounded concurrency: each offline device can burn several
+            // safeRead timeouts, so a sequential sweep over a handful of
+            // unreachable nodes would take tens of seconds.
+            const CONCURRENCY = 4;
+            const out: DeviceState[] = new Array(ids.length);
+            let next = 0;
+            async function worker() {
+                while (next < ids.length) {
+                    const i = next++;
+                    try { out[i] = await readState(ids[i]); }
+                    catch { out[i] = { id: ids[i], reachable: false }; }
+                }
             }
+            await Promise.all(Array.from({ length: Math.min(CONCURRENCY, ids.length) }, worker));
             return out;
         },
         async commission(pairingCode: string, transport?: "wifi" | "thread"): Promise<string> {

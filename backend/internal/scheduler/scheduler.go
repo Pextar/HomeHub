@@ -80,6 +80,18 @@ func Run(ctx context.Context, st *store.Store, pushSvc *push.Service) {
 				dueTimers = append(dueTimers, *t)
 			}
 		}
+		// Drop bookkeeping for schedules that no longer exist — without this
+		// the maps grow forever on a long-running install.
+		for id := range lastFired {
+			if _, ok := st.Schedules[id]; !ok {
+				delete(lastFired, id)
+			}
+		}
+		for id := range pending {
+			if _, ok := st.Schedules[id]; !ok {
+				delete(pending, id)
+			}
+		}
 		st.Mu.RUnlock()
 
 		// Register random-offset schedules into the pending map.

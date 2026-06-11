@@ -265,7 +265,7 @@
                 {#if conditions.length === 0}
                     <p class="field-help">No conditions — actions run every time the trigger fires.</p>
                 {/if}
-                {#each conditions as c, i (i)}
+                {#each conditions as c, i (c)}
                     <div class="rowcard">
                         <div class="field-row">
                             <div class="field">
@@ -308,7 +308,7 @@
                     <span class="tag on">Then</span>
                     <button type="button" class="chip sm" onclick={addAction}><Icon name="plus" size={12} /> Action</button>
                 </div>
-                {#each thenActions as a, i (i)}
+                {#each thenActions as a, i (a)}
                     <div class="rowcard">
                         <div class="field-row">
                             <div class="field">

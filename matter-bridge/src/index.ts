@@ -29,6 +29,9 @@ async function main() {
     const server = http.createServer((req, res) => {
         handle(req, res, controller).catch((err) => {
             console.error("[matter-bridge] handler error:", err);
+            // If the handler already started writing, writeHead would throw;
+            // just drop the connection in that case.
+            if (res.headersSent) { res.destroy(); return; }
             writeJson(res, 500, { error: (err as Error).message });
         });
     });
@@ -84,6 +87,12 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, contr
     if (deviceMatch) {
         const id = decodeURIComponent(deviceMatch[1]);
         const isState = !!deviceMatch[2];
+        if (!/^\d+$/.test(id)) {
+            // Node ids are decimal strings; anything else would throw in
+            // BigInt() and surface as a misleading 500.
+            writeJson(res, 400, { error: `invalid node id ${JSON.stringify(id)}` });
+            return;
+        }
         if (method === "GET" && !isState) {
             const state = await controller.getState(id);
             writeJson(res, 200, state);

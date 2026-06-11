@@ -633,7 +633,7 @@
                                 {#if rule.conditions.length === 0}
                                     <div class="field-help">Optional — without conditions the rule runs every time it triggers.</div>
                                 {/if}
-                                {#each rule.conditions as c, ci (ci)}
+                                {#each rule.conditions as c, ci (c)}
                                     <div class="rowcard">
                                         <div class="field-row">
                                             <div class="field">
@@ -680,7 +680,7 @@
                                         <Icon name="plus" size={12} /> Action
                                     </button>
                                 </div>
-                                {#each rule.actions as a, ai (ai)}
+                                {#each rule.actions as a, ai (a)}
                                     <div class="rowcard">
                                         <div class="field-row">
                                             <div class="field">
@@ -802,7 +802,7 @@
                             Set what happens when you tap this scene manually. Supports multi-step sequences with delays.
                         </div>
                         <div class="steps-wrap">
-                            {#each steps as step, i (i)}
+                            {#each steps as step, i (step)}
                                 <div class="step-card">
                                     <div class="step-header">
                                         <span class="step-badge">Step {i + 1}</span>

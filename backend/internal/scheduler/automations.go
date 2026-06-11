@@ -61,6 +61,23 @@ func (e *autoEngine) tick(st *store.Store, now time.Time, pushSvc *push.Service)
 	settings := *st.Settings
 	st.Mu.RUnlock()
 
+	// Drop edge-tracking state for automations that no longer exist so the
+	// maps don't grow forever on a long-running install.
+	alive := make(map[string]bool, len(automations))
+	for _, a := range automations {
+		alive[a.ID] = true
+	}
+	for id := range e.lastFired {
+		if !alive[id] {
+			delete(e.lastFired, id)
+		}
+	}
+	for id := range e.sensorEdge {
+		if !alive[id] {
+			delete(e.sensorEdge, id)
+		}
+	}
+
 	var due []store.Automation
 	for _, a := range automations {
 		if !a.Enabled {

@@ -317,9 +317,10 @@ type Sensor struct {
 	LastValue     *float64   `json:"last_value,omitempty"`
 	LastReadingAt *time.Time `json:"last_reading_at,omitempty"`
 	// Alerting is true while the latest reading is outside the configured
-	// thresholds. Not persisted — resets to false on restart. Used to
-	// detect the rising edge of an alert so push notifications are sent
-	// only once per threshold breach, not on every subsequent reading.
+	// thresholds. Used to detect the rising edge of an alert so push
+	// notifications are sent only once per threshold breach, not on every
+	// subsequent reading. Persisted with the sensor, deliberately: an
+	// ongoing breach doesn't re-notify just because the server restarted.
 	Alerting bool `json:"alerting,omitempty"`
 }
 
