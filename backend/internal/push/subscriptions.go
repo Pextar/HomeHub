@@ -3,6 +3,7 @@ package push
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sync"
@@ -57,9 +58,15 @@ func (s *SubscriptionStore) Add(sub PushSubscription) error {
 
 	// Deduplicate: if a subscription for this endpoint already exists (e.g.
 	// the user re-subscribed from the same browser), replace it in place so
-	// we don't accumulate stale entries.
+	// we don't accumulate stale entries. A different user re-binding the
+	// endpoint is legitimate on shared devices (the browser keeps one push
+	// subscription across logins), but it's also the only way to redirect
+	// someone else's notifications — so it's logged for auditability.
 	for _, existing := range s.subs {
 		if existing.Endpoint == sub.Endpoint {
+			if existing.UserID != sub.UserID {
+				log.Printf("push: endpoint re-bound from user %s to user %s", existing.UserID, sub.UserID)
+			}
 			sub.ID = existing.ID
 			sub.Created = existing.Created
 			s.subs[sub.ID] = &sub

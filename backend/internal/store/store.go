@@ -11,6 +11,7 @@
 package store
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -306,17 +307,23 @@ func (s *Store) UserByUsername(username string) *User {
 }
 
 // UserByLoginCode returns the user whose login code exactly matches, or
-// nil. An empty code never matches. Caller must hold Mu.
+// nil. An empty code never matches. The comparison is constant-time and
+// every user is checked even after a match, so response timing doesn't
+// help an attacker guess codes character by character. Caller must hold Mu.
 func (s *Store) UserByLoginCode(code string) *User {
 	if code == "" {
 		return nil
 	}
+	var found *User
 	for _, u := range s.Users {
-		if u.LoginCode == code {
-			return u
+		if u.LoginCode == "" {
+			continue
+		}
+		if subtle.ConstantTimeCompare([]byte(u.LoginCode), []byte(code)) == 1 && found == nil {
+			found = u
 		}
 	}
-	return nil
+	return found
 }
 
 // UserByInviteToken returns the user whose pending invite token matches,

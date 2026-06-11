@@ -89,3 +89,28 @@ func TestLoginLimiter_PerKeyIsolation(t *testing.T) {
 		t.Fatal("one IP's lockout must not affect another")
 	}
 }
+
+func TestLoginLimiter_GlobalCapAcrossIPs(t *testing.T) {
+	now := time.Now()
+	l := newLoginLimiter()
+	l.now = func() time.Time { return now }
+
+	// Spread failures across distinct IPs so no single per-IP threshold
+	// trips; the global counter must still accumulate.
+	for i := 0; i < maxGlobalLoginFailures-1; i++ {
+		ip := "2001:db8::" + string(rune('a'+i%26)) + string(rune('a'+i/26))
+		l.recordFailure(ip)
+		if ok, _ := l.allowed(globalLoginKey); !ok {
+			t.Fatalf("global lockout tripped early after %d failures", i+1)
+		}
+	}
+	l.recordFailure("198.51.100.7") // crosses the global threshold
+	if ok, _ := l.allowed(globalLoginKey); ok {
+		t.Fatal("expected global lockout after crossing threshold")
+	}
+	// A success from one client must not refill the attacker's budget.
+	l.recordSuccess("203.0.113.9")
+	if ok, _ := l.allowed(globalLoginKey); ok {
+		t.Fatal("recordSuccess cleared the global counter")
+	}
+}
