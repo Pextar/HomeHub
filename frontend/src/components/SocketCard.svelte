@@ -145,8 +145,13 @@
         function onDocClick(e: MouseEvent) {
             if (!cardEl?.contains(e.target as Node)) moreOpen = false;
         }
+        function onKey(e: KeyboardEvent) { if (e.key === "Escape") moreOpen = false; }
         document.addEventListener("click", onDocClick, true);
-        return () => document.removeEventListener("click", onDocClick, true);
+        document.addEventListener("keydown", onKey, true);
+        return () => {
+            document.removeEventListener("click", onDocClick, true);
+            document.removeEventListener("keydown", onKey, true);
+        };
     });
 
     function onBodyClick() {
@@ -306,7 +311,7 @@
     }
     .tile.on .tile-bulb {
         background: var(--on);
-        color: #3a2400;
+        color: var(--primary-fg);
         box-shadow: 0 0 0 1px var(--on), 0 0 24px 4px var(--on-glow);
     }
     .tile.on .tile-bulb::after {

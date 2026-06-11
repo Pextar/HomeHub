@@ -78,8 +78,13 @@
     $effect(() => {
         if (!moreOpen) return;
         function onDoc(e: MouseEvent) { if (!rowEl?.contains(e.target as Node)) moreOpen = false; }
+        function onKey(e: KeyboardEvent) { if (e.key === "Escape") moreOpen = false; }
         document.addEventListener("click", onDoc, true);
-        return () => document.removeEventListener("click", onDoc, true);
+        document.addEventListener("keydown", onKey, true);
+        return () => {
+            document.removeEventListener("click", onDoc, true);
+            document.removeEventListener("keydown", onKey, true);
+        };
     });
 </script>
 

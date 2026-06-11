@@ -76,14 +76,13 @@
     --primary-fg: #1a1813;
     --primary-soft: rgba(245, 189, 110, 0.14);
     --primary-glow: rgba(245, 189, 110, 0.45);
-    --gradient-brand: linear-gradient(135deg, #f5bd6e 0%, #f5a06e 60%, #e0c47a 100%);
 
     --success: #9cc28a;
     --success-soft: rgba(156, 194, 138, 0.15);
     --danger: #e08a7a;
     --danger-soft: rgba(224, 138, 122, 0.15);
-    --warn: #e0c47a;
-    --warn-soft: rgba(224, 196, 122, 0.15);
+    --warn: #e8b96b;
+    --warn-soft: rgba(232, 185, 107, 0.15);
     --info: #84acc4;
     --info-soft: rgba(132, 172, 196, 0.15);
 
@@ -123,7 +122,6 @@
     --primary-fg: #ffffff;
     --primary-soft: rgba(201, 122, 31, 0.10);
     --primary-glow: rgba(201, 122, 31, 0.30);
-    --gradient-brand: linear-gradient(135deg, #c97a1f 0%, #d98a2f 60%, #e0a84a 100%);
 
     --success: #4e8a3d;
     --success-soft: rgba(78, 138, 61, 0.12);

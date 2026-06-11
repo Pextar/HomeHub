@@ -50,8 +50,13 @@
     $effect(() => {
         if (openId === null) return;
         function onDoc(e: MouseEvent) { if (!listEl?.contains(e.target as Node)) openId = null; }
+        function onKey(e: KeyboardEvent) { if (e.key === "Escape") openId = null; }
         document.addEventListener("click", onDoc, true);
-        return () => document.removeEventListener("click", onDoc, true);
+        document.addEventListener("keydown", onKey, true);
+        return () => {
+            document.removeEventListener("click", onDoc, true);
+            document.removeEventListener("keydown", onKey, true);
+        };
     });
 </script>
 
@@ -144,7 +149,7 @@
         display: grid; place-items: center;
         transition: background var(--t-med), color var(--t-med);
     }
-    .ico.on { background: var(--on); color: #3a2400; }
+    .ico.on { background: var(--on); color: var(--primary-fg); }
 
     .body {
         all: unset;

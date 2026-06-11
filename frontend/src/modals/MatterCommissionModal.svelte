@@ -340,7 +340,6 @@
                 </div>
             {:else}
                 <div class="commissioning">
-                    <div class="spinner" aria-hidden="true"></div>
                     <div class="title">Pairing with your device…</div>
                     <div class="hint">
                         This usually takes 30–60 seconds. The bridge talks to the
@@ -484,17 +483,6 @@
         transition: width 0.6s ease;
     }
 
-    .spinner {
-        width: 32px; height: 32px;
-        border: 3px solid var(--border);
-        border-top-color: var(--primary);
-        border-radius: 50%;
-        animation: spin 0.9s linear infinite;
-    }
-    @keyframes spin {
-        from { transform: rotate(0deg); }
-        to   { transform: rotate(360deg); }
-    }
 
     .field-help {
         font-size: 12px;

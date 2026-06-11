@@ -34,7 +34,7 @@
 
     const META: Record<Category, { color: string; icon: "clock" | "scenes" | "socket" }> = {
         auto:   { color: "var(--on)",   icon: "clock" },
-        scene:  { color: "#c4a4e0",     icon: "scenes" },
+        scene:  { color: "var(--p-matter)", icon: "scenes" },
         manual: { color: "var(--cool)", icon: "socket" },
     };
 

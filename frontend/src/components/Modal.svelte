@@ -16,7 +16,28 @@
     let { title, subtitle, body, actions, size = "default" }: Props = $props();
 
     function onKey(e: KeyboardEvent) {
-        if (e.key === "Escape") closeModal();
+        if (e.key === "Escape") {
+            closeModal();
+            return;
+        }
+        // Focus trap: keep Tab cycling inside the dialog — without this,
+        // Tab walks out of the role="dialog" into the inert page behind.
+        if (e.key === "Tab" && dialog) {
+            const focusables = Array.from(dialog.querySelectorAll<HTMLElement>(
+                "button, [href], input, select, textarea, [tabindex]:not([tabindex='-1'])"
+            )).filter(el => !el.hasAttribute("disabled") && el.offsetParent !== null);
+            if (focusables.length === 0) return;
+            const first = focusables[0];
+            const last = focusables[focusables.length - 1];
+            const active = document.activeElement as HTMLElement | null;
+            if (e.shiftKey && (active === first || !dialog.contains(active))) {
+                e.preventDefault();
+                last.focus();
+            } else if (!e.shiftKey && (active === last || !dialog.contains(active))) {
+                e.preventDefault();
+                first.focus();
+            }
+        }
     }
 
     function onBackdrop(e: MouseEvent) {
@@ -26,9 +47,15 @@
     // Lock background scroll for the lifetime of the modal. iOS won't otherwise
     // honour overflow: hidden on body, so without this the page can scroll
     // behind the sheet when a touch overscrolls.
+    // Also remember what had focus when the modal opened, and hand focus
+    // back to it on close so keyboard users don't get dropped at <body>.
     onMount(() => {
+        const trigger = document.activeElement as HTMLElement | null;
         lockBodyScroll();
-        return () => unlockBodyScroll();
+        return () => {
+            unlockBodyScroll();
+            if (trigger && document.contains(trigger)) trigger.focus();
+        };
     });
 
     let dialog: HTMLDivElement | undefined = $state();

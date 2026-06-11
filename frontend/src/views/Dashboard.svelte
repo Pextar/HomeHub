@@ -10,6 +10,7 @@
     import { runAction, describeTarget } from "../lib/utils";
     import { openModal } from "../lib/modal.svelte";
     import ConfirmModal from "../components/ConfirmModal.svelte";
+    import EmptyState from "../components/EmptyState.svelte";
     import SocketModal from "../modals/SocketModal.svelte";
     import { fly, scale } from "svelte/transition";
     import { flip } from "svelte/animate";
@@ -170,6 +171,30 @@
 </header>
 
 <!-- ── Whole-home hero + desktop stat strip ───────────────────────── -->
+{#if !v.loaded}
+    <!-- First load: shimmer placeholders instead of blank sections (§10). -->
+    <div class="top-grid" aria-hidden="true">
+        <div class="hero tile skel-hero">
+            <div class="skeleton skel-line lg"></div>
+            <div class="skeleton skel-line sm"></div>
+        </div>
+    </div>
+    <section class="home-section" aria-hidden="true">
+        <div class="rooms">
+            {#each Array.from({ length: 4 }) as _, i (i)}
+                <div class="skeleton skel-room"></div>
+            {/each}
+        </div>
+    </section>
+{:else if totalSockets === 0}
+    <!-- First run: no devices at all — point at the add-device flow. -->
+    <EmptyState icon="socket" title="No devices yet"
+        message="Add your first RF socket or smart light to start controlling your home.">
+        {#if session.isAdmin}
+            <button class="btn btn-primary" onclick={() => openModal(SocketModal, {})}>Add device</button>
+        {/if}
+    </EmptyState>
+{:else}
 <div class="top-grid">
     <div class="hero tile" class:on={heroOn}
         in:fly={{ y: 14, duration: dur(280), easing: cubicOut }}>
@@ -223,6 +248,7 @@
         </div>
     {/if}
 </div>
+{/if}
 
 <!-- ── Scenes scroller ────────────────────────────────────────────── -->
 {#if v.scenes.length > 0}
@@ -327,6 +353,7 @@
 {/if}
 
 <!-- ── Rooms ──────────────────────────────────────────────────────── -->
+{#if v.loaded}
 <section class="home-section mobile-rooms">
     <div class="section-head"><h2><span class="section-ico"><Icon name="home" size={15} /></span>Rooms</h2></div>
     {#if liveRooms.length === 0}
@@ -343,6 +370,7 @@
         </div>
     {/if}
 </section>
+{/if}
 
 <!-- ── Desktop: all devices with room filter ─────────────────────── -->
 {#if v.sockets.length > 0}
@@ -370,6 +398,17 @@
 {/if}
 
 <style>
+    /* ── First-load skeletons ───────────────────────── */
+    .skel-hero {
+        min-height: 120px;
+        justify-content: center;
+        gap: 10px;
+    }
+    .skel-line { height: 14px; border-radius: var(--r-sm); width: 60%; }
+    .skel-line.lg { height: 26px; width: 40%; }
+    .skel-line.sm { width: 25%; }
+    .skel-room { height: 72px; border-radius: var(--r-lg); }
+
     /* ── Greeting ───────────────────────────────────── */
     .greeting {
         display: flex;

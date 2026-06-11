@@ -202,12 +202,12 @@
     </div>
 {:else if mode === "starting"}
     <div class="scanner placeholder">
-        <div class="spinner"></div>
+        <div class="skeleton sk-block" aria-hidden="true"></div>
         <span class="hint">Starting camera…</span>
     </div>
 {:else if mode === "decoding"}
     <div class="scanner placeholder">
-        <div class="spinner"></div>
+        <div class="skeleton sk-block" aria-hidden="true"></div>
         <span class="hint">Reading the photo…</span>
     </div>
 {:else if mode === "error"}
@@ -321,14 +321,10 @@
         text-shadow: none;
     }
 
-    .spinner {
-        width: 28px; height: 28px;
-        border: 3px solid var(--border);
-        border-top-color: var(--primary);
-        border-radius: 50%;
-        animation: spin 0.9s linear infinite;
+    .sk-block {
+        width: 120px; height: 14px;
+        border-radius: var(--r-sm);
     }
-    @keyframes spin { to { transform: rotate(360deg); } }
 
     .error-box {
         display: flex; flex-direction: column; gap: 6px;
