@@ -31,8 +31,6 @@ func (s *Server) getAutomations(w http.ResponseWriter, r *http.Request) {
 			effective[a.ID] = eff
 		}
 	}
-	s.Store.Mu.RUnlock()
-
 	sort.Slice(list, func(i, j int) bool {
 		if list[i].Name != list[j].Name {
 			return list[i].Name < list[j].Name
@@ -44,7 +42,15 @@ func (s *Server) getAutomations(w http.ResponseWriter, r *http.Request) {
 	for i, a := range list {
 		result[i] = automationResponse{Automation: a, EffectiveTriggerTime: effective[a.ID]}
 	}
-	writeJSON(w, http.StatusOK, result)
+	// Snapshot under the lock — result still holds live *store.Automation
+	// pointers that writers mutate in place.
+	b, err := json.Marshal(result)
+	s.Store.Mu.RUnlock()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to encode response")
+		return
+	}
+	writeJSONBytes(w, http.StatusOK, b)
 }
 
 func (s *Server) createAutomation(w http.ResponseWriter, r *http.Request) {
@@ -63,6 +69,10 @@ func (s *Server) createAutomation(w http.ResponseWriter, r *http.Request) {
 	}
 	if a.ID == "" {
 		a.ID = fmt.Sprintf("automation_%d", time.Now().UnixNano())
+	} else if _, exists := s.Store.Automations[a.ID]; exists {
+		// A client-supplied ID must not silently replace an existing record.
+		writeError(w, http.StatusConflict, "an automation with that id already exists")
+		return
 	}
 	s.Store.Automations[a.ID] = &a
 	if err := s.Store.Save(); err != nil {
@@ -133,41 +143,59 @@ func (s *Server) runAutomation(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
 
 	s.Store.Mu.Lock()
-	defer s.Store.Mu.Unlock()
-
 	a, ok := s.Store.Automations[id]
+	var kind, name string
+	var staged []store.StagedSend
+	if ok {
+		name = a.Name
+		kind = "bulk"
+		if len(a.Actions) == 1 {
+			kind = a.Actions[0].TargetType
+		}
+		staged = s.Store.StageAutomationActions(a.Actions)
+	}
+	s.Store.Mu.Unlock()
 	if !ok {
 		writeError(w, http.StatusNotFound, "automation not found")
 		return
 	}
 
+	s.Store.SendStaged(staged)
+
+	s.Store.Mu.Lock()
 	s.Store.SuppressStateChange = true
-	var firstErr error
-	for _, act := range a.Actions {
-		if err := s.Store.ExecuteAction(act.TargetType, act.TargetID, act.Action); err != nil && firstErr == nil {
-			firstErr = err
-		}
-	}
+	firstErr := s.Store.ApplyStaged(staged)
 	s.Store.SuppressStateChange = false
 
-	kind := "bulk"
-	if len(a.Actions) == 1 {
-		kind = a.Actions[0].TargetType
-	}
-	entry := store.ActivityEntry{Kind: kind, Source: "automation", Action: "run", Label: a.Name}
+	entry := store.ActivityEntry{Kind: kind, Source: "automation", Action: "run", Label: name}
 	if firstErr != nil {
 		entry.Status = "error"
 		entry.Error = firstErr.Error()
 	}
 	s.Store.Activity.Add(entry)
-	a.LastFiredAt = time.Now().UTC()
-	a.RunCount++
+	// Re-fetch: the automation may have been deleted while sends were in flight.
+	var result *store.Automation
+	if cur, still := s.Store.Automations[id]; still {
+		cur.LastFiredAt = time.Now().UTC()
+		cur.RunCount++
+		result = cur
+	}
+	var body []byte
+	if result != nil {
+		body, _ = json.Marshal(result)
+	}
 	if err := s.Store.Save(); err != nil && firstErr == nil {
 		firstErr = err
 	}
+	s.Store.Mu.Unlock()
+	s.Store.FlushLights()
 	if firstErr != nil {
 		writeError(w, http.StatusInternalServerError, firstErr.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, a)
+	if body == nil {
+		writeError(w, http.StatusNotFound, "automation not found")
+		return
+	}
+	writeJSONBytes(w, http.StatusOK, body)
 }

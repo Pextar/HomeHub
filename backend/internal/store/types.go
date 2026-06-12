@@ -168,6 +168,20 @@ type User struct {
 	NotifPrefs   NotifPrefs `json:"notif_prefs,omitempty"`
 }
 
+// Clone returns a deep copy of the user, safe to read after the store lock is
+// released. SocketIDs is mutated in place by CascadeDeleteSocket, so it is
+// copied rather than aliased.
+func (u *User) Clone() *User {
+	if u == nil {
+		return nil
+	}
+	c := *u
+	if u.SocketIDs != nil {
+		c.SocketIDs = append([]string(nil), u.SocketIDs...)
+	}
+	return &c
+}
+
 // CanAccessSocket reports whether this user may see/control the given
 // socket. Admins can access everything; others are limited to SocketIDs.
 func (u *User) CanAccessSocket(socketID string) bool {
@@ -303,9 +317,10 @@ type Sensor struct {
 	LastValue     *float64   `json:"last_value,omitempty"`
 	LastReadingAt *time.Time `json:"last_reading_at,omitempty"`
 	// Alerting is true while the latest reading is outside the configured
-	// thresholds. Not persisted — resets to false on restart. Used to
-	// detect the rising edge of an alert so push notifications are sent
-	// only once per threshold breach, not on every subsequent reading.
+	// thresholds. Used to detect the rising edge of an alert so push
+	// notifications are sent only once per threshold breach, not on every
+	// subsequent reading. Persisted with the sensor, deliberately: an
+	// ongoing breach doesn't re-notify just because the server restarted.
 	Alerting bool `json:"alerting,omitempty"`
 }
 

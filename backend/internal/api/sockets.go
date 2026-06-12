@@ -25,16 +25,23 @@ func (s *Server) getSockets(w http.ResponseWriter, r *http.Request) {
 		}
 		result = append(result, sock)
 	}
-	s.Store.Mu.RUnlock()
-
 	sort.Slice(result, func(i, j int) bool {
 		if result[i].Room != result[j].Room {
 			return strings.ToLower(result[i].Room) < strings.ToLower(result[j].Room)
 		}
 		return strings.ToLower(result[i].Name) < strings.ToLower(result[j].Name)
 	})
+	// Marshal under the lock so we snapshot the sockets consistently rather
+	// than handing live *store.Socket pointers to the encoder after unlocking
+	// (writers mutate those structs in place).
+	b, err := json.Marshal(result)
+	s.Store.Mu.RUnlock()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to encode response")
+		return
+	}
 
-	writeJSON(w, http.StatusOK, result)
+	writeJSONBytes(w, http.StatusOK, b)
 }
 
 func (s *Server) createSocket(w http.ResponseWriter, r *http.Request) {
@@ -49,11 +56,18 @@ func (s *Server) createSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if socket.ID == "" {
+	hadID := socket.ID != ""
+	if !hadID {
 		socket.ID = fmt.Sprintf("socket_%d", time.Now().UnixNano())
 	}
 
 	s.Store.Mu.Lock()
+	if _, exists := s.Store.Sockets[socket.ID]; exists && hadID {
+		// A client-supplied ID must not silently replace an existing record.
+		s.Store.Mu.Unlock()
+		writeError(w, http.StatusConflict, "a socket with that id already exists")
+		return
+	}
 	s.Store.Sockets[socket.ID] = &socket
 	if err := s.Store.Save(); err != nil {
 		delete(s.Store.Sockets, socket.ID)
@@ -74,12 +88,21 @@ func (s *Server) getSocket(w http.ResponseWriter, r *http.Request) {
 
 	s.Store.Mu.RLock()
 	socket, ok := s.Store.Sockets[id]
+	var b []byte
+	var err error
+	if ok {
+		b, err = json.Marshal(socket)
+	}
 	s.Store.Mu.RUnlock()
 	if !ok {
 		writeError(w, http.StatusNotFound, "socket not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, socket)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to encode response")
+		return
+	}
+	writeJSONBytes(w, http.StatusOK, b)
 }
 
 func (s *Server) updateSocket(w http.ResponseWriter, r *http.Request) {
@@ -288,12 +311,12 @@ func (s *Server) learnSocket(w http.ResponseWriter, r *http.Request) {
 	// Doubling the on-air time significantly improves reliability for sockets
 	// whose receive windows are short or whose decoders need a clean frame
 	// after the radio settles (observed with some Telldus/Proove models).
-	if err := s.Store.RF.Send(code, protocol, true); err != nil {
+	if err := s.Store.Transmit(code, protocol, true); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to send learn signal: "+err.Error())
 		return
 	}
 	time.Sleep(200 * time.Millisecond)
-	_ = s.Store.RF.Send(code, protocol, true) // best-effort second burst
+	_ = s.Store.Transmit(code, protocol, true) // best-effort second burst
 
 	writeJSON(w, http.StatusOK, map[string]string{"code": code, "protocol": protocol})
 }
@@ -309,42 +332,44 @@ func (s *Server) turnOff(w http.ResponseWriter, r *http.Request) {
 }
 
 // bulkSetState returns a handler that switches every socket on or off.
-// It returns the number of successes and a list of failures.
+// It returns the number of successes and a list of failures. Device I/O
+// happens between two lock acquisitions (staged flow) so one slow device
+// can't stall the rest of the API.
 func (s *Server) bulkSetState(target bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user := currentUser(r)
-		s.Store.Mu.Lock()
-		defer s.Store.Mu.Unlock()
-
-		var ok int
-		failures := make([]map[string]string, 0)
-		// Suppress per-socket push notifications; we send one summary below.
-		s.Store.SuppressStateChange = true
-		for _, sock := range s.Store.Sockets {
-			if !canAccess(user, sock.ID) {
-				continue
-			}
-			if err := s.Store.ApplyState(sock, &target); err != nil {
-				failures = append(failures, map[string]string{
-					"socket_id": sock.ID,
-					"error":     err.Error(),
-				})
-				continue
-			}
-			ok++
-		}
-		s.Store.SuppressStateChange = false
 		action := "off"
 		if target {
 			action = "on"
 		}
+
+		s.Store.Mu.Lock()
+		staged := make([]store.StagedSend, 0, len(s.Store.Sockets))
+		for _, sock := range s.Store.Sockets {
+			if !canAccess(user, sock.ID) {
+				continue
+			}
+			staged = append(staged, s.Store.StageSocketSend(sock.ID, action))
+		}
+		s.Store.Mu.Unlock()
+
+		s.Store.SendStaged(staged)
+
+		s.Store.Mu.Lock()
+		// Suppress per-socket push notifications; we send one summary below.
+		s.Store.SuppressStateChange = true
+		_ = s.Store.ApplyStaged(staged)
+		s.Store.SuppressStateChange = false
+		ok, failures := stagedFailures(staged)
 		entry := store.ActivityEntry{Kind: "bulk", Source: "manual", Action: action, Label: "All sockets"}
 		if len(failures) > 0 {
 			entry.Status = "error"
 			entry.Error = fmt.Sprintf("%d of %d failed", len(failures), ok+len(failures))
 		}
 		s.Store.Activity.Add(entry)
-		if err := s.Store.Save(); err != nil {
+		err := s.Store.Save()
+		s.Store.Mu.Unlock()
+		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
 			return
 		}
@@ -354,4 +379,21 @@ func (s *Server) bulkSetState(target bool) http.HandlerFunc {
 			"failures": failures,
 		})
 	}
+}
+
+// stagedFailures splits staged results into a success count and the
+// per-socket failure list shape shared by all bulk endpoints.
+func stagedFailures(staged []store.StagedSend) (ok int, failures []map[string]string) {
+	failures = make([]map[string]string, 0)
+	for _, c := range staged {
+		if c.Err != nil {
+			failures = append(failures, map[string]string{
+				"socket_id": c.SocketID,
+				"error":     c.Err.Error(),
+			})
+			continue
+		}
+		ok++
+	}
+	return ok, failures
 }

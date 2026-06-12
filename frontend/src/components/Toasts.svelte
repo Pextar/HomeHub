@@ -53,8 +53,7 @@
     }
     .toast[data-tone="success"] { --tone: var(--success); }
     .toast[data-tone="error"]   { --tone: var(--danger); }
-    /* Spec warn tone is a warmer amber than the generic --warn token. */
-    .toast[data-tone="warn"]    { --tone: #e8b96b; }
+    .toast[data-tone="warn"]    { --tone: var(--warn); }
     .body { flex: 1; min-width: 0; }
     .title {
         font-weight: 600;

@@ -6,15 +6,66 @@ package tasmota
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
 
 // DefaultTimeout caps how long we wait for a device to respond.
 const DefaultTimeout = 5 * time.Second
+
+// ValidateHost checks that host is a bare hostname or "host:port" that is safe
+// to interpolate into http://<host>/cm. It rejects values that could redirect
+// the server-side request away from the intended device — an embedded scheme,
+// path, query, fragment, or userinfo — and IP literals that point at sensitive
+// targets (loopback, link-local incl. the 169.254.169.254 cloud-metadata
+// endpoint, unspecified, or multicast). Tasmota devices live on the LAN, so
+// private/RFC-1918 ranges are intentionally allowed.
+func ValidateHost(host string) error {
+	h := strings.TrimSpace(host)
+	if h == "" {
+		return errors.New("device host is empty")
+	}
+	// Anything that lets the value escape the host position of the URL.
+	if strings.ContainsAny(h, "/?#@\\ \t\r\n") {
+		return fmt.Errorf("invalid device host %q", host)
+	}
+
+	hostPart := h
+	if hp, port, err := net.SplitHostPort(h); err == nil {
+		// A port was supplied (this never matches a bare IPv6 literal, which
+		// SplitHostPort rejects as "too many colons").
+		hostPart = hp
+		if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
+			return fmt.Errorf("invalid port in device host %q", host)
+		}
+	}
+
+	if parsed := net.ParseIP(hostPart); parsed != nil {
+		if parsed.IsLoopback() || parsed.IsLinkLocalUnicast() ||
+			parsed.IsLinkLocalMulticast() || parsed.IsUnspecified() || parsed.IsMulticast() {
+			return fmt.Errorf("device host %q is not an allowed address", host)
+		}
+		return nil
+	}
+
+	// Not an IP literal: accept LAN hostnames (letters, digits, hyphen, dot,
+	// e.g. "tasmota-1234.local"). DNS is not resolved here — range checks above
+	// only bind IP literals; name resolution stays the network's responsibility.
+	for _, c := range hostPart {
+		ok := (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+			(c >= '0' && c <= '9') || c == '-' || c == '.'
+		if !ok {
+			return fmt.Errorf("invalid device host %q", host)
+		}
+	}
+	return nil
+}
 
 // State is the current device state parsed from cmnd=State.
 // Fields are nil/empty when the device doesn't support that capability,
@@ -46,6 +97,9 @@ func Send(ctx context.Context, ip string, on bool) error {
 
 // GetState fetches the full device state.
 func GetState(ctx context.Context, ip string) (*State, error) {
+	if err := ValidateHost(ip); err != nil {
+		return nil, fmt.Errorf("tasmota: %w", err)
+	}
 	u := fmt.Sprintf("http://%s/cm?cmnd=State", ip)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
@@ -114,6 +168,9 @@ func SetState(ctx context.Context, ip string, update StateUpdate) error {
 // Probe checks whether a Tasmota device is reachable at ip.
 // Used by the "Test connection" button in the socket editor.
 func Probe(ctx context.Context, ip string) error {
+	if err := ValidateHost(ip); err != nil {
+		return fmt.Errorf("tasmota: %w", err)
+	}
 	u := fmt.Sprintf("http://%s/cm?cmnd=Power", ip)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
@@ -131,6 +188,9 @@ func Probe(ctx context.Context, ip string) error {
 }
 
 func runCmd(ctx context.Context, ip, cmd string) error {
+	if err := ValidateHost(ip); err != nil {
+		return fmt.Errorf("tasmota: %w", err)
+	}
 	u := fmt.Sprintf("http://%s/cm?cmnd=%s", ip, url.QueryEscape(cmd))
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {

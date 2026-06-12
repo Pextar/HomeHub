@@ -10,6 +10,7 @@
     import { runAction, describeTarget } from "../lib/utils";
     import { openModal } from "../lib/modal.svelte";
     import ConfirmModal from "../components/ConfirmModal.svelte";
+    import EmptyState from "../components/EmptyState.svelte";
     import SocketModal from "../modals/SocketModal.svelte";
     import { fly, scale } from "svelte/transition";
     import { flip } from "svelte/animate";
@@ -62,8 +63,11 @@
     // Desktop stat strip (wide screens only): real metrics that complement the
     // hero — how many automations are active and the next scheduled event.
     const enabledAutomations = $derived(v.automations.filter(a => a.enabled).length);
+    // Derive from the minute, not the 1-second clock tick — otherwise the
+    // whole schedule list is re-parsed and re-sorted every second.
+    const nowMinute = $derived(now.getHours() * 60 + now.getMinutes());
     const nextEvent = $derived.by(() => {
-        const nowMin = now.getHours() * 60 + now.getMinutes();
+        const nowMin = nowMinute;
         const parse = (s?: string) => {
             if (!s || !/^\d\d:\d\d/.test(s)) return -1;
             const [h, m] = s.split(":").map(Number);
@@ -167,6 +171,30 @@
 </header>
 
 <!-- ── Whole-home hero + desktop stat strip ───────────────────────── -->
+{#if !v.loaded}
+    <!-- First load: shimmer placeholders instead of blank sections (§10). -->
+    <div class="top-grid" aria-hidden="true">
+        <div class="hero tile skel-hero">
+            <div class="skeleton skel-line lg"></div>
+            <div class="skeleton skel-line sm"></div>
+        </div>
+    </div>
+    <section class="home-section" aria-hidden="true">
+        <div class="rooms">
+            {#each Array.from({ length: 4 }) as _, i (i)}
+                <div class="skeleton skel-room"></div>
+            {/each}
+        </div>
+    </section>
+{:else if totalSockets === 0}
+    <!-- First run: no devices at all — point at the add-device flow. -->
+    <EmptyState icon="socket" title="No devices yet"
+        message="Add your first RF socket or smart light to start controlling your home.">
+        {#if session.isAdmin}
+            <button class="btn btn-primary" onclick={() => openModal(SocketModal, {})}>Add device</button>
+        {/if}
+    </EmptyState>
+{:else}
 <div class="top-grid">
     <div class="hero tile" class:on={heroOn}
         in:fly={{ y: 14, duration: dur(280), easing: cubicOut }}>
@@ -220,6 +248,7 @@
         </div>
     {/if}
 </div>
+{/if}
 
 <!-- ── Scenes scroller ────────────────────────────────────────────── -->
 {#if v.scenes.length > 0}
@@ -324,6 +353,7 @@
 {/if}
 
 <!-- ── Rooms ──────────────────────────────────────────────────────── -->
+{#if v.loaded}
 <section class="home-section mobile-rooms">
     <div class="section-head"><h2><span class="section-ico"><Icon name="home" size={15} /></span>Rooms</h2></div>
     {#if liveRooms.length === 0}
@@ -340,6 +370,7 @@
         </div>
     {/if}
 </section>
+{/if}
 
 <!-- ── Desktop: all devices with room filter ─────────────────────── -->
 {#if v.sockets.length > 0}
@@ -349,7 +380,7 @@
             <div class="device-chips">
                 <button class="chip" class:active={deviceRoom === ''} onclick={() => deviceRoom = ''}>All</button>
                 <button class="chip" class:active={deviceRoom === 'on'} onclick={() => deviceRoom = 'on'}>On</button>
-                {#each allDeviceRooms as r}
+                {#each allDeviceRooms as r (r)}
                     <button class="chip" class:active={deviceRoom === r} onclick={() => deviceRoom = r}>{r}</button>
                 {/each}
             </div>
@@ -367,6 +398,17 @@
 {/if}
 
 <style>
+    /* ── First-load skeletons ───────────────────────── */
+    .skel-hero {
+        min-height: 120px;
+        justify-content: center;
+        gap: 10px;
+    }
+    .skel-line { height: 14px; border-radius: var(--r-sm); width: 60%; }
+    .skel-line.lg { height: 26px; width: 40%; }
+    .skel-line.sm { width: 25%; }
+    .skel-room { height: 72px; border-radius: var(--r-lg); }
+
     /* ── Greeting ───────────────────────────────────── */
     .greeting {
         display: flex;

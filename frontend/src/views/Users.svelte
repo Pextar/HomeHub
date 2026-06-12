@@ -33,7 +33,7 @@
         }),
     );
 
-    const AVATAR_HUES = ["var(--cool)", "#a96bd9", "var(--good)", "#d97a45"];
+    const AVATAR_HUES = ["var(--cool)", "var(--warn)", "var(--good)", "var(--bad)"];
     function avatarColor(u: User): string {
         if (u.admin || u.owner) return "var(--on)";
         let h = 5381;
@@ -234,7 +234,7 @@
         border-radius: 50%;
         display: grid;
         place-items: center;
-        color: #3a2400;
+        color: var(--primary-fg);
         font-weight: 600;
         font-size: 16px;
         flex-shrink: 0;
@@ -255,11 +255,9 @@
         border-radius: var(--r-sm);
     }
     .badge.you { color: var(--text-muted); background: var(--surface-hover); }
-    .badge.kid { color: #b15dff; background: rgba(177, 93, 255, 0.14); }
-    .badge.owner-badge { color: #92400e; background: #fef3c7; }
-    :global([data-theme="dark"]) .badge.owner-badge { color: #fbbf24; background: rgba(245, 158, 11, 0.15); }
-    .badge.invite-badge { color: #0369a1; background: #e0f2fe; }
-    :global([data-theme="dark"]) .badge.invite-badge { color: #38bdf8; background: rgba(56, 189, 248, 0.15); }
+    .badge.kid { color: var(--cool); background: var(--cool-soft); }
+    .badge.owner-badge { color: var(--on); background: var(--on-soft); }
+    .badge.invite-badge { color: var(--warn); background: var(--warn-soft); }
     .row-actions { display: flex; gap: 4px; flex-shrink: 0; }
     .icon-btn {
         display: grid;

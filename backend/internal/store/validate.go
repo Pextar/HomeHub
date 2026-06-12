@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"rf-socket-controller/internal/tasmota"
 )
 
 // ValidateSchedule normalizes and validates a schedule. Caller must
@@ -50,6 +52,16 @@ func (s *Store) ValidateSchedule(sch *Schedule) error {
 		if sch.Action != "on" && sch.Action != "off" && sch.Action != "toggle" {
 			return errors.New("group action must be on/off/toggle")
 		}
+	case "room":
+		if sch.TargetID == "" {
+			return errors.New("target_id is required for room schedules")
+		}
+		if _, ok := s.Rooms[sch.TargetID]; !ok {
+			return errors.New("target room does not exist")
+		}
+		if sch.Action != "on" && sch.Action != "off" && sch.Action != "toggle" {
+			return errors.New("room action must be on/off/toggle")
+		}
 	case "scene":
 		if sch.TargetID == "" {
 			return errors.New("target_id is required for scene schedules")
@@ -59,7 +71,7 @@ func (s *Store) ValidateSchedule(sch *Schedule) error {
 		}
 		sch.Action = "activate"
 	default:
-		return errors.New("target_type must be socket, group, or scene")
+		return errors.New("target_type must be socket, group, room, or scene")
 	}
 
 	switch sch.TimeMode {
@@ -451,9 +463,23 @@ func (s *Store) ValidateSocket(sock *Socket) error {
 	if sock.Code == "" {
 		return errors.New("code is required")
 	}
-	if sock.Protocol == "nexa" {
+	switch sock.Protocol {
+	case "nexa":
 		if err := validateNexaCode(sock.Code); err != nil {
 			return err
+		}
+	case "tasmota":
+		// Code is the device host/IP, interpolated into a server-side URL.
+		// Reject anything that could point the request at a non-device host.
+		if err := tasmota.ValidateHost(sock.Code); err != nil {
+			return err
+		}
+	case "matter", "matter-thread":
+		// Code is the Matter node id (a decimal string). Keep it numeric so it
+		// can't smuggle path segments into the bridge URL, even though it's
+		// already path-escaped at request time.
+		if _, err := strconv.ParseUint(sock.Code, 10, 64); err != nil {
+			return errors.New("matter node id must be a decimal number")
 		}
 	}
 	return nil

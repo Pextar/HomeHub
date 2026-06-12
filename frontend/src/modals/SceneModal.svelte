@@ -1,17 +1,17 @@
 <script lang="ts">
     import Modal from "../components/Modal.svelte";
     import Icon from "../components/Icon.svelte";
-    import Segmented from "../components/Segmented.svelte";
     import Switch from "../components/Switch.svelte";
-    import DayPicker from "../components/DayPicker.svelte";
+    import RuleEditor, { COLOURS, blankRuleAction } from "../components/RuleEditor.svelte";
     import { closeModal } from "../lib/modal.svelte";
     import { api } from "../lib/api";
     import { data, toasts } from "../lib/stores.svelte";
-    import { sortedSockets, formatAgo } from "../lib/utils";
+    import { sortedSockets, formatAgo, isSmartProtocol } from "../lib/utils";
     import { untrack } from "svelte";
     import type {
         Scene, SceneStep, AutomationTriggerType, AutomationTrigger,
         AutomationAction, AutomationCondition, TargetType, Automation, SceneAccent,
+        RuleDraft,
     } from "../lib/types";
 
     interface Props { existing?: Scene | null; }
@@ -21,35 +21,7 @@
     const sockets = $derived(sortedSockets(data.value.sockets));
     const v = data.value;
 
-    const isSmart = (protocol: string) =>
-        protocol === "tasmota" || protocol === "matter" || protocol === "matter-thread";
-
-    const COLOURS: { hex: string; name: string }[] = [
-        { hex: "", name: "Auto" },
-        { hex: "f5bd6e", name: "Warm" },
-        { hex: "ffe9c4", name: "Soft" },
-        { hex: "ffffff", name: "Bright" },
-        { hex: "c4a4e0", name: "Lilac" },
-        { hex: "7aa4d9", name: "Cool" },
-    ];
-
-    // Matter lamp presets — same palette as MatterLightModal. White presets
-    // carry a CT-approximated hex for display and to nudge the RGB mode toward
-    // the right temperature on lamps that don't expose CT via this bridge path.
-    type MatterPreset = { label: string; level: number; color: string; cssColor: string };
-    const MATTER_PRESETS: MatterPreset[] = [
-        { label: "Reading",     level: 100, color: "dcdbd6", cssColor: "#dcdbd6" },
-        { label: "Concentrate", level: 100, color: "d2e5f4", cssColor: "#d2e5f4" },
-        { label: "Daylight",    level: 100, color: "d5e2eb", cssColor: "#d5e2eb" },
-        { label: "Warm",        level: 80,  color: "edcaa2", cssColor: "#edcaa2" },
-        { label: "Relax",       level: 40,  color: "f1c696", cssColor: "#f1c696" },
-        { label: "Night",       level: 12,  color: "f9bf7f", cssColor: "#f9bf7f" },
-        { label: "Sunset",      level: 70,  color: "ff6a3d", cssColor: "#ff6a3d" },
-        { label: "Forest",      level: 60,  color: "3dbf6a", cssColor: "#3dbf6a" },
-        { label: "Ocean",       level: 70,  color: "3dafff", cssColor: "#3dafff" },
-        { label: "Lavender",    level: 60,  color: "b47cff", cssColor: "#b47cff" },
-        { label: "Rose",        level: 60,  color: "ff6fa3", cssColor: "#ff6fa3" },
-    ];
+    const isSmart = isSmartProtocol;
 
     // Scene tile identity. Icons come from the shared icon set; accent keys map
     // to design tokens so the tile stays theme-aware.
@@ -164,56 +136,15 @@
     }
 
     // ── Rule state ─────────────────────────────────────────────────────
-    type RuleActionDraft = {
-        target_type: TargetType;
-        target_id: string;
-        action: string;
-        level: number;
-        color: string;
-    };
-
-    type RuleDraft = {
+    // The WHEN / ONLY-IF / THEN fields live in the shared RuleDraft shape
+    // edited by RuleEditor; the scene wizard adds per-rule bookkeeping.
+    type SceneRuleDraft = RuleDraft & {
         _key: string;
         automationId: string;
         enabled: boolean;
-        trigType: AutomationTriggerType;
-        trigTimeMode: string;
-        trigTime: string;
-        trigSolarOffset: number;
-        trigDays: number[];
-        trigSensorId: string;
-        trigOp: "above" | "below";
-        trigValue: number;
-        trigSocketId: string;
-        trigToState: "on" | "off";
-        conditions: AutomationCondition[];
-        actions: RuleActionDraft[];
     };
 
-    const hasLocation = $derived(v.settings.latitude !== 0 || v.settings.longitude !== 0);
-
-    function firstTargetType(): TargetType {
-        return v.sockets.length ? "socket" : v.groups.length ? "group" : v.rooms.length ? "room" : "scene";
-    }
-
-    function targetsFor(type: string) {
-        if (type === "socket") return v.sockets.map(s => ({ id: s.id, label: s.name }));
-        if (type === "group")  return v.groups.map(g => ({ id: g.id, label: g.name }));
-        if (type === "room")   return [...v.rooms].sort((a, b) => a.name.localeCompare(b.name)).map(r => ({ id: r.id, label: r.name }));
-        return v.scenes.map(s => ({ id: s.id, label: s.name }));
-    }
-
-    function solarSummary(mode: string, offset: number): string {
-        const event = mode === "sunrise" ? "sunrise" : "sunset";
-        if (offset === 0) return `At ${event}`;
-        const abs = Math.abs(offset);
-        const h = Math.floor(abs / 60);
-        const mins = abs % 60;
-        const parts = [h && `${h}h`, mins && `${mins}m`].filter(Boolean).join(" ");
-        return `${parts} ${offset < 0 ? "before" : "after"} ${event}`;
-    }
-
-    function blankRule(): RuleDraft {
+    function blankRule(): SceneRuleDraft {
         return {
             _key: Math.random().toString(36).slice(2),
             automationId: "",
@@ -229,11 +160,11 @@
             trigSocketId: v.sockets[0]?.id ?? "",
             trigToState: "on",
             conditions: [],
-            actions: [{ target_type: firstTargetType(), target_id: "", action: "on", level: 100, color: "" }],
+            actions: [blankRuleAction()],
         };
     }
 
-    function ruleFromAutomation(a: Automation): RuleDraft {
+    function ruleFromAutomation(a: Automation): SceneRuleDraft {
         const t = a.trigger;
         return {
             _key: Math.random().toString(36).slice(2),
@@ -260,7 +191,7 @@
         };
     }
 
-    let rules = $state<RuleDraft[]>(untrack(() => {
+    let rules = $state<SceneRuleDraft[]>(untrack(() => {
         if (existing) {
             const owned = data.value.automations.filter(a => a.scene_id === existing!.id);
             if (owned.length) return owned.map(ruleFromAutomation);
@@ -268,33 +199,8 @@
         return [];
     }));
 
-    $effect(() => {
-        for (const rule of rules) {
-            for (const a of rule.actions) {
-                const opts = targetsFor(a.target_type);
-                if (!opts.find(o => o.id === a.target_id)) a.target_id = opts[0]?.id ?? "";
-                if (a.target_type === "scene") a.action = "activate";
-                else if (a.action === "activate") a.action = "on";
-            }
-        }
-    });
-
     function addRule() { rules = [...rules, blankRule()]; }
     function removeRule(i: number) { rules = rules.filter((_, idx) => idx !== i); }
-    function addRuleAction(ri: number) {
-        rules[ri].actions = [...rules[ri].actions,
-            { target_type: firstTargetType(), target_id: "", action: "on", level: 100, color: "" }];
-    }
-    function removeRuleAction(ri: number, ai: number) {
-        rules[ri].actions = rules[ri].actions.filter((_, idx) => idx !== ai);
-    }
-    function addCondition(ri: number) {
-        rules[ri].conditions = [...rules[ri].conditions,
-            { type: "device", socket_id: v.sockets[0]?.id ?? "", state: "on" }];
-    }
-    function removeCondition(ri: number, ci: number) {
-        rules[ri].conditions = rules[ri].conditions.filter((_, idx) => idx !== ci);
-    }
 
     // Owned automation backing a rule, used to surface last-fired / run-count.
     function ruleStats(automationId: string): { count: number; ago: string } | null {
@@ -304,7 +210,7 @@
         return { count: a.run_count ?? 0, ago: formatAgo(a.last_fired_at) };
     }
 
-    function buildRulePayload(rule: RuleDraft, sceneId: string, sceneName: string, idx: number): Partial<Automation> {
+    function buildRulePayload(rule: SceneRuleDraft, sceneId: string, sceneName: string, idx: number): Partial<Automation> {
         let trigger: AutomationTrigger;
         if (rule.trigType === "time") {
             trigger = {
@@ -541,238 +447,7 @@
                             </div>
                         </div>
                         <div class="rule-inner">
-
-                            <!-- WHEN -->
-                            <div class="block when">
-                                <div class="block-head"><span class="tag cool">When</span></div>
-                                <Segmented name="rule-{ri}-trigtype" bind:value={rule.trigType}
-                                    options={[
-                                        { value: "time",   label: "Time" },
-                                        { value: "sensor", label: "Sensor", disabled: v.sensors.length === 0 },
-                                        { value: "device", label: "Device", disabled: v.sockets.length === 0 },
-                                    ]} />
-
-                                {#if rule.trigType === "time"}
-                                    <div class="field mt">
-                                        <Segmented name="rule-{ri}-timemode" bind:value={rule.trigTimeMode}
-                                            options={[
-                                                { value: "fixed",   label: "Fixed" },
-                                                { value: "sunrise", label: "Sunrise" },
-                                                { value: "sunset",  label: "Sunset" },
-                                            ]} />
-                                    </div>
-                                    {#if rule.trigTimeMode === "fixed"}
-                                        <div class="field mt">
-                                            <label for="rule-{ri}-time">Time</label>
-                                            <input id="rule-{ri}-time" type="time" bind:value={rule.trigTime} />
-                                        </div>
-                                    {:else}
-                                        <div class="field mt">
-                                            <label for="rule-{ri}-solar">Offset</label>
-                                            <input id="rule-{ri}-solar" type="range" min="-120" max="120" step="5"
-                                                bind:value={rule.trigSolarOffset} />
-                                            <div class="solar-summary">{solarSummary(rule.trigTimeMode, rule.trigSolarOffset)}</div>
-                                            {#if !hasLocation}
-                                                <div class="field-help warn">Set a location in Settings for solar triggers to fire.</div>
-                                            {/if}
-                                        </div>
-                                    {/if}
-                                    <div class="field mt">
-                                        <span class="field-label">On days</span>
-                                        <DayPicker bind:days={rule.trigDays} />
-                                        <div class="field-help">Leave empty for every day.</div>
-                                    </div>
-
-                                {:else if rule.trigType === "sensor"}
-                                    <div class="field-row mt">
-                                        <div class="field">
-                                            <label for="rule-{ri}-sensor">Sensor</label>
-                                            <select id="rule-{ri}-sensor" bind:value={rule.trigSensorId}>
-                                                {#each v.sensors as s (s.id)}<option value={s.id}>{s.name}</option>{/each}
-                                            </select>
-                                        </div>
-                                        <div class="field">
-                                            <label for="rule-{ri}-op">Crosses</label>
-                                            <select id="rule-{ri}-op" bind:value={rule.trigOp}>
-                                                <option value="above">Above</option>
-                                                <option value="below">Below</option>
-                                            </select>
-                                        </div>
-                                    </div>
-                                    <div class="field mt">
-                                        <label for="rule-{ri}-val">Threshold{v.sensors.find(s => s.id === rule.trigSensorId)?.unit ? ` (${v.sensors.find(s => s.id === rule.trigSensorId)?.unit})` : ""}</label>
-                                        <input id="rule-{ri}-val" type="number" step="0.1" bind:value={rule.trigValue} />
-                                    </div>
-
-                                {:else}
-                                    <div class="field-row mt">
-                                        <div class="field">
-                                            <label for="rule-{ri}-dev">Device</label>
-                                            <select id="rule-{ri}-dev" bind:value={rule.trigSocketId}>
-                                                {#each v.sockets as s (s.id)}<option value={s.id}>{s.name}</option>{/each}
-                                            </select>
-                                        </div>
-                                        <div class="field">
-                                            <label for="rule-{ri}-state">Turns</label>
-                                            <select id="rule-{ri}-state" bind:value={rule.trigToState}>
-                                                <option value="on">On</option>
-                                                <option value="off">Off</option>
-                                            </select>
-                                        </div>
-                                    </div>
-                                {/if}
-                            </div>
-
-                            <!-- ONLY IF (conditions) -->
-                            <div class="block iff">
-                                <div class="block-head">
-                                    <span class="tag">Only if</span>
-                                    <button type="button" class="chip-sm" onclick={() => addCondition(ri)}>
-                                        <Icon name="plus" size={12} /> Condition
-                                    </button>
-                                </div>
-                                {#if rule.conditions.length === 0}
-                                    <div class="field-help">Optional — without conditions the rule runs every time it triggers.</div>
-                                {/if}
-                                {#each rule.conditions as c, ci (ci)}
-                                    <div class="rowcard">
-                                        <div class="field-row">
-                                            <div class="field">
-                                                <select bind:value={c.type}>
-                                                    <option value="device">Device is</option>
-                                                    <option value="time_range">Time between</option>
-                                                </select>
-                                            </div>
-                                            {#if c.type === "device"}
-                                                <div class="field">
-                                                    <select bind:value={c.socket_id}>
-                                                        {#each v.sockets as s (s.id)}<option value={s.id}>{s.name}</option>{/each}
-                                                    </select>
-                                                </div>
-                                            {/if}
-                                        </div>
-                                        {#if c.type === "device"}
-                                            <div class="field mt-sm">
-                                                <select bind:value={c.state}>
-                                                    <option value="on">On</option>
-                                                    <option value="off">Off</option>
-                                                </select>
-                                            </div>
-                                        {:else}
-                                            <div class="field-row mt-sm">
-                                                <div class="field"><input type="time" bind:value={c.after} aria-label="After" /></div>
-                                                <div class="field"><input type="time" bind:value={c.before} aria-label="Before" /></div>
-                                            </div>
-                                        {/if}
-                                        <button type="button" class="row-remove"
-                                            onclick={() => removeCondition(ri, ci)}
-                                            aria-label="Remove condition">
-                                            <Icon name="trash" size={14} /> Remove
-                                        </button>
-                                    </div>
-                                {/each}
-                            </div>
-
-                            <!-- THEN -->
-                            <div class="block then">
-                                <div class="block-head">
-                                    <span class="tag on">Then</span>
-                                    <button type="button" class="chip-sm" onclick={() => addRuleAction(ri)}>
-                                        <Icon name="plus" size={12} /> Action
-                                    </button>
-                                </div>
-                                {#each rule.actions as a, ai (ai)}
-                                    <div class="rowcard">
-                                        <div class="field-row">
-                                            <div class="field">
-                                                <select bind:value={a.target_type}>
-                                                    <option value="socket" disabled={v.sockets.length === 0}>Device</option>
-                                                    <option value="group"  disabled={v.groups.length === 0}>Group</option>
-                                                    <option value="room"   disabled={v.rooms.length === 0}>Room</option>
-                                                    <option value="scene"  disabled={v.scenes.length === 0}>Scene</option>
-                                                </select>
-                                            </div>
-                                            <div class="field">
-                                                <select bind:value={a.target_id}>
-                                                    {#each targetsFor(a.target_type) as t (t.id)}<option value={t.id}>{t.label}</option>{/each}
-                                                </select>
-                                            </div>
-                                        </div>
-                                        <div class="field mt-sm" style:opacity={a.target_type === "scene" ? 0.6 : 1}>
-                                            <select bind:value={a.action} disabled={a.target_type === "scene"}>
-                                                {#if a.target_type === "scene"}
-                                                    <option value="activate">Activate</option>
-                                                {:else}
-                                                    <option value="on">Turn on</option>
-                                                    <option value="off">Turn off</option>
-                                                    <option value="toggle">Toggle</option>
-                                                {/if}
-                                            </select>
-                                        </div>
-                                        {#if a.action === "on"}
-                                            {#if a.target_type === "socket" && isSmart(v.sockets.find(s => s.id === a.target_id)?.protocol ?? "")}
-                                                <div class="action-light-row">
-                                                    <div class="bright">
-                                                        <span class="bright-ico"><Icon name="sun" size={14} /></span>
-                                                        <input type="range" min="1" max="100" step="1" bind:value={a.level} aria-label="Brightness" />
-                                                        <span class="bright-val mono">{a.level ?? 100}%</span>
-                                                    </div>
-                                                    <div class="swatches">
-                                                        {#each COLOURS as c (c.name)}
-                                                            <button type="button" class="swatch"
-                                                                class:active={(a.color ?? "") === c.hex}
-                                                                class:auto={c.hex === ""}
-                                                                style={c.hex ? `background:#${c.hex}` : ""}
-                                                                title={c.name}
-                                                                aria-label="{c.name} color"
-                                                                onclick={() => a.color = c.hex}>
-                                                                {#if c.hex === ""}<Icon name="close" size={12} />{/if}
-                                                            </button>
-                                                        {/each}
-                                                    </div>
-                                                </div>
-                                            {:else if a.target_type === "group" || a.target_type === "room"}
-                                                {@const activeIdx = MATTER_PRESETS.findIndex(p => p.color === a.color && p.level === a.level)}
-                                                <div class="action-light-row">
-                                                    <div class="bright">
-                                                        <span class="bright-ico"><Icon name="sun" size={14} /></span>
-                                                        <input type="range" min="1" max="100" step="1" bind:value={a.level} aria-label="Brightness" />
-                                                        <span class="bright-val mono">{a.level ?? 100}%</span>
-                                                    </div>
-                                                    <div class="preset-chips" role="group" aria-label="Lighting preset">
-                                                        <button type="button" class="preset-chip auto"
-                                                            class:active={activeIdx === -1}
-                                                            title="No preset — turn on at previous brightness"
-                                                            aria-label="No lighting preset" aria-pressed={activeIdx === -1}
-                                                            onclick={() => { a.color = ""; a.level = 100; }}>
-                                                            —
-                                                        </button>
-                                                        {#each MATTER_PRESETS as p, pi (p.label)}
-                                                            <button type="button" class="preset-chip"
-                                                                class:active={activeIdx === pi}
-                                                                style="--pc: {p.cssColor}"
-                                                                title="{p.label} · {p.level}%"
-                                                                aria-label="{p.label} preset" aria-pressed={activeIdx === pi}
-                                                                onclick={() => { a.level = p.level; a.color = p.color; }}>
-                                                                <span class="preset-dot" style="background:{p.cssColor}"></span>
-                                                                {p.label}
-                                                            </button>
-                                                        {/each}
-                                                    </div>
-                                                </div>
-                                            {/if}
-                                        {/if}
-                                        {#if rule.actions.length > 1}
-                                            <button type="button" class="row-remove"
-                                                onclick={() => removeRuleAction(ri, ai)}
-                                                aria-label="Remove action">
-                                                <Icon name="trash" size={14} /> Remove
-                                            </button>
-                                        {/if}
-                                    </div>
-                                {/each}
-                            </div>
-
+                            <RuleEditor bind:draft={rules[ri]} idPrefix="rule-{ri}" />
                         </div>
                     </div>
                 {/each}
@@ -803,7 +478,7 @@
                             Set what happens when you tap this scene manually. Supports multi-step sequences with delays.
                         </div>
                         <div class="steps-wrap">
-                            {#each steps as step, i (i)}
+                            {#each steps as step, i (step)}
                                 <div class="step-card">
                                     <div class="step-header">
                                         <span class="step-badge">Step {i + 1}</span>
@@ -817,7 +492,7 @@
                                                     value={step.delay_minutes}
                                                     oninput={(e) => {
                                                         const v = parseInt((e.target as HTMLInputElement).value, 10);
-                                                        if (!isNaN(v) && v >= 0) step.delay_minutes = v;
+                                                        if (!isNaN(v) && v >= 1) step.delay_minutes = v;
                                                     }}
                                                     aria-label="Delay in minutes for step {i + 1}" />
                                                 <span class="timing-lbl">min</span>
@@ -1014,7 +689,6 @@
         font-size: 11px;
         color: var(--text-dim);
     }
-    .block.iff { border-left: 3px solid var(--border-strong); }
     .rule-badge {
         font-family: var(--font-mono);
         font-size: 11px;
@@ -1044,118 +718,6 @@
         flex-direction: column;
         gap: var(--space-3);
     }
-
-    /* ── WHEN / THEN blocks ───────────────────────────────────────── */
-    .block {
-        border: 1px solid var(--hairline);
-        border-radius: var(--r-md);
-        padding: var(--space-3);
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-2);
-    }
-    .block.when { border-left: 3px solid var(--cool); }
-    .block.then { border-left: 3px solid var(--on); }
-    .block-head { display: flex; align-items: center; justify-content: space-between; }
-    .tag {
-        font-family: var(--font-mono);
-        font-size: 11px;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
-        color: var(--text-mute);
-    }
-    .tag.cool { color: var(--cool); }
-    .tag.on   { color: var(--on); }
-    .mt    { margin-top: var(--space-3); }
-    .mt-sm { margin-top: var(--space-2); }
-
-    .chip-sm {
-        padding: 4px 10px;
-        font-size: 12px;
-        cursor: pointer;
-        display: inline-flex;
-        align-items: center;
-        gap: 4px;
-        background: var(--card-2);
-        border: 1px solid var(--hairline);
-        border-radius: var(--r-pill);
-        color: var(--text-mute);
-        transition: background var(--t-fast), color var(--t-fast);
-    }
-    .chip-sm:hover { background: var(--card-3); color: var(--text); }
-
-    .rowcard {
-        background: var(--card-2);
-        border: 1px solid var(--hairline);
-        border-radius: var(--r-sm);
-        padding: var(--space-3);
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-2);
-    }
-    .row-remove {
-        align-self: flex-end;
-        display: inline-flex; align-items: center; gap: 4px;
-        background: none; border: 0; cursor: pointer;
-        color: var(--text-mute); font-size: 12px; padding: 2px 4px;
-        border-radius: var(--r-sm);
-        transition: color var(--t-fast);
-    }
-    .row-remove:hover { color: var(--bad); }
-
-    .action-light-row {
-        display: flex;
-        flex-direction: column;
-        gap: 8px;
-        padding-top: var(--space-2);
-    }
-
-    /* ── Matter preset chips (group/room rule actions) ────────────── */
-    .preset-chips {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 5px;
-    }
-    .preset-chip {
-        display: inline-flex;
-        align-items: center;
-        gap: 5px;
-        padding: 3px 9px;
-        font-size: 12px;
-        background: var(--card-2);
-        border: 1px solid var(--hairline);
-        border-radius: var(--r-pill);
-        color: var(--text-mute);
-        cursor: pointer;
-        touch-action: manipulation;
-        transition: background var(--t-fast), color var(--t-fast), box-shadow var(--t-fast);
-        white-space: nowrap;
-    }
-    .preset-chip:hover { background: var(--card-3); color: var(--text); }
-    .preset-chip.active {
-        background: var(--card-3);
-        color: var(--text);
-        box-shadow: 0 0 0 1px var(--border-strong) inset;
-    }
-    .preset-chip.auto { color: var(--text-dim); font-size: 13px; }
-    .preset-dot {
-        width: 10px;
-        height: 10px;
-        border-radius: 50%;
-        flex-shrink: 0;
-        border: 1px solid rgba(255,255,255,0.15);
-    }
-    @media (pointer: coarse) {
-        .preset-chip { padding: 6px 12px; font-size: 13px; min-height: 36px; }
-        .preset-dot { width: 12px; height: 12px; }
-    }
-    .solar-summary {
-        margin-top: 5px;
-        font-weight: 600;
-        font-size: 0.9rem;
-        color: var(--text);
-    }
-    .field-help.warn { color: var(--warn, var(--danger)); }
 
     /* ── Icon + accent pickers ───────────────────────────────────── */
     .identity-row { align-items: flex-start; }

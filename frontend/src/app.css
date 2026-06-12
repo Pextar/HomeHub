@@ -76,14 +76,18 @@
     --primary-fg: #1a1813;
     --primary-soft: rgba(245, 189, 110, 0.14);
     --primary-glow: rgba(245, 189, 110, 0.45);
-    --gradient-brand: linear-gradient(135deg, #f5bd6e 0%, #f5a06e 60%, #e0c47a 100%);
 
     --success: #9cc28a;
     --success-soft: rgba(156, 194, 138, 0.15);
     --danger: #e08a7a;
     --danger-soft: rgba(224, 138, 122, 0.15);
-    --warn: #e0c47a;
-    --warn-soft: rgba(224, 196, 122, 0.15);
+    --warn: #e8b96b;
+    --warn-soft: rgba(232, 185, 107, 0.15);
+
+    /* The one sanctioned "ON" surface (DESIGN.md §6.1). Defined once so
+       SocketCard / Groups / RoomCard can't drift from .tile.on. */
+    --tile-on-gradient: linear-gradient(155deg, #2b2419 0%, #221d14 60%, #1d180f 100%);
+    --tile-on-border: rgba(245, 189, 110, 0.18);
     --info: #84acc4;
     --info-soft: rgba(132, 172, 196, 0.15);
 
@@ -123,13 +127,14 @@
     --primary-fg: #ffffff;
     --primary-soft: rgba(201, 122, 31, 0.10);
     --primary-glow: rgba(201, 122, 31, 0.30);
-    --gradient-brand: linear-gradient(135deg, #c97a1f 0%, #d98a2f 60%, #e0a84a 100%);
 
     --success: #4e8a3d;
     --success-soft: rgba(78, 138, 61, 0.12);
     --danger: #b14b3d;
     --danger-soft: rgba(177, 75, 61, 0.10);
     --warn: #b8860b;
+    --tile-on-gradient: linear-gradient(155deg, #fff5e3 0%, #ffeece 100%);
+    --tile-on-border: rgba(201, 122, 31, 0.20);
     --warn-soft: rgba(184, 134, 11, 0.12);
     --info: #426c84;
     --info-soft: rgba(66, 108, 132, 0.10);
@@ -467,12 +472,8 @@ textarea[aria-invalid="true"]:focus-visible {
     transition: background var(--t-med), border-color var(--t-med);
 }
 .tile.on {
-    background: linear-gradient(155deg, #2b2419 0%, #221d14 60%, #1d180f 100%);
-    border-color: rgba(245, 189, 110, 0.18);
-}
-[data-theme="light"] .tile.on {
-    background: linear-gradient(155deg, #fff5e3 0%, #ffeece 100%);
-    border-color: rgba(201, 122, 31, 0.20);
+    background: var(--tile-on-gradient);
+    border-color: var(--tile-on-border);
 }
 .tile-bulb {
     width: 36px; height: 36px;

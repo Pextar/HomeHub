@@ -34,8 +34,14 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 			return
 		}
 		if c, err := r.Cookie(cookieName); err == nil {
-			if id, version, ok := verifySession(s.SessionSecret, c.Value); ok {
+			if id, version, expires, ok := verifySession(s.SessionSecret, c.Value); ok {
 				if u := s.lookupUser(id); u != nil && u.TokenVersion == version {
+					// Rolling renewal: re-issue the cookie once it's past
+					// half its life so active devices never expire while
+					// a stolen cookie still dies within cookieTTL.
+					if time.Until(expires) < cookieTTL/2 {
+						setSessionCookie(w, s.SessionSecret, u.ID, u.TokenVersion, isSecureRequest(r))
+					}
 					next.ServeHTTP(w, r.WithContext(withUser(r.Context(), u)))
 					return
 				}
@@ -51,11 +57,13 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// lookupUser returns the stored user with the given ID, or nil.
+// lookupUser returns a copy of the stored user with the given ID, or nil.
+// A copy (not the live pointer) is returned because the result is stashed in
+// the request context and read concurrently with user-mutating handlers.
 func (s *Server) lookupUser(id string) *store.User {
 	s.Store.Mu.RLock()
 	defer s.Store.Mu.RUnlock()
-	return s.Store.UserByID(id)
+	return s.Store.UserByID(id).Clone()
 }
 
 // verifyCredentials returns the user if username/password match a stored

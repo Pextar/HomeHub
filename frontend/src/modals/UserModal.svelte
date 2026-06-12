@@ -149,7 +149,7 @@
                     <label class="admin-row kid-row">
                         <input type="checkbox" bind:checked={kid} />
                         <div>
-                            <div>Kid mode 🧸</div>
+                            <div>Kid mode</div>
                             <div class="field-help">A big, colorful, animated layout with their lamps as oversized tap tiles.</div>
                         </div>
                     </label>

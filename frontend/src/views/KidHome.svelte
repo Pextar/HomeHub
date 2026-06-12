@@ -1,17 +1,17 @@
 <script lang="ts">
-    import { onMount } from "svelte";
+    import { onMount, onDestroy } from "svelte";
     import { fade, scale } from "svelte/transition";
     import { backOut } from "svelte/easing";
     import { api } from "../lib/api";
     import { data, toasts, session } from "../lib/stores.svelte";
-    import { formatDays } from "../lib/utils";
+    import { formatDays, isSmartProtocol, socketAction } from "../lib/utils";
     import type { Socket, Schedule } from "../lib/types";
     import KidLampPanel from "./KidLampPanel.svelte";
     import KidScheduleSheet from "../modals/KidScheduleSheet.svelte";
 
     // Matter/Tasmota bulbs get the colour + brightness playground; plain RF
     // sockets just flip on/off on tap.
-    const isSmart = (lamp: Socket) => lamp.protocol.startsWith("matter") || lamp.protocol === "tasmota";
+    const isSmart = (lamp: Socket) => isSmartProtocol(lamp.protocol);
     let active = $state<Socket | null>(null);
     let confirmExit = $state(false);
 
@@ -21,6 +21,9 @@
     // pendingDelete holds the ID awaiting a second tap to confirm deletion.
     let pendingDelete = $state<string | null>(null);
     let pendingDeleteTimer = $state<ReturnType<typeof setTimeout> | null>(null);
+    onDestroy(() => {
+        if (pendingDeleteTimer) clearTimeout(pendingDeleteTimer);
+    });
 
     function openNewSchedule() {
         editingSchedule = null;
@@ -129,14 +132,10 @@
 
     async function toggle(lamp: Socket) {
         bump(lamp.id);
-        const prev = lamp.state;
-        lamp.state = !prev; // optimistic — store is reactive
-        try {
-            await api.socketToggle(lamp.id);
-        } catch (e) {
-            lamp.state = prev;
-            toasts.error("Oops!", (e as Error).message);
-        }
+        // socketAction does the optimistic flip, merges the server's returned
+        // socket back in (so a divergent device result corrects immediately
+        // instead of waiting for the next poll), and rolls back on failure.
+        await socketAction(lamp, "toggle");
     }
 
     async function signOut() {

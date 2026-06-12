@@ -20,16 +20,20 @@ func (s *Server) getSensors(w http.ResponseWriter, r *http.Request) {
 	for _, sn := range s.Store.Sensors {
 		result = append(result, sn)
 	}
-	s.Store.Mu.RUnlock()
-
 	sort.Slice(result, func(i, j int) bool {
 		if result[i].Room != result[j].Room {
 			return result[i].Room < result[j].Room
 		}
 		return result[i].Name < result[j].Name
 	})
+	b, err := json.Marshal(result)
+	s.Store.Mu.RUnlock()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to encode response")
+		return
+	}
 
-	writeJSON(w, http.StatusOK, result)
+	writeJSONBytes(w, http.StatusOK, b)
 }
 
 func (s *Server) createSensor(w http.ResponseWriter, r *http.Request) {
@@ -48,6 +52,10 @@ func (s *Server) createSensor(w http.ResponseWriter, r *http.Request) {
 	}
 	if sn.ID == "" {
 		sn.ID = fmt.Sprintf("sensor_%d", time.Now().UnixNano())
+	} else if _, exists := s.Store.Sensors[sn.ID]; exists {
+		// A client-supplied ID must not silently replace an existing record.
+		writeError(w, http.StatusConflict, "a sensor with that id already exists")
+		return
 	}
 	s.Store.Sensors[sn.ID] = &sn
 	if err := s.Store.Save(); err != nil {

@@ -1,6 +1,6 @@
 <script lang="ts">
     import Icon from "./Icon.svelte";
-    import { untrack, onMount } from "svelte";
+    import { untrack, onMount, onDestroy } from "svelte";
     import { api } from "../lib/api";
     import { socketAction, automationsUsingSocket, plural } from "../lib/utils";
     import { openModal } from "../lib/modal.svelte";
@@ -26,7 +26,9 @@
     const protoLabel = $derived(isTasmota ? "Wi-Fi" : isThread ? "Thread" : isMatter ? "Matter" : "RF");
     const protoIcon = $derived(isTasmota ? "wifi" : isMatter ? "devices" : "radio");
 
-    // One-shot "pulse" ring whenever the socket's state flips.
+    // One-shot "pulse" ring whenever the socket's state flips. A state flip
+    // also invalidates the cached brightness — scenes/automations often pair
+    // "on" with a level, so the cached value is likely stale after a flip.
     let prevState = untrack(() => socket.state);
     let pulsing = $state(false);
     $effect(() => {
@@ -34,6 +36,7 @@
         if (s !== prevState) {
             prevState = s;
             pulsing = true;
+            if (isSmartLight) brightness = null; // lazy-fetch effect refetches
             const t = setTimeout(() => { pulsing = false; }, 550);
             return () => clearTimeout(t);
         }
@@ -64,6 +67,7 @@
     });
 
     let brightnessTimer: ReturnType<typeof setTimeout> | undefined;
+    onDestroy(() => clearTimeout(brightnessTimer));
     function setBrightness(v: number) {
         brightness = v;
         clearTimeout(brightnessTimer);
@@ -104,10 +108,14 @@
         } catch (e) { toasts.error("Failed", (e as Error).message); }
     }
 
-    function openControls() {
+    async function openControls() {
         moreOpen = false;
-        if (isTasmota) openModal(TasmotaLightModal, { socket });
-        else if (isMatter) openModal(MatterLightModal, { socket });
+        if (isTasmota) await openModal(TasmotaLightModal, { socket });
+        else if (isMatter) await openModal(MatterLightModal, { socket });
+        else return;
+        // The modal can change brightness/colour — refetch so the
+        // "On · NN%" label and inline slider don't go stale.
+        brightness = null;
     }
     function openTimer() { moreOpen = false; openModal(TimerModal, { socket }); }
     function openEdit()  { moreOpen = false; openModal(SocketModal, { existing: socket }); }
@@ -144,8 +152,13 @@
         function onDocClick(e: MouseEvent) {
             if (!cardEl?.contains(e.target as Node)) moreOpen = false;
         }
+        function onKey(e: KeyboardEvent) { if (e.key === "Escape") moreOpen = false; }
         document.addEventListener("click", onDocClick, true);
-        return () => document.removeEventListener("click", onDocClick, true);
+        document.addEventListener("keydown", onKey, true);
+        return () => {
+            document.removeEventListener("click", onDocClick, true);
+            document.removeEventListener("keydown", onKey, true);
+        };
     });
 
     function onBodyClick() {
@@ -237,12 +250,8 @@
         transition: background var(--t-med), border-color var(--t-med), box-shadow var(--t-fast);
     }
     .tile.on {
-        background: linear-gradient(155deg, #2b2419 0%, #221d14 60%, #1d180f 100%);
-        border-color: rgba(245, 189, 110, 0.18);
-    }
-    :global([data-theme="light"]) .tile.on {
-        background: linear-gradient(155deg, #fff5e3 0%, #ffeece 100%);
-        border-color: rgba(201, 122, 31, 0.20);
+        background: var(--tile-on-gradient);
+        border-color: var(--tile-on-border);
     }
     @media (hover: hover) {
         .tile:hover { border-color: var(--border-strong); }
@@ -305,7 +314,7 @@
     }
     .tile.on .tile-bulb {
         background: var(--on);
-        color: #3a2400;
+        color: var(--primary-fg);
         box-shadow: 0 0 0 1px var(--on), 0 0 24px 4px var(--on-glow);
     }
     .tile.on .tile-bulb::after {

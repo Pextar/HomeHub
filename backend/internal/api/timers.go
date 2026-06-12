@@ -20,9 +20,14 @@ func (s *Server) getTimers(w http.ResponseWriter, r *http.Request) {
 	for _, t := range s.Store.Timers {
 		out = append(out, t)
 	}
-	s.Store.Mu.RUnlock()
 	sort.Slice(out, func(i, j int) bool { return out[i].FiresAt.Before(out[j].FiresAt) })
-	writeJSON(w, http.StatusOK, out)
+	b, err := json.Marshal(out)
+	s.Store.Mu.RUnlock()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to encode response")
+		return
+	}
+	writeJSONBytes(w, http.StatusOK, b)
 }
 
 // timerRequest is the JSON shape clients use to schedule a one-shot
@@ -45,14 +50,14 @@ func (req *timerRequest) toTimer() (*store.Timer, error) {
 		return nil, errors.New("target_type and target_id are required")
 	}
 	switch tt {
-	case "socket", "group":
+	case "socket", "group", "room":
 		if action != "on" && action != "off" && action != "toggle" {
 			return nil, errors.New("action must be on/off/toggle")
 		}
 	case "scene":
 		action = "activate"
 	default:
-		return nil, errors.New("target_type must be socket, group, or scene")
+		return nil, errors.New("target_type must be socket, group, room, or scene")
 	}
 
 	var firesAt time.Time

@@ -479,7 +479,7 @@
         width: 50px; height: 50px;
         border-radius: 50%;
         background: var(--on);
-        color: #3a2400;
+        color: var(--primary-fg);
         display: grid; place-items: center;
         font-weight: 600; font-size: 18px;
         flex-shrink: 0;

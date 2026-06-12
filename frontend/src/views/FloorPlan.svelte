@@ -2,7 +2,7 @@
     import Topbar from "../components/Topbar.svelte";
     import Icon from "../components/Icon.svelte";
     import { data, route } from "../lib/stores.svelte";
-    import { socketAction } from "../lib/utils";
+    import { socketAction, protocolKind } from "../lib/utils";
     import { fly } from "svelte/transition";
     import { cubicOut } from "svelte/easing";
     import { dur } from "../lib/motion";
@@ -34,12 +34,7 @@
         try { localStorage.setItem(POS_KEY, JSON.stringify(positions)); } catch { /* private mode */ }
     });
 
-    function protoKey(p: string): "rf" | "wifi" | "matter" | "mqtt" {
-        if (p === "tasmota" || p === "wifi") return "wifi";
-        if (p.startsWith("matter")) return "matter";
-        if (p === "mqtt") return "mqtt";
-        return "rf";
-    }
+    const protoKey = protocolKind;
     const PROTO_COLOR: Record<string, string> = {
         rf: "var(--p-rf)", wifi: "var(--p-wifi)", matter: "var(--p-matter)", mqtt: "var(--p-mqtt)",
     };

@@ -12,20 +12,78 @@
         body?: Snippet;
         actions?: Snippet;
         size?: "default" | "wide";
+        // Set false for modals whose controls apply live (light controls):
+        // there's nothing to discard, so dismissal should never prompt.
+        guardUnsaved?: boolean;
     }
-    let { title, subtitle, body, actions, size = "default" }: Props = $props();
+    let { title, subtitle, body, actions, size = "default", guardUnsaved = true }: Props = $props();
+
+    // ── Unsaved-changes guard ────────────────────────────────────────────
+    // Generic dirty heuristic: any input/change event bubbling out of the
+    // dialog's form controls. Dismissal paths (Escape, backdrop, drag, ×)
+    // go through requestClose and ask before discarding a dirty form; an
+    // explicit save calls closeModal() directly and never sees the prompt.
+    let dirty = false;
+    let confirmDiscard = $state(false);
+    let discardCancelEl = $state<HTMLButtonElement>();
+    function markDirty() { dirty = true; }
+
+    function requestClose() {
+        if (guardUnsaved && dirty) {
+            confirmDiscard = true;
+            return;
+        }
+        closeModal();
+    }
+
+    // Land focus on the safe option when the prompt opens.
+    $effect(() => {
+        if (confirmDiscard) discardCancelEl?.focus();
+    });
+
+    function onEscape() {
+        if (confirmDiscard) {
+            confirmDiscard = false; // back to editing
+            return;
+        }
+        requestClose();
+    }
 
     function onKey(e: KeyboardEvent) {
-        if (e.key === "Escape") closeModal();
+        if (e.key === "Escape") {
+            onEscape();
+            return;
+        }
+        // Focus trap: keep Tab cycling inside the dialog — without this,
+        // Tab walks out of the role="dialog" into the inert page behind.
+        if (e.key === "Tab" && dialog) {
+            const focusables = Array.from(dialog.querySelectorAll<HTMLElement>(
+                "button, [href], input, select, textarea, [tabindex]:not([tabindex='-1'])"
+            )).filter(el => !el.hasAttribute("disabled") && el.offsetParent !== null);
+            if (focusables.length === 0) return;
+            const first = focusables[0];
+            const last = focusables[focusables.length - 1];
+            const active = document.activeElement as HTMLElement | null;
+            if (e.shiftKey && (active === first || !dialog.contains(active))) {
+                e.preventDefault();
+                last.focus();
+            } else if (!e.shiftKey && (active === last || !dialog.contains(active))) {
+                e.preventDefault();
+                first.focus();
+            }
+        }
     }
 
     function onBackdrop(e: MouseEvent) {
-        if (e.target === e.currentTarget) closeModal();
+        if (e.target === e.currentTarget) requestClose();
     }
 
     // Lock background scroll for the lifetime of the modal. iOS won't otherwise
     // honour overflow: hidden on body, so without this the page can scroll
-    // behind the sheet when a touch overscrolls.
+    // behind the sheet when a touch overscrolls. (Focus restore on close is
+    // handled by the modal stack in lib/modal.svelte, which remembers the
+    // trigger element — doing it here too would steal focus whenever another
+    // modal replaces this one on top of the stack.)
     onMount(() => {
         lockBodyScroll();
         return () => unlockBodyScroll();
@@ -159,6 +217,13 @@
     function finishDrag() {
         dragging = false;
         if (dragY > 90) {
+            if (guardUnsaved && dirty) {
+                // A 90px flick shouldn't silently discard a long form —
+                // snap the sheet back and ask.
+                requestAnimationFrame(() => { dragY = 0; });
+                confirmDiscard = true;
+                return;
+            }
             dismissing = true;
             dragY = 600;
             setTimeout(() => closeModal(), 230);
@@ -174,7 +239,7 @@
     class="root"
     role="presentation"
     onclick={onBackdrop}
-    onkeydown={(e) => { if (e.key === "Escape") closeModal(); }}
+    onkeydown={(e) => { if (e.key === "Escape") { e.stopPropagation(); onEscape(); } }}
     aria-hidden="false"
     in:fade={{ duration: dur(180) }}
     out:fade={{ duration: dur(200) }}
@@ -188,6 +253,8 @@
         aria-labelledby="modal-title"
         bind:this={dialog}
         tabindex="-1"
+        oninput={markDirty}
+        onchange={markDirty}
         style:transform={dragY > 0 ? `translateY(${dragY}px)` : ''}
         style:opacity={dragY > 0 ? Math.max(0.4, 1 - dragY / 300) : undefined}
         style:transition={dragging ? 'none' : dragY > 0 ? 'transform 0.22s ease-in, opacity 0.22s ease-in' : 'transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)'}
@@ -211,7 +278,7 @@
                     <h2 id="modal-title">{title}</h2>
                     {#if subtitle}<p class="subtitle">{subtitle}</p>{/if}
                 </div>
-                <button class="icon-btn" aria-label="Close" onclick={() => closeModal()}>×</button>
+                <button class="icon-btn" aria-label="Close" onclick={requestClose}>×</button>
             </div>
         </div>
         {#if body}
@@ -227,6 +294,24 @@
         {/if}
         {#if actions}
             <div class="actions">{@render actions()}</div>
+        {/if}
+
+        {#if confirmDiscard}
+            <!-- Inline (not a stacked modal — ModalRoot only renders the top
+                 of the stack, so stacking would destroy this form's state). -->
+            <div class="discard-scrim" role="alertdialog" aria-modal="true"
+                aria-labelledby="discard-title"
+                transition:fade={{ duration: dur(140) }}>
+                <div class="discard-card">
+                    <h3 id="discard-title">Discard changes?</h3>
+                    <p>You have unsaved edits in this form.</p>
+                    <div class="discard-row">
+                        <button class="btn" bind:this={discardCancelEl}
+                            onclick={() => (confirmDiscard = false)}>Keep editing</button>
+                        <button class="btn btn-danger" onclick={() => closeModal()}>Discard</button>
+                    </div>
+                </div>
+            </div>
         {/if}
     </div>
 </div>
@@ -255,6 +340,8 @@
         display: flex;
         flex-direction: column;
         overflow: hidden;
+        /* Containing block for the .discard-scrim overlay. */
+        position: relative;
         /* GPU-promote so the drag transform and slide transitions stay smooth. */
         will-change: transform;
     }
@@ -352,4 +439,35 @@
         }
         .actions :global(.btn) { width: 100%; justify-content: center; }
     }
+
+    /* ── Discard-changes prompt (DESIGN.md §10 confirmation) ─────────── */
+    .discard-scrim {
+        position: absolute;
+        inset: 0;
+        background: rgba(10, 8, 4, 0.55);
+        backdrop-filter: blur(3px);
+        display: grid;
+        place-items: center;
+        padding: var(--space-4);
+        border-radius: inherit;
+        z-index: 5;
+    }
+    :global([data-theme="light"]) .discard-scrim { background: rgba(26, 24, 19, 0.30); }
+    .discard-card {
+        background: var(--bg-elevated);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-lg);
+        padding: var(--space-5);
+        max-width: 340px;
+        width: 100%;
+        text-align: center;
+    }
+    .discard-card h3 { font-size: 16px; font-weight: 600; }
+    .discard-card p { color: var(--text-muted); font-size: 13.5px; margin-top: var(--space-2); }
+    .discard-row {
+        display: flex;
+        gap: var(--space-3);
+        margin-top: var(--space-5);
+    }
+    .discard-row .btn { flex: 1; justify-content: center; }
 </style>

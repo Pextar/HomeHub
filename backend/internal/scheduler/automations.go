@@ -38,8 +38,10 @@ func newAutoEngine() *autoEngine {
 }
 
 // tick evaluates every enabled automation against the current state and fires
-// those whose trigger edge occurred and whose conditions all hold.
-func (e *autoEngine) tick(st *store.Store, now time.Time, pushSvc *push.Service) {
+// those whose trigger edge occurred and whose conditions all hold. prev is
+// the previous tick's time, anchoring the (prev, now] window for time
+// triggers (see timeWindowMatches).
+func (e *autoEngine) tick(st *store.Store, prev, now time.Time, pushSvc *push.Service) {
 	stamp := now.Format("2006-01-02 15:04")
 
 	// Snapshot the state we need under a read lock, then evaluate without it.
@@ -61,12 +63,29 @@ func (e *autoEngine) tick(st *store.Store, now time.Time, pushSvc *push.Service)
 	settings := *st.Settings
 	st.Mu.RUnlock()
 
+	// Drop edge-tracking state for automations that no longer exist so the
+	// maps don't grow forever on a long-running install.
+	alive := make(map[string]bool, len(automations))
+	for _, a := range automations {
+		alive[a.ID] = true
+	}
+	for id := range e.lastFired {
+		if !alive[id] {
+			delete(e.lastFired, id)
+		}
+	}
+	for id := range e.sensorEdge {
+		if !alive[id] {
+			delete(e.sensorEdge, id)
+		}
+	}
+
 	var due []store.Automation
 	for _, a := range automations {
 		if !a.Enabled {
 			continue
 		}
-		if e.triggerFired(a, now, stamp, curSocket, sensorVal, &settings) &&
+		if e.triggerFired(a, prev, now, stamp, curSocket, sensorVal, &settings) &&
 			e.conditionsHold(a.Conditions, curSocket, now) {
 			due = append(due, a)
 		}
@@ -84,19 +103,20 @@ func (e *autoEngine) tick(st *store.Store, now time.Time, pushSvc *push.Service)
 }
 
 func (e *autoEngine) triggerFired(
-	a store.Automation, now time.Time, stamp string,
+	a store.Automation, prev, now time.Time, stamp string,
 	curSocket map[string]bool, sensorVal map[string]float64, settings *store.Settings,
 ) bool {
 	t := a.Trigger
 	switch t.Type {
 	case "time":
-		// Reuse the Schedule solar/fixed time resolution.
+		// Reuse the Schedule solar/fixed time resolution, matched against
+		// the (prev, now] window so DST gaps don't swallow the trigger.
 		sched := store.Schedule{TimeMode: t.TimeMode, Time: t.Time, SolarOffsetMinutes: t.SolarOffsetMinutes}
 		eff, ok := sched.EffectiveHHMM(now, settings)
-		if !ok || eff != now.Format("15:04") {
+		if !ok || !timeWindowMatches(eff, prev, now) {
 			return false
 		}
-		if !dayMatches(t.Days, int(now.Weekday())) {
+		if !dayMatches(t.Days, fireWeekday(eff, prev, now)) {
 			return false
 		}
 		if e.lastFired[a.ID] == stamp {
@@ -150,41 +170,18 @@ func (e *autoEngine) conditionsHold(conds []store.AutomationCondition, curSocket
 }
 
 func (e *autoEngine) execute(st *store.Store, a store.Automation, now time.Time, pushSvc *push.Service) error {
+	// Stage under the lock (this also queues smart-light brightness/colour),
+	// transmit off-lock, then fold the results back in — a slow device can't
+	// stall the scheduler tick or the API.
 	st.Mu.Lock()
-	defer st.FlushLights() // off-lock bridge calls for scene brightness/colour
-	defer st.Mu.Unlock()
+	staged := st.StageAutomationActions(a.Actions)
+	st.Mu.Unlock()
 
+	st.SendStaged(staged)
+
+	st.Mu.Lock()
 	st.SuppressStateChange = true
-	var firstErr error
-	for _, act := range a.Actions {
-		if err := st.ExecuteAction(act.TargetType, act.TargetID, act.Action); err != nil && firstErr == nil {
-			firstErr = err
-		}
-		if act.Action == "on" && (act.Level != nil || act.Color != "") {
-			switch act.TargetType {
-			case "socket":
-				if sock, ok := st.Sockets[act.TargetID]; ok {
-					st.QueueLight(*sock, act.Level, act.Color)
-				}
-			case "group":
-				if grp, ok := st.Groups[act.TargetID]; ok {
-					for _, sid := range grp.SocketIDs {
-						if sock, ok := st.Sockets[sid]; ok {
-							st.QueueLight(*sock, act.Level, act.Color)
-						}
-					}
-				}
-			case "room":
-				if rm, ok := st.Rooms[act.TargetID]; ok {
-					for _, sock := range st.Sockets {
-						if sock.Room == rm.Name {
-							st.QueueLight(*sock, act.Level, act.Color)
-						}
-					}
-				}
-			}
-		}
-	}
+	firstErr := st.ApplyStaged(staged)
 	st.SuppressStateChange = false
 
 	kind := "bulk"
@@ -205,6 +202,9 @@ func (e *autoEngine) execute(st *store.Store, a store.Automation, now time.Time,
 	if err := st.Save(); err != nil && firstErr == nil {
 		firstErr = err
 	}
+	st.Mu.Unlock()
+	st.FlushLights() // off-lock bridge calls for scene brightness/colour
+
 	if firstErr == nil {
 		log.Printf("automation fired: %s (%s)", a.Name, a.ID)
 		if pushSvc != nil {

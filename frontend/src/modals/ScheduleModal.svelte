@@ -22,7 +22,8 @@
     );
 
     let targetType = $state<string>(initialType);
-    let targetId = $state<string>(untrack(() => existing?.target_id || existing?.socket_id || ""));
+    let targetId = $state<string>(untrack(() =>
+        existing?.target_id || existing?.socket_id || firstTargetFor(initialType)));
     let action = $state<string>(untrack(() => existing?.action ?? "on"));
     let timeMode = $state<ScheduleTimeMode>(untrack(() => (existing?.time_mode as ScheduleTimeMode | undefined) ?? "fixed"));
     let time = $state(untrack(() => existing?.time || "08:00"));
@@ -46,25 +47,35 @@
         return `${parts} ${m < 0 ? "before" : "after"} ${event}`;
     });
 
-    // Available targets for the current type, plus reset of selection /
-    // action when switching type.
+    // Available targets for the current type.
     const targets = $derived.by(() => {
         if (targetType === "socket") return v.sockets.map(s => ({ id: s.id, label: `${s.name}${s.room ? ` · ${s.room}` : ""}` }));
         if (targetType === "group")  return v.groups.map(g => ({ id: g.id, label: `${g.name} · ${g.socket_ids.length} sockets` }));
         return v.scenes.map(s => ({ id: s.id, label: s.steps?.length > 1 ? `${s.name} · ${s.steps.length} steps` : `${s.name} · ${s.steps?.[0]?.actions.length ?? 0} actions` }));
     });
+    // True when the selected target no longer exists (deleted while editing,
+    // or a stale edit) — rendered as a disabled "(removed)" option so the
+    // user re-picks deliberately instead of us silently rewriting it.
+    const targetMissing = $derived(!!targetId && !targets.find(t => t.id === targetId));
 
-    $effect(() => {
-        if (!targets.find(t => t.id === targetId)) {
-            targetId = targets[0]?.id ?? "";
-        }
-        if (targetType === "scene") action = "activate";
+    function firstTargetFor(type: string): string {
+        if (type === "socket") return v.sockets[0]?.id ?? "";
+        if (type === "group") return v.groups[0]?.id ?? "";
+        return v.scenes[0]?.id ?? "";
+    }
+
+    // Explicit handler instead of a state-mutating $effect: switching type
+    // is the only moment the selection should be reseeded.
+    function onTargetTypeChange(t: string) {
+        targetId = firstTargetFor(t);
+        targetError = "";
+        if (t === "scene") action = "activate";
         else if (action === "activate") action = "on";
-    });
+    }
 
     async function save() {
         if (saving) return;
-        if (!targetId) { targetError = "Pick something to schedule."; return; }
+        if (!targetId || targetMissing) { targetError = "Pick something to schedule."; return; }
         targetError = "";
         const payload: Partial<Schedule> = {
             target_type: targetType as TargetType,
@@ -109,6 +120,7 @@
                 <Segmented
                     name="sched-target-type"
                     bind:value={targetType}
+                    onChange={onTargetTypeChange}
                     options={[
                         { value: "socket", label: "Socket", disabled: v.sockets.length === 0 },
                         { value: "group",  label: "Group",  disabled: v.groups.length === 0 },
@@ -123,6 +135,9 @@
                         aria-invalid={targetError ? "true" : undefined}
                         aria-describedby={targetError ? "sched-target-err" : undefined}
                         onchange={() => targetError = ""}>
+                        {#if targetMissing}
+                            <option value={targetId} disabled>(removed)</option>
+                        {/if}
                         {#each targets as t (t.id)}
                             <option value={t.id}>{t.label}</option>
                         {/each}

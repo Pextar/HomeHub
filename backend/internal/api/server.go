@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -95,6 +96,7 @@ func (s *Server) Handler() http.Handler {
 	r := mux.NewRouter()
 	r.Use(loggingMiddleware)
 	r.Use(maxBodyBytes(maxRequestBody))
+	r.Use(csrfMiddleware)
 
 	s.Store.Mu.RLock()
 	authEnabled := len(s.Store.Users) > 0
@@ -243,30 +245,79 @@ func (s *Server) Handler() http.Handler {
 	return r
 }
 
-// corsFromEnv builds CORS middleware from CORS_ALLOWED_ORIGINS (a comma-
-// separated list). It returns nil when the var is unset, leaving the API
-// same-origin only. Explicit origins also get credentialed requests
-// enabled; a "*" entry can't, since credentials and wildcard are mutually
-// exclusive per the CORS spec.
-func corsFromEnv() func(http.Handler) http.Handler {
+// corsOrigins parses CORS_ALLOWED_ORIGINS (a comma-separated list) into the
+// origins the operator has opted in. Empty when unset. Shared by the CORS
+// middleware and the CSRF origin check so the two can't drift.
+func corsOrigins() []string {
 	raw := strings.TrimSpace(os.Getenv("CORS_ALLOWED_ORIGINS"))
 	if raw == "" {
 		return nil
 	}
 	var origins []string
-	wildcard := false
 	for _, o := range strings.Split(raw, ",") {
-		o = strings.TrimSpace(o)
-		if o == "" {
-			continue
+		if o = strings.TrimSpace(o); o != "" {
+			origins = append(origins, o)
 		}
+	}
+	return origins
+}
+
+// csrfMiddleware rejects state-changing requests whose Origin header shows a
+// browser context on a different origin than ours (or an operator-allowed
+// CORS origin). SameSite=Lax on the session cookie is the first line of
+// defense; this covers the gaps — login CSRF, older browsers, and overly
+// broad CORS_ALLOWED_ORIGINS entries combined with credentials. Requests
+// without an Origin header (curl, iOS Shortcuts) pass through untouched.
+func csrfMiddleware(next http.Handler) http.Handler {
+	allowed := make(map[string]bool)
+	for _, o := range corsOrigins() {
+		allowed[o] = true
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet, http.MethodHead, http.MethodOptions:
+			next.ServeHTTP(w, r)
+			return
+		}
+		origin := r.Header.Get("Origin")
+		if origin == "" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		// Same-origin check against the Host the request arrived with, and
+		// against X-Forwarded-Host for reverse proxies that rewrite Host.
+		// (Trusting XFH only loosens toward same-origin: a cross-site
+		// browser request can't carry a custom XFH header — forms can't set
+		// headers and fetch would need a preflight that CORS denies.)
+		if u, err := url.Parse(origin); err == nil {
+			if strings.EqualFold(u.Host, r.Host) ||
+				(r.Header.Get("X-Forwarded-Host") != "" && strings.EqualFold(u.Host, r.Header.Get("X-Forwarded-Host"))) {
+				next.ServeHTTP(w, r) // same-origin
+				return
+			}
+		}
+		if allowed["*"] || allowed[origin] {
+			next.ServeHTTP(w, r)
+			return
+		}
+		writeError(w, http.StatusForbidden, "cross-origin request rejected")
+	})
+}
+
+// corsFromEnv builds CORS middleware from CORS_ALLOWED_ORIGINS. It returns
+// nil when the var is unset, leaving the API same-origin only. Explicit
+// origins also get credentialed requests enabled; a "*" entry can't, since
+// credentials and wildcard are mutually exclusive per the CORS spec.
+func corsFromEnv() func(http.Handler) http.Handler {
+	origins := corsOrigins()
+	if len(origins) == 0 {
+		return nil
+	}
+	wildcard := false
+	for _, o := range origins {
 		if o == "*" {
 			wildcard = true
 		}
-		origins = append(origins, o)
-	}
-	if len(origins) == 0 {
-		return nil
 	}
 	opts := []handlers.CORSOption{
 		handlers.AllowedOrigins(origins),
@@ -286,6 +337,17 @@ func writeJSON(w http.ResponseWriter, status int, v interface{}) {
 	if v != nil {
 		_ = json.NewEncoder(w).Encode(v)
 	}
+}
+
+// writeJSONBytes writes an already-encoded JSON body. Used together with a
+// json.Marshal performed under the store lock: the marshal produces a
+// consistent snapshot while the lock is held (it does no network I/O), and the
+// potentially slow client write happens here after the lock is released, so the
+// store is never held across client I/O.
+func writeJSONBytes(w http.ResponseWriter, status int, b []byte) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_, _ = w.Write(b)
 }
 
 // writeError responds with a JSON {"error": "..."} body.
@@ -314,6 +376,13 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if authEnabled {
 		ip := clientIP(r)
 		if ok, retryAfter := s.logins.allowed(ip); !ok {
+			w.Header().Set("Retry-After", strconv.Itoa(int(retryAfter.Seconds())+1))
+			writeError(w, http.StatusTooManyRequests, "too many failed attempts — try again later")
+			return
+		}
+		// Cross-IP cap: an attacker rotating source addresses still runs
+		// into this one. Existing sessions are unaffected by the pause.
+		if ok, retryAfter := s.logins.allowed(globalLoginKey); !ok {
 			w.Header().Set("Retry-After", strconv.Itoa(int(retryAfter.Seconds())+1))
 			writeError(w, http.StatusTooManyRequests, "too many failed attempts — try again later")
 			return
@@ -349,12 +418,16 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 // configured credentials, so the frontend's "iOS Shortcuts" helper can
 // hand the user a ready-to-paste Authorization header.
 //
-// This sits behind authMiddleware, so only an already-authenticated
-// client can reach it — and it grants nothing the caller's session
-// cookie didn't already grant. Returns an empty header when auth is off.
-func (s *Server) getShortcutAuth(w http.ResponseWriter, _ *http.Request) {
+// Only the owner gets the credential back: AUTH_USER/AUTH_PASS is the
+// owner's permanent password equivalent, so returning it to any admin
+// session would let a non-owner admin escalate to the (undemotable)
+// owner account. Other callers get an empty header, the same shape the
+// frontend already handles for the auth-off case.
+func (s *Server) getShortcutAuth(w http.ResponseWriter, r *http.Request) {
 	header := ""
-	if s.AuthUser != "" && s.AuthPass != "" {
+	u := currentUser(r)
+	ownerOrAuthOff := u == nil || u.Owner
+	if ownerOrAuthOff && s.AuthUser != "" && s.AuthPass != "" {
 		token := base64.StdEncoding.EncodeToString([]byte(s.AuthUser + ":" + s.AuthPass))
 		header = "Basic " + token
 	}

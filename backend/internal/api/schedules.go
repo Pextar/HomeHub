@@ -61,8 +61,6 @@ func (s *Server) getSchedules(w http.ResponseWriter, r *http.Request) {
 		}
 		keys[sch.ID] = k
 	}
-	s.Store.Mu.RUnlock()
-
 	sort.Slice(raw, func(i, j int) bool {
 		ki, kj := keys[raw[i].ID], keys[raw[j].ID]
 		if ki != kj {
@@ -75,8 +73,16 @@ func (s *Server) getSchedules(w http.ResponseWriter, r *http.Request) {
 	for i, sch := range raw {
 		result[i] = scheduleResponse{Schedule: sch, EffectiveTime: effective[sch.ID]}
 	}
+	// Snapshot under the lock — result still holds live *store.Schedule
+	// pointers that writers mutate in place.
+	b, err := json.Marshal(result)
+	s.Store.Mu.RUnlock()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to encode response")
+		return
+	}
 
-	writeJSON(w, http.StatusOK, result)
+	writeJSONBytes(w, http.StatusOK, b)
 }
 
 func (s *Server) createSchedule(w http.ResponseWriter, r *http.Request) {
@@ -113,6 +119,10 @@ func (s *Server) createSchedule(w http.ResponseWriter, r *http.Request) {
 	}
 	if schedule.ID == "" {
 		schedule.ID = fmt.Sprintf("schedule_%d", time.Now().UnixNano())
+	} else if _, exists := s.Store.Schedules[schedule.ID]; exists {
+		// A client-supplied ID must not silently replace an existing record.
+		writeError(w, http.StatusConflict, "a schedule with that id already exists")
+		return
 	}
 
 	s.Store.Schedules[schedule.ID] = &schedule
@@ -128,7 +138,15 @@ func (s *Server) createSchedule(w http.ResponseWriter, r *http.Request) {
 func (s *Server) updateSchedule(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
 
-	var updates store.Schedule
+	// Enabled and the offsets shadow the embedded fields as pointers so a
+	// partial PUT that omits them keeps the stored values instead of
+	// silently disabling the schedule / zeroing its offsets.
+	var updates struct {
+		store.Schedule
+		Enabled             *bool `json:"enabled"`
+		RandomOffsetMinutes *int  `json:"random_offset_minutes"`
+		SolarOffsetMinutes  *int  `json:"solar_offset_minutes"`
+	}
 	if err := json.NewDecoder(r.Body).Decode(&updates); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return
@@ -175,9 +193,15 @@ func (s *Server) updateSchedule(w http.ResponseWriter, r *http.Request) {
 	if updates.Days != nil {
 		merged.Days = updates.Days
 	}
-	merged.Enabled = updates.Enabled
-	merged.RandomOffsetMinutes = updates.RandomOffsetMinutes
-	merged.SolarOffsetMinutes = updates.SolarOffsetMinutes
+	if updates.Enabled != nil {
+		merged.Enabled = *updates.Enabled
+	}
+	if updates.RandomOffsetMinutes != nil {
+		merged.RandomOffsetMinutes = *updates.RandomOffsetMinutes
+	}
+	if updates.SolarOffsetMinutes != nil {
+		merged.SolarOffsetMinutes = *updates.SolarOffsetMinutes
+	}
 
 	if !isAdmin(user) {
 		// After merge, the target must still be the user's own socket.

@@ -70,8 +70,13 @@
     $effect(() => {
         if (!moreOpen) return;
         function onDoc(e: MouseEvent) { if (!el?.contains(e.target as Node)) moreOpen = false; }
+        function onKey(e: KeyboardEvent) { if (e.key === "Escape") moreOpen = false; }
         document.addEventListener("click", onDoc, true);
-        return () => document.removeEventListener("click", onDoc, true);
+        document.addEventListener("keydown", onKey, true);
+        return () => {
+            document.removeEventListener("click", onDoc, true);
+            document.removeEventListener("keydown", onKey, true);
+        };
     });
 </script>
 
@@ -129,21 +134,14 @@
         /* Subtle tone tint even when off */
         background: var(--card);
     }
-    .room[data-tone="warm"]    { background: linear-gradient(155deg, #201d15 0%, #1a1811 100%); }
-    .room[data-tone="cool"]    { background: linear-gradient(155deg, #161d23 0%, #11171c 100%); }
-    .room[data-tone="neutral"] { background: linear-gradient(155deg, #1d1d17 0%, #161611 100%); }
-
-    :global([data-theme="light"]) .room[data-tone="warm"]    { background: linear-gradient(155deg, #fdf6ea 0%, #f8eed8 100%); }
-    :global([data-theme="light"]) .room[data-tone="cool"]    { background: linear-gradient(155deg, #eef3f7 0%, #e5edf3 100%); }
-    :global([data-theme="light"]) .room[data-tone="neutral"] { background: linear-gradient(155deg, #f5f3ee 0%, #edeae2 100%); }
-
-    .room.on { border-color: transparent; }
-    .room.on[data-tone="warm"]    { background: linear-gradient(155deg, #3a2f1f 0%, #271f14 100%); }
-    .room.on[data-tone="cool"]    { background: linear-gradient(155deg, #1f2a30 0%, #161c20 100%); }
-    .room.on[data-tone="neutral"] { background: linear-gradient(155deg, #2a2620 0%, #1d1a15 100%); }
-    :global([data-theme="light"]) .room.on[data-tone="warm"]    { background: linear-gradient(155deg, #fff2dc 0%, #ffe9c6 100%); }
-    :global([data-theme="light"]) .room.on[data-tone="cool"]    { background: linear-gradient(155deg, #e6eef2 0%, #dbe7ed 100%); }
-    :global([data-theme="light"]) .room.on[data-tone="neutral"] { background: linear-gradient(155deg, #f3efe6 0%, #ebe4d6 100%); }
+    /* ON uses the one sanctioned surface (DESIGN.md §6.1) — the per-room
+       tone gradients that used to live here were off-spec ("no gradients
+       except .tile.on and the timeline"); room identity now sits on the
+       icon tint below instead. */
+    .room.on {
+        background: var(--tile-on-gradient);
+        border-color: var(--tile-on-border);
+    }
 
     @media (hover: hover) {
         .room:hover { border-color: var(--border-strong); transform: translateY(-2px); box-shadow: var(--shadow-md); }
@@ -181,6 +179,9 @@
         transition: background var(--t-med), color var(--t-med);
         flex-shrink: 0;
     }
+    /* Per-room identity, token-tinted (replaces the old tone gradients). */
+    .room[data-tone="warm"]:not(.on) .ico { color: var(--p-rf); }
+    .room[data-tone="cool"]:not(.on) .ico { color: var(--cool); }
     .ico.on {
         background: var(--on-soft);
         color: var(--on);

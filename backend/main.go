@@ -297,5 +297,7 @@ func main() {
 			log.Printf("https graceful shutdown failed: %v", err)
 		}
 	}
+	// Persist any readings still sitting in the debounce window.
+	st.FlushSensorSaves()
 	log.Println("bye")
 }

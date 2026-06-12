@@ -37,6 +37,23 @@ export const PROTOCOLS: { value: string; label: string }[] = [
   { value: "mqtt", label: "MQTT" },
 ];
 
+// Protocol classification, shared by every view that branches on transport.
+// Previously each view kept its own copy of this sniffing and they had
+// already drifted (only Console knew about a literal "wifi" protocol).
+export type ProtocolKind = "rf" | "wifi" | "matter" | "mqtt";
+export function protocolKind(p: string): ProtocolKind {
+  if (p === "tasmota" || p === "wifi") return "wifi";
+  if (p.startsWith("matter")) return "matter";
+  if (p === "mqtt") return "mqtt";
+  return "rf";
+}
+
+// Smart protocols are driven through a bridge (Tasmota/Matter) and expose
+// brightness/colour beyond plain on/off.
+export function isSmartProtocol(p: string): boolean {
+  return p === "tasmota" || p.startsWith("matter");
+}
+
 export function formatDays(days: number[] | undefined): string {
   if (!days || days.length === 0 || days.length === 7) return "Every day";
   const sorted = [...days].sort((a, b) => a - b);

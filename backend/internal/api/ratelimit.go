@@ -11,10 +11,20 @@ import (
 // without a brake an attacker on the network could exhaust the keyspace.
 // We count failures per client IP and lock that IP out once it crosses the
 // threshold inside a rolling window. Successful logins clear the counter.
+//
+// The per-IP limit alone is bypassable by rotating source addresses (an
+// IPv6 /64 hands an attacker billions), so a second counter under
+// globalLoginKey caps total failures across all IPs. Tripping it pauses
+// logins for everyone for the lockout window — for a home hub that beats
+// letting a distributed guesser keep chipping at 6-digit codes, and
+// existing sessions keep working throughout.
 const (
 	maxLoginFailures = 10
 	loginWindow      = 15 * time.Minute
 	loginLockout     = 15 * time.Minute
+
+	globalLoginKey         = "\x00global" // NUL prefix can't collide with an IP
+	maxGlobalLoginFailures = 50
 )
 
 type loginAttempts struct {
@@ -50,10 +60,20 @@ func (l *loginLimiter) allowed(key string) (bool, time.Duration) {
 }
 
 // recordFailure registers a failed attempt for key and locks it out once it
-// crosses the threshold within the window.
+// crosses the threshold within the window. Every failure also counts toward
+// the cross-IP global counter (see globalLoginKey).
 func (l *loginLimiter) recordFailure(key string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	l.bump(key, maxLoginFailures)
+	if key != globalLoginKey {
+		l.bump(globalLoginKey, maxGlobalLoginFailures)
+	}
+}
+
+// bump increments the failure count for key, locking it out at max.
+// Caller must hold l.mu.
+func (l *loginLimiter) bump(key string, max int) {
 	now := l.now()
 	a := l.by[key]
 	if a == nil || now.After(a.windowEnd) {
@@ -61,14 +81,16 @@ func (l *loginLimiter) recordFailure(key string) {
 		l.by[key] = a
 	}
 	a.failures++
-	if a.failures >= maxLoginFailures {
+	if a.failures >= max {
 		a.lockedUntil = now.Add(loginLockout)
 		a.failures = 0
 		a.windowEnd = now.Add(loginLockout)
 	}
 }
 
-// recordSuccess clears any tracked failures for key.
+// recordSuccess clears any tracked failures for key. The global counter is
+// left untouched — a distributed guesser shouldn't get its budget refilled
+// by an unrelated successful login.
 func (l *loginLimiter) recordSuccess(key string) {
 	l.mu.Lock()
 	delete(l.by, key)

@@ -278,7 +278,7 @@
   <div class="footer">
     {#if session.user?.username}
       <div class="profile-card" title={session.user.username}>
-        <div class="profile-avatar">{session.user.username[0].toUpperCase()}</div>
+        <div class="profile-avatar">{session.user.username.trim().charAt(0).toUpperCase() || "?"}</div>
         <div class="profile-info">
           <span class="profile-name">{session.user.username}</span>
           <span class="profile-role">{session.user.admin ? "Admin" : "Limited"}</span>

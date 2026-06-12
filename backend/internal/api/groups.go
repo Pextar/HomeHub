@@ -19,23 +19,37 @@ func (s *Server) getGroups(w http.ResponseWriter, r *http.Request) {
 	for _, g := range s.Store.Groups {
 		out = append(out, g)
 	}
-	s.Store.Mu.RUnlock()
 	sort.Slice(out, func(i, j int) bool {
 		return strings.ToLower(out[i].Name) < strings.ToLower(out[j].Name)
 	})
-	writeJSON(w, http.StatusOK, out)
+	b, err := json.Marshal(out)
+	s.Store.Mu.RUnlock()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to encode response")
+		return
+	}
+	writeJSONBytes(w, http.StatusOK, b)
 }
 
 func (s *Server) getGroup(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
 	s.Store.Mu.RLock()
 	g, ok := s.Store.Groups[id]
+	var b []byte
+	var err error
+	if ok {
+		b, err = json.Marshal(g)
+	}
 	s.Store.Mu.RUnlock()
 	if !ok {
 		writeError(w, http.StatusNotFound, "group not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, g)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to encode response")
+		return
+	}
+	writeJSONBytes(w, http.StatusOK, b)
 }
 
 func (s *Server) createGroup(w http.ResponseWriter, r *http.Request) {
@@ -54,6 +68,10 @@ func (s *Server) createGroup(w http.ResponseWriter, r *http.Request) {
 	}
 	if g.ID == "" {
 		g.ID = fmt.Sprintf("group_%d", time.Now().UnixNano())
+	} else if _, exists := s.Store.Groups[g.ID]; exists {
+		// A client-supplied ID must not silently replace an existing record.
+		writeError(w, http.StatusConflict, "a group with that id already exists")
+		return
 	}
 	s.Store.Groups[g.ID] = &g
 	if err := s.Store.Save(); err != nil {
@@ -137,42 +155,42 @@ func (s *Server) groupAction(action string) http.HandlerFunc {
 		id := mux.Vars(r)["id"]
 
 		s.Store.Mu.Lock()
-		defer s.Store.Mu.Unlock()
-
 		g, ok := s.Store.Groups[id]
+		var name string
+		var staged []store.StagedSend
+		if ok {
+			name = g.Name
+			staged, _ = s.Store.StageAction("group", id, action)
+		}
+		s.Store.Mu.Unlock()
 		if !ok {
 			writeError(w, http.StatusNotFound, "group not found")
 			return
 		}
 
-		var ok2 int
-		failures := make([]map[string]string, 0)
+		s.Store.SendStaged(staged)
+
+		s.Store.Mu.Lock()
 		// Suppress per-socket push notifications; we send one summary below.
 		s.Store.SuppressStateChange = true
-		for _, sid := range g.SocketIDs {
-			if err := s.Store.ExecuteAction("socket", sid, action); err != nil {
-				failures = append(failures, map[string]string{
-					"socket_id": sid,
-					"error":     err.Error(),
-				})
-				continue
-			}
-			ok2++
-		}
+		_ = s.Store.ApplyStaged(staged)
 		s.Store.SuppressStateChange = false
-		entry := store.ActivityEntry{Kind: "group", Source: "manual", Action: action, Label: g.Name}
+		ok2, failures := stagedFailures(staged)
+		entry := store.ActivityEntry{Kind: "group", Source: "manual", Action: action, Label: name}
 		if len(failures) > 0 {
 			entry.Status = "error"
 			entry.Error = fmt.Sprintf("%d of %d failed", len(failures), ok2+len(failures))
 		}
 		s.Store.Activity.Add(entry)
-		if err := s.Store.Save(); err != nil {
+		err := s.Store.Save()
+		s.Store.Mu.Unlock()
+		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
 			return
 		}
-		s.notifyBulkState(fmt.Sprintf("%s turned %s", g.Name, action), ok2)
+		s.notifyBulkState(fmt.Sprintf("%s turned %s", name, action), ok2)
 		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"group":    g.Name,
+			"group":    name,
 			"updated":  ok2,
 			"failures": failures,
 		})

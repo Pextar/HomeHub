@@ -11,12 +11,15 @@
 package store
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 )
 
 // RFSender abstracts the radio transmitter so the store doesn't import
@@ -84,6 +87,17 @@ type Store struct {
 	// while executing a scene under Mu. They are drained by FlushLights after
 	// the lock is released, so the (network) bridge calls never block the lock.
 	pendingLights []lightCmd
+
+	// sensorsDirty + sensorSaveTimer implement the readings-persistence
+	// debounce (see scheduleSensorSave). Guarded by Mu.
+	sensorsDirty    bool
+	sensorSaveTimer *time.Timer
+
+	// txMu serializes 433 MHz transmissions (see Transmit). Concurrent RF
+	// sends would overlap on air and garble both frames; network protocols
+	// (Tasmota/Matter/MQTT) don't take it. Never acquired while waiting on Mu,
+	// so the Mu → txMu order in ApplyState cannot deadlock.
+	txMu sync.Mutex
 }
 
 type lightCmd struct {
@@ -300,17 +314,23 @@ func (s *Store) UserByUsername(username string) *User {
 }
 
 // UserByLoginCode returns the user whose login code exactly matches, or
-// nil. An empty code never matches. Caller must hold Mu.
+// nil. An empty code never matches. The comparison is constant-time and
+// every user is checked even after a match, so response timing doesn't
+// help an attacker guess codes character by character. Caller must hold Mu.
 func (s *Store) UserByLoginCode(code string) *User {
 	if code == "" {
 		return nil
 	}
+	var found *User
 	for _, u := range s.Users {
-		if u.LoginCode == code {
-			return u
+		if u.LoginCode == "" {
+			continue
+		}
+		if subtle.ConstantTimeCompare([]byte(u.LoginCode), []byte(code)) == 1 && found == nil {
+			found = u
 		}
 	}
-	return nil
+	return found
 }
 
 // UserByInviteToken returns the user whose pending invite token matches,
@@ -352,8 +372,11 @@ func (s *Store) SaveSensors() error {
 }
 
 // AppendReading adds one reading to a sensor's rolling window, updates
-// the sensor's LastValue/LastReadingAt, persists, and fires OnSensorAlert
-// if the reading crosses a configured threshold for the first time.
+// the sensor's LastValue/LastReadingAt, and fires OnSensorAlert if the
+// reading crosses a configured threshold for the first time. Persistence
+// is debounced (see scheduleSensorSave) — a chatty rtl_433 sensor can
+// deliver several packets a second, and rewriting sensors.json plus the
+// full readings window per packet was the RX path's dominant cost.
 // Caller must hold Mu.
 func (s *Store) AppendReading(sensorID string, r SensorReading) error {
 	sensor, ok := s.Sensors[sensorID]
@@ -385,7 +408,53 @@ func (s *Store) AppendReading(sensorID string, r SensorReading) error {
 		s.OnSensorAlert(*sensor, r.Value, direction)
 	}
 
-	return s.SaveSensors()
+	s.scheduleSensorSave()
+	return nil
+}
+
+// sensorSaveDelay is the debounce window for persisting readings. A crash
+// loses at most this much sensor history — readings are telemetry, not
+// commands, so that's an easy trade for not hammering the SD card.
+const sensorSaveDelay = 5 * time.Second
+
+// scheduleSensorSave arms a one-shot deferred SaveSensors. Multiple
+// readings inside the window coalesce into a single write. Caller must
+// hold Mu.
+func (s *Store) scheduleSensorSave() {
+	s.sensorsDirty = true
+	if s.sensorSaveTimer != nil {
+		return // already armed; the pending flush picks this reading up
+	}
+	s.sensorSaveTimer = time.AfterFunc(sensorSaveDelay, func() {
+		s.Mu.Lock()
+		defer s.Mu.Unlock()
+		s.sensorSaveTimer = nil
+		if !s.sensorsDirty {
+			return
+		}
+		s.sensorsDirty = false
+		if err := s.SaveSensors(); err != nil {
+			log.Printf("store: deferred sensor save failed: %v", err)
+		}
+	})
+}
+
+// FlushSensorSaves persists any pending sensor/readings writes right away.
+// Called on shutdown so the debounce window's readings aren't lost.
+func (s *Store) FlushSensorSaves() {
+	s.Mu.Lock()
+	defer s.Mu.Unlock()
+	if s.sensorSaveTimer != nil {
+		s.sensorSaveTimer.Stop()
+		s.sensorSaveTimer = nil
+	}
+	if !s.sensorsDirty {
+		return
+	}
+	s.sensorsDirty = false
+	if err := s.SaveSensors(); err != nil {
+		log.Printf("store: final sensor save failed: %v", err)
+	}
 }
 
 func readJSON(path string, v interface{}) error {
