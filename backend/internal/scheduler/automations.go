@@ -38,8 +38,10 @@ func newAutoEngine() *autoEngine {
 }
 
 // tick evaluates every enabled automation against the current state and fires
-// those whose trigger edge occurred and whose conditions all hold.
-func (e *autoEngine) tick(st *store.Store, now time.Time, pushSvc *push.Service) {
+// those whose trigger edge occurred and whose conditions all hold. prev is
+// the previous tick's time, anchoring the (prev, now] window for time
+// triggers (see timeWindowMatches).
+func (e *autoEngine) tick(st *store.Store, prev, now time.Time, pushSvc *push.Service) {
 	stamp := now.Format("2006-01-02 15:04")
 
 	// Snapshot the state we need under a read lock, then evaluate without it.
@@ -83,7 +85,7 @@ func (e *autoEngine) tick(st *store.Store, now time.Time, pushSvc *push.Service)
 		if !a.Enabled {
 			continue
 		}
-		if e.triggerFired(a, now, stamp, curSocket, sensorVal, &settings) &&
+		if e.triggerFired(a, prev, now, stamp, curSocket, sensorVal, &settings) &&
 			e.conditionsHold(a.Conditions, curSocket, now) {
 			due = append(due, a)
 		}
@@ -101,19 +103,20 @@ func (e *autoEngine) tick(st *store.Store, now time.Time, pushSvc *push.Service)
 }
 
 func (e *autoEngine) triggerFired(
-	a store.Automation, now time.Time, stamp string,
+	a store.Automation, prev, now time.Time, stamp string,
 	curSocket map[string]bool, sensorVal map[string]float64, settings *store.Settings,
 ) bool {
 	t := a.Trigger
 	switch t.Type {
 	case "time":
-		// Reuse the Schedule solar/fixed time resolution.
+		// Reuse the Schedule solar/fixed time resolution, matched against
+		// the (prev, now] window so DST gaps don't swallow the trigger.
 		sched := store.Schedule{TimeMode: t.TimeMode, Time: t.Time, SolarOffsetMinutes: t.SolarOffsetMinutes}
 		eff, ok := sched.EffectiveHHMM(now, settings)
-		if !ok || eff != now.Format("15:04") {
+		if !ok || !timeWindowMatches(eff, prev, now) {
 			return false
 		}
-		if !dayMatches(t.Days, int(now.Weekday())) {
+		if !dayMatches(t.Days, fireWeekday(eff, prev, now)) {
 			return false
 		}
 		if e.lastFired[a.ID] == stamp {

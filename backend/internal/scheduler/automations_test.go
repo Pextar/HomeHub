@@ -21,19 +21,19 @@ func TestDeviceTriggerFiresOnEdgeOnly(t *testing.T) {
 	settings := &store.Settings{}
 
 	// First tick: not primed yet — must not fire even if already on.
-	if e.triggerFired(a, now, "", map[string]bool{"s1": true}, nil, settings) {
+	if e.triggerFired(a, now.Add(-5*time.Second), now, "", map[string]bool{"s1": true}, nil, settings) {
 		t.Fatal("device trigger fired before engine was primed")
 	}
 	e.prevSocket = map[string]bool{"s1": false}
 	e.primed = true
 
 	// Transition off -> on fires.
-	if !e.triggerFired(a, now, "", map[string]bool{"s1": true}, nil, settings) {
+	if !e.triggerFired(a, now.Add(-5*time.Second), now, "", map[string]bool{"s1": true}, nil, settings) {
 		t.Fatal("device trigger did not fire on off->on edge")
 	}
 	// Staying on does not fire again (prevSocket updated by tick(), simulate it).
 	e.prevSocket = map[string]bool{"s1": true}
-	if e.triggerFired(a, now, "", map[string]bool{"s1": true}, nil, settings) {
+	if e.triggerFired(a, now.Add(-5*time.Second), now, "", map[string]bool{"s1": true}, nil, settings) {
 		t.Fatal("device trigger fired while state held on")
 	}
 }
@@ -48,15 +48,15 @@ func TestSensorTriggerFiresOnRisingEdge(t *testing.T) {
 	settings := &store.Settings{}
 
 	// Below threshold: no fire.
-	if e.triggerFired(a, now, "", nil, map[string]float64{"temp": 20}, settings) {
+	if e.triggerFired(a, now.Add(-5*time.Second), now, "", nil, map[string]float64{"temp": 20}, settings) {
 		t.Fatal("sensor trigger fired below threshold")
 	}
 	// Crossing above: fires once.
-	if !e.triggerFired(a, now, "", nil, map[string]float64{"temp": 30}, settings) {
+	if !e.triggerFired(a, now.Add(-5*time.Second), now, "", nil, map[string]float64{"temp": 30}, settings) {
 		t.Fatal("sensor trigger did not fire on crossing")
 	}
 	// Still above: does not re-fire.
-	if e.triggerFired(a, now, "", nil, map[string]float64{"temp": 31}, settings) {
+	if e.triggerFired(a, now.Add(-5*time.Second), now, "", nil, map[string]float64{"temp": 31}, settings) {
 		t.Fatal("sensor trigger re-fired while held above threshold")
 	}
 }
@@ -71,10 +71,10 @@ func TestTimeTriggerMatchesMinuteOnce(t *testing.T) {
 	}
 	settings := &store.Settings{}
 
-	if !e.triggerFired(a, now, stamp, nil, nil, settings) {
+	if !e.triggerFired(a, now.Add(-5*time.Second), now, stamp, nil, nil, settings) {
 		t.Fatal("time trigger did not fire at matching minute")
 	}
-	if e.triggerFired(a, now, stamp, nil, nil, settings) {
+	if e.triggerFired(a, now.Add(-5*time.Second), now, stamp, nil, nil, settings) {
 		t.Fatal("time trigger fired twice in the same minute")
 	}
 }

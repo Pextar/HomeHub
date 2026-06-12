@@ -34,6 +34,11 @@ func Run(ctx context.Context, st *store.Store, pushSvc *push.Service) {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 
+	// prevTick anchors the (prev, now] matching window. Seeded just before
+	// the current minute starts so schedules due in the startup minute
+	// still fire on the first tick.
+	prevTick := time.Now().Truncate(time.Minute).Add(-time.Second)
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -66,7 +71,7 @@ func Run(ctx context.Context, st *store.Store, pushSvc *push.Service) {
 				// Either way, skip the base-time check this tick.
 				continue
 			}
-			if !scheduleMatchesNow(s, now, st.Settings, lastFired[s.ID], stamp) {
+			if !scheduleMatchesNow(s, prevTick, now, st.Settings, lastFired[s.ID], stamp) {
 				continue
 			}
 			if s.RandomOffsetMinutes > 0 {
@@ -119,7 +124,8 @@ func Run(ctx context.Context, st *store.Store, pushSvc *push.Service) {
 		// Automations run off the same tick: time triggers match the minute,
 		// while sensor/device triggers fire on edges detected against the
 		// previous tick's snapshot.
-		autos.tick(st, now, pushSvc)
+		autos.tick(st, prevTick, now, pushSvc)
+		prevTick = now
 	}
 }
 
@@ -244,20 +250,66 @@ func targetLabel(st *store.Store, kind, id string) string {
 	return id
 }
 
-// scheduleMatchesNow reports whether s's trigger time falls in the current
-// minute on a matching weekday and it hasn't already fired this minute. It
-// does not consider the random offset or pending state — the caller layers
-// those on top. lastStamp is the "YYYY-MM-DD HH:MM" the schedule last fired
-// at; nowStamp is the same format for now.
-func scheduleMatchesNow(s *store.Schedule, now time.Time, settings *store.Settings, lastStamp, nowStamp string) bool {
+// scheduleMatchesNow reports whether s's trigger time falls inside the
+// (prev, now] wall-clock window on a matching weekday and it hasn't already
+// fired this minute. It does not consider the random offset or pending
+// state — the caller layers those on top. lastStamp is the
+// "YYYY-MM-DD HH:MM" the schedule last fired at; nowStamp is the same
+// format for now.
+func scheduleMatchesNow(s *store.Schedule, prev, now time.Time, settings *store.Settings, lastStamp, nowStamp string) bool {
 	triggerHHMM, ok := s.EffectiveHHMM(now, settings)
-	if !ok || triggerHHMM != now.Format("15:04") {
+	if !ok || !timeWindowMatches(triggerHHMM, prev, now) {
 		return false
 	}
-	if !dayMatches(s.Days, int(now.Weekday())) {
+	if !dayMatches(s.Days, fireWeekday(triggerHHMM, prev, now)) {
 		return false
 	}
 	return lastStamp != nowStamp
+}
+
+// timeWindowMatches reports whether an "HH:MM" trigger falls inside the
+// half-open wall-clock window (prev, now]. The window normally spans one
+// 5s tick — exactly one tick crosses each minute boundary, so this behaves
+// like the old exact-minute match — but it widens across clock
+// discontinuities: a DST spring-forward (02:00 → 03:00) or a suspend/
+// resume still fires the schedules whose trigger time the clock skipped.
+// A backwards step (DST fall-back, NTP) degrades to exact-minute matching;
+// the per-minute lastFired stamp already dedupes the repeated hour.
+func timeWindowMatches(triggerHHMM string, prev, now time.Time) bool {
+	t, err := time.Parse("15:04", triggerHHMM)
+	if err != nil {
+		return false
+	}
+	trigger := t.Hour()*60 + t.Minute()
+	prevMin := prev.Hour()*60 + prev.Minute()
+	nowMin := now.Hour()*60 + now.Minute()
+	sameDay := prev.Year() == now.Year() && prev.YearDay() == now.YearDay()
+	switch {
+	case sameDay && prevMin <= nowMin:
+		return trigger > prevMin && trigger <= nowMin
+	case !sameDay && !now.Before(prev):
+		// Crossed midnight: yesterday's tail plus today's head.
+		return trigger > prevMin || trigger <= nowMin
+	default:
+		// Wall clock stepped backwards within the same day.
+		return trigger == nowMin
+	}
+}
+
+// fireWeekday returns the weekday a trigger inside the (prev, now] window
+// belongs to: a trigger in yesterday's tail (window crossing midnight)
+// keeps yesterday's weekday for day-of-week matching.
+func fireWeekday(triggerHHMM string, prev, now time.Time) int {
+	t, err := time.Parse("15:04", triggerHHMM)
+	if err != nil {
+		return int(now.Weekday())
+	}
+	trigger := t.Hour()*60 + t.Minute()
+	sameDay := prev.Year() == now.Year() && prev.YearDay() == now.YearDay()
+	if !sameDay && trigger > prev.Hour()*60+prev.Minute() {
+		return int(prev.Weekday())
+	}
+	return int(now.Weekday())
 }
 
 func dayMatches(days []int, weekday int) bool {

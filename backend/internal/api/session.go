@@ -23,7 +23,11 @@ import (
 
 const (
 	cookieName = "rfauth"
-	cookieTTL  = 90 * 24 * time.Hour
+	// cookieTTL bounds how long a stolen cookie stays usable. Active
+	// clients never notice the shorter window: authMiddleware re-issues
+	// the cookie once it's past half its life (rolling renewal), so only
+	// a device that stays away for the full TTL has to log in again.
+	cookieTTL = 30 * 24 * time.Hour
 )
 
 // LoadOrCreateSessionSecret reads (or generates) a 32-byte HMAC secret
@@ -51,14 +55,15 @@ func signSession(secret []byte, id string, version int, expires time.Time) strin
 	return payload + ":" + sig
 }
 
-// verifySession validates a cookie value and returns the user id and the
-// token version it was minted with. The caller must still confirm the
-// version matches the user's current TokenVersion (see authMiddleware) so
-// a credential change invalidates older cookies.
-func verifySession(secret []byte, value string) (id string, version int, ok bool) {
+// verifySession validates a cookie value and returns the user id, the
+// token version it was minted with, and its expiry. The caller must still
+// confirm the version matches the user's current TokenVersion (see
+// authMiddleware) so a credential change invalidates older cookies; the
+// expiry drives the rolling renewal.
+func verifySession(secret []byte, value string) (id string, version int, expires time.Time, ok bool) {
 	parts := strings.SplitN(value, ":", 4)
 	if len(parts) != 4 {
-		return "", 0, false
+		return "", 0, time.Time{}, false
 	}
 	uid, verStr, expStr, gotSig := parts[0], parts[1], parts[2], parts[3]
 	payload := uid + ":" + verStr + ":" + expStr
@@ -66,17 +71,17 @@ func verifySession(secret []byte, value string) (id string, version int, ok bool
 	mac.Write([]byte(payload))
 	wantSig := base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 	if subtle.ConstantTimeCompare([]byte(gotSig), []byte(wantSig)) != 1 {
-		return "", 0, false
+		return "", 0, time.Time{}, false
 	}
 	exp, err := strconv.ParseInt(expStr, 10, 64)
 	if err != nil || time.Now().Unix() > exp {
-		return "", 0, false
+		return "", 0, time.Time{}, false
 	}
 	ver, err := strconv.Atoi(verStr)
 	if err != nil {
-		return "", 0, false
+		return "", 0, time.Time{}, false
 	}
-	return uid, ver, true
+	return uid, ver, time.Unix(exp, 0), true
 }
 
 func setSessionCookie(w http.ResponseWriter, secret []byte, id string, version int, secure bool) {
