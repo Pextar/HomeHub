@@ -132,12 +132,8 @@
         overflow: visible; /* allow dropdown menu to escape the card bounds */
     }
     .tile.on {
-        background: linear-gradient(155deg, #2b2419 0%, #221d14 60%, #1d180f 100%);
-        border-color: rgba(245, 189, 110, 0.18);
-    }
-    :global([data-theme="light"]) .tile.on {
-        background: linear-gradient(155deg, #fff5e3 0%, #ffeece 100%);
-        border-color: rgba(201, 122, 31, 0.20);
+        background: var(--tile-on-gradient);
+        border-color: var(--tile-on-border);
     }
 
     .top { display: flex; justify-content: space-between; align-items: flex-start; }

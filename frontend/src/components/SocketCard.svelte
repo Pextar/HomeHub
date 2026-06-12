@@ -26,7 +26,9 @@
     const protoLabel = $derived(isTasmota ? "Wi-Fi" : isThread ? "Thread" : isMatter ? "Matter" : "RF");
     const protoIcon = $derived(isTasmota ? "wifi" : isMatter ? "devices" : "radio");
 
-    // One-shot "pulse" ring whenever the socket's state flips.
+    // One-shot "pulse" ring whenever the socket's state flips. A state flip
+    // also invalidates the cached brightness — scenes/automations often pair
+    // "on" with a level, so the cached value is likely stale after a flip.
     let prevState = untrack(() => socket.state);
     let pulsing = $state(false);
     $effect(() => {
@@ -34,6 +36,7 @@
         if (s !== prevState) {
             prevState = s;
             pulsing = true;
+            if (isSmartLight) brightness = null; // lazy-fetch effect refetches
             const t = setTimeout(() => { pulsing = false; }, 550);
             return () => clearTimeout(t);
         }
@@ -105,10 +108,14 @@
         } catch (e) { toasts.error("Failed", (e as Error).message); }
     }
 
-    function openControls() {
+    async function openControls() {
         moreOpen = false;
-        if (isTasmota) openModal(TasmotaLightModal, { socket });
-        else if (isMatter) openModal(MatterLightModal, { socket });
+        if (isTasmota) await openModal(TasmotaLightModal, { socket });
+        else if (isMatter) await openModal(MatterLightModal, { socket });
+        else return;
+        // The modal can change brightness/colour — refetch so the
+        // "On · NN%" label and inline slider don't go stale.
+        brightness = null;
     }
     function openTimer() { moreOpen = false; openModal(TimerModal, { socket }); }
     function openEdit()  { moreOpen = false; openModal(SocketModal, { existing: socket }); }
@@ -243,12 +250,8 @@
         transition: background var(--t-med), border-color var(--t-med), box-shadow var(--t-fast);
     }
     .tile.on {
-        background: linear-gradient(155deg, #2b2419 0%, #221d14 60%, #1d180f 100%);
-        border-color: rgba(245, 189, 110, 0.18);
-    }
-    :global([data-theme="light"]) .tile.on {
-        background: linear-gradient(155deg, #fff5e3 0%, #ffeece 100%);
-        border-color: rgba(201, 122, 31, 0.20);
+        background: var(--tile-on-gradient);
+        border-color: var(--tile-on-border);
     }
     @media (hover: hover) {
         .tile:hover { border-color: var(--border-strong); }
