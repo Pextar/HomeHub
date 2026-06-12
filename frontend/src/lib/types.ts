@@ -245,6 +245,34 @@ export interface AutomationAction {
   color?: string;  // "RRGGBB", smart lights only
 }
 
+// ── Rule editor drafts ──────────────────────────────────────────────
+// Edited in place by components/RuleEditor.svelte (the shared
+// WHEN / ONLY-IF / THEN editor). The owning modal builds the actual
+// Automation API payload from a draft itself.
+
+export interface RuleActionDraft {
+  target_type: TargetType;
+  target_id: string;
+  action: string;
+  level: number;
+  color: string;
+}
+
+export interface RuleDraft {
+  trigType: AutomationTriggerType;
+  trigTimeMode: string;
+  trigTime: string;
+  trigSolarOffset: number;
+  trigDays: number[];
+  trigSensorId: string;
+  trigOp: "above" | "below";
+  trigValue: number;
+  trigSocketId: string;
+  trigToState: "on" | "off";
+  conditions: AutomationCondition[];
+  actions: RuleActionDraft[];
+}
+
 export interface Automation {
   id: string;
   name: string;
