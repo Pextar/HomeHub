@@ -312,7 +312,6 @@
                         </div>
                     </div>
                 {:else if a.target_type === "group" || a.target_type === "room"}
-                    {@const activeIdx = MATTER_PRESETS.findIndex(p => p.color === a.color && p.level === a.level)}
                     <div class="action-light-row">
                         <div class="bright">
                             <span class="bright-ico"><Icon name="sun" size={14} /></span>
@@ -321,18 +320,18 @@
                         </div>
                         <div class="preset-chips" role="group" aria-label="Lighting preset">
                             <button type="button" class="preset-chip auto"
-                                class:active={activeIdx === -1}
+                                class:active={!a.color}
                                 title="No preset — turn on at previous brightness"
-                                aria-label="No lighting preset" aria-pressed={activeIdx === -1}
+                                aria-label="No lighting preset" aria-pressed={!a.color}
                                 onclick={() => { a.color = ""; a.level = 100; }}>
                                 —
                             </button>
-                            {#each MATTER_PRESETS as p, pi (p.label)}
+                            {#each MATTER_PRESETS as p (p.label)}
                                 <button type="button" class="preset-chip"
-                                    class:active={activeIdx === pi}
+                                    class:active={a.color === p.color}
                                     style="--pc: {p.cssColor}"
                                     title="{p.label} · {p.level}%"
-                                    aria-label="{p.label} preset" aria-pressed={activeIdx === pi}
+                                    aria-label="{p.label} preset" aria-pressed={a.color === p.color}
                                     onclick={() => { a.level = p.level; a.color = p.color; }}>
                                     <span class="preset-dot" style="background:{p.cssColor}"></span>
                                     {p.label}
