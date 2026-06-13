@@ -94,6 +94,76 @@
         steps.flatMap(step => Object.values(step.perSocket).filter(v => v !== "ignore")).length
     );
 
+    // ── Snapshot scope + bulk fill ────────────────────────────────────
+    // The snapshot stores per-device values, but real edits usually start
+    // from "set this whole room/group, then tweak a couple of lamps". The
+    // scope chip narrows the visible device rows; the bulk controls write
+    // every shown row in one tap. Scope is a view filter only — rows hidden
+    // by it keep whatever they were already configured to.
+    // Start a fresh snapshot scoped to the scene's room (the common "set up
+    // this room's lamps" flow); when editing an existing snapshot, show All
+    // so no already-configured device is hidden behind the filter on open.
+    let scope = $state<string>(untrack(() =>
+        (!existingHasSnapshot && existing?.room) ? `room:${existing.room}` : ""));
+
+    const scopeOptions = $derived([
+        { key: "", label: "All" },
+        ...[...v.rooms].sort((a, b) => a.name.localeCompare(b.name))
+            .map(r => ({ key: `room:${r.name}`, label: r.name })),
+        ...v.groups.map(g => ({ key: `group:${g.id}`, label: g.name })),
+    ]);
+
+    const shownSockets = $derived.by(() => {
+        if (scope.startsWith("room:")) {
+            const rn = scope.slice(5);
+            return sockets.filter(s => (s.room || "") === rn);
+        }
+        if (scope.startsWith("group:")) {
+            const g = v.groups.find(x => x.id === scope.slice(6));
+            const ids = new Set(g?.socket_ids ?? []);
+            return sockets.filter(s => ids.has(s.id));
+        }
+        return sockets;
+    });
+    const shownHasSmart = $derived(shownSockets.some(s => isSmart(s.protocol)));
+
+    // Representative bulk values — taken from the first shown smart light.
+    // After a bulk apply every shown light matches, so this reflects the
+    // shared setting back into the slider/swatch UI.
+    function bulkLevel(step: StepState): number {
+        const f = shownSockets.find(s => isSmart(s.protocol));
+        return f ? step.levels[f.id] : 100;
+    }
+    function bulkColor(step: StepState): string {
+        const f = shownSockets.find(s => isSmart(s.protocol));
+        return f ? step.colors[f.id] : "";
+    }
+    function setAll(step: StepState, state: "ignore" | "on" | "off") {
+        for (const s of shownSockets) step.perSocket[s.id] = state;
+    }
+    function setAllLevel(step: StepState, level: number) {
+        if (isNaN(level)) return;
+        for (const s of shownSockets) if (isSmart(s.protocol)) {
+            step.levels[s.id] = level;
+            step.perSocket[s.id] = "on";
+        }
+    }
+    function setAllColor(step: StepState, hex: string) {
+        for (const s of shownSockets) if (isSmart(s.protocol)) {
+            step.colors[s.id] = hex;
+            step.perSocket[s.id] = "on";
+        }
+    }
+    // Count of devices configured in a step but hidden by the current scope,
+    // so a narrowed view never looks like settings silently vanished.
+    function hiddenConfigured(step: StepState): number {
+        const shown = new Set(shownSockets.map(s => s.id));
+        let n = 0;
+        for (const [id, st] of Object.entries(step.perSocket))
+            if (st !== "ignore" && !shown.has(id)) n++;
+        return n;
+    }
+
     function addStep() {
         const last = steps[steps.length - 1]?.delay_minutes ?? 0;
         steps = [...steps, blankStepState(last + 60)];
@@ -110,11 +180,12 @@
     function captureCurrentState(stepIndex: number) {
         const step = steps[stepIndex];
         if (!step) return;
-        for (const s of sockets) {
+        for (const s of shownSockets) {
             step.perSocket[s.id] = s.state ? "on" : "off";
         }
+        const n = shownSockets.length;
         toasts.info("Captured current state",
-            `${sockets.length} device${sockets.length === 1 ? "" : "s"} set to their current on/off state`);
+            `${n} device${n === 1 ? "" : "s"} set to their current on/off state`);
     }
 
     function buildSteps() {
@@ -477,6 +548,16 @@
                         <div class="field-help snapshot-hint">
                             Set what happens when you tap this scene manually. Supports multi-step sequences with delays.
                         </div>
+                        {#if scopeOptions.length > 1}
+                            <div class="scope-chips" role="group" aria-label="Filter devices by room or group">
+                                {#each scopeOptions as opt (opt.key)}
+                                    <button type="button" class="scope-chip"
+                                        class:active={scope === opt.key}
+                                        aria-pressed={scope === opt.key}
+                                        onclick={() => scope = opt.key}>{opt.label}</button>
+                                {/each}
+                            </div>
+                        {/if}
                         <div class="steps-wrap">
                             {#each steps as step, i (step)}
                                 <div class="step-card">
@@ -512,8 +593,54 @@
                                         {/if}
                                     </div>
 
+                                    {#if shownSockets.length > 0}
+                                        <div class="bulk-bar">
+                                            <span class="bulk-lbl">Set all<span class="bulk-n mono">{shownSockets.length}</span></span>
+                                            <div class="state-group" role="group"
+                                                aria-label="Set all shown devices in step {i + 1}">
+                                                <button type="button" class="state-btn"
+                                                    onclick={() => setAll(step, 'ignore')}
+                                                    aria-label="Ignore all shown devices">—</button>
+                                                <button type="button" class="state-btn s-on"
+                                                    onclick={() => setAll(step, 'on')}
+                                                    aria-label="Turn all shown devices on">On</button>
+                                                <button type="button" class="state-btn s-off"
+                                                    onclick={() => setAll(step, 'off')}
+                                                    aria-label="Turn all shown devices off">Off</button>
+                                            </div>
+                                            {#if shownHasSmart}
+                                                <div class="bulk-light">
+                                                    <div class="bright">
+                                                        <span class="bright-ico"><Icon name="sun" size={14} /></span>
+                                                        <input type="range" min="1" max="100" step="1"
+                                                            value={bulkLevel(step)}
+                                                            oninput={(e) => setAllLevel(step, parseInt((e.target as HTMLInputElement).value, 10))}
+                                                            aria-label="Brightness for all shown lights" />
+                                                        <span class="bright-val mono">{bulkLevel(step)}%</span>
+                                                    </div>
+                                                    <div class="swatches">
+                                                        {#each COLOURS as c (c.name)}
+                                                            <button type="button" class="swatch"
+                                                                class:active={bulkColor(step) === c.hex}
+                                                                class:auto={c.hex === ""}
+                                                                style={c.hex ? `background:#${c.hex}` : ""}
+                                                                title="{c.name} for all shown"
+                                                                aria-label="{c.name} for all shown lights"
+                                                                onclick={() => setAllColor(step, c.hex)}>
+                                                                {#if c.hex === ""}<Icon name="close" size={12} />{/if}
+                                                            </button>
+                                                        {/each}
+                                                    </div>
+                                                </div>
+                                            {/if}
+                                        </div>
+                                    {/if}
+
                                     <div class="picker">
-                                        {#each sockets as s, si (s.id)}
+                                        {#if shownSockets.length === 0}
+                                            <div class="picker-empty mono">No devices in this scope</div>
+                                        {/if}
+                                        {#each shownSockets as s, si (s.id)}
                                             {@const state = step.perSocket[s.id]}
                                             {#if si > 0}<div class="row-sep" aria-hidden="true"></div>{/if}
                                             <div class="picker-row"
@@ -575,6 +702,11 @@
                                                 {/if}
                                             </div>
                                         {/each}
+                                        {#if hiddenConfigured(step) > 0}
+                                            <div class="hidden-hint">
+                                                <span class="mono">{hiddenConfigured(step)}</span> configured device{hiddenConfigured(step) === 1 ? "" : "s"} hidden by this filter
+                                            </div>
+                                        {/if}
                                     </div>
                                 </div>
                             {/each}
@@ -807,6 +939,50 @@
         gap: 10px;
     }
     .snapshot-hint { margin-bottom: 2px; }
+
+    /* ── Scope filter + bulk fill ─────────────────────────────────── */
+    .scope-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+    .scope-chip {
+        padding: 4px 11px; font-size: 12px;
+        background: var(--card-2); border: 1px solid var(--hairline);
+        border-radius: var(--r-pill); color: var(--text-mute);
+        cursor: pointer; touch-action: manipulation; white-space: nowrap;
+        transition: background var(--t-fast), color var(--t-fast), box-shadow var(--t-fast);
+    }
+    .scope-chip:hover { background: var(--card-3); color: var(--text); }
+    .scope-chip.active {
+        background: var(--card-3); color: var(--text);
+        box-shadow: 0 0 0 1px var(--border-strong) inset;
+    }
+    .bulk-bar {
+        display: flex; align-items: center; flex-wrap: wrap; gap: 10px;
+        padding: 8px 12px; margin: 4px 4px 0;
+        background: var(--card-2); border: 1px solid var(--hairline);
+        border-radius: var(--r-sm);
+    }
+    .bulk-lbl {
+        display: inline-flex; align-items: center; gap: 6px;
+        font-family: var(--font-mono); font-size: 10.5px;
+        text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-mute);
+        flex-shrink: 0;
+    }
+    .bulk-n {
+        font-size: 11px; color: var(--text-dim);
+        background: var(--card-3); border-radius: var(--r-pill); padding: 0 6px;
+    }
+    .bulk-light {
+        display: flex; align-items: center; gap: 12px;
+        flex: 1; flex-wrap: wrap; min-width: 220px;
+    }
+    .bulk-light .bright { flex: 1; min-width: 150px; }
+    .picker-empty { padding: 16px 12px; text-align: center; font-size: 12px; color: var(--text-dim); }
+    .hidden-hint { padding: 8px 12px 4px 58px; font-size: 11.5px; color: var(--text-dim); }
+    @media (prefers-reduced-motion: reduce) {
+        .scope-chip { transition-duration: 0.001ms; }
+    }
+    @media (pointer: coarse) {
+        .scope-chip { min-height: 34px; padding: 7px 13px; }
+    }
 
     /* ── Steps (inside snapshot) ────────────────────────────────── */
     .steps-wrap { display: flex; flex-direction: column; gap: 10px; }

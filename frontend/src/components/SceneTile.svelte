@@ -40,6 +40,12 @@
     const offCount = $derived(allActions.filter(a => a.action === "off").length);
     const stepCount = $derived((scene.steps ?? []).length);
 
+    // Manual activation only runs the snapshot steps; attached rules fire on
+    // their own triggers, never on tap. A scene with no snapshot is therefore
+    // a no-op when activated, so we don't offer "Run" — tapping opens the
+    // editor instead of pretending to do something.
+    const hasSnapshot = $derived(allActions.length > 0);
+
     // Brightness/colour hint: levels set on any on-action, and distinct colours.
     const dimLevels = $derived(
         allActions.filter(a => a.action === "on" && a.level != null).map(a => a.level as number),
@@ -109,7 +115,9 @@
 </script>
 
 <div class="scene" class:manage bind:this={el}>
-    <button class="scene-hit" onclick={activate} aria-label="Activate {scene.name}">
+    <button class="scene-hit" onclick={hasSnapshot ? activate : openEdit}
+        aria-label={hasSnapshot ? `Activate ${scene.name}` : `Edit ${scene.name}`}
+        title={hasSnapshot ? undefined : "Rules run automatically on their triggers. Tap to edit."}>
         <span class="top">
             <span class="hue-chip" style:color={hue}>
                 {#if scene.icon}
@@ -118,7 +126,11 @@
                     <span class="hue" style="background:{hue}"></span>
                 {/if}
             </span>
-            <span class="run">Run</span>
+            {#if hasSnapshot}
+                <span class="run">Run</span>
+            {:else}
+                <span class="run auto-tag">Auto</span>
+            {/if}
         </span>
         <span class="meta">
             <span class="name">{scene.name}</span>
@@ -220,6 +232,17 @@
     }
     .hue { width: 14px; height: 14px; border-radius: 50%; display: block; }
     .run { color: var(--text-mute); font-size: 11px; }
+    .run.auto-tag {
+        font-family: var(--font-mono);
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--text-dim);
+        background: var(--card-3);
+        border: 1px solid var(--hairline);
+        border-radius: var(--r-pill);
+        padding: 1px 7px;
+    }
 
     .meta { display: flex; flex-direction: column; min-width: 0; }
     .name {
