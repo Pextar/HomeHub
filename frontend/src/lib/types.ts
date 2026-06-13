@@ -256,6 +256,11 @@ export interface RuleActionDraft {
   action: string;
   level: number;
   color: string;
+  /** Present only on a group/room "on" action authored per-lamp: instead of
+   *  one uniform fan-out, the action compiles to one socket action per member,
+   *  each with its own state/level/colour. Keyed by socket id. Absent = the
+   *  uniform (whole group/room) behaviour. */
+  perLamp?: Record<string, { state: "on" | "off" | "ignore"; level: number; color: string }>;
 }
 
 export interface RuleDraft {

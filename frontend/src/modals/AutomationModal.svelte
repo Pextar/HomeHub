@@ -1,7 +1,7 @@
 <script lang="ts">
     import Modal from "../components/Modal.svelte";
     import Switch from "../components/Switch.svelte";
-    import RuleEditor, { blankRuleAction } from "../components/RuleEditor.svelte";
+    import RuleEditor, { blankRuleAction, compileAction } from "../components/RuleEditor.svelte";
     import { closeModal } from "../lib/modal.svelte";
     import { api } from "../lib/api";
     import { data, toasts } from "../lib/stores.svelte";
@@ -83,27 +83,9 @@
         } else {
             trigger = { type: "device", socket_id: draft.trigSocketId, to_state: draft.trigToState };
         }
-        const actions: AutomationAction[] = draft.actions.map(a => {
-            const base: AutomationAction = {
-                target_type: a.target_type,
-                target_id: a.target_id,
-                action: (a.target_type === "scene" ? "activate" : a.action) as AutomationAction["action"],
-            };
-            if (a.action === "on") {
-                if (a.target_type === "socket") {
-                    base.level = a.level ?? 100;
-                    if (a.color) base.color = a.color;
-                } else if (a.target_type === "group" || a.target_type === "room") {
-                    // Only include lighting info when the user explicitly chose a preset
-                    // (any color set, or brightness moved from the default 100%).
-                    if (a.color || a.level !== 100) {
-                        base.level = a.level ?? 100;
-                        if (a.color) base.color = a.color;
-                    }
-                }
-            }
-            return base;
-        });
+        // compileAction expands per-lamp group/room actions into one socket
+        // action per member; every other action maps 1:1.
+        const actions: AutomationAction[] = draft.actions.flatMap(compileAction);
         const conditions: AutomationCondition[] = draft.conditions.map(c =>
             c.type === "device"
                 ? { type: "device", socket_id: c.socket_id, state: c.state }

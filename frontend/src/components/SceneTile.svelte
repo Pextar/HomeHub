@@ -117,7 +117,9 @@
 <div class="scene" class:manage bind:this={el}>
     <button class="scene-hit" onclick={hasSnapshot ? activate : openEdit}
         aria-label={hasSnapshot ? `Activate ${scene.name}` : `Edit ${scene.name}`}
-        title={hasSnapshot ? undefined : "Rules run automatically on their triggers. Tap to edit."}>
+        title={hasSnapshot ? undefined : (ruleCount > 0
+            ? "Runs automatically on its triggers. Tap to edit."
+            : "Not set up yet. Tap to add lights.")}>
         <span class="top">
             <span class="hue-chip" style:color={hue}>
                 {#if scene.icon}
@@ -128,7 +130,7 @@
             </span>
             {#if hasSnapshot}
                 <span class="run">Run</span>
-            {:else}
+            {:else if ruleCount > 0}
                 <span class="run auto-tag">Auto</span>
             {/if}
         </span>
