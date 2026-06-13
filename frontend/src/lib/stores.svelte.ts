@@ -1,5 +1,5 @@
-import { api } from "./api";
-import type { Socket, Schedule, Group, Scene, Timer, RoomSummary, ToastSpec, Route, ActivityEntry, Sensor, Settings, User, Automation } from "./types";
+import { api, streamAssistantChat, streamAssistantConfirm } from "./api";
+import type { Socket, Schedule, Group, Scene, Timer, RoomSummary, ToastSpec, Route, ActivityEntry, Sensor, Settings, User, Automation, AssistantMessage, AssistantConfirmation, AssistantStatus, AssistantStreamEvent } from "./types";
 
 // Reactive global state. Svelte 5 runes ($state) make any property mutation
 // trigger downstream reactivity in components that read these values.
@@ -134,7 +134,7 @@ function createToastStore() {
 }
 
 function createRouteStore() {
-  const valid: Route[] = ["dashboard", "rooms", "floorplan", "sockets", "groups", "scenes", "schedules", "sensors", "automations", "insights", "activity", "users", "settings", "console"];
+  const valid: Route[] = ["dashboard", "rooms", "floorplan", "sockets", "groups", "scenes", "schedules", "sensors", "automations", "insights", "activity", "users", "settings", "console", "assistant"];
   const current = $state<{ route: Route; query: Record<string, string> }>({ route: parse(), query: parseQuery() });
 
   function parse(): Route {
@@ -228,9 +228,121 @@ function createSidebarStore() {
   };
 }
 
+// The local LLM assistant: a running chat thread plus the streaming machinery.
+// Conversation state lives here (not in the view) so it survives navigating
+// away and back.
+function createAssistantStore() {
+  const s = $state<{
+    messages: AssistantMessage[];
+    streaming: boolean;
+    pending: AssistantConfirmation | null;
+    status: AssistantStatus | null;
+  }>({ messages: [], streaming: false, pending: null, status: null });
+
+  let abort: AbortController | null = null;
+
+  async function loadStatus() {
+    try { s.status = await api.assistantStatus(); }
+    catch { s.status = { enabled: false }; }
+  }
+
+  function lastAssistant(): AssistantMessage | undefined {
+    for (let i = s.messages.length - 1; i >= 0; i--) {
+      if (s.messages[i].role === "assistant") return s.messages[i];
+    }
+    return undefined;
+  }
+
+  // handle folds one streamed event into the live assistant bubble.
+  function handle(e: AssistantStreamEvent) {
+    const a = lastAssistant();
+    switch (e.type) {
+      case "token":
+        if (a) { a.pending = false; a.content += e.text; }
+        break;
+      case "tool":
+        if (a) { a.pending = false; (a.tools ??= []).push({ name: e.name, result: e.result }); }
+        break;
+      case "confirmation":
+        s.pending = e.confirmation;
+        if (a) a.pending = false;
+        break;
+      case "error":
+        if (a) { a.pending = false; a.error = true; if (!a.content) a.content = e.message; }
+        toasts.error("Assistant error", e.message);
+        break;
+      case "done":
+        break;
+    }
+  }
+
+  async function runStream(fn: (signal: AbortSignal) => Promise<void>) {
+    s.streaming = true;
+    abort = new AbortController();
+    // The bubble the streamed tokens flow into; pending shows the skeleton
+    // until the first token (or tool/confirmation) lands.
+    s.messages.push({ role: "assistant", content: "", pending: true });
+    try {
+      await fn(abort.signal);
+    } catch (err) {
+      const a = lastAssistant();
+      if (a) {
+        a.pending = false;
+        a.error = true;
+        if (!a.content) a.content = (err as Error)?.message || "the assistant request failed";
+      }
+    } finally {
+      s.streaming = false;
+      abort = null;
+      // A tool may have changed device state; refresh the rest of the app.
+      // (SSE usually beats us to it, but this covers actions that don't emit.)
+      data.refresh();
+    }
+  }
+
+  async function send(text: string) {
+    const t = text.trim();
+    if (!t || s.streaming) return;
+    s.pending = null;
+    s.messages.push({ role: "user", content: t });
+    const history = s.messages.slice();
+    await runStream((signal) => streamAssistantChat(history, handle, signal));
+  }
+
+  async function confirm() {
+    if (!s.pending || s.streaming) return;
+    const token = s.pending.token;
+    s.pending = null;
+    const history = s.messages.slice();
+    await runStream((signal) => streamAssistantConfirm(token, history, handle, signal));
+  }
+
+  function cancel() {
+    if (!s.pending) return;
+    s.pending = null;
+    s.messages.push({ role: "assistant", content: "Okay, I won't do that." });
+  }
+
+  function reset() {
+    abort?.abort();
+    s.messages = [];
+    s.pending = null;
+    s.streaming = false;
+  }
+
+  return {
+    get messages() { return s.messages; },
+    get streaming() { return s.streaming; },
+    get pending() { return s.pending; },
+    get status() { return s.status; },
+    loadStatus, send, confirm, cancel, reset,
+  };
+}
+
 export const session = createSessionStore();
 export const data = createDataStore();
 export const toasts = createToastStore();
 export const route = createRouteStore();
 export const theme = createThemeStore();
 export const sidebar = createSidebarStore();
+export const assistant = createAssistantStore();

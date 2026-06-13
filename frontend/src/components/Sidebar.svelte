@@ -36,6 +36,7 @@
   const allItems: NavItem[] = [
     { route: "dashboard", icon: "home", label: "Home" },
     { route: "sockets", icon: "socket", label: "Devices" },
+    { route: "assistant", icon: "assistant", label: "Assistant", admin: true },
     { route: "groups", icon: "groups", label: "Groups", admin: true },
     { route: "automations", icon: "automation", label: "Automations", admin: true },
     { route: "rooms", icon: "couch", label: "Rooms", admin: true },

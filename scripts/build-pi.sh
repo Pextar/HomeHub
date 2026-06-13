@@ -59,6 +59,12 @@ cp "$ROOT/scripts/ft007th_rx.py"         "$RELEASE/"
 # release so the script can find its config.
 cp "$ROOT/scripts/setup-mosquitto.sh"    "$RELEASE/"
 cp "$ROOT/deploy/mosquitto.conf"         "$RELEASE/"
+# Optional local LLM assistant (Ollama). deploy-pi.sh runs setup-ollama.sh on
+# the Pi when SETUP_OLLAMA=1; the systemd drop-in lives beside it so the script
+# can find it.
+cp "$ROOT/scripts/setup-ollama.sh"       "$RELEASE/"
+mkdir -p "$RELEASE/ollama.service.d"
+cp "$ROOT/deploy/ollama.service.d/override.conf" "$RELEASE/ollama.service.d/"
 
 echo "==> Release ready:"
 ls -lh "$RELEASE"
