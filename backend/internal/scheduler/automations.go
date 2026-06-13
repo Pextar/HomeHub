@@ -3,6 +3,7 @@ package scheduler
 import (
 	"fmt"
 	"log"
+	"strconv"
 	"time"
 
 	"rf-socket-controller/internal/push"
@@ -37,10 +38,13 @@ func newAutoEngine() *autoEngine {
 	}
 }
 
-// tick evaluates every enabled automation against the current state and fires
-// those whose trigger edge occurred and whose conditions all hold. prev is
-// the previous tick's time, anchoring the (prev, now] window for time
-// triggers (see timeWindowMatches).
+// ruleKey identifies one rule within an automation for edge-tracking maps.
+func ruleKey(id string, idx int) string { return id + "#" + strconv.Itoa(idx) }
+
+// tick evaluates every rule of every enabled automation against the current
+// state and fires those whose trigger edge occurred and whose conditions all
+// hold. prev is the previous tick's time, anchoring the (prev, now] window for
+// time triggers (see timeWindowMatches).
 func (e *autoEngine) tick(st *store.Store, prev, now time.Time, pushSvc *push.Service) {
 	stamp := now.Format("2006-01-02 15:04")
 
@@ -63,11 +67,13 @@ func (e *autoEngine) tick(st *store.Store, prev, now time.Time, pushSvc *push.Se
 	settings := *st.Settings
 	st.Mu.RUnlock()
 
-	// Drop edge-tracking state for automations that no longer exist so the
-	// maps don't grow forever on a long-running install.
-	alive := make(map[string]bool, len(automations))
+	// Drop edge-tracking state for rules that no longer exist so the maps
+	// don't grow forever on a long-running install. Keys are per rule.
+	alive := make(map[string]bool)
 	for _, a := range automations {
-		alive[a.ID] = true
+		for ri := range a.Rules {
+			alive[ruleKey(a.ID, ri)] = true
+		}
 	}
 	for id := range e.lastFired {
 		if !alive[id] {
@@ -80,14 +86,22 @@ func (e *autoEngine) tick(st *store.Store, prev, now time.Time, pushSvc *push.Se
 		}
 	}
 
-	var due []store.Automation
+	type dueRule struct {
+		a       store.Automation
+		ruleIdx int
+	}
+	var due []dueRule
 	for _, a := range automations {
 		if !a.Enabled {
 			continue
 		}
-		if e.triggerFired(a, prev, now, stamp, curSocket, sensorVal, &settings) &&
-			e.conditionsHold(a.Conditions, curSocket, now) {
-			due = append(due, a)
+		for ri := range a.Rules {
+			rule := a.Rules[ri]
+			key := ruleKey(a.ID, ri)
+			if e.triggerFired(key, rule.Trigger, prev, now, stamp, curSocket, sensorVal, &settings) &&
+				e.conditionsHold(rule.Conditions, curSocket, now) {
+				due = append(due, dueRule{a: a, ruleIdx: ri})
+			}
 		}
 	}
 
@@ -95,18 +109,17 @@ func (e *autoEngine) tick(st *store.Store, prev, now time.Time, pushSvc *push.Se
 	e.prevSocket = curSocket
 	e.primed = true
 
-	for _, a := range due {
-		if err := e.execute(st, a, now, pushSvc); err != nil {
-			log.Printf("automation %s (%s) failed: %v", a.ID, a.Name, err)
+	for _, d := range due {
+		if err := e.execute(st, d.a, d.ruleIdx, now, pushSvc); err != nil {
+			log.Printf("automation %s (%s) rule %d failed: %v", d.a.ID, d.a.Name, d.ruleIdx, err)
 		}
 	}
 }
 
 func (e *autoEngine) triggerFired(
-	a store.Automation, prev, now time.Time, stamp string,
+	key string, t store.AutomationTrigger, prev, now time.Time, stamp string,
 	curSocket map[string]bool, sensorVal map[string]float64, settings *store.Settings,
 ) bool {
-	t := a.Trigger
 	switch t.Type {
 	case "time":
 		// Reuse the Schedule solar/fixed time resolution, matched against
@@ -119,24 +132,24 @@ func (e *autoEngine) triggerFired(
 		if !dayMatches(t.Days, fireWeekday(eff, prev, now)) {
 			return false
 		}
-		if e.lastFired[a.ID] == stamp {
+		if e.lastFired[key] == stamp {
 			return false
 		}
-		e.lastFired[a.ID] = stamp
+		e.lastFired[key] = stamp
 		return true
 
 	case "device":
 		cur := curSocket[t.SocketID]
-		prev, had := e.prevSocket[t.SocketID]
+		prevState, had := e.prevSocket[t.SocketID]
 		want := t.ToState == "on"
-		return e.primed && had && prev != cur && cur == want
+		return e.primed && had && prevState != cur && cur == want
 
 	case "sensor":
 		v, ok := sensorVal[t.SensorID]
 		truth := ok && ((t.Op == "above" && v > t.Value) || (t.Op == "below" && v < t.Value))
-		prev := e.sensorEdge[a.ID]
-		e.sensorEdge[a.ID] = truth
-		return truth && !prev
+		prevTruth := e.sensorEdge[key]
+		e.sensorEdge[key] = truth
+		return truth && !prevTruth
 	}
 	return false
 }
@@ -169,12 +182,13 @@ func (e *autoEngine) conditionsHold(conds []store.AutomationCondition, curSocket
 	return true
 }
 
-func (e *autoEngine) execute(st *store.Store, a store.Automation, now time.Time, pushSvc *push.Service) error {
+func (e *autoEngine) execute(st *store.Store, a store.Automation, ruleIdx int, now time.Time, pushSvc *push.Service) error {
+	actions := a.Rules[ruleIdx].Actions
 	// Stage under the lock (this also queues smart-light brightness/colour),
 	// transmit off-lock, then fold the results back in — a slow device can't
 	// stall the scheduler tick or the API.
 	st.Mu.Lock()
-	staged := st.StageAutomationActions(a.Actions)
+	staged := st.StageAutomationActions(actions)
 	st.Mu.Unlock()
 
 	st.SendStaged(staged)
@@ -185,8 +199,8 @@ func (e *autoEngine) execute(st *store.Store, a store.Automation, now time.Time,
 	st.SuppressStateChange = false
 
 	kind := "bulk"
-	if len(a.Actions) == 1 {
-		kind = a.Actions[0].TargetType
+	if len(actions) == 1 {
+		kind = actions[0].TargetType
 	}
 	entry := store.ActivityEntry{Kind: kind, Source: "automation", Action: "run", Label: a.Name}
 	if firstErr != nil {

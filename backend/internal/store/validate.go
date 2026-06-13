@@ -102,15 +102,29 @@ func (s *Store) ValidateSchedule(sch *Schedule) error {
 	return nil
 }
 
-// ValidateAutomation normalizes and validates an automation: its trigger,
-// optional conditions, and ordered actions. Referenced sockets/groups/scenes/
-// sensors must exist. Caller must hold Mu (read lock at minimum).
+// ValidateAutomation normalizes and validates an automation: its name and one
+// or more rules, each with a trigger, optional conditions, and ordered actions.
+// Referenced sockets/groups/scenes/sensors must exist. Caller must hold Mu
+// (read lock at minimum).
 func (s *Store) ValidateAutomation(a *Automation) error {
 	a.Name = strings.TrimSpace(a.Name)
 	if a.Name == "" {
 		return errors.New("name is required")
 	}
+	if len(a.Rules) == 0 {
+		return errors.New("at least one rule is required")
+	}
+	for i := range a.Rules {
+		if err := s.validateRule(&a.Rules[i]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
+// validateRule normalizes and validates one trigger → conditions → actions
+// rule. Caller must hold Mu (read lock at minimum).
+func (s *Store) validateRule(a *AutomationRule) error {
 	// ── Trigger ──────────────────────────────────────────────
 	t := &a.Trigger
 	t.Type = strings.ToLower(strings.TrimSpace(t.Type))

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strconv"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -14,22 +15,18 @@ import (
 
 type automationResponse struct {
 	*store.Automation
-	// EffectiveTriggerTime is the resolved HH:MM for solar time triggers
-	// (sunrise/sunset + offset). Empty when the trigger is not solar or
-	// the location is not configured.
-	EffectiveTriggerTime string `json:"effective_trigger_time,omitempty"`
+	// EffectiveTriggerTimes holds the resolved HH:MM for each rule's solar time
+	// trigger (sunrise/sunset + offset), index-aligned to Rules. An entry is
+	// empty when that rule's trigger is not solar or location is not configured.
+	EffectiveTriggerTimes []string `json:"effective_trigger_times,omitempty"`
 }
 
 func (s *Server) getAutomations(w http.ResponseWriter, r *http.Request) {
 	now := time.Now()
 	s.Store.Mu.RLock()
 	list := make([]*store.Automation, 0, len(s.Store.Automations))
-	effective := make(map[string]string, len(s.Store.Automations))
 	for _, a := range s.Store.Automations {
 		list = append(list, a)
-		if eff, ok := store.TriggerEffectiveHHMM(&a.Trigger, now, s.Store.Settings); ok {
-			effective[a.ID] = eff
-		}
 	}
 	sort.Slice(list, func(i, j int) bool {
 		if list[i].Name != list[j].Name {
@@ -40,7 +37,21 @@ func (s *Server) getAutomations(w http.ResponseWriter, r *http.Request) {
 
 	result := make([]automationResponse, len(list))
 	for i, a := range list {
-		result[i] = automationResponse{Automation: a, EffectiveTriggerTime: effective[a.ID]}
+		var effs []string
+		any := false
+		for ri := range a.Rules {
+			if effs == nil {
+				effs = make([]string, len(a.Rules))
+			}
+			if eff, ok := store.TriggerEffectiveHHMM(&a.Rules[ri].Trigger, now, s.Store.Settings); ok {
+				effs[ri] = eff
+				any = true
+			}
+		}
+		if !any {
+			effs = nil
+		}
+		result[i] = automationResponse{Automation: a, EffectiveTriggerTimes: effs}
 	}
 	// Snapshot under the lock — result still holds live *store.Automation
 	// pointers that writers mutate in place.
@@ -137,28 +148,70 @@ func (s *Server) deleteAutomation(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// runAutomation fires an automation's actions immediately, ignoring its
-// trigger and conditions — the "Run now" / test button in the editor.
+// runAutomation fires every rule's actions immediately, ignoring triggers and
+// conditions — the list view's "Run now" quick action. For an automation whose
+// rules conflict (e.g. on then off), the actions run in order.
 func (s *Server) runAutomation(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
 
-	s.Store.Mu.Lock()
+	s.Store.Mu.RLock()
 	a, ok := s.Store.Automations[id]
-	var kind, name string
-	var staged []store.StagedSend
+	var name string
+	var actions []store.AutomationAction
 	if ok {
 		name = a.Name
-		kind = "bulk"
-		if len(a.Actions) == 1 {
-			kind = a.Actions[0].TargetType
+		for _, rl := range a.Rules {
+			actions = append(actions, rl.Actions...)
 		}
-		staged = s.Store.StageAutomationActions(a.Actions)
 	}
-	s.Store.Mu.Unlock()
+	s.Store.Mu.RUnlock()
 	if !ok {
 		writeError(w, http.StatusNotFound, "automation not found")
 		return
 	}
+	s.runAutomationActions(w, id, name, actions)
+}
+
+// runAutomationRule fires just one rule's actions immediately — the per-rule
+// "Run" / test button in the editor.
+func (s *Server) runAutomationRule(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	id := vars["id"]
+	idx, err := strconv.Atoi(vars["idx"])
+	if err != nil || idx < 0 {
+		writeError(w, http.StatusBadRequest, "invalid rule index")
+		return
+	}
+
+	s.Store.Mu.RLock()
+	a, ok := s.Store.Automations[id]
+	var name string
+	var actions []store.AutomationAction
+	if ok && idx < len(a.Rules) {
+		name = a.Name
+		actions = append(actions, a.Rules[idx].Actions...)
+	} else {
+		ok = false
+	}
+	s.Store.Mu.RUnlock()
+	if !ok {
+		writeError(w, http.StatusNotFound, "automation or rule not found")
+		return
+	}
+	s.runAutomationActions(w, id, name, actions)
+}
+
+// runAutomationActions transmits a set of actions immediately and records the
+// run against the automation. Shared by the whole-automation and per-rule run
+// endpoints.
+func (s *Server) runAutomationActions(w http.ResponseWriter, id, name string, actions []store.AutomationAction) {
+	s.Store.Mu.Lock()
+	kind := "bulk"
+	if len(actions) == 1 {
+		kind = actions[0].TargetType
+	}
+	staged := s.Store.StageAutomationActions(actions)
+	s.Store.Mu.Unlock()
 
 	s.Store.SendStaged(staged)
 
@@ -174,15 +227,11 @@ func (s *Server) runAutomation(w http.ResponseWriter, r *http.Request) {
 	}
 	s.Store.Activity.Add(entry)
 	// Re-fetch: the automation may have been deleted while sends were in flight.
-	var result *store.Automation
+	var body []byte
 	if cur, still := s.Store.Automations[id]; still {
 		cur.LastFiredAt = time.Now().UTC()
 		cur.RunCount++
-		result = cur
-	}
-	var body []byte
-	if result != nil {
-		body, _ = json.Marshal(result)
+		body, _ = json.Marshal(cur)
 	}
 	if err := s.Store.Save(); err != nil && firstErr == nil {
 		firstErr = err
