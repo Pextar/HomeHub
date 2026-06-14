@@ -138,6 +138,7 @@ export const api = {
   updateAutomation(id: string, body: Partial<Automation>) { return req<Automation>(`/automations/${encodeURIComponent(id)}`, { method: "PUT", body: json(body) }); },
   deleteAutomation(id: string) { return req<void>(`/automations/${encodeURIComponent(id)}`, { method: "DELETE" }); },
   runAutomation(id: string) { return req<Automation>(`/automations/${encodeURIComponent(id)}/run`, { method: "POST" }); },
+  runAutomationRule(id: string, ruleIdx: number) { return req<Automation>(`/automations/${encodeURIComponent(id)}/rules/${ruleIdx}/run`, { method: "POST" }); },
 
   // Groups
   listGroups() { return req<Group[]>("/groups"); },

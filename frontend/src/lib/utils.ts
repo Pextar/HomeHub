@@ -5,17 +5,17 @@ import { data, toasts } from "./stores.svelte";
 // Count automations that reference an entity, so delete confirmations can warn
 // that the cascade will remove or prune them (mirrors the backend cleanup).
 export function automationsUsingSocket(autos: Automation[], id: string): number {
-  return autos.filter(a =>
-    (a.trigger.type === "device" && a.trigger.socket_id === id) ||
-    (a.conditions?.some(c => c.type === "device" && c.socket_id === id) ?? false) ||
-    a.actions.some(ac => ac.target_type === "socket" && ac.target_id === id),
-  ).length;
+  return autos.filter(a => a.rules.some(r =>
+    (r.trigger.type === "device" && r.trigger.socket_id === id) ||
+    (r.conditions?.some(c => c.type === "device" && c.socket_id === id) ?? false) ||
+    r.actions.some(ac => ac.target_type === "socket" && ac.target_id === id),
+  )).length;
 }
 export function automationsUsingSensor(autos: Automation[], id: string): number {
-  return autos.filter(a => a.trigger.type === "sensor" && a.trigger.sensor_id === id).length;
+  return autos.filter(a => a.rules.some(r => r.trigger.type === "sensor" && r.trigger.sensor_id === id)).length;
 }
 export function automationsUsingTarget(autos: Automation[], type: "group" | "scene", id: string): number {
-  return autos.filter(a => a.actions.some(ac => ac.target_type === type && ac.target_id === id)).length;
+  return autos.filter(a => a.rules.some(r => r.actions.some(ac => ac.target_type === type && ac.target_id === id))).length;
 }
 
 // "1 automation" / "3 automations" — for warning copy.

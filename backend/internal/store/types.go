@@ -1,6 +1,9 @@
 package store
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // Socket represents a controllable socket / smart device.
 type Socket struct {
@@ -96,22 +99,55 @@ type AutomationAction struct {
 	Color      string `json:"color,omitempty"` // "RRGGBB", smart lights only
 }
 
-// Automation is a trigger → optional conditions → ordered actions rule.
-// Unlike a Schedule (time-only), an automation can react to sensor
-// thresholds and device-state changes. Evaluated by the scheduler tick.
+// AutomationRule is one trigger → optional conditions → ordered actions.
+// An automation holds one or more rules and fires each independently, so a
+// single automation can express "at sunset turn the lamp on" and "at 23:00
+// turn it off" together.
+type AutomationRule struct {
+	Trigger    AutomationTrigger     `json:"trigger"`
+	Conditions []AutomationCondition `json:"conditions,omitempty"`
+	Actions    []AutomationAction    `json:"actions"`
+}
+
+// Automation is a named group of independent trigger → conditions → actions
+// rules. Unlike a Schedule (time-only), a rule can react to sensor thresholds
+// and device-state changes. Evaluated per rule by the scheduler tick.
 //
 // SceneID, when set, marks this automation as belonging to a specific scene.
 // These automations are deleted automatically when their parent scene is deleted.
 type Automation struct {
-	ID          string                `json:"id"`
-	Name        string                `json:"name"`
-	Enabled     bool                  `json:"enabled"`
-	Trigger     AutomationTrigger     `json:"trigger"`
-	Conditions  []AutomationCondition `json:"conditions,omitempty"`
-	Actions     []AutomationAction    `json:"actions"`
-	LastFiredAt time.Time             `json:"last_fired_at,omitempty"`
-	RunCount    int                   `json:"run_count,omitempty"`
-	SceneID     string                `json:"scene_id,omitempty"`
+	ID          string           `json:"id"`
+	Name        string           `json:"name"`
+	Enabled     bool             `json:"enabled"`
+	Rules       []AutomationRule `json:"rules"`
+	LastFiredAt time.Time        `json:"last_fired_at,omitempty"`
+	RunCount    int              `json:"run_count,omitempty"`
+	SceneID     string           `json:"scene_id,omitempty"`
+}
+
+// UnmarshalJSON reads both the current multi-rule shape and the legacy
+// single-trigger shape ({trigger, conditions, actions} at the top level),
+// folding a legacy automation into a single rule. New data is always written
+// in the multi-rule shape.
+func (a *Automation) UnmarshalJSON(b []byte) error {
+	type alias Automation
+	aux := struct {
+		*alias
+		LegacyTrigger    *AutomationTrigger    `json:"trigger"`
+		LegacyConditions []AutomationCondition `json:"conditions"`
+		LegacyActions    []AutomationAction    `json:"actions"`
+	}{alias: (*alias)(a)}
+	if err := json.Unmarshal(b, &aux); err != nil {
+		return err
+	}
+	if len(a.Rules) == 0 && (aux.LegacyTrigger != nil || len(aux.LegacyActions) > 0) {
+		r := AutomationRule{Conditions: aux.LegacyConditions, Actions: aux.LegacyActions}
+		if aux.LegacyTrigger != nil {
+			r.Trigger = *aux.LegacyTrigger
+		}
+		a.Rules = []AutomationRule{r}
+	}
+	return nil
 }
 
 // NotifPrefs controls which event categories trigger push notifications for

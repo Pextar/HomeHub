@@ -257,41 +257,67 @@ func (s *Store) CascadeDeleteRoom(roomID string) {
 // must hold Mu.
 func (s *Store) pruneAutomationsForSocket(socketID string) {
 	for id, a := range s.Automations {
-		if a.Trigger.Type == "device" && a.Trigger.SocketID == socketID {
-			delete(s.Automations, id)
-			continue
-		}
-		conds := a.Conditions[:0]
-		for _, c := range a.Conditions {
-			if c.Type == "device" && c.SocketID == socketID {
+		kept := a.Rules[:0]
+		for _, r := range a.Rules {
+			// A rule triggered by the socket's state can never fire again.
+			if r.Trigger.Type == "device" && r.Trigger.SocketID == socketID {
 				continue
 			}
-			conds = append(conds, c)
+			conds := r.Conditions[:0]
+			for _, c := range r.Conditions {
+				if c.Type == "device" && c.SocketID == socketID {
+					continue
+				}
+				conds = append(conds, c)
+			}
+			r.Conditions = conds
+			r.Actions = filterActions(r.Actions, "socket", socketID)
+			if len(r.Actions) == 0 {
+				continue
+			}
+			kept = append(kept, r)
 		}
-		a.Conditions = conds
-		a.Actions = filterActions(a.Actions, "socket", socketID)
-		if len(a.Actions) == 0 {
+		a.Rules = kept
+		if len(a.Rules) == 0 {
 			delete(s.Automations, id)
 		}
 	}
 }
 
-// PruneAutomationsForSensor removes automations whose trigger watches a
-// deleted sensor (sensors are only referenced by triggers). Caller holds Mu.
+// PruneAutomationsForSensor drops rules whose trigger watches a deleted sensor
+// (sensors are only referenced by triggers), removing the automation if it is
+// left with no rules. Caller holds Mu.
 func (s *Store) PruneAutomationsForSensor(sensorID string) {
 	for id, a := range s.Automations {
-		if a.Trigger.Type == "sensor" && a.Trigger.SensorID == sensorID {
+		kept := a.Rules[:0]
+		for _, r := range a.Rules {
+			if r.Trigger.Type == "sensor" && r.Trigger.SensorID == sensorID {
+				continue
+			}
+			kept = append(kept, r)
+		}
+		a.Rules = kept
+		if len(a.Rules) == 0 {
 			delete(s.Automations, id)
 		}
 	}
 }
 
-// PruneAutomationsForTarget drops actions that target a deleted group or
-// scene, removing the automation if it is left with no actions. Caller holds Mu.
+// PruneAutomationsForTarget drops actions that target a deleted group or scene,
+// removing a rule left with no actions and the automation if no rules remain.
+// Caller holds Mu.
 func (s *Store) PruneAutomationsForTarget(targetType, targetID string) {
 	for id, a := range s.Automations {
-		a.Actions = filterActions(a.Actions, targetType, targetID)
-		if len(a.Actions) == 0 {
+		kept := a.Rules[:0]
+		for _, r := range a.Rules {
+			r.Actions = filterActions(r.Actions, targetType, targetID)
+			if len(r.Actions) == 0 {
+				continue
+			}
+			kept = append(kept, r)
+		}
+		a.Rules = kept
+		if len(a.Rules) == 0 {
 			delete(s.Automations, id)
 		}
 	}

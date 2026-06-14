@@ -1,18 +1,13 @@
 <script lang="ts">
     import Modal from "../components/Modal.svelte";
     import Icon from "../components/Icon.svelte";
-    import Switch from "../components/Switch.svelte";
-    import RuleEditor, { COLOURS, blankRuleAction } from "../components/RuleEditor.svelte";
+    import { COLOURS } from "../components/RuleEditor.svelte";
     import { closeModal } from "../lib/modal.svelte";
     import { api } from "../lib/api";
     import { data, toasts } from "../lib/stores.svelte";
-    import { sortedSockets, formatAgo, isSmartProtocol } from "../lib/utils";
+    import { sortedSockets, isSmartProtocol } from "../lib/utils";
     import { untrack } from "svelte";
-    import type {
-        Scene, SceneStep, AutomationTriggerType, AutomationTrigger,
-        AutomationAction, AutomationCondition, TargetType, Automation, SceneAccent,
-        RuleDraft,
-    } from "../lib/types";
+    import type { Scene, SceneStep, SceneAccent } from "../lib/types";
 
     interface Props { existing?: Scene | null; }
     let { existing = null }: Props = $props();
@@ -88,11 +83,81 @@
     const existingHasSnapshot = untrack(() =>
         !!(existing?.steps?.some(s => s.actions.length > 0) || existing?.actions?.length)
     );
-    let snapshotOpen = $state(existingHasSnapshot);
+    let snapshotOpen = $state(true);
 
     const snapshotDeviceCount = $derived(
         steps.flatMap(step => Object.values(step.perSocket).filter(v => v !== "ignore")).length
     );
+
+    // ── Snapshot scope + bulk fill ────────────────────────────────────
+    // The snapshot stores per-device values, but real edits usually start
+    // from "set this whole room/group, then tweak a couple of lamps". The
+    // scope chip narrows the visible device rows; the bulk controls write
+    // every shown row in one tap. Scope is a view filter only — rows hidden
+    // by it keep whatever they were already configured to.
+    // Start a fresh snapshot scoped to the scene's room (the common "set up
+    // this room's lamps" flow); when editing an existing snapshot, show All
+    // so no already-configured device is hidden behind the filter on open.
+    let scope = $state<string>(untrack(() =>
+        (!existingHasSnapshot && existing?.room) ? `room:${existing.room}` : ""));
+
+    const scopeOptions = $derived([
+        { key: "", label: "All" },
+        ...[...v.rooms].sort((a, b) => a.name.localeCompare(b.name))
+            .map(r => ({ key: `room:${r.name}`, label: r.name })),
+        ...v.groups.map(g => ({ key: `group:${g.id}`, label: g.name })),
+    ]);
+
+    const shownSockets = $derived.by(() => {
+        if (scope.startsWith("room:")) {
+            const rn = scope.slice(5);
+            return sockets.filter(s => (s.room || "") === rn);
+        }
+        if (scope.startsWith("group:")) {
+            const g = v.groups.find(x => x.id === scope.slice(6));
+            const ids = new Set(g?.socket_ids ?? []);
+            return sockets.filter(s => ids.has(s.id));
+        }
+        return sockets;
+    });
+    const shownHasSmart = $derived(shownSockets.some(s => isSmart(s.protocol)));
+
+    // Representative bulk values — taken from the first shown smart light.
+    // After a bulk apply every shown light matches, so this reflects the
+    // shared setting back into the slider/swatch UI.
+    function bulkLevel(step: StepState): number {
+        const f = shownSockets.find(s => isSmart(s.protocol));
+        return f ? step.levels[f.id] : 100;
+    }
+    function bulkColor(step: StepState): string {
+        const f = shownSockets.find(s => isSmart(s.protocol));
+        return f ? step.colors[f.id] : "";
+    }
+    function setAll(step: StepState, state: "ignore" | "on" | "off") {
+        for (const s of shownSockets) step.perSocket[s.id] = state;
+    }
+    function setAllLevel(step: StepState, level: number) {
+        if (isNaN(level)) return;
+        for (const s of shownSockets) if (isSmart(s.protocol)) {
+            step.levels[s.id] = level;
+            step.perSocket[s.id] = "on";
+        }
+    }
+    function setAllColor(step: StepState, hex: string) {
+        for (const s of shownSockets) if (isSmart(s.protocol)) {
+            step.colors[s.id] = hex;
+            step.perSocket[s.id] = "on";
+        }
+    }
+    // Count of devices configured in a step but hidden by the current scope,
+    // so a narrowed view never looks like settings silently vanished.
+    function hiddenConfigured(step: StepState): number {
+        const shown = new Set(shownSockets.map(s => s.id));
+        let n = 0;
+        for (const [id, st] of Object.entries(step.perSocket))
+            if (st !== "ignore" && !shown.has(id)) n++;
+        return n;
+    }
 
     function addStep() {
         const last = steps[steps.length - 1]?.delay_minutes ?? 0;
@@ -110,11 +175,12 @@
     function captureCurrentState(stepIndex: number) {
         const step = steps[stepIndex];
         if (!step) return;
-        for (const s of sockets) {
+        for (const s of shownSockets) {
             step.perSocket[s.id] = s.state ? "on" : "off";
         }
+        const n = shownSockets.length;
         toasts.info("Captured current state",
-            `${sockets.length} device${sockets.length === 1 ? "" : "s"} set to their current on/off state`);
+            `${n} device${n === 1 ? "" : "s"} set to their current on/off state`);
     }
 
     function buildSteps() {
@@ -135,125 +201,6 @@
         })).filter(s => s.actions.length > 0);
     }
 
-    // ── Rule state ─────────────────────────────────────────────────────
-    // The WHEN / ONLY-IF / THEN fields live in the shared RuleDraft shape
-    // edited by RuleEditor; the scene wizard adds per-rule bookkeeping.
-    type SceneRuleDraft = RuleDraft & {
-        _key: string;
-        automationId: string;
-        enabled: boolean;
-    };
-
-    function blankRule(): SceneRuleDraft {
-        return {
-            _key: Math.random().toString(36).slice(2),
-            automationId: "",
-            enabled: true,
-            trigType: "time",
-            trigTimeMode: "fixed",
-            trigTime: "07:00",
-            trigSolarOffset: 0,
-            trigDays: [],
-            trigSensorId: v.sensors[0]?.id ?? "",
-            trigOp: "below",
-            trigValue: 20,
-            trigSocketId: v.sockets[0]?.id ?? "",
-            trigToState: "on",
-            conditions: [],
-            actions: [blankRuleAction()],
-        };
-    }
-
-    function ruleFromAutomation(a: Automation): SceneRuleDraft {
-        const t = a.trigger;
-        return {
-            _key: Math.random().toString(36).slice(2),
-            automationId: a.id,
-            enabled: a.enabled,
-            trigType: t.type as AutomationTriggerType,
-            trigTimeMode: t.time_mode ?? "fixed",
-            trigTime: t.time || "07:00",
-            trigSolarOffset: t.solar_offset_minutes ?? 0,
-            trigDays: [...(t.days ?? [])],
-            trigSensorId: t.sensor_id ?? v.sensors[0]?.id ?? "",
-            trigOp: (t.op ?? "below") as "above" | "below",
-            trigValue: t.value ?? 20,
-            trigSocketId: t.socket_id ?? v.sockets[0]?.id ?? "",
-            trigToState: (t.to_state ?? "on") as "on" | "off",
-            conditions: (a.conditions ?? []).map(c => ({ ...c })),
-            actions: (a.actions ?? []).map(act => ({
-                target_type: act.target_type as TargetType,
-                target_id: act.target_id,
-                action: act.action as string,
-                level: act.level ?? 100,
-                color: act.color ?? "",
-            })),
-        };
-    }
-
-    let rules = $state<SceneRuleDraft[]>(untrack(() => {
-        if (existing) {
-            const owned = data.value.automations.filter(a => a.scene_id === existing!.id);
-            if (owned.length) return owned.map(ruleFromAutomation);
-        }
-        return [];
-    }));
-
-    function addRule() { rules = [...rules, blankRule()]; }
-    function removeRule(i: number) { rules = rules.filter((_, idx) => idx !== i); }
-
-    // Owned automation backing a rule, used to surface last-fired / run-count.
-    function ruleStats(automationId: string): { count: number; ago: string } | null {
-        if (!automationId) return null;
-        const a = data.value.automations.find(x => x.id === automationId);
-        if (!a) return null;
-        return { count: a.run_count ?? 0, ago: formatAgo(a.last_fired_at) };
-    }
-
-    function buildRulePayload(rule: SceneRuleDraft, sceneId: string, sceneName: string, idx: number): Partial<Automation> {
-        let trigger: AutomationTrigger;
-        if (rule.trigType === "time") {
-            trigger = {
-                type: "time",
-                time_mode: rule.trigTimeMode as AutomationTrigger["time_mode"],
-                time: rule.trigTimeMode === "fixed" ? rule.trigTime : "",
-                solar_offset_minutes: rule.trigTimeMode === "fixed" ? 0 : rule.trigSolarOffset,
-                days: rule.trigDays,
-            };
-        } else if (rule.trigType === "sensor") {
-            trigger = { type: "sensor", sensor_id: rule.trigSensorId, op: rule.trigOp, value: Number(rule.trigValue) };
-        } else {
-            trigger = { type: "device", socket_id: rule.trigSocketId, to_state: rule.trigToState };
-        }
-        const actions: AutomationAction[] = rule.actions.map(a => {
-            const base: AutomationAction = {
-                target_type: a.target_type,
-                target_id: a.target_id,
-                action: (a.target_type === "scene" ? "activate" : a.action) as AutomationAction["action"],
-            };
-            if (a.action === "on") {
-                if (a.target_type === "socket") {
-                    base.level = a.level ?? 100;
-                    if (a.color) base.color = a.color;
-                } else if (a.target_type === "group" || a.target_type === "room") {
-                    // Only include lighting info when the user explicitly chose a preset
-                    // (any color set, or brightness moved from the default 100%).
-                    if (a.color || a.level !== 100) {
-                        base.level = a.level ?? 100;
-                        if (a.color) base.color = a.color;
-                    }
-                }
-            }
-            return base;
-        });
-        const conditions: AutomationCondition[] = rule.conditions.map(c =>
-            c.type === "device"
-                ? { type: "device", socket_id: c.socket_id, state: c.state }
-                : { type: "time_range", after: c.after, before: c.before },
-        );
-        return { name: `${sceneName} – rule ${idx + 1}`, enabled: rule.enabled, trigger, conditions, actions, scene_id: sceneId };
-    }
-
     // ── Form state ─────────────────────────────────────────────────────
     let name = $state(untrack(() => existing?.name ?? ""));
     let room = $state(untrack(() => existing?.room ?? ""));
@@ -264,7 +211,7 @@
     let nameError = $state("");
 
     const modalTitle = $derived(isEdit ? "Edit scene" : "New scene");
-    const modalSubtitle = "Add automated rules and optionally set a manual activation snapshot.";
+    const modalSubtitle = "A saved lighting look you activate by tapping. For things that happen on a trigger, use Automations.";
 
     // ── Test ────────────────────────────────────────────────────────────
     // Runs the saved scene immediately so you can preview it. Only available
@@ -296,39 +243,13 @@
             // Snapshot steps are optional — send whatever is configured (may be []).
             const payload = { name: sceneName, room: room || undefined, icon: icon || undefined, color: color || undefined, steps: buildSteps() };
 
-            let sceneId: string;
             if (isEdit) {
                 await api.updateScene(existing!.id, payload);
-                sceneId = existing!.id;
             } else {
-                const created = await api.createScene(payload);
-                sceneId = created.id;
+                await api.createScene(payload);
             }
 
-            // Delete removed rules, create / update surviving ones.
-            const survivingIds = new Set(rules.map(r => r.automationId).filter(Boolean));
-            for (const a of data.value.automations) {
-                if (a.scene_id === sceneId && !survivingIds.has(a.id)) {
-                    try { await api.deleteAutomation(a.id); } catch (_) { /* best-effort */ }
-                }
-            }
-            let ruleSaveErrors = 0;
-            for (let i = 0; i < rules.length; i++) {
-                try {
-                    const rp = buildRulePayload(rules[i], sceneId, sceneName, i);
-                    if (rules[i].automationId) await api.updateAutomation(rules[i].automationId, rp);
-                    else await api.createAutomation(rp);
-                } catch (_) { ruleSaveErrors++; }
-            }
-
-            const rc = rules.length;
-            if (ruleSaveErrors > 0) {
-                toasts.warn(isEdit ? "Scene updated" : "Scene created",
-                    `${rc - ruleSaveErrors} of ${rc} rules saved.`);
-            } else {
-                toasts.success(isEdit ? "Scene updated" : "Scene created",
-                    rc > 0 ? `${sceneName} · ${rc} rule${rc > 1 ? "s" : ""}` : sceneName);
-            }
+            toasts.success(isEdit ? "Scene updated" : "Scene created", sceneName);
             closeModal();
             await data.refresh();
         } catch (e) {
@@ -410,53 +331,6 @@
                 </div>
             </div>
 
-            <!-- ── Rules ─────────────────────────────────────────── -->
-            <div class="form-section">
-                <div class="form-sec-head">
-                    <span class="form-sec-label">Rules</span>
-                    <span class="form-sec-hint">Each rule fires independently on its own trigger</span>
-                </div>
-
-                {#if rules.length === 0}
-                    <div class="rules-empty">
-                        <div class="rules-empty-icon"><Icon name="automation" size={26} /></div>
-                        <div class="rules-empty-title">No rules yet</div>
-                        <div class="rules-empty-sub">Rules control devices automatically — at sunset, at a fixed time, when a sensor crosses a threshold, or when a device changes state.</div>
-                    </div>
-                {/if}
-
-                {#each rules as rule, ri (rule._key)}
-                    <div class="rule-card">
-                        <div class="rule-header">
-                            <span class="rule-badge">Rule {ri + 1}</span>
-                            {#if !rule.enabled}<span class="rule-muted">Off</span>{/if}
-                            {#if ruleStats(rule.automationId)}
-                                {@const st = ruleStats(rule.automationId)}
-                                <span class="rule-stats mono" title="How often this rule has fired">
-                                    Ran {st!.count}×{st!.ago ? ` · ${st!.ago}` : ""}
-                                </span>
-                            {/if}
-                            <div class="rule-head-actions">
-                                <Switch bind:checked={rule.enabled}
-                                    ariaLabel="Enable rule {ri + 1}" />
-                                <button type="button" class="rule-remove"
-                                    onclick={() => removeRule(ri)}
-                                    aria-label="Remove rule {ri + 1}">
-                                    <Icon name="trash" size={14} />
-                                </button>
-                            </div>
-                        </div>
-                        <div class="rule-inner">
-                            <RuleEditor bind:draft={rules[ri]} idPrefix="rule-{ri}" />
-                        </div>
-                    </div>
-                {/each}
-
-                <button type="button" class="add-dashed-btn" onclick={addRule}>
-                    <Icon name="plus" size={15} /> Add rule
-                </button>
-            </div>
-
             <!-- ── Snapshot (manual activation) ─────────────────── -->
             <div class="form-section">
                 <button type="button" class="snapshot-toggle"
@@ -465,8 +339,7 @@
                     <span class="snapshot-chevron" class:open={snapshotOpen}>
                         <Icon name="chevronDown" size={14} />
                     </span>
-                    <span class="form-sec-label">Manual activation snapshot</span>
-                    <span class="opt-pill">optional</span>
+                    <span class="form-sec-label">Lights &amp; devices</span>
                     {#if !snapshotOpen && snapshotDeviceCount > 0}
                         <span class="snapshot-count mono">{snapshotDeviceCount} device{snapshotDeviceCount > 1 ? "s" : ""}</span>
                     {/if}
@@ -475,8 +348,18 @@
                 {#if snapshotOpen}
                     <div class="snapshot-body">
                         <div class="field-help snapshot-hint">
-                            Set what happens when you tap this scene manually. Supports multi-step sequences with delays.
+                            What this scene sets when you tap it. Pick a room, set them all, then tweak individual lamps. Add steps to ramp over time.
                         </div>
+                        {#if scopeOptions.length > 1}
+                            <div class="scope-chips" role="group" aria-label="Filter devices by room or group">
+                                {#each scopeOptions as opt (opt.key)}
+                                    <button type="button" class="scope-chip"
+                                        class:active={scope === opt.key}
+                                        aria-pressed={scope === opt.key}
+                                        onclick={() => scope = opt.key}>{opt.label}</button>
+                                {/each}
+                            </div>
+                        {/if}
                         <div class="steps-wrap">
                             {#each steps as step, i (step)}
                                 <div class="step-card">
@@ -512,8 +395,54 @@
                                         {/if}
                                     </div>
 
+                                    {#if shownSockets.length > 0}
+                                        <div class="bulk-bar">
+                                            <span class="bulk-lbl">Set all<span class="bulk-n mono">{shownSockets.length}</span></span>
+                                            <div class="state-group" role="group"
+                                                aria-label="Set all shown devices in step {i + 1}">
+                                                <button type="button" class="state-btn"
+                                                    onclick={() => setAll(step, 'ignore')}
+                                                    aria-label="Ignore all shown devices">—</button>
+                                                <button type="button" class="state-btn s-on"
+                                                    onclick={() => setAll(step, 'on')}
+                                                    aria-label="Turn all shown devices on">On</button>
+                                                <button type="button" class="state-btn s-off"
+                                                    onclick={() => setAll(step, 'off')}
+                                                    aria-label="Turn all shown devices off">Off</button>
+                                            </div>
+                                            {#if shownHasSmart}
+                                                <div class="bulk-light">
+                                                    <div class="bright">
+                                                        <span class="bright-ico"><Icon name="sun" size={14} /></span>
+                                                        <input type="range" min="1" max="100" step="1"
+                                                            value={bulkLevel(step)}
+                                                            oninput={(e) => setAllLevel(step, parseInt((e.target as HTMLInputElement).value, 10))}
+                                                            aria-label="Brightness for all shown lights" />
+                                                        <span class="bright-val mono">{bulkLevel(step)}%</span>
+                                                    </div>
+                                                    <div class="swatches">
+                                                        {#each COLOURS as c (c.name)}
+                                                            <button type="button" class="swatch"
+                                                                class:active={bulkColor(step) === c.hex}
+                                                                class:auto={c.hex === ""}
+                                                                style={c.hex ? `background:#${c.hex}` : ""}
+                                                                title="{c.name} for all shown"
+                                                                aria-label="{c.name} for all shown lights"
+                                                                onclick={() => setAllColor(step, c.hex)}>
+                                                                {#if c.hex === ""}<Icon name="close" size={12} />{/if}
+                                                            </button>
+                                                        {/each}
+                                                    </div>
+                                                </div>
+                                            {/if}
+                                        </div>
+                                    {/if}
+
                                     <div class="picker">
-                                        {#each sockets as s, si (s.id)}
+                                        {#if shownSockets.length === 0}
+                                            <div class="picker-empty mono">No devices in this scope</div>
+                                        {/if}
+                                        {#each shownSockets as s, si (s.id)}
                                             {@const state = step.perSocket[s.id]}
                                             {#if si > 0}<div class="row-sep" aria-hidden="true"></div>{/if}
                                             <div class="picker-row"
@@ -575,6 +504,11 @@
                                                 {/if}
                                             </div>
                                         {/each}
+                                        {#if hiddenConfigured(step) > 0}
+                                            <div class="hidden-hint">
+                                                <span class="mono">{hiddenConfigured(step)}</span> configured device{hiddenConfigured(step) === 1 ? "" : "s"} hidden by this filter
+                                            </div>
+                                        {/if}
                                     </div>
                                 </div>
                             {/each}
@@ -621,11 +555,6 @@
         flex-direction: column;
         gap: 10px;
     }
-    .form-sec-head {
-        display: flex;
-        align-items: baseline;
-        gap: 8px;
-    }
     .form-sec-label {
         font-family: var(--font-mono);
         font-size: 11px;
@@ -633,90 +562,6 @@
         text-transform: uppercase;
         letter-spacing: 0.08em;
         color: var(--text-mute);
-    }
-    .form-sec-hint {
-        font-size: 12px;
-        color: var(--text-dim);
-    }
-
-    /* ── Rules empty state ───────────────────────────────────────── */
-    .rules-empty {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        text-align: center;
-        gap: 8px;
-        padding: 28px 24px;
-        border: 1px dashed var(--border);
-        border-radius: var(--r-md);
-    }
-    .rules-empty-icon { color: var(--text-dim); }
-    .rules-empty-title { font-size: 13.5px; font-weight: 500; color: var(--text-mute); }
-    .rules-empty-sub { font-size: 12.5px; color: var(--text-dim); line-height: 1.5; max-width: 340px; }
-
-    /* ── Rule cards ───────────────────────────────────────────────── */
-    .rule-card {
-        border: 1px solid var(--border);
-        border-radius: var(--r-md);
-        overflow: hidden;
-    }
-    .rule-header {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        padding: 8px 12px;
-        background: var(--card-3);
-        border-bottom: 1px solid var(--border);
-    }
-    .rule-head-actions {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        margin-left: auto;
-    }
-    .rule-muted {
-        font-family: var(--font-mono);
-        font-size: 10px;
-        text-transform: uppercase;
-        letter-spacing: 0.06em;
-        color: var(--text-dim);
-        background: var(--card-2);
-        border: 1px solid var(--hairline);
-        border-radius: var(--r-pill);
-        padding: 1px 7px;
-    }
-    .rule-stats {
-        font-size: 11px;
-        color: var(--text-dim);
-    }
-    .rule-badge {
-        font-family: var(--font-mono);
-        font-size: 11px;
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 0.08em;
-        color: var(--text-mute);
-    }
-    .rule-remove {
-        background: transparent;
-        border: 0;
-        padding: 4px 6px;
-        cursor: pointer;
-        color: var(--text-dim);
-        display: inline-flex;
-        align-items: center;
-        border-radius: var(--r-sm);
-        min-width: 32px;
-        min-height: 32px;
-        justify-content: center;
-        transition: background var(--t-fast), color var(--t-fast);
-    }
-    .rule-remove:hover { background: var(--surface-hover); color: var(--bad); }
-    .rule-inner {
-        padding: var(--space-3);
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-3);
     }
 
     /* ── Icon + accent pickers ───────────────────────────────────── */
@@ -784,17 +629,6 @@
     }
     .snapshot-chevron.open { transform: rotate(0deg); }
     .snapshot-chevron:not(.open) { transform: rotate(-90deg); }
-    .opt-pill {
-        font-size: 10.5px;
-        font-family: var(--font-mono);
-        text-transform: uppercase;
-        letter-spacing: 0.06em;
-        color: var(--text-dim);
-        background: var(--card-3);
-        border: 1px solid var(--hairline);
-        border-radius: var(--r-pill);
-        padding: 1px 7px;
-    }
     .snapshot-count {
         font-size: 11px;
         color: var(--text-mute);
@@ -807,6 +641,50 @@
         gap: 10px;
     }
     .snapshot-hint { margin-bottom: 2px; }
+
+    /* ── Scope filter + bulk fill ─────────────────────────────────── */
+    .scope-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+    .scope-chip {
+        padding: 4px 11px; font-size: 12px;
+        background: var(--card-2); border: 1px solid var(--hairline);
+        border-radius: var(--r-pill); color: var(--text-mute);
+        cursor: pointer; touch-action: manipulation; white-space: nowrap;
+        transition: background var(--t-fast), color var(--t-fast), box-shadow var(--t-fast);
+    }
+    .scope-chip:hover { background: var(--card-3); color: var(--text); }
+    .scope-chip.active {
+        background: var(--card-3); color: var(--text);
+        box-shadow: 0 0 0 1px var(--border-strong) inset;
+    }
+    .bulk-bar {
+        display: flex; align-items: center; flex-wrap: wrap; gap: 10px;
+        padding: 8px 12px; margin: 4px 4px 0;
+        background: var(--card-2); border: 1px solid var(--hairline);
+        border-radius: var(--r-sm);
+    }
+    .bulk-lbl {
+        display: inline-flex; align-items: center; gap: 6px;
+        font-family: var(--font-mono); font-size: 10.5px;
+        text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-mute);
+        flex-shrink: 0;
+    }
+    .bulk-n {
+        font-size: 11px; color: var(--text-dim);
+        background: var(--card-3); border-radius: var(--r-pill); padding: 0 6px;
+    }
+    .bulk-light {
+        display: flex; align-items: center; gap: 12px;
+        flex: 1; flex-wrap: wrap; min-width: 220px;
+    }
+    .bulk-light .bright { flex: 1; min-width: 150px; }
+    .picker-empty { padding: 16px 12px; text-align: center; font-size: 12px; color: var(--text-dim); }
+    .hidden-hint { padding: 8px 12px 4px 58px; font-size: 11.5px; color: var(--text-dim); }
+    @media (prefers-reduced-motion: reduce) {
+        .scope-chip { transition-duration: 0.001ms; }
+    }
+    @media (pointer: coarse) {
+        .scope-chip { min-height: 34px; padding: 7px 13px; }
+    }
 
     /* ── Steps (inside snapshot) ────────────────────────────────── */
     .steps-wrap { display: flex; flex-direction: column; gap: 10px; }
@@ -918,7 +796,7 @@
     /* ── Reduced motion ───────────────────────────────────────────── */
     @media (prefers-reduced-motion: reduce) {
         .snapshot-chevron, .row-bulb, .picker-row, .state-btn,
-        .rule-card, .add-dashed-btn { transition-duration: 0.001ms; }
+        .add-dashed-btn { transition-duration: 0.001ms; }
     }
 
     .opt { color: var(--text-muted); font-weight: 400; font-size: 12px; }
@@ -933,12 +811,10 @@
         .swatch { width: 28px; height: 28px; }
         .bright input[type="range"] { height: 28px; }
         .light-row { padding: 0 10px 12px 52px; }
-        .rule-remove { min-width: 44px; min-height: 44px; }
     }
     @media (pointer: coarse) {
         input[type="range"] { height: 28px; }
         .swatch { width: 30px; height: 30px; }
         .state-btn { min-height: 34px; }
-        .rule-remove { min-width: 44px; min-height: 44px; }
     }
 </style>

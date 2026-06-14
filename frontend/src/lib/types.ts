@@ -256,6 +256,11 @@ export interface RuleActionDraft {
   action: string;
   level: number;
   color: string;
+  /** Present only on a group/room "on" action authored per-lamp: instead of
+   *  one uniform fan-out, the action compiles to one socket action per member,
+   *  each with its own state/level/colour. Keyed by socket id. Absent = the
+   *  uniform (whole group/room) behaviour. */
+  perLamp?: Record<string, { state: "on" | "off" | "ignore"; level: number; color: string }>;
 }
 
 export interface RuleDraft {
@@ -273,20 +278,27 @@ export interface RuleDraft {
   actions: RuleActionDraft[];
 }
 
+// One independent trigger → optional conditions → actions rule. An automation
+// holds one or more, firing each on its own trigger.
+export interface AutomationRule {
+  trigger: AutomationTrigger;
+  conditions?: AutomationCondition[];
+  actions: AutomationAction[];
+}
+
 export interface Automation {
   id: string;
   name: string;
   enabled: boolean;
-  trigger: AutomationTrigger;
-  conditions?: AutomationCondition[];
-  actions: AutomationAction[];
+  rules: AutomationRule[];
   last_fired_at?: string;
   run_count?: number;
   /** Set when this automation was created as a rule inside a scene wizard. */
   scene_id?: string;
-  /** Server-computed HH:MM for solar time triggers (sunrise/sunset + offset).
-   *  Absent when the trigger is not solar or the location is not configured. */
-  effective_trigger_time?: string;
+  /** Server-computed HH:MM for each rule's solar time trigger (sunrise/sunset +
+   *  offset), index-aligned to rules. An entry is empty for non-solar triggers
+   *  or when location is not configured. */
+  effective_trigger_times?: (string | null)[];
 }
 
 export interface BulkResult {

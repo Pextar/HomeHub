@@ -14,7 +14,7 @@
     import { flip } from "svelte/animate";
     import { cubicOut } from "svelte/easing";
     import { dur, stagger } from "../lib/motion";
-    import type { Automation, Schedule } from "../lib/types";
+    import type { Automation, AutomationRule, Schedule } from "../lib/types";
 
     const v = $derived(data.value);
 
@@ -33,7 +33,7 @@
         filter === "all" || filter === "time" ? v.schedules : [],
     );
     const shownAutomations = $derived(
-        filter === "all" ? v.automations : v.automations.filter(a => a.trigger.type === filter),
+        filter === "all" ? v.automations : v.automations.filter(a => a.rules.some(r => r.trigger.type === filter)),
     );
     const nothingToShow  = $derived(shownSchedules.length === 0 && shownAutomations.length === 0);
     const totalRules     = $derived(v.schedules.length + v.automations.length);
@@ -106,11 +106,11 @@
         return socketName(id);
     }
 
-    function whenText(a: Automation): string {
-        const t = a.trigger;
+    function whenText(r: AutomationRule, eff?: string | null): string {
+        const t = r.trigger;
         if (t.type === "time") {
             if (t.time_mode === "sunrise" || t.time_mode === "sunset") {
-                if (a.effective_trigger_time) return `≈ ${a.effective_trigger_time}`;
+                if (eff) return `≈ ${eff}`;
                 const off = t.solar_offset_minutes ?? 0;
                 const suffix = off ? ` ${off < 0 ? "−" : "+"}${Math.abs(off)}m` : "";
                 return `${t.time_mode}${suffix}`;
@@ -125,11 +125,11 @@
         return `${socketName(t.socket_id)} turns ${t.to_state}`;
     }
 
-    function thenText(a: Automation): string {
-        if (a.actions.length === 0) return "—";
-        const first = a.actions[0];
+    function thenText(r: AutomationRule): string {
+        if (r.actions.length === 0) return "—";
+        const first = r.actions[0];
         const label = `${targetName(first.target_type, first.target_id)} ${first.action}`;
-        return a.actions.length > 1 ? `${label} +${a.actions.length - 1}` : label;
+        return r.actions.length > 1 ? `${label} +${r.actions.length - 1}` : label;
     }
 
     function lastFiredText(a: Automation): string {
@@ -284,13 +284,15 @@
                                 <span class="dot" class:on={a.enabled}></span>
                                 <span class="name">{a.name}</span>
                             </span>
-                            <span class="rule mono">
-                                <span class="kw when">WHEN</span>
-                                <span class="val">{whenText(a)}</span>
-                                <Icon name="chevronDown" size={12} />
-                                <span class="kw then">THEN</span>
-                                <span class="val">{thenText(a)}</span>
-                            </span>
+                            {#each a.rules as r, ri (ri)}
+                                <span class="rule mono">
+                                    <span class="kw when">WHEN</span>
+                                    <span class="val">{whenText(r, a.effective_trigger_times?.[ri])}</span>
+                                    <Icon name="chevronDown" size={12} />
+                                    <span class="kw then">THEN</span>
+                                    <span class="val">{thenText(r)}</span>
+                                </span>
+                            {/each}
                             {#if (a.run_count ?? 0) > 0}
                                 <span class="runs mono" title={a.last_fired_at ? new Date(a.last_fired_at).toLocaleString() : undefined}>ran {a.run_count}× · {lastFiredText(a)}</span>
                             {/if}

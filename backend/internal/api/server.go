@@ -171,6 +171,7 @@ func (s *Server) Handler() http.Handler {
 	api.HandleFunc("/automations/{id}", s.requireAdmin(s.updateAutomation)).Methods("PUT")
 	api.HandleFunc("/automations/{id}", s.requireAdmin(s.deleteAutomation)).Methods("DELETE")
 	api.HandleFunc("/automations/{id}/run", s.requireAdmin(s.runAutomation)).Methods("POST")
+	api.HandleFunc("/automations/{id}/rules/{idx}/run", s.requireAdmin(s.runAutomationRule)).Methods("POST")
 
 	api.HandleFunc("/groups", s.requireAdmin(s.getGroups)).Methods("GET")
 	api.HandleFunc("/groups", s.requireAdmin(s.createGroup)).Methods("POST")
