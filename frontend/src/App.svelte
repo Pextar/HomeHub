@@ -18,8 +18,8 @@
     import Users from "./views/Users.svelte";
     import Settings from "./views/Settings.svelte";
     import Console from "./views/Console.svelte";
-    import Assistant from "./views/Assistant.svelte";
     import KidHome from "./views/KidHome.svelte";
+    import AssistantLauncher from "./components/AssistantLauncher.svelte";
     import { data, route, toasts, session } from "./lib/stores.svelte";
     import { fly, fade } from "svelte/transition";
     import { cubicOut } from "svelte/easing";
@@ -107,12 +107,11 @@
         users: Users,
         settings: Settings,
         console: Console,
-        assistant: Assistant,
     };
 
     // Routes a non-admin profile is allowed to open. Everything else is
     // admin-only; deep-linking elsewhere bounces back to the dashboard.
-    const ADMIN_ONLY: Route[] = ["rooms", "floorplan", "groups", "scenes", "schedules", "automations", "sensors", "insights", "activity", "users", "settings", "console", "assistant"];
+    const ADMIN_ONLY: Route[] = ["rooms", "floorplan", "groups", "scenes", "schedules", "automations", "sensors", "insights", "activity", "users", "settings", "console"];
     const effectiveRoute = $derived(
         !session.isAdmin && ADMIN_ONLY.includes(route.current) ? "dashboard" : route.current,
     );
@@ -150,6 +149,7 @@
                 </div>
             </main>
         </div>
+        <AssistantLauncher />
     {/if}
 </LoginGate>
 

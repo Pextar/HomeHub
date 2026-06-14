@@ -1,13 +1,17 @@
 <script lang="ts">
-    import Topbar from "../components/Topbar.svelte";
-    import Icon from "../components/Icon.svelte";
+    import Icon from "./Icon.svelte";
     import { assistant } from "../lib/stores.svelte";
     import { onMount, tick } from "svelte";
     import { fly } from "svelte/transition";
     import { dur } from "../lib/motion";
 
+    // The conversation core, shared by the mobile sheet and desktop popover.
+    // It fills its container (height:100%); the surrounding surface owns the
+    // header (title/status/close). No page Topbar here.
+
     let draft = $state("");
     let scroller = $state<HTMLDivElement | undefined>();
+    let input = $state<HTMLTextAreaElement | undefined>();
 
     const status = $derived(assistant.status);
     const messages = $derived(assistant.messages);
@@ -23,11 +27,14 @@
     ];
 
     onMount(() => {
-        assistant.loadStatus();
+        // Focus the input on open, except on touch (avoids an abrupt keyboard).
+        if (!window.matchMedia("(pointer: coarse)").matches) {
+            requestAnimationFrame(() => input?.focus());
+        }
     });
 
-    // Keep the thread pinned to the newest content as it streams in. Reading
-    // the last message's length registers token-level reactivity.
+    // Pin the thread to the newest content as it streams. Reading the last
+    // message's length registers token-level reactivity.
     const tail = $derived(
         messages.length + (messages.at(-1)?.content.length ?? 0) + (messages.at(-1)?.tools?.length ?? 0),
     );
@@ -35,9 +42,7 @@
         tail;
         pending;
         if (scroller) {
-            tick().then(() => {
-                scroller?.scrollTo({ top: scroller.scrollHeight, behavior: "smooth" });
-            });
+            tick().then(() => scroller?.scrollTo({ top: scroller.scrollHeight, behavior: "smooth" }));
         }
     });
 
@@ -49,7 +54,6 @@
     }
 
     function onKeydown(e: KeyboardEvent) {
-        // Enter sends; Shift+Enter inserts a newline.
         if (e.key === "Enter" && !e.shiftKey) {
             e.preventDefault();
             send();
@@ -62,23 +66,6 @@
         assistant.send(text);
     }
 </script>
-
-<Topbar
-    title="Assistant"
-    subtitle={status?.enabled
-        ? unreachable
-            ? "Model unreachable"
-            : `Local · ${status.model ?? "llm"}`
-        : "Local AI"}
->
-    {#snippet actions()}
-        {#if messages.length > 0}
-            <button class="icon-btn" aria-label="Clear conversation" onclick={() => assistant.reset()}>
-                <Icon name="trash" size={18} />
-            </button>
-        {/if}
-    {/snippet}
-</Topbar>
 
 {#if disabled}
     <div class="notice">
@@ -174,6 +161,7 @@
 
         <div class="composer">
             <textarea
+                bind:this={input}
                 bind:value={draft}
                 onkeydown={onKeydown}
                 placeholder="Message your home…"
@@ -197,10 +185,8 @@
     .chat {
         display: flex;
         flex-direction: column;
-        /* Fill the remaining viewport so the composer sits at the bottom and
-           only the thread scrolls. Account for the desktop main padding. */
-        height: calc(100vh - 160px);
-        min-height: 360px;
+        height: 100%;
+        min-height: 0;
     }
     .thread {
         flex: 1;
@@ -208,8 +194,9 @@
         display: flex;
         flex-direction: column;
         gap: var(--space-3);
-        padding: var(--space-2) var(--space-1) var(--space-4);
+        padding: var(--space-3) var(--space-1) var(--space-4);
         scroll-behavior: smooth;
+        min-height: 0;
     }
 
     /* ── Messages ───────────────────────────────────────────── */
@@ -217,7 +204,7 @@
     .row.user { justify-content: flex-end; }
     .row.assistant { justify-content: flex-start; }
     .bubble {
-        max-width: min(72ch, 86%);
+        max-width: 86%;
         padding: 12px 15px;
         border-radius: var(--r-lg);
         font-size: 14px;
@@ -238,12 +225,7 @@
     .bubble.error { border-color: var(--bad); color: var(--bad); }
     .text { margin: 0; white-space: pre-wrap; word-break: break-word; }
 
-    .tools {
-        display: flex;
-        flex-wrap: wrap;
-        gap: var(--space-1);
-        margin-bottom: var(--space-2);
-    }
+    .tools { display: flex; flex-wrap: wrap; gap: var(--space-1); margin-bottom: var(--space-2); }
     .tool-chip {
         display: inline-flex;
         align-items: center;
@@ -254,11 +236,7 @@
         color: var(--text-mute);
     }
     .tool-chip :global(svg) { color: var(--good); }
-    .tool-name {
-        font-family: var(--font-mono);
-        font-size: 11px;
-        letter-spacing: 0.02em;
-    }
+    .tool-name { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.02em; }
 
     /* Typing skeleton (no spinners — DESIGN §2). */
     .typing { display: flex; flex-direction: column; gap: 6px; min-width: 120px; }
@@ -288,13 +266,7 @@
     }
     .empty-title { margin: 0; font-size: 17px; font-weight: 600; letter-spacing: -0.02em; color: var(--text); }
     .empty-sub { margin: 0; font-size: 13px; color: var(--text-mute); line-height: 1.5; }
-    .examples {
-        display: flex;
-        flex-wrap: wrap;
-        gap: var(--space-2);
-        justify-content: center;
-        margin-top: var(--space-3);
-    }
+    .examples { display: flex; flex-wrap: wrap; gap: var(--space-2); justify-content: center; margin-top: var(--space-3); }
     .example {
         padding: 8px 14px;
         border-radius: var(--r-pill);
@@ -309,7 +281,7 @@
 
     /* ── Confirmation card ──────────────────────────────────── */
     .confirm {
-        max-width: min(72ch, 86%);
+        max-width: 86%;
         padding: var(--space-4);
         border-radius: var(--r-lg);
         background: var(--card);
@@ -320,13 +292,7 @@
     }
     .confirm-summary { margin: 0; font-size: 14.5px; font-weight: 600; color: var(--text); }
     .affected { display: flex; flex-wrap: wrap; gap: 6px; }
-    .affected-chip {
-        padding: 3px 9px;
-        border-radius: var(--r-pill);
-        background: var(--card-3);
-        color: var(--text-mute);
-        font-size: 12px;
-    }
+    .affected-chip { padding: 3px 9px; border-radius: var(--r-pill); background: var(--card-3); color: var(--text-mute); font-size: 12px; }
     .affected-chip.more { color: var(--text); }
     .mono { font-family: var(--font-mono); }
     .confirm-actions { display: flex; gap: var(--space-2); justify-content: flex-end; }
@@ -355,6 +321,7 @@
         border: 1px solid var(--hairline);
         border-radius: var(--r-xl);
         background: var(--card);
+        margin-top: var(--space-2);
     }
     textarea {
         flex: 1;
@@ -365,7 +332,7 @@
         font-family: var(--font-sans);
         font-size: 15px;
         line-height: 1.5;
-        max-height: 160px;
+        max-height: 140px;
         padding: 10px 8px;
         outline: none;
     }
@@ -411,9 +378,6 @@
         color: var(--text);
     }
 
-    @media (max-width: 900px) {
-        .chat { height: calc(100vh - 220px); }
-    }
     /* Prevent iOS auto-zoom on focus (DESIGN: 16px min on touch). */
     @media (pointer: coarse) {
         textarea { font-size: 16px; }

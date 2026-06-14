@@ -1,7 +1,7 @@
 <script lang="ts">
   import Icon from "./Icon.svelte";
   import ConfirmModal from "./ConfirmModal.svelte";
-  import { route, theme, data, session, sidebar } from "../lib/stores.svelte";
+  import { route, theme, data, session, sidebar, assistant } from "../lib/stores.svelte";
   import { api } from "../lib/api";
   import { openModal, modalStack } from "../lib/modal.svelte";
   import { fade } from "svelte/transition";
@@ -36,7 +36,6 @@
   const allItems: NavItem[] = [
     { route: "dashboard", icon: "home", label: "Home" },
     { route: "sockets", icon: "socket", label: "Devices" },
-    { route: "assistant", icon: "assistant", label: "Assistant", admin: true },
     { route: "groups", icon: "groups", label: "Groups", admin: true },
     { route: "automations", icon: "automation", label: "Automations", admin: true },
     { route: "rooms", icon: "couch", label: "Rooms", admin: true },
@@ -102,7 +101,7 @@
     }
     if (e.key === "t") { toggleTheme(); e.preventDefault(); }
     if (e.key === "[") { sidebar.toggle(); e.preventDefault(); }
-    if ((e.metaKey || e.ctrlKey) && e.key === "k") { route.go("sockets"); e.preventDefault(); }
+    // Cmd/Ctrl-K is handled globally by AssistantLauncher (opens the assistant).
   }
 
   // True when the active route is one of the overflow items — used to
@@ -239,6 +238,13 @@
   <!-- Desktop: full list. Mobile: only the primary slice (the rest live in
          the More drawer). -->
   <nav class="nav nav-desktop" aria-label="Sections">
+    {#if session.isAdmin}
+      <button class="nav-item assistant-launch" data-label="Assistant" onclick={() => assistant.show()}>
+        <Icon name="assistant" size={18} />
+        <span class="nav-label">Assistant</span>
+        <kbd class="nav-key" aria-hidden="true">⌘K</kbd>
+      </button>
+    {/if}
     {#each items as item, i (item.route)}
       <a
         href="#/{item.route}"

@@ -134,7 +134,7 @@ function createToastStore() {
 }
 
 function createRouteStore() {
-  const valid: Route[] = ["dashboard", "rooms", "floorplan", "sockets", "groups", "scenes", "schedules", "sensors", "automations", "insights", "activity", "users", "settings", "console", "assistant"];
+  const valid: Route[] = ["dashboard", "rooms", "floorplan", "sockets", "groups", "scenes", "schedules", "sensors", "automations", "insights", "activity", "users", "settings", "console"];
   const current = $state<{ route: Route; query: Record<string, string> }>({ route: parse(), query: parseQuery() });
 
   function parse(): Route {
@@ -237,7 +237,8 @@ function createAssistantStore() {
     streaming: boolean;
     pending: AssistantConfirmation | null;
     status: AssistantStatus | null;
-  }>({ messages: [], streaming: false, pending: null, status: null });
+    open: boolean;
+  }>({ messages: [], streaming: false, pending: null, status: null, open: false });
 
   let abort: AbortController | null = null;
 
@@ -335,6 +336,12 @@ function createAssistantStore() {
     get streaming() { return s.streaming; },
     get pending() { return s.pending; },
     get status() { return s.status; },
+    // The assistant is a summoned overlay (FAB / Cmd-K), not a routed page,
+    // so its open state lives here and any surface can toggle it.
+    get open() { return s.open; },
+    show() { s.open = true; void loadStatus(); },
+    hide() { s.open = false; },
+    toggle() { s.open = !s.open; if (s.open) void loadStatus(); },
     loadStatus, send, confirm, cancel, reset,
   };
 }
