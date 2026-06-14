@@ -17,6 +17,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"rf-socket-controller/internal/api"
+	"rf-socket-controller/internal/llm"
 	"rf-socket-controller/internal/matter"
 	"rf-socket-controller/internal/mqtt"
 	"rf-socket-controller/internal/push"
@@ -130,6 +131,13 @@ func main() {
 		log.Printf("MQTT disabled — set MQTT_BROKER_URL to enable")
 	}
 
+	llmClient := llm.FromEnv()
+	if llmClient.Enabled() {
+		log.Printf("LLM assistant enabled (%s at %s)", llmClient.Model, llmClient.BaseURL)
+	} else {
+		log.Printf("LLM assistant disabled — set LLM_ENABLED=true to enable")
+	}
+
 	st := store.New(dataDir, &sender.Multi{
 		RF:     rf.Sender{NexaScript: nexaScriptPath()},
 		Matter: matterClient,
@@ -194,6 +202,7 @@ func main() {
 		Store:         st,
 		Matter:        matterClient,
 		MQTT:          mqttClient,
+		LLM:           llmClient,
 		Push:          pushSvc,
 		AuthUser:      os.Getenv("AUTH_USER"),
 		AuthPass:      os.Getenv("AUTH_PASS"),

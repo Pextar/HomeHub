@@ -157,15 +157,33 @@ func (s *Server) deleteScene(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) activateScene(w http.ResponseWriter, r *http.Request) {
-	id := mux.Vars(r)["id"]
+	name, okCount, failures, found, err := s.doActivateScene(mux.Vars(r)["id"])
+	if !found {
+		writeError(w, http.StatusNotFound, "scene not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"scene":    name,
+		"updated":  okCount,
+		"failures": failures,
+	})
+}
 
-	// Stage the first step (delayed steps are scheduled as background
-	// goroutines by StageAction), transmit off-lock, then fold the results
-	// back in. Smart-light brightness/colour is queued during staging and
-	// drained by FlushLights at the end.
+// doActivateScene runs the scene's first step through the staged flow (delayed
+// steps are scheduled as background goroutines by StageAction), records
+// activation telemetry, and sends a single summary notification. Shared by the
+// activate REST handler and the assistant's activate_scene tool. found is false
+// when no scene has the given id. Caller must NOT hold Mu.
+func (s *Server) doActivateScene(id string) (name string, okCount int, failures []map[string]string, found bool, err error) {
+	// Stage the first step, transmit off-lock, then fold the results back in.
+	// Smart-light brightness/colour is queued during staging and drained by
+	// FlushLights at the end.
 	s.Store.Mu.Lock()
 	scene, ok := s.Store.Scenes[id]
-	var name string
 	var staged []store.StagedSend
 	if ok {
 		name = scene.Name
@@ -173,8 +191,7 @@ func (s *Server) activateScene(w http.ResponseWriter, r *http.Request) {
 	}
 	s.Store.Mu.Unlock()
 	if !ok {
-		writeError(w, http.StatusNotFound, "scene not found")
-		return
+		return "", 0, nil, false, nil
 	}
 
 	s.Store.SendStaged(staged)
@@ -184,7 +201,7 @@ func (s *Server) activateScene(w http.ResponseWriter, r *http.Request) {
 	s.Store.SuppressStateChange = true
 	_ = s.Store.ApplyStaged(staged)
 	s.Store.SuppressStateChange = false
-	okCount, failures := stagedFailures(staged)
+	okCount, failures = stagedFailures(staged)
 	// Record activation telemetry so the UI can show "ran N× · 2h ago".
 	// Re-fetch: the scene may have been deleted while the sends were in flight.
 	if sc, still := s.Store.Scenes[id]; still {
@@ -197,17 +214,12 @@ func (s *Server) activateScene(w http.ResponseWriter, r *http.Request) {
 		entry.Error = fmt.Sprintf("%d of %d failed", len(failures), okCount+len(failures))
 	}
 	s.Store.Activity.Add(entry)
-	err := s.Store.Save()
+	err = s.Store.Save()
 	s.Store.Mu.Unlock()
 	s.Store.FlushLights()
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
-		return
+		return name, okCount, failures, true, err
 	}
 	s.notifyBulkState(fmt.Sprintf("Scene activated: %s", name), okCount)
-	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"scene":    name,
-		"updated":  okCount,
-		"failures": failures,
-	})
+	return name, okCount, failures, true, nil
 }

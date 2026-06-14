@@ -152,47 +152,59 @@ func (s *Server) deleteGroup(w http.ResponseWriter, r *http.Request) {
 // of a group.
 func (s *Server) groupAction(action string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		id := mux.Vars(r)["id"]
-
-		s.Store.Mu.Lock()
-		g, ok := s.Store.Groups[id]
-		var name string
-		var staged []store.StagedSend
-		if ok {
-			name = g.Name
-			staged, _ = s.Store.StageAction("group", id, action)
-		}
-		s.Store.Mu.Unlock()
-		if !ok {
+		name, ok, failures, found, err := s.doGroupAction(mux.Vars(r)["id"], action)
+		if !found {
 			writeError(w, http.StatusNotFound, "group not found")
 			return
 		}
-
-		s.Store.SendStaged(staged)
-
-		s.Store.Mu.Lock()
-		// Suppress per-socket push notifications; we send one summary below.
-		s.Store.SuppressStateChange = true
-		_ = s.Store.ApplyStaged(staged)
-		s.Store.SuppressStateChange = false
-		ok2, failures := stagedFailures(staged)
-		entry := store.ActivityEntry{Kind: "group", Source: "manual", Action: action, Label: name}
-		if len(failures) > 0 {
-			entry.Status = "error"
-			entry.Error = fmt.Sprintf("%d of %d failed", len(failures), ok2+len(failures))
-		}
-		s.Store.Activity.Add(entry)
-		err := s.Store.Save()
-		s.Store.Mu.Unlock()
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
 			return
 		}
-		s.notifyBulkState(fmt.Sprintf("%s turned %s", name, action), ok2)
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"group":    name,
-			"updated":  ok2,
+			"updated":  ok,
 			"failures": failures,
 		})
 	}
+}
+
+// doGroupAction applies an action to every member of a group through the
+// staged flow and sends a single summary notification. Shared by the group
+// REST handler and the assistant's control_group tool. found is false when no
+// group has the given id. Caller must NOT hold Mu.
+func (s *Server) doGroupAction(id, action string) (name string, ok int, failures []map[string]string, found bool, err error) {
+	s.Store.Mu.Lock()
+	g, exists := s.Store.Groups[id]
+	var staged []store.StagedSend
+	if exists {
+		name = g.Name
+		staged, _ = s.Store.StageAction("group", id, action)
+	}
+	s.Store.Mu.Unlock()
+	if !exists {
+		return "", 0, nil, false, nil
+	}
+
+	s.Store.SendStaged(staged)
+
+	s.Store.Mu.Lock()
+	// Suppress per-socket push notifications; we send one summary below.
+	s.Store.SuppressStateChange = true
+	_ = s.Store.ApplyStaged(staged)
+	s.Store.SuppressStateChange = false
+	ok, failures = stagedFailures(staged)
+	entry := store.ActivityEntry{Kind: "group", Source: "manual", Action: action, Label: name}
+	if len(failures) > 0 {
+		entry.Status = "error"
+		entry.Error = fmt.Sprintf("%d of %d failed", len(failures), ok+len(failures))
+	}
+	s.Store.Activity.Add(entry)
+	err = s.Store.Save()
+	s.Store.Mu.Unlock()
+	if err != nil {
+		return name, ok, failures, true, err
+	}
+	s.notifyBulkState(fmt.Sprintf("%s turned %s", name, action), ok)
+	return name, ok, failures, true, nil
 }

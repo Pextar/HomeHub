@@ -19,6 +19,7 @@
     import Settings from "./views/Settings.svelte";
     import Console from "./views/Console.svelte";
     import KidHome from "./views/KidHome.svelte";
+    import AssistantLauncher from "./components/AssistantLauncher.svelte";
     import { data, route, toasts, session } from "./lib/stores.svelte";
     import { fly, fade } from "svelte/transition";
     import { cubicOut } from "svelte/easing";
@@ -148,6 +149,7 @@
                 </div>
             </main>
         </div>
+        <AssistantLauncher />
     {/if}
 </LoginGate>
 

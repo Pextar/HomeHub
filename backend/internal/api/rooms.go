@@ -203,52 +203,65 @@ func (s *Server) roomSetState(target bool) http.HandlerFunc {
 			writeError(w, http.StatusBadRequest, "room is required")
 			return
 		}
-
-		user := currentUser(r)
-		action := "off"
-		if target {
-			action = "on"
-		}
-
-		s.Store.Mu.Lock()
-		var staged []store.StagedSend
-		for _, sock := range s.Store.Sockets {
-			if !strings.EqualFold(sock.Room, room) || !canAccess(user, sock.ID) {
-				continue
-			}
-			staged = append(staged, s.Store.StageSocketSend(sock.ID, action))
-		}
-		s.Store.Mu.Unlock()
-		if len(staged) == 0 {
+		ok, failures, found, err := s.doRoomSetState(currentUser(r), room, target)
+		if !found {
 			writeError(w, http.StatusNotFound, "no sockets in that room")
 			return
 		}
-
-		s.Store.SendStaged(staged)
-
-		s.Store.Mu.Lock()
-		// Suppress per-socket push notifications; we send one summary below.
-		s.Store.SuppressStateChange = true
-		_ = s.Store.ApplyStaged(staged)
-		s.Store.SuppressStateChange = false
-		ok, failures := stagedFailures(staged)
-		entry := store.ActivityEntry{Kind: "room", Source: "manual", Action: action, Label: room}
-		if len(failures) > 0 {
-			entry.Status = "error"
-			entry.Error = fmt.Sprintf("%d of %d failed", len(failures), ok+len(failures))
-		}
-		s.Store.Activity.Add(entry)
-		err := s.Store.Save()
-		s.Store.Mu.Unlock()
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
 			return
 		}
-		s.notifyBulkState(fmt.Sprintf("%s turned %s", room, action), ok)
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"room":     room,
 			"updated":  ok,
 			"failures": failures,
 		})
 	}
+}
+
+// doRoomSetState switches every accessible socket in a named room on or off
+// through the staged flow and sends a single summary notification. Shared by
+// the room REST handler and the assistant's control_room tool. found is false
+// when the room has no accessible sockets. Caller must NOT hold Mu.
+func (s *Server) doRoomSetState(user *store.User, room string, target bool) (ok int, failures []map[string]string, found bool, err error) {
+	action := "off"
+	if target {
+		action = "on"
+	}
+
+	s.Store.Mu.Lock()
+	var staged []store.StagedSend
+	for _, sock := range s.Store.Sockets {
+		if !strings.EqualFold(sock.Room, room) || !canAccess(user, sock.ID) {
+			continue
+		}
+		staged = append(staged, s.Store.StageSocketSend(sock.ID, action))
+	}
+	s.Store.Mu.Unlock()
+	if len(staged) == 0 {
+		return 0, nil, false, nil
+	}
+
+	s.Store.SendStaged(staged)
+
+	s.Store.Mu.Lock()
+	// Suppress per-socket push notifications; we send one summary below.
+	s.Store.SuppressStateChange = true
+	_ = s.Store.ApplyStaged(staged)
+	s.Store.SuppressStateChange = false
+	ok, failures = stagedFailures(staged)
+	entry := store.ActivityEntry{Kind: "room", Source: "manual", Action: action, Label: room}
+	if len(failures) > 0 {
+		entry.Status = "error"
+		entry.Error = fmt.Sprintf("%d of %d failed", len(failures), ok+len(failures))
+	}
+	s.Store.Activity.Add(entry)
+	err = s.Store.Save()
+	s.Store.Mu.Unlock()
+	if err != nil {
+		return ok, failures, true, err
+	}
+	s.notifyBulkState(fmt.Sprintf("%s turned %s", room, action), ok)
+	return ok, failures, true, nil
 }

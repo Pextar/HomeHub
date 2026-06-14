@@ -18,6 +18,7 @@ import (
 	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
 
+	"rf-socket-controller/internal/llm"
 	"rf-socket-controller/internal/matter"
 	"rf-socket-controller/internal/mqtt"
 	"rf-socket-controller/internal/push"
@@ -33,6 +34,7 @@ type Server struct {
 	Store         *store.Store
 	Matter        *matter.Client // optional; nil-safe via Matter.Enabled()
 	MQTT          *mqtt.Client   // optional; nil-safe via MQTT.Enabled()
+	LLM           *llm.Client    // optional; nil-safe via LLM.Enabled(). Powers the assistant.
 	Push          *push.Service  // optional; nil means push notifications are disabled
 	AuthUser      string
 	AuthPass      string
@@ -224,6 +226,13 @@ func (s *Server) Handler() http.Handler {
 
 	api.HandleFunc("/mqtt/status", s.requireAdmin(s.mqttStatus)).Methods("GET")
 	api.HandleFunc("/mqtt/publish", s.requireAdmin(s.mqttPublish)).Methods("POST")
+
+	// Local LLM assistant. Admin-gated: it can drive bulk control and reads
+	// across every device, matching the posture of the groups/scenes routes.
+	// When the LLM client is disabled the handlers return 503.
+	api.HandleFunc("/assistant/status", s.requireAdmin(s.assistantStatus)).Methods("GET")
+	api.HandleFunc("/assistant/chat", s.requireAdmin(s.assistantChat)).Methods("POST")
+	api.HandleFunc("/assistant/confirm", s.requireAdmin(s.assistantConfirm)).Methods("POST")
 
 	// Push notifications. vapid-key is public (no auth) so the frontend can
 	// subscribe before the user is authenticated. Subscribe/unsubscribe require

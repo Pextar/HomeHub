@@ -236,6 +236,47 @@ func (s *Server) setSocketState(w http.ResponseWriter, r *http.Request, target *
 	writeJSON(w, http.StatusOK, socket)
 }
 
+// doControlSocket applies on/off/toggle to a single socket by id, transmitting
+// synchronously (like the toggle/on/off REST handlers) so a device error is
+// reported directly. Shared by the assistant's control_device tool. found is
+// false when no socket has the id. Caller must NOT hold Mu.
+func (s *Server) doControlSocket(id, action string) (sock store.Socket, found bool, err error) {
+	var target *bool
+	switch action {
+	case "on":
+		t := true
+		target = &t
+	case "off":
+		t := false
+		target = &t
+	case "toggle":
+		target = nil
+	default:
+		return store.Socket{}, true, fmt.Errorf("unsupported action %q (use on, off, or toggle)", action)
+	}
+
+	s.Store.Mu.Lock()
+	defer s.Store.Mu.Unlock()
+	socket, ok := s.Store.Sockets[id]
+	if !ok {
+		return store.Socket{}, false, nil
+	}
+	applyErr := s.Store.ApplyState(socket, target)
+	entry := store.ActivityEntry{Kind: "socket", Source: "assistant", Action: action, Label: socket.Name}
+	if applyErr != nil {
+		entry.Status = "error"
+		entry.Error = applyErr.Error()
+	}
+	s.Store.Activity.Add(entry)
+	if applyErr != nil {
+		return *socket, true, applyErr
+	}
+	if err := s.Store.Save(); err != nil {
+		return *socket, true, err
+	}
+	return *socket, true, nil
+}
+
 // learnSocket picks a random unused code and broadcasts an ON signal so
 // a 433MHz socket in learn mode pairs to it. The caller then saves the
 // socket via the regular POST /sockets with the returned code.
@@ -332,53 +373,63 @@ func (s *Server) turnOff(w http.ResponseWriter, r *http.Request) {
 }
 
 // bulkSetState returns a handler that switches every socket on or off.
-// It returns the number of successes and a list of failures. Device I/O
-// happens between two lock acquisitions (staged flow) so one slow device
-// can't stall the rest of the API.
 func (s *Server) bulkSetState(target bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		user := currentUser(r)
-		action := "off"
-		if target {
-			action = "on"
-		}
-
-		s.Store.Mu.Lock()
-		staged := make([]store.StagedSend, 0, len(s.Store.Sockets))
-		for _, sock := range s.Store.Sockets {
-			if !canAccess(user, sock.ID) {
-				continue
-			}
-			staged = append(staged, s.Store.StageSocketSend(sock.ID, action))
-		}
-		s.Store.Mu.Unlock()
-
-		s.Store.SendStaged(staged)
-
-		s.Store.Mu.Lock()
-		// Suppress per-socket push notifications; we send one summary below.
-		s.Store.SuppressStateChange = true
-		_ = s.Store.ApplyStaged(staged)
-		s.Store.SuppressStateChange = false
-		ok, failures := stagedFailures(staged)
-		entry := store.ActivityEntry{Kind: "bulk", Source: "manual", Action: action, Label: "All sockets"}
-		if len(failures) > 0 {
-			entry.Status = "error"
-			entry.Error = fmt.Sprintf("%d of %d failed", len(failures), ok+len(failures))
-		}
-		s.Store.Activity.Add(entry)
-		err := s.Store.Save()
-		s.Store.Mu.Unlock()
+		ok, failures, err := s.doBulkSetState(currentUser(r), target)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
 			return
 		}
-		s.notifyBulkState(fmt.Sprintf("All devices turned %s", action), ok)
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"updated":  ok,
 			"failures": failures,
 		})
 	}
+}
+
+// doBulkSetState switches every socket the user may access on or off and
+// returns the success count plus the per-socket failure list. Device I/O
+// happens between two lock acquisitions (staged flow) so one slow device
+// can't stall the rest of the API. Shared by the bulk REST handler and the
+// assistant's all_devices tool so the Mu/staged/off-lock sequence lives in
+// one place. Caller must NOT hold Mu.
+func (s *Server) doBulkSetState(user *store.User, target bool) (ok int, failures []map[string]string, err error) {
+	action := "off"
+	if target {
+		action = "on"
+	}
+
+	s.Store.Mu.Lock()
+	staged := make([]store.StagedSend, 0, len(s.Store.Sockets))
+	for _, sock := range s.Store.Sockets {
+		if !canAccess(user, sock.ID) {
+			continue
+		}
+		staged = append(staged, s.Store.StageSocketSend(sock.ID, action))
+	}
+	s.Store.Mu.Unlock()
+
+	s.Store.SendStaged(staged)
+
+	s.Store.Mu.Lock()
+	// Suppress per-socket push notifications; we send one summary below.
+	s.Store.SuppressStateChange = true
+	_ = s.Store.ApplyStaged(staged)
+	s.Store.SuppressStateChange = false
+	ok, failures = stagedFailures(staged)
+	entry := store.ActivityEntry{Kind: "bulk", Source: "manual", Action: action, Label: "All sockets"}
+	if len(failures) > 0 {
+		entry.Status = "error"
+		entry.Error = fmt.Sprintf("%d of %d failed", len(failures), ok+len(failures))
+	}
+	s.Store.Activity.Add(entry)
+	err = s.Store.Save()
+	s.Store.Mu.Unlock()
+	if err != nil {
+		return ok, failures, err
+	}
+	s.notifyBulkState(fmt.Sprintf("All devices turned %s", action), ok)
+	return ok, failures, nil
 }
 
 // stagedFailures splits staged results into a success count and the
