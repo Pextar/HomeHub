@@ -24,10 +24,11 @@
         assistant.loadStatus();
     });
 
-    // Lock the page behind the overlay while it's open (both surfaces are an
-    // active, focused session; clicking the backdrop dismisses).
+    // Lock the page only behind the MOBILE sheet (a modal surface). The
+    // desktop panel is a non-modal popover — the app stays scrollable and
+    // clickable beside it — so no lock there.
     $effect(() => {
-        if (open) {
+        if (open && window.matchMedia("(max-width: 900px)").matches) {
             lockBodyScroll();
             return () => unlockBodyScroll();
         }
@@ -66,8 +67,10 @@
     {/if}
 
     {#if open}
-        <!-- Backdrop: dimmed on mobile, transparent on desktop; a click
-             anywhere outside the panel dismisses (popover semantics). -->
+        <!-- Mobile: a dimmed modal backdrop, click-to-dismiss. Desktop: the
+             same element becomes click-through (pointer-events:none) so the
+             panel floats as a non-modal popover — you keep working beside it
+             and close via the X, Esc, or Cmd-K. -->
         <div
             class="backdrop"
             role="presentation"
@@ -150,6 +153,8 @@
     .surface {
         display: flex;
         flex-direction: column;
+        /* Stays interactive even when the backdrop is click-through (desktop). */
+        pointer-events: auto;
         width: 100%;
         height: 82vh;
         background: var(--bg-2);
@@ -202,10 +207,11 @@
     /* ── Desktop: bottom-right popover panel ────────────────── */
     @media (min-width: 901px) {
         .backdrop {
-            /* Transparent catcher so clicking the app behind dismisses, but
-               the screen isn't dimmed — popover, not modal sheet. */
+            /* Non-modal: no dim, and click-through so the app behind stays
+               usable. The panel itself re-enables pointer events. */
             background: transparent;
             backdrop-filter: none;
+            pointer-events: none;
             align-items: flex-end;
             justify-content: flex-end;
             padding: 0 28px 28px;
