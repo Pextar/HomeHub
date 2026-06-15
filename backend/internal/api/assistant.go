@@ -229,10 +229,10 @@ func (s *Server) buildMessages(user *store.User, history []assistantClientMessag
 	return out
 }
 
-// systemPrompt frames the assistant and embeds the current home state as JSON
-// so the model can resolve names to ids without an extra tool round.
+// systemPrompt frames the assistant and embeds a compact text view of the
+// current home state so the model can pass names straight to the tools.
 func systemPrompt(snap stateSnapshot) string {
-	state := toJSON(snap)
+	state := snap.render()
 	return strings.Join([]string{
 		"You are the assistant for HomeHub, a home automation app. You help the user",
 		"control their devices and answer questions about their home by calling tools.",
@@ -246,7 +246,7 @@ func systemPrompt(snap stateSnapshot) string {
 		"- Keep replies short and concrete. Numbers and device names, not fluff.",
 		"- You cannot create or delete schedules, scenes, or groups yet; point the user to the app for that.",
 		"",
-		"Current home state (JSON):",
+		"Current home state:",
 		state,
 	}, "\n")
 }
