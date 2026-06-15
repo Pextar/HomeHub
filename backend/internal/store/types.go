@@ -76,16 +76,18 @@ type AutomationTrigger struct {
 
 // AutomationCondition optionally gates a trigger. All conditions on an
 // automation must hold (logical AND) for its actions to run.
-//   - "device":     a socket must currently be on/off.
-//   - "time_range": local time must fall within [After, Before] (may wrap midnight).
+//   - "device":      a socket must currently be on/off.
+//   - "time_range":  local time must fall within [After, Before] (may wrap midnight).
+//   - "time_before": local time must be strictly before Before ("HH:MM").
+//   - "time_after":  local time must be at or after After ("HH:MM").
 type AutomationCondition struct {
-	Type string `json:"type"` // "device" | "time_range"
+	Type string `json:"type"` // "device" | "time_range" | "time_before" | "time_after"
 
 	// device
 	SocketID string `json:"socket_id,omitempty"`
 	State    string `json:"state,omitempty"` // "on" | "off"
 
-	// time_range
+	// time_range / time_before / time_after
 	After  string `json:"after,omitempty"`  // "HH:MM"
 	Before string `json:"before,omitempty"` // "HH:MM"
 }

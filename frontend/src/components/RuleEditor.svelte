@@ -313,6 +313,8 @@
                 <div class="field">
                     <select bind:value={c.type}>
                         <option value="device">Device is</option>
+                        <option value="time_before">Time is before</option>
+                        <option value="time_after">Time is after</option>
                         <option value="time_range">Time between</option>
                     </select>
                 </div>
@@ -321,6 +323,14 @@
                         <select bind:value={c.socket_id}>
                             {#each v.sockets as s (s.id)}<option value={s.id}>{s.name}</option>{/each}
                         </select>
+                    </div>
+                {:else if c.type === "time_before"}
+                    <div class="field">
+                        <input type="time" bind:value={c.before} class="cond-time" aria-label="Before time" />
+                    </div>
+                {:else if c.type === "time_after"}
+                    <div class="field">
+                        <input type="time" bind:value={c.after} class="cond-time" aria-label="After time" />
                     </div>
                 {/if}
             </div>
@@ -331,10 +341,16 @@
                         <option value="off">Off</option>
                     </select>
                 </div>
-            {:else}
+            {:else if c.type === "time_range"}
                 <div class="field-row mt-sm">
-                    <div class="field"><input type="time" bind:value={c.after} aria-label="After" /></div>
-                    <div class="field"><input type="time" bind:value={c.before} aria-label="Before" /></div>
+                    <div class="field">
+                        <label for="{idPrefix}-cond-{ci}-after">From</label>
+                        <input type="time" id="{idPrefix}-cond-{ci}-after" bind:value={c.after} class="cond-time" />
+                    </div>
+                    <div class="field">
+                        <label for="{idPrefix}-cond-{ci}-before">To</label>
+                        <input type="time" id="{idPrefix}-cond-{ci}-before" bind:value={c.before} class="cond-time" />
+                    </div>
                 </div>
             {/if}
             <button type="button" class="row-remove"
@@ -759,6 +775,14 @@
         .preset-chip { padding: 6px 12px; font-size: 13px; min-height: 36px; }
         .preset-dot { width: 12px; height: 12px; }
     }
+    /* Time inputs inside condition cards — mono face so digits align */
+    .cond-time {
+        font-family: var(--font-mono);
+        font-feature-settings: "tnum" 1;
+        letter-spacing: 0.02em;
+        text-align: center;
+    }
+
     .solar-summary {
         margin-top: 5px;
         font-weight: 600;

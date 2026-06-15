@@ -229,11 +229,11 @@ export interface AutomationTrigger {
 }
 
 export interface AutomationCondition {
-  type: "device" | "time_range";
+  type: "device" | "time_range" | "time_before" | "time_after";
   // device
   socket_id?: string;
   state?: "on" | "off";
-  // time_range
+  // time_range / time_before / time_after
   after?: string;
   before?: string;
 }
