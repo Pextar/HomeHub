@@ -324,6 +324,14 @@
                             {#each v.sockets as s (s.id)}<option value={s.id}>{s.name}</option>{/each}
                         </select>
                     </div>
+                {:else if c.type === "time_before"}
+                    <div class="field">
+                        <input type="time" bind:value={c.before} class="cond-time" aria-label="Before time" />
+                    </div>
+                {:else if c.type === "time_after"}
+                    <div class="field">
+                        <input type="time" bind:value={c.after} class="cond-time" aria-label="After time" />
+                    </div>
                 {/if}
             </div>
             {#if c.type === "device"}
@@ -333,18 +341,16 @@
                         <option value="off">Off</option>
                     </select>
                 </div>
-            {:else if c.type === "time_before"}
-                <div class="field mt-sm">
-                    <input type="time" bind:value={c.before} aria-label="Before time" />
-                </div>
-            {:else if c.type === "time_after"}
-                <div class="field mt-sm">
-                    <input type="time" bind:value={c.after} aria-label="After time" />
-                </div>
-            {:else}
+            {:else if c.type === "time_range"}
                 <div class="field-row mt-sm">
-                    <div class="field"><input type="time" bind:value={c.after} aria-label="After" /></div>
-                    <div class="field"><input type="time" bind:value={c.before} aria-label="Before" /></div>
+                    <div class="field">
+                        <label>From</label>
+                        <input type="time" bind:value={c.after} class="cond-time" aria-label="Start time" />
+                    </div>
+                    <div class="field">
+                        <label>To</label>
+                        <input type="time" bind:value={c.before} class="cond-time" aria-label="End time" />
+                    </div>
                 </div>
             {/if}
             <button type="button" class="row-remove"
@@ -769,6 +775,14 @@
         .preset-chip { padding: 6px 12px; font-size: 13px; min-height: 36px; }
         .preset-dot { width: 12px; height: 12px; }
     }
+    /* Time inputs inside condition cards — mono face so digits align */
+    .cond-time {
+        font-family: var(--font-mono);
+        font-feature-settings: "tnum" 1;
+        letter-spacing: 0.02em;
+        text-align: center;
+    }
+
     .solar-summary {
         margin-top: 5px;
         font-weight: 600;

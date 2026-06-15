@@ -100,11 +100,12 @@
     }
 
     function buildRule(d: RuleDraft): AutomationRule {
-        const conditions: AutomationCondition[] = d.conditions.map(c =>
-            c.type === "device"
-                ? { type: "device", socket_id: c.socket_id, state: c.state }
-                : { type: "time_range", after: c.after, before: c.before },
-        );
+        const conditions: AutomationCondition[] = d.conditions.map(c => {
+            if (c.type === "device")      return { type: "device",      socket_id: c.socket_id, state: c.state };
+            if (c.type === "time_before") return { type: "time_before", before: c.before };
+            if (c.type === "time_after")  return { type: "time_after",  after: c.after };
+            return { type: "time_range", after: c.after, before: c.before };
+        });
         // compileAction expands per-lamp group/room actions into one socket
         // action per member; every other action maps 1:1.
         const actions: AutomationAction[] = d.actions.flatMap(compileAction);
