@@ -313,6 +313,8 @@
                 <div class="field">
                     <select bind:value={c.type}>
                         <option value="device">Device is</option>
+                        <option value="time_before">Time is before</option>
+                        <option value="time_after">Time is after</option>
                         <option value="time_range">Time between</option>
                     </select>
                 </div>
@@ -330,6 +332,14 @@
                         <option value="on">On</option>
                         <option value="off">Off</option>
                     </select>
+                </div>
+            {:else if c.type === "time_before"}
+                <div class="field mt-sm">
+                    <input type="time" bind:value={c.before} aria-label="Before time" />
+                </div>
+            {:else if c.type === "time_after"}
+                <div class="field mt-sm">
+                    <input type="time" bind:value={c.after} aria-label="After time" />
                 </div>
             {:else}
                 <div class="field-row mt-sm">

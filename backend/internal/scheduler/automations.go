@@ -177,6 +177,16 @@ func (e *autoEngine) conditionsHold(conds []store.AutomationCondition, curSocket
 			if !inRange {
 				return false
 			}
+		case "time_before":
+			before := hhmmToMin(c.Before)
+			if before < 0 || nowMin >= before {
+				return false
+			}
+		case "time_after":
+			after := hhmmToMin(c.After)
+			if after < 0 || nowMin < after {
+				return false
+			}
 		}
 	}
 	return true

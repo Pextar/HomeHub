@@ -197,8 +197,18 @@ func (s *Store) validateRule(a *AutomationRule) error {
 			}
 			c.After = strings.TrimSpace(c.After)
 			c.Before = strings.TrimSpace(c.Before)
+		case "time_before":
+			if _, err := time.Parse("15:04", strings.TrimSpace(c.Before)); err != nil {
+				return errors.New("condition before must be in HH:MM format")
+			}
+			c.Before = strings.TrimSpace(c.Before)
+		case "time_after":
+			if _, err := time.Parse("15:04", strings.TrimSpace(c.After)); err != nil {
+				return errors.New("condition after must be in HH:MM format")
+			}
+			c.After = strings.TrimSpace(c.After)
 		default:
-			return errors.New("condition type must be device or time_range")
+			return errors.New("condition type must be device, time_range, time_before, or time_after")
 		}
 	}
 
