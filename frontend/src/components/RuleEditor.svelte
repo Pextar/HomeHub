@@ -344,12 +344,12 @@
             {:else if c.type === "time_range"}
                 <div class="field-row mt-sm">
                     <div class="field">
-                        <label>From</label>
-                        <input type="time" bind:value={c.after} class="cond-time" aria-label="Start time" />
+                        <label for="{idPrefix}-cond-{ci}-after">From</label>
+                        <input type="time" id="{idPrefix}-cond-{ci}-after" bind:value={c.after} class="cond-time" />
                     </div>
                     <div class="field">
-                        <label>To</label>
-                        <input type="time" bind:value={c.before} class="cond-time" aria-label="End time" />
+                        <label for="{idPrefix}-cond-{ci}-before">To</label>
+                        <input type="time" id="{idPrefix}-cond-{ci}-before" bind:value={c.before} class="cond-time" />
                     </div>
                 </div>
             {/if}
