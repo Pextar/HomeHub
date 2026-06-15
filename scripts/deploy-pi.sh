@@ -12,8 +12,8 @@
 #     scripts/deploy-pi.sh                                             # with auth (recommended)
 #
 # Also install a local LLM (Ollama) for the assistant, models on a big drive:
-#   SETUP_OLLAMA=1 OLLAMA_MODELS_DIR=/mnt/storage/ollama-models \
-#     LLM_MODEL=llama3.2:3b scripts/deploy-pi.sh
+#   SETUP_OLLAMA=1 OLLAMA_MODELS_DIR=/mnt/ssd/ollama-models \
+#     LLM_MODEL=llama3.2:1b scripts/deploy-pi.sh
 #
 # Layout on the Pi (under the SSH user's home):
 #   ~/rf-socket-controller/
@@ -95,14 +95,17 @@ fi
 
 # Optional: install + configure Ollama on the Pi so the local LLM assistant can
 # run. Opt-in (SETUP_OLLAMA=1). Point OLLAMA_MODELS_DIR at a large drive (the
-# 1 TB disk) so multi-GB models don't fill the SD card; choose the model with
-# LLM_MODEL. The setup script enables the assistant in .env and pulls the model.
+# 1 TB disk) so multi-GB models don't fill the SD card; the setup script also
+# redirects Ollama's own binaries/libs (~1.7 GB) onto OLLAMA_LIB_DIR on the same
+# drive. Choose the model with LLM_MODEL. The setup script enables the assistant
+# in .env and pulls the model.
 if [ "${SETUP_OLLAMA:-}" = "1" ]; then
   echo "==> Setting up local Ollama LLM"
-  rsync -av "$RELEASE/setup-ollama.sh" "$RELEASE/ollama.service.d" "$HOST:$REMOTE_DIR/"
+  rsync -av "$RELEASE/setup-ollama.sh" "$HOST:$REMOTE_DIR/"
   ssh "$HOST" "chmod +x '$REMOTE_DIR/setup-ollama.sh' && \
-    OLLAMA_MODELS_DIR='${OLLAMA_MODELS_DIR:-/mnt/storage/ollama-models}' \
-    LLM_MODEL='${LLM_MODEL:-llama3.2:3b}' \
+    OLLAMA_MODELS_DIR='${OLLAMA_MODELS_DIR:-/mnt/ssd/ollama-models}' \
+    ${OLLAMA_LIB_DIR:+OLLAMA_LIB_DIR='$OLLAMA_LIB_DIR'} \
+    LLM_MODEL='${LLM_MODEL:-llama3.2:1b}' \
     ENV_FILE='$REMOTE_DIR/.env' '$REMOTE_DIR/setup-ollama.sh'"
 fi
 
