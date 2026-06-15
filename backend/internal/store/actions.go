@@ -10,6 +10,9 @@ import (
 // Caller must hold Mu (write lock). On RF failure the previous state is
 // restored. Save is intentionally NOT called here — callers batch.
 func (s *Store) ApplyState(socket *Socket, target *bool) error {
+	if socket.ReadOnly {
+		return fmt.Errorf("%q is a read-only sensor and cannot be controlled", socket.Name)
+	}
 	previous := socket.State
 	if target == nil {
 		socket.State = !socket.State

@@ -65,6 +65,7 @@
     let room        = $state("");
     let vendor      = $state("");
     let product     = $state("");
+    let readOnly    = $state(false); // true for sensors (motion, contact, temperature…)
     let saving      = $state(false);
 
     function onScanned(text: string) {
@@ -201,6 +202,16 @@
         step = "input";
     }
 
+    // BLE-phase errors happen before any network credentials are sent to the
+    // device. The device has NOT joined Thread/Wi-Fi yet, so factory-reset is
+    // always safe and the Thread-dataset / border-router hint is irrelevant.
+    function isBlePhaseError(msg: string | null): boolean {
+        if (!msg) return false;
+        // All these happen before any Matter protocol is exchanged — the device
+        // has not received network credentials, so a retry or factory-reset is safe.
+        return /connecting to peripheral|unexpected state.*error|could not find.*device|ble.*scan|scan.*timeout/i.test(msg);
+    }
+
     async function save() {
         const payload = {
             name: name.trim(),
@@ -208,6 +219,7 @@
             code: nodeId,
             // Save as "matter-thread" or "matter" so the UI labels the device correctly.
             protocol: transport === "thread" ? "matter-thread" : "matter",
+            ...(readOnly ? { readonly: true } : {}),
         };
         if (!payload.name) {
             nameError = "Give the device a name so you can find it later.";
@@ -251,7 +263,7 @@
                         {/each}
                     </div>
                     <div class="field-help">
-                        Choose Thread for low-power mesh devices (via your Apple TV / Border Router),
+                        Choose Thread for low-power mesh devices (via your Thread Border Router),
                         or Wi-Fi for bulbs and plugs that connect directly.
                     </div>
                 </div>
@@ -315,7 +327,14 @@
                     <strong>Commissioning failed</strong>
                     <span>{commissionError}</span>
                     <span class="hint">
-                        {#if transport === "thread"}
+                        {#if isBlePhaseError(commissionError)}
+                            Bluetooth found the device but couldn't connect before the
+                            commissioning window closed — no network credentials were
+                            sent yet. <strong>Re-open the commissioning window</strong>
+                            (short button press, 1–5 s, see your device's manual), then
+                            hit Try again. A factory-reset is also safe at this point
+                            if needed.
+                        {:else if transport === "thread"}
                             The device may have already joined your Thread mesh but
                             didn't complete the fabric handshake. Its commissioning
                             window has likely closed — <strong>open it again</strong>
@@ -324,7 +343,7 @@
                             network. Only factory-reset (hold ~10 s) as a last resort
                             if short-pressing doesn't help. Other causes:
                             MATTER_BRIDGE_THREAD_DATASET not set or Thread Border
-                            Router (e.g. Apple TV) not reachable.
+                            Router not reachable, or SRP-to-mDNS bridging not active on your border router.
                         {:else}
                             The device may have already joined your Wi-Fi but didn't
                             complete the fabric handshake. Its commissioning window
@@ -382,6 +401,10 @@
                     {/each}
                 </datalist>
             </div>
+            <label class="field-checkbox">
+                <input type="checkbox" bind:checked={readOnly} />
+                <span>Sensor (read-only) — motion, contact, temperature, etc.</span>
+            </label>
         {/if}
     {/snippet}
     {#snippet actions()}
@@ -491,6 +514,16 @@
     }
     .field-help code { font-family: var(--font-mono); }
     .opt { color: var(--text-muted); font-weight: 400; font-size: 12px; }
+
+    .field-checkbox {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-size: 14px;
+        cursor: pointer;
+        padding: 2px 0;
+    }
+    .field-checkbox input[type="checkbox"] { width: 16px; height: 16px; flex-shrink: 0; cursor: pointer; }
 
     .camera-fallback-hint {
         font-size: 13px;

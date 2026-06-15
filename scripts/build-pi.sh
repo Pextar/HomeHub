@@ -44,6 +44,7 @@ if [ "${SKIP_MATTER_BRIDGE:-}" != "1" ]; then
   echo "==> Packaging matter-bridge sources"
   mkdir -p "$RELEASE/matter-bridge"
   cp -R "$ROOT/matter-bridge/src"          "$RELEASE/matter-bridge/src"
+  cp -R "$ROOT/matter-bridge/scripts"     "$RELEASE/matter-bridge/scripts"
   cp    "$ROOT/matter-bridge/package.json" "$RELEASE/matter-bridge/"
   cp    "$ROOT/matter-bridge/tsconfig.json" "$RELEASE/matter-bridge/"
   cp    "$ROOT/matter-bridge/README.md"    "$RELEASE/matter-bridge/"

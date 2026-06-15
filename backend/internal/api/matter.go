@@ -37,8 +37,8 @@ func (s *Server) matterListDevices(w http.ResponseWriter, r *http.Request) {
 // matterCommission handles POST /api/matter/commission.
 // Body: { "pairing_code": "..." }.
 //
-// Commissioning a Matter device takes 30–90s (BLE discovery + Wi-Fi
-// onboarding + CASE session) — far longer than the http.Server's
+// Commissioning a Matter device takes 30–180s (BLE discovery + network
+// onboarding + CASE session; Thread adds ~120s mDNS wait) — far longer than the http.Server's
 // WriteTimeout and longer than iOS Safari will keep a single fetch
 // alive. We start the work in a background goroutine and return a
 // job id immediately; the frontend polls
@@ -68,7 +68,9 @@ func (s *Server) matterCommission(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		// Detached from r.Context() — the HTTP request will close almost
 		// immediately. We give the bridge a generous ceiling of its own.
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+		// 5 min covers: BLE retry (up to 2×30s) + 6s waits + steps 0-12
+		// (~30s) + Thread mDNS discovery (120s) with headroom to spare.
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
 		nodeID, err := s.Matter.Commission(ctx, pairingCode, transport)
 		if err != nil {

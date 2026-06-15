@@ -6,7 +6,8 @@ export interface Socket {
   state: boolean;
   room: string;
   favorite?: boolean;
-  emoji?: string; // shown big in kid mode
+  emoji?: string;      // shown big in kid mode
+  readonly?: boolean;  // sensor / monitoring device — no on/off commands
 }
 
 export type TargetType = "socket" | "group" | "room" | "scene";

@@ -15,6 +15,7 @@ type Socket struct {
 	Room     string `json:"room"`               // room/location
 	Favorite bool   `json:"favorite,omitempty"` // pinned to dashboard
 	Emoji    string `json:"emoji,omitempty"`    // shown big in kid mode; admin-picked
+	ReadOnly bool   `json:"readonly,omitempty"` // sensor / monitoring device — no on/off commands
 }
 
 // Schedule represents a recurring timer for a socket, group, or scene.

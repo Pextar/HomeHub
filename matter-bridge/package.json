@@ -8,7 +8,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "start": "node --enable-source-maps dist/index.js",
-    "dev": "tsc -w -p tsconfig.json"
+    "dev": "tsc -w -p tsconfig.json",
+    "postinstall": "node scripts/patch-matter.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.19.19",

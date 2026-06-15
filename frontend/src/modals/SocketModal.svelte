@@ -16,6 +16,7 @@
     let code     = $state(untrack(() => existing?.code     ?? ""));
     let protocol = $state(untrack(() => existing?.protocol || "nexa"));
     let emoji    = $state(untrack(() => existing?.emoji    ?? ""));
+    let readOnly = $state(untrack(() => existing?.readonly ?? false));
 
     // Quick-pick set shown in kid mode. Tapping the active one clears it.
     const EMOJI_CHOICES = ["💡", "🛏️", "🌟", "🚀", "🦕", "🐙", "🌈", "🎮", "📺", "🎄", "🔦", "🛋️"];
@@ -104,7 +105,7 @@
 
     async function save() {
         if (saving) return;
-        const payload = { name: name.trim(), room: room.trim(), code: code.trim(), protocol, emoji };
+        const payload = { name: name.trim(), room: room.trim(), code: code.trim(), protocol, emoji, ...(readOnly ? { readonly: true } : {}) };
         const codeLabel = isTasmota ? "device IP"
                         : isMatter  ? "Matter node id"
                         : isMqtt    ? "command topic"
@@ -196,6 +197,10 @@
                         {/if}
                     </select>
                 </div>
+                <label class="field-checkbox" style="margin-top:var(--space-4)">
+                    <input type="checkbox" bind:checked={readOnly} />
+                    <span>Sensor (read-only) — disables on/off toggle</span>
+                </label>
                 <div class="field" style="margin-top:var(--space-4)">
                     <span class="field-label">Icon <span class="opt">(for kid mode)</span></span>
                     <div class="emoji-grid" role="group" aria-label="Pick an icon">
@@ -288,6 +293,11 @@
 
 <style>
     .opt { color: var(--text-muted); font-weight: 400; font-size: 12px; }
+    .field-checkbox {
+        display: flex; align-items: center; gap: 10px;
+        font-size: 14px; cursor: pointer; padding: 2px 0;
+    }
+    .field-checkbox input[type="checkbox"] { width: 16px; height: 16px; flex-shrink: 0; cursor: pointer; }
     .emoji-grid {
         display: grid;
         grid-template-columns: repeat(auto-fill, minmax(44px, 1fr));

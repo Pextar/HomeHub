@@ -110,7 +110,11 @@ export async function startController(): Promise<MatterController> {
                     .then(() => resolve(true))
                     .catch(() => resolve(false));
             });
-            const deadline = new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 4000));
+            // Thread devices can take up to ~20 s for the initial CASE session
+            // after SRP records propagate through the border router.  Wi-Fi
+            // devices are typically ready in 2–5 s.  We cap at 20 s so a
+            // genuinely offline device doesn't eat the full Go-side HTTP timeout.
+            const deadline = new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 20_000));
             await Promise.race([ready, deadline]);
         }
         return node;
@@ -136,9 +140,9 @@ export async function startController(): Promise<MatterController> {
         state.reachable = node.isConnected;
         const info = node.basicInformation;
         if (info) {
-            state.vendor  = asString(info.vendorName);
+            state.vendor = asString(info.vendorName);
             state.product = asString(info.productName);
-            state.name    = asString(info.nodeLabel) ?? state.product;
+            state.name = asString(info.nodeLabel) ?? state.product;
         }
         const ep = pickPrimaryEndpoint(node);
         if (!ep) return state;
@@ -232,37 +236,121 @@ export async function startController(): Promise<MatterController> {
         async commission(pairingCode: string, transport?: "wifi" | "thread"): Promise<string> {
             const opts = optionsFromPairingCode(pairingCode, transport);
 
-            // Snapshot of commissioned nodes before the attempt so we can
-            // detect any partial fabric entry left behind if commissionNode
-            // throws — e.g. when the device joined Wi-Fi (Phase 1 done) but
-            // the CASE session over IP failed (Phase 2 failed).
+            // BLE connections are flaky on Linux/Raspberry Pi; one automatic
+            // retry is safe because a BLE error means no Matter protocol was
+            // exchanged — the device has not received network credentials and no
+            // fabric entry was written on either side.
+            //
+            // BlueZ/Noble on the Pi throws several distinct phrasings for what is
+            // really the same class of transient GATT-connect failure. All are safe
+            // to retry: a failed BLE connect means no Matter protocol was exchanged,
+            // so the device received no credentials and no fabric entry exists.
+            //
+            //   "Timeout while connecting to peripheral …"   — HCI connect stalled.
+            //   "Error while connecting to peripheral …"     — HCI LE Create Connection
+            //                                                  returned a failure status.
+            //   "Can not connect to peripheral … unexpected state 'error'" (or "error")
+            //                                                  — Noble's per-peripheral
+            //       state machine is corrupted from a prior failed attempt and refuses
+            //       all further connects until the process restarts. After exhausting
+            //       retries we exit so systemd restarts us with a clean Noble instance.
+            //       (Single or double quotes depending on Noble version.)
+            const BLE_TIMEOUT_RE =
+                /(?:timeout|error) while connecting to peripheral|can ?not connect to peripheral|unexpected state\s*["']?error["']?/i;
+
+            // matter.js throws this once BLE + network provisioning have already
+            // succeeded but the post-commissioning operational (CASE-over-IP)
+            // reconnect can't find the device's _matter._tcp record via mDNS.
+            // For Thread this almost always means the device joined the fabric
+            // but its operational SRP record never propagated to the controller
+            // — not a transient fault, so we surface an actionable message
+            // instead of the opaque library text. (Substring from
+            // @matter/protocol ControllerDiscovery.discoverOperationalDevice.)
+            const OPERATIONAL_DISCOVERY_RE =
+                /operational device cannot be found on the network/i;
+            const MAX_BLE_RETRIES = 2; // up to 3 attempts total; BLE on Linux is flaky
+
+            // Snapshot commissioned nodes before any attempt so orphan cleanup
+            // works correctly across retries.
             const nodesBefore = new Set(commissioning.getCommissionedNodes().map(n => key(n)));
 
-            let nodeId: NodeId;
-            try {
-                nodeId = await commissioning.commissionNode(opts);
-            } catch (err) {
-                // If matter.js persisted a partial node despite the failure,
-                // remove it so the fabric stays clean and a retry (or
-                // factory-reset + retry) starts from a known-good state.
-                const orphaned = commissioning.getCommissionedNodes()
-                    .map(n => key(n))
-                    .filter(id => !nodesBefore.has(id));
-                if (orphaned.length > 0) {
-                    console.warn(
-                        `[matter-bridge] commission failed — removing ${orphaned.length} orphaned node(s): ${orphaned.join(", ")}`,
-                    );
-                    for (const id of orphaned) {
-                        try {
-                            await commissioning.removeNode(NodeId(BigInt(id)));
-                        } catch (removeErr) {
-                            console.error(`[matter-bridge] could not remove orphaned node ${id}:`, removeErr);
+            for (let attempt = 0; attempt <= MAX_BLE_RETRIES; attempt++) {
+                if (attempt > 0) {
+                    console.log(`[matter-bridge] retrying commission (attempt ${attempt + 1}) after BLE timeout…`);
+                    await new Promise<void>(r => setTimeout(r, 6000));
+                }
+                try {
+                    // Pass false so matter.js doesn't open a *second* operational
+                    // connection + subscription right after commissioning — we manage
+                    // operational connections lazily via getPaired() on first control.
+                    // This flag does NOT affect CommissioningComplete: that is sent by
+                    // the commissioning flow itself (step 16) before commissionNode
+                    // returns, once CASE over the operational (Thread) network succeeds.
+                    const nodeId = await commissioning.commissionNode(opts, false);
+                    return key(nodeId);
+                } catch (err) {
+                    const msg = (err as Error).message ?? "";
+                    const isBleTimeout = BLE_TIMEOUT_RE.test(msg);
+
+                    // Clean up any partial fabric entries before retrying or surfacing the error.
+                    const orphaned = commissioning.getCommissionedNodes()
+                        .map(n => key(n))
+                        .filter(id => !nodesBefore.has(id));
+                    if (orphaned.length > 0) {
+                        console.warn(
+                            `[matter-bridge] commission failed — removing ${orphaned.length} orphaned node(s): ${orphaned.join(", ")}`,
+                        );
+                        for (const id of orphaned) {
+                            try {
+                                await commissioning.removeNode(NodeId(BigInt(id)));
+                            } catch (removeErr) {
+                                console.error(`[matter-bridge] could not remove orphaned node ${id}:`, removeErr);
+                            }
                         }
                     }
+
+                    if (isBleTimeout && attempt < MAX_BLE_RETRIES) {
+                        console.warn(`[matter-bridge] BLE error on attempt ${attempt + 1} — retrying`);
+                        continue;
+                    }
+
+                    // All BLE retries exhausted. Noble's per-peripheral state
+                    // machine is permanently corrupted until the process restarts.
+                    // Exit now so systemd restarts the bridge with a clean Noble
+                    // instance — the next commissioning attempt will succeed.
+                    if (isBleTimeout) {
+                        console.error(
+                            `[matter-bridge] BLE error persists after ${MAX_BLE_RETRIES + 1} attempts — ` +
+                            `exiting so systemd can restart with a clean BLE state`,
+                        );
+                        setTimeout(() => process.exit(1), 100);
+                    }
+
+                    // BLE + network provisioning worked, but the device's
+                    // operational record never appeared so CASE-over-IP couldn't
+                    // be established. Retrying won't help — point the operator at
+                    // the real culprits. (Most common: a re-paired Thread device
+                    // that kept stale credentials, so it reports "already
+                    // connected", matter.js skips ConnectNetwork, and the device
+                    // never re-registers SRP. A clean factory reset fixes it.)
+                    if (OPERATIONAL_DISCOVERY_RE.test(msg)) {
+                        throw new Error(
+                            "Device joined the fabric but its operational record never appeared on the network " +
+                            "(CASE-over-IP discovery timed out). For Thread devices this usually means: " +
+                            "(1) the device kept stale Thread credentials from a previous pairing — factory-reset " +
+                            "it fully (pairing mode alone is not enough) so it re-attaches and re-registers SRP; " +
+                            "(2) the Thread Border Router or its SRP server is down — verify `ot-ctl state` and " +
+                            "`ot-ctl srp server state`; or (3) the OTBR's active dataset no longer matches " +
+                            "MATTER_BRIDGE_THREAD_DATASET. " +
+                            `(underlying error: ${msg})`,
+                        );
+                    }
+
+                    throw err;
                 }
-                throw err;
             }
-            return key(nodeId);
+            // Unreachable; satisfies TypeScript.
+            throw new Error("commission: exhausted retry loop");
         },
         async getState(nodeId: string) { return readState(nodeId); },
         async setState(nodeId: string, update: Partial<DeviceState>) { await actOn(nodeId, update); },
@@ -311,7 +399,7 @@ function parseThreadNetworkName(hexDataset: string): string {
         let offset = 0;
         while (offset + 2 <= bytes.length) {
             const type = bytes[offset++];
-            const len  = bytes[offset++];
+            const len = bytes[offset++];
             if (offset + len > bytes.length) break;
             if (type === 0x03) {              // Network Name
                 return bytes.subarray(offset, offset + len).toString("utf8");
@@ -328,7 +416,7 @@ function parseThreadNetworkName(hexDataset: string): string {
 export function availableTransports(): ("thread" | "wifi")[] {
     const result: ("thread" | "wifi")[] = [];
     if (process.env.MATTER_BRIDGE_THREAD_DATASET?.trim()) result.push("thread");
-    if (process.env.MATTER_BRIDGE_WIFI_SSID?.trim())     result.push("wifi");
+    if (process.env.MATTER_BRIDGE_WIFI_SSID?.trim()) result.push("wifi");
     return result;
 }
 
@@ -354,7 +442,7 @@ function optionsFromPairingCode(code: string, transport?: "wifi" | "thread"): No
     // If transport is explicitly specified, use exactly that — error if not configured.
     // If unspecified (legacy / direct bridge call), fall back to Thread-first auto-detect.
     let thread: ReturnType<typeof threadNetwork> = undefined;
-    let wifi:   ReturnType<typeof wifiNetwork>   = undefined;
+    let wifi: ReturnType<typeof wifiNetwork> = undefined;
 
     if (transport === "thread") {
         thread = threadNetwork();
@@ -384,7 +472,15 @@ function optionsFromPairingCode(code: string, transport?: "wifi" | "thread"): No
         commissioning: {
             regulatoryCountryCode: "XX",
             ...(thread ? { threadNetwork: thread } : {}),
-            ...(wifi   ? { wifiNetwork:   wifi   } : {}),
+            ...(wifi ? { wifiNetwork: wifi } : {}),
+            // No finalizeCommissioning override: we let matter.js run the full
+            // commissioning flow, including operational discovery (mDNS), CASE
+            // reconnect, and CommissioningComplete (step 16). This requires the
+            // Thread Border Router to publish the device's operational service via
+            // mDNS on the infrastructure interface — i.e. OTBR must run with the
+            // correct BACKBONE_INTERFACE/INFRA_IF_NAME and an enabled SRP server.
+            // Without CommissioningComplete the device's fail-safe expires and it
+            // rolls back, so this step is what actually finishes onboarding.
         },
         discovery: {
             identifierData: discriminator !== undefined
@@ -429,12 +525,12 @@ function hsToHex(hue254: number, sat254: number): string {
     const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
     const m = v - c;
     let r = 0, g = 0, b = 0;
-    if      (h < 60)  { r = c; g = x; }
+    if (h < 60) { r = c; g = x; }
     else if (h < 120) { r = x; g = c; }
     else if (h < 180) { g = c; b = x; }
     else if (h < 240) { g = x; b = c; }
     else if (h < 300) { r = x; b = c; }
-    else              { r = c; b = x; }
+    else { r = c; b = x; }
     const to = (n: number) => Math.round((n + m) * 255).toString(16).padStart(2, "0");
     return (to(r) + to(g) + to(b)).toUpperCase();
 }
@@ -448,9 +544,9 @@ function hexToHs(hex: string): { hue: number; sat: number } {
     const d = max - min;
     let hue = 0;
     if (d !== 0) {
-        if      (max === r) hue = ((g - b) / d) % 6;
+        if (max === r) hue = ((g - b) / d) % 6;
         else if (max === g) hue = (b - r) / d + 2;
-        else                hue = (r - g) / d + 4;
+        else hue = (r - g) / d + 4;
         hue = hue * 60;
         if (hue < 0) hue += 360;
     }

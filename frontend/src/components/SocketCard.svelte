@@ -17,10 +17,11 @@
     interface Props { socket: Socket; }
     let { socket }: Props = $props();
 
-    const isTasmota = $derived(socket.protocol === "tasmota");
-    const isMatter  = $derived(socket.protocol === "matter" || socket.protocol === "matter-thread");
-    const isThread  = $derived(socket.protocol === "matter-thread");
-    const isSmartLight = $derived(isTasmota || isMatter);
+    const isTasmota  = $derived(socket.protocol === "tasmota");
+    const isMatter   = $derived(socket.protocol === "matter" || socket.protocol === "matter-thread");
+    const isThread   = $derived(socket.protocol === "matter-thread");
+    const isReadOnly = $derived(!!socket.readonly);
+    const isSmartLight = $derived((isTasmota || isMatter) && !isReadOnly);
 
     const proto = $derived(isTasmota ? "tasmota" : isMatter ? "matter" : "rf");
     const protoLabel = $derived(isTasmota ? "Wi-Fi" : isThread ? "Thread" : isMatter ? "Matter" : "RF");
@@ -162,27 +163,32 @@
     });
 
     function onBodyClick() {
-        // Smart lights open their control modal directly; everything else
-        // opens the actions menu (there's no per-device detail for RF).
+        // Sensors open only the actions menu (edit/delete), never controls.
+        // Smart lights open their control modal. RF opens the actions menu.
+        if (isReadOnly) { moreOpen = !moreOpen; return; }
         if (isSmartLight) openControls();
         else moreOpen = !moreOpen;
     }
 </script>
 
-<article class="tile" class:on={socket.state} class:pulsing bind:this={cardEl}>
-    <button class="sw" class:on={socket.state}
-        role="switch" aria-checked={socket.state}
-        aria-label="Toggle {socket.name}"
-        onclick={(e) => { e.stopPropagation(); socketAction(socket, "toggle"); }}></button>
+<article class="tile" class:on={socket.state} class:pulsing class:readonly={isReadOnly} bind:this={cardEl}>
+    {#if !isReadOnly}
+        <button class="sw" class:on={socket.state}
+            role="switch" aria-checked={socket.state}
+            aria-label="Toggle {socket.name}"
+            onclick={(e) => { e.stopPropagation(); socketAction(socket, "toggle"); }}></button>
+    {:else}
+        <span class="sw-placeholder" aria-hidden="true"></span>
+    {/if}
 
     <button class="tile-hit" onclick={onBodyClick}
-        aria-haspopup={isSmartLight ? undefined : "menu"}
-        aria-expanded={isSmartLight ? undefined : moreOpen}>
-        <span class="tile-bulb"><Icon name="light" size={18} /></span>
+        aria-haspopup="menu"
+        aria-expanded={moreOpen}>
+        <span class="tile-bulb"><Icon name={isReadOnly ? "sensor" : "light"} size={18} /></span>
         <span class="tile-info">
             <span class="name" title={socket.name}>{socket.name}</span>
             <span class="meta-row">
-                <span class="meta">{statusText}{socket.room ? ` · ${socket.room}` : ""}</span>
+                <span class="meta">{isReadOnly ? "Sensor" : statusText}{socket.room ? ` · ${socket.room}` : ""}</span>
                 <span class="protocol-badge" data-proto={proto} title={`${socket.protocol || "rf"} · ${socket.code}`}>
                     <Icon name={protoIcon} size={11} />{protoLabel}
                 </span>
@@ -215,17 +221,19 @@
             style:left={menuPos.left != null ? `${menuPos.left}px` : undefined}
             in:scale={{ start: 0.95, duration: 140, easing: cubicOut, opacity: 0 }}
             out:scale={{ start: 0.95, duration: 100, easing: cubicOut, opacity: 0 }}>
-            {#if isSmartLight}
+            {#if isSmartLight && !isReadOnly}
                 <button class="overflow-item" role="menuitem" onclick={openControls}>
                     <Icon name="sun" size={16} /><span>Brightness &amp; colour</span>
+                </button>
+            {/if}
+            {#if !isReadOnly}
+                <button class="overflow-item" role="menuitem" onclick={openTimer}>
+                    <Icon name="timer" size={16} /><span>Set timer</span>
                 </button>
             {/if}
             <button class="overflow-item" role="menuitem" onclick={toggleFavorite}>
                 <Icon name={socket.favorite ? "star" : "starOutline"} size={16} />
                 <span>{socket.favorite ? "Remove favourite" : "Add to favourites"}</span>
-            </button>
-            <button class="overflow-item" role="menuitem" onclick={openTimer}>
-                <Icon name="timer" size={16} /><span>Set timer</span>
             </button>
             <button class="overflow-item" role="menuitem" onclick={openEdit}>
                 <Icon name="edit" size={16} /><span>Edit device</span>
@@ -288,6 +296,15 @@
     }
     .sw.on { background: var(--on); }
     .sw.on::after { transform: translateX(18px); background: #fff; }
+
+    /* Placeholder occupies the same slot as .sw so the layout is unchanged. */
+    .sw-placeholder {
+        position: absolute;
+        top: 16px; right: 16px;
+        width: 44px; height: 26px;
+    }
+    .tile.readonly { opacity: 0.85; }
+    .tile.readonly .tile-bulb { color: var(--text-muted); }
 
     /* Tap target for the tile body — opens controls (smart) or actions menu. */
     .tile-hit {
