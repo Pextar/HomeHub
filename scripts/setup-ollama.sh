@@ -31,7 +31,7 @@ set -euo pipefail
 
 MODELS_DIR="${OLLAMA_MODELS_DIR:-/mnt/ssd/ollama-models}"
 LIB_DIR="${OLLAMA_LIB_DIR:-$(dirname "$MODELS_DIR")/ollama-lib}"
-MODEL="${LLM_MODEL:-qwen2.5:1.5b}"
+MODEL="${LLM_MODEL:-qwen2.5:1.5b}"  # Pi default; use qwen3.5:9b-mlx on Apple Silicon
 
 ollama_service_present() {
   [ -f /etc/systemd/system/ollama.service ]

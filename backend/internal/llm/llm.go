@@ -24,11 +24,10 @@ import (
 	"time"
 )
 
-// DefaultModel is a small, fast tool-calling model — chosen so CPU inference
-// on a Pi stays responsive across the agent's multi-round tool loop. A 3B is
-// noticeably slower per round and can exceed LLM_TIMEOUT. Override with
-// LLM_MODEL (e.g. qwen2.5:3b) for stronger results on faster hardware.
-const DefaultModel = "qwen2.5:1.5b"
+// DefaultModel targets a Mac with Apple Silicon (MLX backend). On a Pi 4 the
+// recommended fallback is qwen2.5:1.5b (~1m40s/round on CPU).
+// Override with LLM_MODEL in .env — no code change needed.
+const DefaultModel = "qwen3.5:9b-mlx"
 
 // DefaultBaseURL is Ollama's loopback address. Override with OLLAMA_URL.
 const DefaultBaseURL = "http://127.0.0.1:11434"
@@ -96,6 +95,10 @@ type ChatRequest struct {
 	Stream    bool           `json:"stream"`
 	Options   map[string]any `json:"options,omitempty"` // num_ctx, temperature, …
 	KeepAlive string         `json:"keep_alive,omitempty"`
+	// Think controls Qwen3's extended reasoning mode. false disables the hidden
+	// <think>…</think> pass, cutting latency significantly on simple queries.
+	// Ignored by non-Qwen3 models.
+	Think *bool `json:"think,omitempty"`
 }
 
 // chatResponse is one /api/chat object. When streaming, the server emits a
@@ -199,6 +202,7 @@ func (c *Client) ChatStream(ctx context.Context, messages []ChatMessage, tools [
 		return ChatMessage{}, fmt.Errorf("llm is not configured (set LLM_ENABLED=true)")
 	}
 
+	noThink := false
 	body, err := json.Marshal(ChatRequest{
 		Model:     c.Model,
 		Messages:  messages,
@@ -206,6 +210,7 @@ func (c *Client) ChatStream(ctx context.Context, messages []ChatMessage, tools [
 		Stream:    true,
 		Options:   options,
 		KeepAlive: c.KeepAlive,
+		Think:     &noThink, // disable Qwen3 extended reasoning; ignored by other models
 	})
 	if err != nil {
 		return ChatMessage{}, fmt.Errorf("llm: encode request: %w", err)
