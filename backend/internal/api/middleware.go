@@ -137,6 +137,16 @@ func (s *statusWriter) WriteHeader(code int) {
 	s.ResponseWriter.WriteHeader(code)
 }
 
+// Unwrap exposes the wrapped ResponseWriter so http.ResponseController can
+// reach the underlying connection. Without it, the controller's
+// SetReadDeadline/SetWriteDeadline calls return ErrNotSupported and silently
+// fail — which left the server's ReadTimeout/WriteTimeout armed and severed
+// long-lived SSE streams (the assistant chat) at ~20s. Required by Go's
+// http.ResponseController unwrap chain (Go 1.20+).
+func (s *statusWriter) Unwrap() http.ResponseWriter {
+	return s.ResponseWriter
+}
+
 // Flush forwards to the underlying writer so streaming responses (SSE on
 // /api/events) keep working through the logging wrapper. Embedding the
 // ResponseWriter interface alone wouldn't promote Flush, since it isn't

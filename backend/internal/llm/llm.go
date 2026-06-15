@@ -24,9 +24,11 @@ import (
 	"time"
 )
 
-// DefaultModel is a small, reliable tool-calling model that fits a Pi 4's
-// 8 GB ceiling at Q4. Override with LLM_MODEL.
-const DefaultModel = "llama3.2:3b"
+// DefaultModel is a small, fast tool-calling model — chosen so CPU inference
+// on a Pi stays responsive across the agent's multi-round tool loop. A 3B is
+// noticeably slower per round and can exceed LLM_TIMEOUT. Override with
+// LLM_MODEL (e.g. llama3.2:3b) for stronger results on faster hardware.
+const DefaultModel = "llama3.2:1b"
 
 // DefaultBaseURL is Ollama's loopback address. Override with OLLAMA_URL.
 const DefaultBaseURL = "http://127.0.0.1:11434"
@@ -35,6 +37,12 @@ const DefaultBaseURL = "http://127.0.0.1:11434"
 // the model into RAM on the first request after idle (10–30s on a Pi 4) and
 // a 3B model generates at low single-digit tokens/sec. Override with LLM_TIMEOUT.
 const DefaultTimeout = 120 * time.Second
+
+// DefaultKeepAlive asks Ollama to hold the model in RAM between requests so
+// back-to-back questions skip the multi-second cold reload. Sent on every chat
+// request so it applies even if the server's OLLAMA_KEEP_ALIVE isn't set.
+// Override with LLM_KEEP_ALIVE (e.g. "-1" to keep it resident indefinitely).
+const DefaultKeepAlive = "30m"
 
 // Role values for ChatMessage.
 const (
@@ -82,11 +90,12 @@ type ToolFunction struct {
 
 // ChatRequest is the body for POST /api/chat.
 type ChatRequest struct {
-	Model    string         `json:"model"`
-	Messages []ChatMessage  `json:"messages"`
-	Tools    []Tool         `json:"tools,omitempty"`
-	Stream   bool           `json:"stream"`
-	Options  map[string]any `json:"options,omitempty"` // num_ctx, temperature, …
+	Model     string         `json:"model"`
+	Messages  []ChatMessage  `json:"messages"`
+	Tools     []Tool         `json:"tools,omitempty"`
+	Stream    bool           `json:"stream"`
+	Options   map[string]any `json:"options,omitempty"` // num_ctx, temperature, …
+	KeepAlive string         `json:"keep_alive,omitempty"`
 }
 
 // chatResponse is one /api/chat object. When streaming, the server emits a
@@ -102,10 +111,11 @@ type chatResponse struct {
 
 // Client talks to a local Ollama server.
 type Client struct {
-	BaseURL string
-	Model   string
-	Timeout time.Duration
-	HTTP    *http.Client
+	BaseURL   string
+	Model     string
+	Timeout   time.Duration
+	KeepAlive string
+	HTTP      *http.Client
 }
 
 // FromEnv builds a Client from the environment, or returns nil when the
@@ -133,10 +143,15 @@ func FromEnv() *Client {
 			timeout = d
 		}
 	}
+	keepAlive := DefaultKeepAlive
+	if v := strings.TrimSpace(os.Getenv("LLM_KEEP_ALIVE")); v != "" {
+		keepAlive = v
+	}
 	return &Client{
-		BaseURL: strings.TrimRight(base, "/"),
-		Model:   model,
-		Timeout: timeout,
+		BaseURL:   strings.TrimRight(base, "/"),
+		Model:     model,
+		Timeout:   timeout,
+		KeepAlive: keepAlive,
 		// No client-level timeout — each call carries its own context
 		// deadline so streaming isn't cut off mid-answer (matter pattern).
 		HTTP: &http.Client{},
@@ -185,11 +200,12 @@ func (c *Client) ChatStream(ctx context.Context, messages []ChatMessage, tools [
 	}
 
 	body, err := json.Marshal(ChatRequest{
-		Model:    c.Model,
-		Messages: messages,
-		Tools:    tools,
-		Stream:   true,
-		Options:  options,
+		Model:     c.Model,
+		Messages:  messages,
+		Tools:     tools,
+		Stream:    true,
+		Options:   options,
+		KeepAlive: c.KeepAlive,
 	})
 	if err != nil {
 		return ChatMessage{}, fmt.Errorf("llm: encode request: %w", err)

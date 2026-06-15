@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 
@@ -12,52 +13,102 @@ import (
 // human-friendly names the model emits ("kitchen lamp") back to entity ids.
 // Everything here reads under a single RLock and never mutates the store.
 
-// deviceLite is the trimmed device shape the model sees. Ids are included so
-// the model can pass them straight back to a tool, avoiding a resolution round
-// trip; names/rooms let it match what the user said.
+// deviceLite is the trimmed device shape the model sees. No id: the tools
+// resolve by name (resolveSocket accepts a name), and an ambiguous name surfaces
+// the colliding ids on demand — so carrying ids for every device here would only
+// bloat the prompt and slow prompt-eval on a Pi.
 type deviceLite struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	Room     string `json:"room,omitempty"`
-	State    string `json:"state"` // "on" | "off"
-	Protocol string `json:"protocol"`
+	Name     string
+	Room     string
+	State    string // "on" | "off"
+	Protocol string
 }
 
 type roomLite struct {
-	Name    string `json:"name"`
-	Devices int    `json:"devices"`
-	On      int    `json:"on"`
+	Name    string
+	Devices int
+	On      int
 }
 
 type sceneLite struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-	Room string `json:"room,omitempty"`
+	Name string
+	Room string
 }
 
 type groupLite struct {
-	ID      string `json:"id"`
-	Name    string `json:"name"`
-	Devices int    `json:"devices"`
+	Name    string
+	Devices int
 }
 
 type sensorLite struct {
-	ID    string   `json:"id"`
-	Name  string   `json:"name"`
-	Kind  string   `json:"kind,omitempty"`
-	Unit  string   `json:"unit,omitempty"`
-	Value *float64 `json:"value,omitempty"`
+	Name  string
+	Kind  string
+	Unit  string
+	Value *float64
 }
 
 // stateSnapshot is the whole-home view embedded in the system prompt. Kept
-// deliberately small (ids + names + current state) so it fits a 3B model's
-// modest context window.
+// deliberately small (names + current state, no ids) and rendered as compact
+// text (see render) so it fits a small model's context and stays cheap to
+// prompt-eval on a Pi CPU.
 type stateSnapshot struct {
-	Devices []deviceLite `json:"devices"`
-	Rooms   []roomLite   `json:"rooms"`
-	Scenes  []sceneLite  `json:"scenes"`
-	Groups  []groupLite  `json:"groups"`
-	Sensors []sensorLite `json:"sensors"`
+	Devices []deviceLite
+	Rooms   []roomLite
+	Scenes  []sceneLite
+	Groups  []groupLite
+	Sensors []sensorLite
+}
+
+// render produces a compact, token-frugal text view for the system prompt,
+// dropping the repeated JSON scaffolding and ids that a full JSON encoding would
+// carry. Sections with no entries are omitted entirely.
+func (snap stateSnapshot) render() string {
+	var b strings.Builder
+	if len(snap.Devices) > 0 {
+		b.WriteString("Devices (name [room] = state):\n")
+		for _, d := range snap.Devices {
+			b.WriteString("- " + d.Name)
+			if d.Room != "" {
+				b.WriteString(" [" + d.Room + "]")
+			}
+			b.WriteString(" = " + d.State + "\n")
+		}
+	}
+	if len(snap.Rooms) > 0 {
+		b.WriteString("Rooms (name: on/total):\n")
+		for _, r := range snap.Rooms {
+			b.WriteString(fmt.Sprintf("- %s: %d/%d\n", r.Name, r.On, r.Devices))
+		}
+	}
+	if len(snap.Groups) > 0 {
+		b.WriteString("Groups (name: device count):\n")
+		for _, g := range snap.Groups {
+			b.WriteString(fmt.Sprintf("- %s: %d\n", g.Name, g.Devices))
+		}
+	}
+	if len(snap.Scenes) > 0 {
+		names := make([]string, len(snap.Scenes))
+		for i, sc := range snap.Scenes {
+			names[i] = sc.Name
+		}
+		b.WriteString("Scenes: " + strings.Join(names, ", ") + "\n")
+	}
+	if len(snap.Sensors) > 0 {
+		b.WriteString("Sensors (name = value):\n")
+		for _, sn := range snap.Sensors {
+			b.WriteString("- " + sn.Name + " = ")
+			if sn.Value != nil {
+				b.WriteString(strings.TrimRight(strings.TrimRight(fmt.Sprintf("%.1f", *sn.Value), "0"), "."))
+			} else {
+				b.WriteString("?")
+			}
+			b.WriteString(sn.Unit + "\n")
+		}
+	}
+	if b.Len() == 0 {
+		return "(no devices configured)"
+	}
+	return b.String()
 }
 
 // buildSnapshot assembles the snapshot under a single read lock. Devices are
@@ -81,7 +132,6 @@ func (s *Server) buildSnapshot(user *store.User) stateSnapshot {
 			continue
 		}
 		snap.Devices = append(snap.Devices, deviceLite{
-			ID:       sock.ID,
 			Name:     sock.Name,
 			Room:     sock.Room,
 			State:    onOff(sock.State),
@@ -107,14 +157,14 @@ func (s *Server) buildSnapshot(user *store.User) stateSnapshot {
 		snap.Rooms = append(snap.Rooms, rl)
 	}
 	for _, sc := range s.Store.Scenes {
-		snap.Scenes = append(snap.Scenes, sceneLite{ID: sc.ID, Name: sc.Name, Room: sc.Room})
+		snap.Scenes = append(snap.Scenes, sceneLite{Name: sc.Name, Room: sc.Room})
 	}
 	for _, g := range s.Store.Groups {
-		snap.Groups = append(snap.Groups, groupLite{ID: g.ID, Name: g.Name, Devices: len(g.SocketIDs)})
+		snap.Groups = append(snap.Groups, groupLite{Name: g.Name, Devices: len(g.SocketIDs)})
 	}
 	for _, sn := range s.Store.Sensors {
 		snap.Sensors = append(snap.Sensors, sensorLite{
-			ID: sn.ID, Name: sn.Name, Kind: sn.Kind, Unit: sn.Unit, Value: sn.LastValue,
+			Name: sn.Name, Kind: sn.Kind, Unit: sn.Unit, Value: sn.LastValue,
 		})
 	}
 
