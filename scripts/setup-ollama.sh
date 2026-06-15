@@ -18,11 +18,11 @@
 # Environment:
 #   OLLAMA_MODELS_DIR  where model blobs are stored   (default /mnt/ssd/ollama-models)
 #   OLLAMA_LIB_DIR     where binaries/libs are stored (default <models-parent>/ollama-lib)
-#   LLM_MODEL          model to pull                  (default llama3.2:1b)
+#   LLM_MODEL          model to pull                  (default qwen2.5:1.5b)
 #   ENV_FILE           controller .env to wire up     (optional)
 #
 # Usage (on the Pi):
-#   OLLAMA_MODELS_DIR=/mnt/ssd/ollama LLM_MODEL=llama3.2:1b ./setup-ollama.sh
+#   OLLAMA_MODELS_DIR=/mnt/ssd/ollama LLM_MODEL=qwen2.5:1.5b ./setup-ollama.sh
 #
 # NOTE: the big drive must be mounted WITHOUT `noexec` — Ollama runs its binary
 # and dlopen()s its .so backends from $OLLAMA_LIB_DIR. Check with:
@@ -31,7 +31,7 @@ set -euo pipefail
 
 MODELS_DIR="${OLLAMA_MODELS_DIR:-/mnt/ssd/ollama-models}"
 LIB_DIR="${OLLAMA_LIB_DIR:-$(dirname "$MODELS_DIR")/ollama-lib}"
-MODEL="${LLM_MODEL:-llama3.2:1b}"
+MODEL="${LLM_MODEL:-qwen2.5:1.5b}"
 
 ollama_service_present() {
   [ -f /etc/systemd/system/ollama.service ]

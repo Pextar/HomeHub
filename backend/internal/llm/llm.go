@@ -27,8 +27,8 @@ import (
 // DefaultModel is a small, fast tool-calling model — chosen so CPU inference
 // on a Pi stays responsive across the agent's multi-round tool loop. A 3B is
 // noticeably slower per round and can exceed LLM_TIMEOUT. Override with
-// LLM_MODEL (e.g. llama3.2:3b) for stronger results on faster hardware.
-const DefaultModel = "llama3.2:1b"
+// LLM_MODEL (e.g. qwen2.5:3b) for stronger results on faster hardware.
+const DefaultModel = "qwen2.5:1.5b"
 
 // DefaultBaseURL is Ollama's loopback address. Override with OLLAMA_URL.
 const DefaultBaseURL = "http://127.0.0.1:11434"

@@ -13,7 +13,7 @@
 #
 # Also install a local LLM (Ollama) for the assistant, models on a big drive:
 #   SETUP_OLLAMA=1 OLLAMA_MODELS_DIR=/mnt/ssd/ollama-models \
-#     LLM_MODEL=llama3.2:1b scripts/deploy-pi.sh
+#     LLM_MODEL=qwen2.5:1.5b scripts/deploy-pi.sh
 #
 # Layout on the Pi (under the SSH user's home):
 #   ~/rf-socket-controller/
@@ -105,7 +105,7 @@ if [ "${SETUP_OLLAMA:-}" = "1" ]; then
   ssh "$HOST" "chmod +x '$REMOTE_DIR/setup-ollama.sh' && \
     OLLAMA_MODELS_DIR='${OLLAMA_MODELS_DIR:-/mnt/ssd/ollama-models}' \
     ${OLLAMA_LIB_DIR:+OLLAMA_LIB_DIR='$OLLAMA_LIB_DIR'} \
-    LLM_MODEL='${LLM_MODEL:-llama3.2:1b}' \
+    LLM_MODEL='${LLM_MODEL:-qwen2.5:1.5b}' \
     ENV_FILE='$REMOTE_DIR/.env' '$REMOTE_DIR/setup-ollama.sh'"
 fi
 
