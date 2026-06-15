@@ -22,6 +22,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"rf-socket-controller/internal/llm"
@@ -144,6 +145,13 @@ func (s *Server) assistantConfirm(w http.ResponseWriter, r *http.Request) {
 // messages already includes the system prompt. Errors are streamed to the
 // client (the HTTP status is already 200 once streaming has begun).
 func (s *Server) runLoop(ctx context.Context, user *store.User, messages []llm.ChatMessage, stream *eventStream) {
+	// Keep the SSE connection alive during the long, silent gaps where the model
+	// cold-loads into RAM and evaluates the prompt (30s+ on a Pi) before the
+	// first token. Without periodic bytes, iOS Safari (and proxies) drop the
+	// fetch and the user sees "Load failed". The frontend ignores comment frames.
+	stopBeat := stream.heartbeat(ctx, 10*time.Second)
+	defer stopBeat()
+
 	tools := s.assistantTools()
 	specs := specsFor(tools)
 	options := map[string]any{"num_ctx": 4096, "temperature": 0.4}
@@ -384,6 +392,9 @@ type eventStream struct {
 	w       http.ResponseWriter
 	flusher http.Flusher
 	rc      *http.ResponseController
+	// mu serializes writes: the heartbeat goroutine and the request goroutine
+	// (tokens, tools, done) both write to w, which is not concurrent-safe.
+	mu sync.Mutex
 }
 
 func newEventStream(w http.ResponseWriter) (*eventStream, bool) {
@@ -392,7 +403,15 @@ func newEventStream(w http.ResponseWriter) (*eventStream, bool) {
 		return nil, false
 	}
 	rc := http.NewResponseController(w)
+	// Lift BOTH connection deadlines for the life of the stream. The write
+	// deadline would otherwise sever a slow answer mid-token; the read deadline
+	// (from the server's ReadTimeout) is the subtler killer — set when the POST
+	// body is read, it fires ~ReadTimeout later and net/http cancels the request,
+	// dropping the stream before a cold-loading model emits its first token. The
+	// /events SSE survives this only because its EventSource client silently
+	// reconnects; this fetch-based stream does not, so the drop is fatal.
 	_ = rc.SetWriteDeadline(time.Time{})
+	_ = rc.SetReadDeadline(time.Time{})
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
@@ -409,10 +428,52 @@ func (e *eventStream) emit(event string, payload any) error {
 	if err != nil {
 		return err
 	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	_ = e.rc.SetWriteDeadline(time.Now().Add(15 * time.Second))
 	if _, err := fmt.Fprintf(e.w, "event: %s\ndata: %s\n\n", event, data); err != nil {
 		return err
 	}
 	e.flusher.Flush()
 	return nil
+}
+
+// comment writes an SSE comment frame (a line beginning with ":"). Per the SSE
+// spec these carry no event and the frontend parser discards them — they exist
+// only to push bytes down an otherwise-idle stream so it isn't dropped.
+func (e *eventStream) comment(text string) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	_ = e.rc.SetWriteDeadline(time.Now().Add(15 * time.Second))
+	if _, err := fmt.Fprintf(e.w, ": %s\n\n", text); err != nil {
+		return err
+	}
+	e.flusher.Flush()
+	return nil
+}
+
+// heartbeat sends a keepalive comment every interval until the returned stop
+// func is called or ctx is cancelled. It guards against the stream sitting
+// silent long enough (cold model load + prompt eval) for the client or a proxy
+// to give up. The returned stop is safe to call multiple times.
+func (e *eventStream) heartbeat(ctx context.Context, interval time.Duration) func() {
+	done := make(chan struct{})
+	go func() {
+		t := time.NewTicker(interval)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-done:
+				return
+			case <-t.C:
+				if err := e.comment("keepalive"); err != nil {
+					return // client gone; the request goroutine will notice too
+				}
+			}
+		}
+	}()
+	var once sync.Once
+	return func() { once.Do(func() { close(done) }) }
 }

@@ -15,11 +15,20 @@ cleanupOutdatedCaches();
 // Precache all assets emitted by Vite (manifest injected at build time).
 precacheAndRoute(self.__WB_MANIFEST);
 
-// /api routes must never be served from cache — always hit the network so
-// the app never shows stale socket state. This mirrors the previous workbox
-// runtimeCaching config.
+// The assistant chat/confirm endpoints stream their response as Server-Sent
+// Events. Safari/WebKit drops a streamed body that passes through a service
+// worker's respondWith() ("Load failed"), so we must NOT intercept these —
+// leaving them unrouted lets the browser fetch them natively. Keep this in
+// sync with the streaming routes in lib/api.ts (streamAssistantChat/Confirm).
+const isStreamingApi = (pathname: string) =>
+  pathname.startsWith("/api/assistant/chat") ||
+  pathname.startsWith("/api/assistant/confirm");
+
+// All other /api routes must never be served from cache — always hit the
+// network so the app never shows stale socket state. This mirrors the previous
+// workbox runtimeCaching config.
 registerRoute(
-  ({ url }) => url.pathname.startsWith("/api"),
+  ({ url }) => url.pathname.startsWith("/api") && !isStreamingApi(url.pathname),
   new NetworkOnly()
 );
 
