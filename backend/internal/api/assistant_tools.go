@@ -141,14 +141,14 @@ func (s *Server) toolGetSensorReadings(user *store.User, args map[string]any) st
 
 	s.Store.Mu.RLock()
 	all := s.Store.Readings[id]
-	type reading struct {
-		Time  time.Time `json:"time"`
-		Value float64   `json:"value"`
+	type point struct {
+		Time  time.Time
+		Value float64
 	}
-	out := make([]reading, 0, len(all))
+	out := make([]point, 0, len(all))
 	for _, rd := range all {
 		if rd.Time.After(cutoff) {
-			out = append(out, reading{Time: rd.Time, Value: rd.Value})
+			out = append(out, point{Time: rd.Time, Value: rd.Value})
 		}
 	}
 	sn := s.Store.Sensors[id]
@@ -160,14 +160,44 @@ func (s *Server) toolGetSensorReadings(user *store.User, args map[string]any) st
 	}
 	s.Store.Mu.RUnlock()
 
-	return toJSON(map[string]any{
-		"sensor":   name,
-		"unit":     unit,
-		"latest":   last,
-		"window":   fmt.Sprintf("last %d min", int(since.Minutes())),
-		"count":    len(out),
-		"readings": out,
-	})
+	result := map[string]any{
+		"sensor": name,
+		"unit":   unit,
+		"latest": last,
+		"window": fmt.Sprintf("last %d min", int(since.Minutes())),
+		"count":  len(out),
+	}
+	// Summarise instead of dumping every point with a full RFC3339 timestamp —
+	// the raw list bloats the next round's prompt and slows the model. Report
+	// min/max/avg over the window plus the few most recent points with short
+	// HH:MM times.
+	if len(out) > 0 {
+		min, max, sum := out[0].Value, out[0].Value, 0.0
+		for _, p := range out {
+			if p.Value < min {
+				min = p.Value
+			}
+			if p.Value > max {
+				max = p.Value
+			}
+			sum += p.Value
+		}
+		result["min"] = min
+		result["max"] = max
+		result["avg"] = sum / float64(len(out))
+
+		const maxPts = 6
+		recent := out
+		if len(recent) > maxPts {
+			recent = recent[len(recent)-maxPts:]
+		}
+		pts := make([]map[string]any, len(recent))
+		for i, p := range recent {
+			pts[i] = map[string]any{"t": p.Time.Format("15:04"), "v": p.Value}
+		}
+		result["recent"] = pts
+	}
+	return toJSON(result)
 }
 
 func (s *Server) toolControlDevice(user *store.User, args map[string]any) string {

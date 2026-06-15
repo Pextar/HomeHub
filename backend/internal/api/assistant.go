@@ -154,7 +154,12 @@ func (s *Server) runLoop(ctx context.Context, user *store.User, messages []llm.C
 
 	tools := s.assistantTools()
 	specs := specsFor(tools)
-	options := map[string]any{"num_ctx": 4096, "temperature": 0.4}
+	// Tuned for CPU inference on a Pi: a 2048-token context fits the compact
+	// prompt + tool specs + a (trimmed) tool result with room to spare, while
+	// halving the KV-cache and prompt-eval cost vs 4096. num_predict caps the
+	// answer so the model can't ramble into minutes of generation; replies are
+	// meant to be short. Bump num_ctx if a very large home overflows the prompt.
+	options := map[string]any{"num_ctx": 2048, "temperature": 0.4, "num_predict": 512}
 
 	for round := 0; round < maxToolRounds; round++ {
 		roundCtx, cancel := context.WithTimeout(ctx, s.LLM.Timeout)
@@ -238,6 +243,11 @@ func systemPrompt(snap stateSnapshot) string {
 		"control their devices and answer questions about their home by calling tools.",
 		"",
 		"Rules:",
+		"- The home state below is live and complete. Answer questions about current",
+		"  device on/off status, rooms, scenes, groups, and latest sensor values",
+		"  DIRECTLY from it — do NOT call a tool just to read what is already shown.",
+		"- Call a tool only to DO something (control a device/room/group/scene) or to",
+		"  fetch sensor history/trends over time (get_sensor_readings).",
 		"- Use the tools to act; never claim you did something without calling the tool.",
 		"- Prefer device/room/scene names from the state below; pass them straight to the tools.",
 		"- If a name is ambiguous or missing, ask the user rather than guessing.",
