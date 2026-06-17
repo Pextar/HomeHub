@@ -66,7 +66,7 @@
             <div class="field" style="margin-top:var(--space-4)">
                 <span class="field-label">Quick presets</span>
                 <div class="presets">
-                    {#each presets as p}
+                    {#each presets as p (p.label)}
                         <button type="button" class="btn btn-secondary"
                             onclick={() => fire(p.seconds, p.label)}>{p.label}</button>
                     {/each}

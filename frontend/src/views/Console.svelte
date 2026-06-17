@@ -121,7 +121,7 @@
         await commitLevel(s, pct);
     }
     function onBarKey(e: KeyboardEvent, s: Socket, cur: number) {
-        let next: number | null = null;
+        let next: number;
         if (e.key === "ArrowRight" || e.key === "ArrowUp") next = cur + 10;
         else if (e.key === "ArrowLeft" || e.key === "ArrowDown") next = cur - 10;
         else if (e.key === "Home") next = 0;

@@ -5,7 +5,7 @@
     import EmptyState from "../components/EmptyState.svelte";
     import Segmented from "../components/Segmented.svelte";
     import { api } from "../lib/api";
-    import { data, toasts, route } from "../lib/stores.svelte";
+    import { data, route } from "../lib/stores.svelte";
     import { groupSocketsByRoom, runAction } from "../lib/utils";
     import { openModal } from "../lib/modal.svelte";
     import SocketModal from "../modals/SocketModal.svelte";
@@ -65,7 +65,7 @@
         </div>
         <select bind:value={roomFilter} aria-label="Filter by room" class="room-filter">
             <option value="">All rooms</option>
-            {#each allRooms as r}
+            {#each allRooms as r (r)}
                 <option value={r}>{r}</option>
             {/each}
         </select>

@@ -50,6 +50,7 @@
     function dayLabel(iso: string): string {
         const d = new Date(iso);
         const today = new Date();
+        // eslint-disable-next-line svelte/prefer-svelte-reactivity -- transient local Date, not reactive state
         const yesterday = new Date();
         yesterday.setDate(today.getDate() - 1);
         if (d.toDateString() === today.toDateString()) return "Today";
@@ -82,7 +83,7 @@
         message="Device changes, schedules and scene runs will show up here as they happen." />
 {:else}
     <div class="filters h-scroll">
-        {#each FILTERS as f}
+        {#each FILTERS as f (f.id)}
             <button class="chip" class:active={filter === f.id} onclick={() => filter = f.id}>
                 {f.label}
             </button>

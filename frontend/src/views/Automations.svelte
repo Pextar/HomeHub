@@ -246,7 +246,7 @@
 
     <!-- ── Filter chips ───────────────────────────────────────── -->
     <div class="filters h-scroll">
-        {#each FILTERS as f}
+        {#each FILTERS as f (f.id)}
             <button class="chip" class:active={filter === f.id} onclick={() => filter = f.id}>{f.label}</button>
         {/each}
     </div>

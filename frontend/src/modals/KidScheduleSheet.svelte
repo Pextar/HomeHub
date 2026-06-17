@@ -73,7 +73,6 @@
     }
 </script>
 
-<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 <div class="ks-overlay" transition:fade={{ duration: 200 }}
      onclick={onClose} role="presentation">
     <div class="ks-panel"
@@ -135,7 +134,7 @@
                 {#if days.length === 0}<span class="ks-hint">every day</span>{/if}
             </p>
             <div class="ks-days" role="group" aria-label="Days of the week">
-                {#each DAY_SHORT as d, i}
+                {#each DAY_SHORT as d, i (i)}
                     <button class="ks-day"
                         class:sel={days.includes(i)}
                         onclick={() => toggleDay(i)}

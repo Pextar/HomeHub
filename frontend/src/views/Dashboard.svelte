@@ -106,6 +106,7 @@
     // Live room on-counts derived from socket state so RoomCards stay in sync
     // with optimistic toggles rather than waiting for the next server refresh.
     const liveRooms = $derived.by(() => {
+        // eslint-disable-next-line svelte/prefer-svelte-reactivity -- transient local Map, built and consumed synchronously
         const onByRoom = new Map<string, number>();
         for (const s of v.sockets) {
             const r = s.room || "Unassigned";

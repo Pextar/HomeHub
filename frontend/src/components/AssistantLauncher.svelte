@@ -3,7 +3,7 @@
     import AssistantChat from "./AssistantChat.svelte";
     import { assistant, session } from "../lib/stores.svelte";
     import { onMount } from "svelte";
-    import { fade, fly } from "svelte/transition";
+    import { fade } from "svelte/transition";
     import { dur, sheet } from "../lib/motion";
     import { lockBodyScroll, unlockBodyScroll } from "../lib/scroll-lock";
 

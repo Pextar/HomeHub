@@ -8,7 +8,6 @@
     import Rooms from "./views/Rooms.svelte";
     import FloorPlan from "./views/FloorPlan.svelte";
     import Sockets from "./views/Sockets.svelte";
-    import Schedules from "./views/Schedules.svelte";
     import Automations from "./views/Automations.svelte";
     import Groups from "./views/Groups.svelte";
     import Scenes from "./views/Scenes.svelte";
