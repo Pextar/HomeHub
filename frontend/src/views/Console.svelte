@@ -363,7 +363,12 @@
             echo("in", `${totalOn}/${totalSockets} on · ${roomCount} rooms · hub:${hubUp ? "up" : "down"}`);
         } else if (first === "ls" || first === "list" || first === "devices") {
             const items = devices.slice(0, 16).map((d) => `${d.name}=${d.state ? "on" : "off"}`);
-            echo("in", `devices: ${items.join(" · ")}${devices.length > 16 ? ` · +${devices.length - 16}` : ""}` || "devices: none");
+            echo(
+                "in",
+                items.length
+                    ? `devices: ${items.join(" · ")}${devices.length > 16 ? ` · +${devices.length - 16}` : ""}`
+                    : "devices: none",
+            );
         } else if (first === "rooms") {
             const rs = roomNames().map((r) => {
                 const ss = v.sockets.filter((s) => (s.room?.trim() ?? "") === r);
