@@ -1,0 +1,28 @@
+# EditorConfig — https://editorconfig.org
+# Normalizes indentation, line endings and whitespace across editors so the
+# tree stays consistent regardless of personal editor settings.
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 2
+
+# Go is gofmt-formatted with tabs.
+[*.go]
+indent_style = tab
+
+[*.{mod,sum}]
+indent_style = tab
+
+# Svelte components use 4-space indentation (see DESIGN.md conventions).
+[*.svelte]
+indent_size = 4
+
+# Don't strip trailing whitespace in Markdown — two trailing spaces are a
+# hard line break.
+[*.md]
+trim_trailing_whitespace = false
