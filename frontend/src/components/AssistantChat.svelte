@@ -88,7 +88,7 @@
                         <p class="notice-title">Can't reach the model</p>
                         <p class="notice-body">
                             Ollama isn't responding{status?.last_error ? ` (${status.last_error})` : ""}.
-                            Make sure the <code>ollama</code> service is running on the Pi.
+                            Make sure the <code>ollama</code> service is running and reachable at the configured <code>OLLAMA_URL</code>.
                         </p>
                     </div>
                 </div>
