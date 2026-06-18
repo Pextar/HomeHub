@@ -26,6 +26,20 @@ export function plural(n: number, word: string): string {
 export const DAY_SHORT = ["S", "M", "T", "W", "T", "F", "S"];
 export const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
+// Default lamp emoji for the Kid module when a socket has none set. Shared so
+// the home grid, lamp panel, and schedule sheet can't drift on the fallback.
+export function lampEmoji(socket: Pick<Socket, "emoji">): string {
+  return socket.emoji?.trim() ? socket.emoji : "💡";
+}
+
+// Short, best-effort haptic tap for playful touch feedback (Kid module). A
+// no-op where the Vibration API is unavailable (desktop, iOS Safari).
+export function haptic(ms = 15): void {
+  if (typeof navigator !== "undefined" && typeof navigator.vibrate === "function") {
+    try { navigator.vibrate(ms); } catch { /* ignore */ }
+  }
+}
+
 export const PROTOCOLS: { value: string; label: string }[] = [
   { value: "nexa", label: "Nexa / Proove" },
   { value: "kaku", label: "KlikAanKlikUit (KAKU)" },
@@ -148,7 +162,12 @@ export async function runAction(
 // Toggle/turn a single socket on or off with an optimistic flip. The store
 // updates instantly, the API response is merged in when it lands, and a
 // failure rolls the state back — all without a full data refresh.
-export async function socketAction(socket: Socket, action: SocketAction, successMessage?: string): Promise<boolean> {
+export async function socketAction(
+  socket: Socket,
+  action: SocketAction,
+  opts: { successMessage?: string; errorTitle?: string } = {},
+): Promise<boolean> {
+  const { successMessage, errorTitle = "Action failed" } = opts;
   const prev = socket.state;
   const next = action === "toggle" ? !prev : action === "on";
   data.applySocket({ ...socket, state: next });
@@ -163,7 +182,7 @@ export async function socketAction(socket: Socket, action: SocketAction, success
     return true;
   } catch (e) {
     data.applySocket({ ...socket, state: prev });
-    toasts.error("Action failed", (e as Error).message);
+    toasts.error(errorTitle, (e as Error).message);
     return false;
   }
 }

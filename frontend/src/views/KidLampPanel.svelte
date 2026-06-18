@@ -7,7 +7,8 @@
     import { fly, fade } from "svelte/transition";
     import { backOut } from "svelte/easing";
     import { api } from "../lib/api";
-    import { toasts } from "../lib/stores.svelte";
+    import { toasts, data } from "../lib/stores.svelte";
+    import { lampEmoji, haptic } from "../lib/utils";
     import type { Socket } from "../lib/types";
 
     interface Props { socket: Socket; onClose: () => void; }
@@ -71,40 +72,50 @@
     async function toggle() {
         const target = !on;
         on = target;
+        haptic();
         try {
-            if (target) await api.socketOn(socket.id);
-            else await api.socketOff(socket.id);
-            socket.state = target;
+            const updated = target ? await api.socketOn(socket.id) : await api.socketOff(socket.id);
+            // Merge the server's view back into the store so the home grid tile
+            // reflects the change immediately instead of waiting for a poll.
+            data.applySocket(updated);
+            on = updated.state;
         } catch (e) {
             on = !target;
             toasts.error("Oops!", (e as Error).message);
         }
     }
 
+    // Keep the home-grid tile in sync when a colour/brightness change implies
+    // the lamp is now on, without waiting for the next poll.
+    function markOn() {
+        on = true;
+        if (!socket.state) data.applySocket({ ...socket, state: true });
+    }
+
     function pickColor(hex: string) {
+        haptic();
         whiteMode = false;
         color = "#" + hex;
-        on = true;
-        socket.state = true;
+        markOn();
         const key = isMatter ? "level" : "dimmer";
         send({ on: true, color: hex, [key]: brightness });
     }
 
     function pickWhite() {
+        haptic();
         whiteMode = true;
-        on = true;
-        socket.state = true;
+        markOn();
         const key = isMatter ? "level" : "dimmer";
         send({ on: true, ct: 370, [key]: brightness });
     }
 
     function onBrightness() {
-        if (!on) { on = true; socket.state = true; }
+        markOn();
         const key = isMatter ? "level" : "dimmer";
         send({ on: true, [key]: brightness });
     }
 
-    const lampEmoji = $derived(socket.emoji && socket.emoji.trim() ? socket.emoji : "💡");
+    const emoji = $derived(lampEmoji(socket));
 
     // The big preview disc shows the chosen color, dimmed by brightness.
     const previewColor = $derived.by(() => {
@@ -132,7 +143,7 @@
 
         <button class="preview" class:on onclick={toggle} aria-pressed={on}
             style:background={previewColor}>
-            <span class="preview-emoji">{lampEmoji}</span>
+            <span class="preview-emoji">{emoji}</span>
             <span class="preview-state">{on ? "ON" : "OFF"}</span>
         </button>
 
@@ -162,6 +173,7 @@
             {/if}
 
             {#if supportsLevel}
+                <div class="bright-readout mono" aria-hidden="true">{brightness}%</div>
                 <div class="bright">
                     <span class="sun small">☀️</span>
                     <input type="range" min="1" max="100" step="1"
@@ -238,7 +250,7 @@
     .preview:active { transform: scale(0.95); }
     .preview.on {
         border-color: rgba(255, 255, 255, 0.6);
-        box-shadow: 0 0 60px 4px var(--shadow-glow, rgba(255, 210, 63, 0.6)), 0 16px 50px rgba(0,0,0,0.3);
+        box-shadow: 0 0 60px 4px var(--shadow-glow, var(--kid-glow-strong)), 0 16px 50px rgba(0,0,0,0.3);
     }
     .preview:not(.on) { color: var(--text-faint); }
     .preview-emoji { font-size: clamp(3rem, 16vw, 5rem); line-height: 1; }
@@ -267,6 +279,14 @@
     }
     .swatch.white.active { border-color: var(--text); }
 
+    .bright-readout {
+        text-align: center;
+        font-size: 2.4rem;
+        font-weight: 700;
+        color: var(--kid-accent);
+        line-height: 1;
+        margin-bottom: calc(-1 * var(--space-2));
+    }
     .bright {
         display: flex;
         align-items: center;
@@ -279,7 +299,7 @@
         appearance: none;
         height: 26px;
         border-radius: 13px;
-        background: linear-gradient(to right, var(--surface), #ffd23f);
+        background: linear-gradient(to right, var(--surface), var(--kid-accent));
         border: 1px solid var(--border);
         outline: none;
     }
@@ -288,7 +308,7 @@
         width: 38px; height: 38px;
         border-radius: 50%;
         background: #fff;
-        border: 3px solid #ffd23f;
+        border: 3px solid var(--kid-accent);
         box-shadow: 0 2px 8px rgba(0,0,0,0.35);
         cursor: pointer;
     }
@@ -296,7 +316,7 @@
         width: 38px; height: 38px;
         border-radius: 50%;
         background: #fff;
-        border: 3px solid #ffd23f;
+        border: 3px solid var(--kid-accent);
         box-shadow: 0 2px 8px rgba(0,0,0,0.35);
         cursor: pointer;
     }

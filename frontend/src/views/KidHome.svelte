@@ -5,7 +5,7 @@
     import { backOut } from "svelte/easing";
     import { api } from "../lib/api";
     import { data, toasts, session } from "../lib/stores.svelte";
-    import { formatDays, isSmartProtocol, socketAction } from "../lib/utils";
+    import { formatDays, isSmartProtocol, socketAction, lampEmoji, haptic } from "../lib/utils";
     import type { Socket, Schedule } from "../lib/types";
     import KidLampPanel from "./KidLampPanel.svelte";
     import KidScheduleSheet from "../modals/KidScheduleSheet.svelte";
@@ -66,6 +66,7 @@
     }
 
     function onTap(lamp: Socket) {
+        haptic();
         if (isSmart(lamp)) {
             bump(lamp.id);
             active = lamp;
@@ -94,8 +95,25 @@
         return lamps.find(l => l.id === id) ?? null;
     }
 
-    function lampEmoji(lamp: Socket): string {
-        return lamp.emoji && lamp.emoji.trim() ? lamp.emoji : "💡";
+    // True once at least one lamp is on, so the "Goodnight" button only
+    // appears when there's actually something to turn off.
+    const anyOn = $derived(lamps.some(l => l.state));
+    let goodnightBusy = $state(false);
+
+    async function goodnight() {
+        if (goodnightBusy) return;
+        goodnightBusy = true;
+        haptic(25);
+        try {
+            // Backend scopes /sockets/all/off to this kid's own sockets.
+            await api.allOff();
+            await data.refresh();
+            toasts.success("Night night! 🌙", "All your lamps are off.");
+        } catch (e) {
+            toasts.error("Oops!", (e as Error).message);
+        } finally {
+            goodnightBusy = false;
+        }
     }
 
     // ── Welcome splash + confetti ───────────────────────────────────────
@@ -134,7 +152,8 @@
         // socketAction does the optimistic flip, merges the server's returned
         // socket back in (so a divergent device result corrects immediately
         // instead of waiting for the next poll), and rolls back on failure.
-        await socketAction(lamp, "toggle");
+        // errorTitle keeps the toast in kid-friendly language.
+        await socketAction(lamp, "toggle", { errorTitle: "Oops!" });
     }
 
     async function signOut() {
@@ -168,12 +187,26 @@
         <button class="signout" onclick={() => confirmExit = true} aria-label="Sign out">👋 Bye</button>
     </header>
 
-    {#if lamps.length === 0}
+    {#if !data.value.loaded}
+        <!-- Skeleton tiles while the first load lands, so the "No lamps yet"
+             empty state doesn't flash before the kid's lamps arrive. -->
+        <div class="grid" aria-hidden="true">
+            {#each Array(4) as _, i (i)}
+                <div class="kid-tile kid-skel"></div>
+            {/each}
+        </div>
+    {:else if lamps.length === 0}
         <div class="none">
             <div class="none-emoji">🔌</div>
             <p>No lamps yet! Ask a grown-up to add some.</p>
         </div>
     {:else}
+        {#if anyOn}
+            <button class="goodnight" onclick={goodnight} disabled={goodnightBusy}>
+                <span class="goodnight-moon">🌙</span>
+                {goodnightBusy ? "Turning off…" : "Turn everything off"}
+            </button>
+        {/if}
         <div class="grid">
             {#each lamps as lamp (lamp.id)}
                 <button
@@ -267,10 +300,7 @@
         min-height: 100vh;
         padding: var(--space-5);
         padding-bottom: calc(var(--space-5) + env(safe-area-inset-bottom));
-        background:
-            radial-gradient(circle at 15% 0%, rgba(77, 155, 255, 0.18), transparent 45%),
-            radial-gradient(circle at 90% 10%, rgba(255, 93, 143, 0.18), transparent 40%),
-            var(--bg);
+        background: var(--kid-bg);
     }
     .kid-head {
         display: flex;
@@ -297,6 +327,30 @@
         flex-shrink: 0;
     }
     .signout:active { transform: scale(0.95); }
+
+    /* ── Goodnight / all-off ── */
+    .goodnight {
+        width: 100%;
+        margin-bottom: var(--space-4);
+        padding: 16px 20px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: var(--space-2);
+        font-size: 1.1rem;
+        font-weight: 800;
+        border-radius: var(--radius-xl);
+        border: 2px solid var(--kid-off-border);
+        background: var(--kid-off-bg);
+        color: var(--kid-off-text);
+        cursor: pointer;
+        min-height: 56px;
+        transition: transform 0.12s ease, opacity 0.15s ease;
+        -webkit-tap-highlight-color: transparent;
+    }
+    .goodnight:active { transform: scale(0.97); }
+    .goodnight:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
+    .goodnight-moon { font-size: 1.4rem; line-height: 1; }
 
     .grid {
         display: grid;
@@ -348,14 +402,22 @@
         letter-spacing: 0.1em;
     }
     .kid-tile.on {
-        border-color: #ffd23f;
-        background: linear-gradient(160deg, #fff3c4, #ffd23f);
-        color: #7a5b00;
-        box-shadow: 0 0 0 4px rgba(255, 210, 63, 0.25), 0 12px 40px rgba(255, 196, 0, 0.45);
+        border-color: var(--kid-accent);
+        background: var(--kid-accent-grad);
+        color: var(--kid-tile-text);
+        box-shadow: 0 0 0 4px var(--kid-ring), 0 12px 40px var(--kid-glow);
         animation: glow 2.2s ease-in-out infinite;
     }
     .kid-tile.on .emoji { filter: none; transform: scale(1.08); }
-    .kid-tile.on .label { color: #5e4500; }
+    .kid-tile.on .label { color: var(--kid-on-text); }
+
+    /* Skeleton tiles for the first-load gate. */
+    .kid-skel {
+        background: linear-gradient(90deg, var(--surface) 0%, var(--surface-hover) 50%, var(--surface) 100%);
+        background-size: 200% 100%;
+        animation: shimmer 1.5s linear infinite;
+        cursor: default;
+    }
     /* Springy bounce when tapped. */
     .kid-tile.pop { animation: pop 0.45s cubic-bezier(0.34, 1.56, 0.64, 1); }
     .kid-tile.on.pop { animation: pop 0.45s cubic-bezier(0.34, 1.56, 0.64, 1), glow 2.2s ease-in-out infinite; }
@@ -367,12 +429,13 @@
         100% { transform: scale(1); }
     }
     @keyframes glow {
-        0%, 100% { box-shadow: 0 0 0 4px rgba(255, 210, 63, 0.25), 0 12px 40px rgba(255, 196, 0, 0.45); }
-        50% { box-shadow: 0 0 0 7px rgba(255, 210, 63, 0.30), 0 16px 52px rgba(255, 196, 0, 0.6); }
+        0%, 100% { box-shadow: 0 0 0 4px var(--kid-ring), 0 12px 40px var(--kid-glow); }
+        50% { box-shadow: 0 0 0 7px var(--kid-ring-strong), 0 16px 52px var(--kid-glow-strong); }
     }
     @media (prefers-reduced-motion: reduce) {
         .kid-tile, .kid-tile.on { animation: none; }
         .kid-tile.pop, .kid-tile.on.pop { animation: none; }
+        .kid-skel { animation: none; }
     }
 
     .none {
@@ -407,9 +470,9 @@
         padding: 10px 18px;
         min-height: 44px;
         border-radius: 999px;
-        border: 2px solid #ffd23f;
+        border: 2px solid var(--kid-accent);
         background: transparent;
-        color: #ffd23f;
+        color: var(--kid-accent);
         cursor: pointer;
         flex-shrink: 0;
         transition: background 0.15s ease, color 0.15s ease, transform 0.12s ease;
@@ -417,7 +480,7 @@
     }
     .sched-new:active {
         transform: scale(0.95);
-        background: rgba(255, 210, 63, 0.15);
+        background: var(--kid-accent-soft);
     }
 
     .sched-empty {
@@ -454,7 +517,7 @@
         transition: border-color 0.15s ease, transform 0.12s ease;
         -webkit-tap-highlight-color: transparent;
     }
-    .sched-main:active { transform: scale(0.98); border-color: #ffd23f55; }
+    .sched-main:active { transform: scale(0.98); border-color: var(--kid-accent); }
 
     .sched-emoji { font-size: 2.2rem; line-height: 1; flex-shrink: 0; }
     .sched-info {
@@ -495,9 +558,9 @@
         border: 1.5px solid var(--border);
     }
     .sched-badge.badge-on {
-        background: rgba(255, 210, 63, 0.15);
-        border-color: #ffd23f;
-        color: #ffd23f;
+        background: var(--kid-accent-soft);
+        border-color: var(--kid-accent);
+        color: var(--kid-accent);
     }
     .sched-days {
         font-size: 0.78rem;
@@ -524,8 +587,8 @@
     }
     .sched-del:active { transform: scale(0.9); }
     .sched-del.pending {
-        background: #ff5d8f;
-        border-color: #ff5d8f;
+        background: var(--kid-pink);
+        border-color: var(--kid-pink);
         color: #fff;
         animation: shake 0.35s ease;
     }
@@ -558,7 +621,7 @@
         font-size: clamp(2.5rem, 10vw, 4.5rem);
         font-weight: 900;
         letter-spacing: -0.03em;
-        background: linear-gradient(120deg, #4d9bff, #b15dff, #ff5d8f);
+        background: linear-gradient(120deg, var(--kid-blue), var(--kid-purple), var(--kid-pink));
         -webkit-background-clip: text;
         background-clip: text;
         -webkit-text-fill-color: transparent;

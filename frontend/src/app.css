@@ -51,6 +51,29 @@
     --r-lg: var(--radius-lg);
     --r-xl: var(--radius-xl);
     --r-pill: 999px;
+
+    /* ── Kid module palette ──────────────────────────────────────
+       The Kid surface (KidHome / KidLampPanel / KidScheduleSheet)
+       deliberately steps outside the warm-dark system with a big,
+       saturated, playful palette. These tokens are the *only* place
+       those literals live — views must consume them, never re-hardcode
+       a hex. The saturated hues read fine on both themes, so they sit
+       here; theme-dependent surfaces (background, OFF state) are set
+       per-theme below. */
+    --kid-accent:       #ffd23f;                          /* sunny "ON" yellow */
+    --kid-accent-soft:  rgba(255, 210, 63, 0.15);
+    --kid-accent-grad:  linear-gradient(160deg, #fff3c4, #ffd23f);
+    --kid-on-text:      #5e4500;                          /* text on yellow */
+    --kid-tile-text:    #7a5b00;                          /* tile body text when ON */
+    --kid-ring:         rgba(255, 210, 63, 0.25);         /* halo ring */
+    --kid-ring-strong:  rgba(255, 210, 63, 0.30);
+    --kid-glow:         rgba(255, 196, 0, 0.45);          /* warm bulb glow */
+    --kid-glow-strong:  rgba(255, 196, 0, 0.60);
+    --kid-pink:         #ff5d8f;
+    --kid-blue:         #4d9bff;
+    --kid-purple:       #b15dff;
+    --kid-green:        #3ddc97;
+    --kid-orange:       #ff8c42;
 }
 
 [data-theme="dark"] {
@@ -103,6 +126,17 @@
     /* literal surfaces for the redesign primitives */
     --bg-2: #1c1a15;
     --card-3: #2e2a22;
+
+    /* Kid module — theme-dependent surfaces (dark) */
+    --kid-bg:
+        radial-gradient(circle at 15% 0%, rgba(77, 155, 255, 0.18), transparent 45%),
+        radial-gradient(circle at 90% 10%, rgba(255, 93, 143, 0.18), transparent 40%),
+        var(--bg);
+    --kid-surface:    var(--bg-elevated);
+    --kid-sel-grad:   linear-gradient(160deg, #2b2011, #1e1a0e);
+    --kid-off-bg:     #1a2140;
+    --kid-off-border: #4460a8;
+    --kid-off-text:   #a0bcf0;
     color-scheme: dark;
 }
 
@@ -150,6 +184,17 @@
     --focus-ring: 0 0 0 3px rgba(201, 122, 31, 0.28);
     --bg-2: #efeae0;
     --card-3: #f1ebde;
+
+    /* Kid module — theme-dependent surfaces (light) */
+    --kid-bg:
+        radial-gradient(circle at 15% 0%, rgba(77, 155, 255, 0.14), transparent 45%),
+        radial-gradient(circle at 90% 10%, rgba(255, 93, 143, 0.12), transparent 40%),
+        var(--bg);
+    --kid-surface:    var(--bg-elevated);
+    --kid-sel-grad:   linear-gradient(160deg, #fff3c4, #ffe7a0);
+    --kid-off-bg:     #e8eeff;
+    --kid-off-border: #88a8ec;
+    --kid-off-text:   #34589c;
     color-scheme: light;
 }
 
