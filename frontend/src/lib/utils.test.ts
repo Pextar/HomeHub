@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   plural,
   formatDays,
@@ -90,6 +90,11 @@ describe("isSmartProtocol", () => {
 // ── formatCountdown ───────────────────────────────────────────────────────────
 
 describe("formatCountdown", () => {
+  // Freeze the clock so the offset computed here and the Date.now() read
+  // inside the function can't straddle a second boundary.
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
   it("returns 'now' for past or present targets", () => {
     expect(formatCountdown(new Date(Date.now() - 1000))).toBe("now");
   });
@@ -106,6 +111,9 @@ describe("formatCountdown", () => {
 // ── formatAgo ──────────────────────────────────────────────────────────────────
 
 describe("formatAgo", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
   it("returns empty string for falsy input", () => {
     expect(formatAgo(undefined)).toBe("");
   });
