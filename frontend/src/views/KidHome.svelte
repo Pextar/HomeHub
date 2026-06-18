@@ -24,6 +24,8 @@
     let pendingDeleteTimer = $state<ReturnType<typeof setTimeout> | null>(null);
     onDestroy(() => {
         if (pendingDeleteTimer) clearTimeout(pendingDeleteTimer);
+        for (const t of bumpTimers) clearTimeout(t);
+        bumpTimers.clear();
     });
 
     function openNewSchedule() {
@@ -119,7 +121,9 @@
     // ── Welcome splash + confetti ───────────────────────────────────────
     const GREETED_KEY = "kid-greeted";
     let showWelcome = $state(!sessionStorage.getItem(GREETED_KEY));
-    const COLORS = ["#ff5d8f", "#ffd23f", "#3ddc97", "#4d9bff", "#b15dff", "#ff8c42"];
+    // Confetti hues reference the shared --kid-* tokens (set on the elements
+    // via var()) so the playful palette lives in exactly one place: app.css.
+    const COLORS = ["--kid-pink", "--kid-accent", "--kid-green", "--kid-blue", "--kid-purple", "--kid-orange"];
     const confetti = Array.from({ length: 70 }, (_, i) => ({
         id: i,
         left: Math.random() * 100,
@@ -139,12 +143,17 @@
 
     // ── Toggle with optimistic flip + a little bounce ───────────────────
     let popping = new SvelteSet<string>();
+    // Track the bounce timers so they can be cancelled if the view unmounts
+    // mid-animation (avoids touching state after destroy).
+    const bumpTimers = new SvelteSet<ReturnType<typeof setTimeout>>();
 
     function bump(id: string) {
         popping.add(id);
-        setTimeout(() => {
+        const t = setTimeout(() => {
             popping.delete(id);
+            bumpTimers.delete(t);
         }, 450);
+        bumpTimers.add(t);
     }
 
     async function toggle(lamp: Socket) {
@@ -168,7 +177,7 @@
         <div class="confetti" aria-hidden="true">
             {#each confetti as c (c.id)}
                 <span
-                    style="left:{c.left}%; background:{c.color}; width:{c.size}px; height:{c.size}px;
+                    style="left:{c.left}%; background:var({c.color}); width:{c.size}px; height:{c.size}px;
                            animation-delay:{c.delay}s; animation-duration:{c.duration}s;
                            transform:rotate({c.rotate}deg);"
                 ></span>
@@ -542,6 +551,7 @@
     }
     .sched-time {
         font-family: var(--font-mono);
+        font-feature-settings: "tnum" 1;
         font-size: 0.9rem;
         font-weight: 700;
         color: var(--text-muted);

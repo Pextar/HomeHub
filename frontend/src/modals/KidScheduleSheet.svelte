@@ -5,7 +5,7 @@
     import { api } from "../lib/api";
     import { data, toasts } from "../lib/stores.svelte";
     import { DAY_SHORT, DAY_NAMES, lampEmoji, haptic } from "../lib/utils";
-    import type { Socket, Schedule, TargetType, ScheduleTimeMode } from "../lib/types";
+    import type { Schedule, TargetType, ScheduleTimeMode } from "../lib/types";
 
     interface Props {
         onClose: () => void;
@@ -359,6 +359,7 @@
         font-size: 2.2rem;
         font-weight: 800;
         font-family: var(--font-mono);
+        font-feature-settings: "tnum" 1;
         padding: 10px 16px;
         border-radius: var(--radius-lg);
         border: 2px solid var(--border);
@@ -383,6 +384,7 @@
         aspect-ratio: 1;
         min-width: 36px;
         max-width: 54px;
+        position: relative;
         border-radius: 50%;
         border: 2px solid var(--border);
         background: var(--bg);
@@ -404,6 +406,10 @@
     }
     @media (pointer: coarse) {
         .ks-day { min-width: 40px; min-height: 40px; }
+        /* Seven chips can't all be 44px wide on a narrow phone, so keep the
+           visual size and expand the touch target to ≥44 with a pseudo-element
+           (same trick as .icon-btn in app.css). */
+        .ks-day::after { content: ""; position: absolute; inset: -3px; }
     }
 
     /* ── Footer ── */

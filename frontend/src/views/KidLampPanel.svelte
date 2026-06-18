@@ -3,7 +3,7 @@
     // shown full-screen when a kid taps a Matter/Tasmota lamp. It speaks to
     // both protocols (Matter uses `level`, Tasmota uses `dimmer`) through a
     // tiny normalisation layer so the kid UI doesn't have to care which.
-    import { onMount } from "svelte";
+    import { onMount, onDestroy } from "svelte";
     import { fly, fade } from "svelte/transition";
     import { backOut } from "svelte/easing";
     import { api } from "../lib/api";
@@ -68,6 +68,8 @@
             }
         }, 120);
     }
+    // Don't let a debounced write fire after the panel closes.
+    onDestroy(() => clearTimeout(timer));
 
     async function toggle() {
         const target = !on;
@@ -86,10 +88,12 @@
     }
 
     // Keep the home-grid tile in sync when a colour/brightness change implies
-    // the lamp is now on, without waiting for the next poll.
+    // the lamp is now on. Early-return once on so a slider drag doesn't re-sync
+    // the store on every input tick.
     function markOn() {
+        if (on) return;
         on = true;
-        if (!socket.state) data.applySocket({ ...socket, state: true });
+        data.applySocket({ ...socket, state: true });
     }
 
     function pickColor(hex: string) {
