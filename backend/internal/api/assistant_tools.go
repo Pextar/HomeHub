@@ -18,8 +18,10 @@ import (
 // or device errors are returned as text (not Go errors) so the agent loop
 // keeps running and the model can react.
 //
-// v1 is control + Q&A only. Creating/deleting schedules, scenes, and groups is
-// deferred to v2 — the existing forms are faster and can't hallucinate.
+// Beyond control + Q&A, the assistant can create automations (see
+// assistant_automation.go) — confirm-gated like the bulk tools. Creating or
+// deleting schedules, scenes, and groups is still deferred to the app forms,
+// which are faster and can't hallucinate.
 
 // assistantTool pairs a model-facing spec with its executor and a flag marking
 // bulk/destructive tools that must be confirmed by the user before running.
@@ -94,6 +96,11 @@ func (s *Server) assistantTools() map[string]assistantTool {
 				}, []string{"action"})),
 			NeedsConfirm: true,
 			Execute:      s.toolAllDevices,
+		},
+		"create_automation": {
+			Spec:         createAutomationTool(),
+			NeedsConfirm: true,
+			Execute:      s.toolCreateAutomation,
 		},
 	}
 	return tools

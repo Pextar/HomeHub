@@ -244,6 +244,26 @@ func (s *Server) resolveRoom(ref string) (name string, ok bool, reason string) {
 	return "", false, "no room named " + quote(ref)
 }
 
+// resolveRoomID maps a reference to a room id (not its name). Automation
+// actions target a room by id (ExecuteAction looks the room up by id, then
+// matches sockets by the room's name), unlike control_room which works by
+// name. Caller must NOT hold Mu.
+func (s *Server) resolveRoomID(ref string) (id, name string, ok bool, reason string) {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return "", "", false, "no room specified"
+	}
+	s.Store.Mu.RLock()
+	defer s.Store.Mu.RUnlock()
+	lower := strings.ToLower(ref)
+	for _, rm := range s.Store.Rooms {
+		if rm.ID == ref || strings.ToLower(rm.Name) == lower {
+			return rm.ID, rm.Name, true, ""
+		}
+	}
+	return "", "", false, "no room named " + quote(ref)
+}
+
 // resolveGroup maps a reference to a group id. Caller must NOT hold Mu.
 func (s *Server) resolveGroup(ref string) (id, name string, ok bool, reason string) {
 	ref = strings.TrimSpace(ref)

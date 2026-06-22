@@ -23,6 +23,7 @@
         "Turn off the living room",
         "Is the kitchen lamp on?",
         "Activate movie night",
+        "At sunset, turn on the porch light",
         "Turn everything off",
     ];
 
@@ -98,7 +99,7 @@
                 <div class="empty">
                     <span class="spark"><Icon name="assistant" size={26} /></span>
                     <p class="empty-title">Ask your home anything</p>
-                    <p class="empty-sub">Control devices and rooms, run scenes, or check a sensor — in plain language.</p>
+                    <p class="empty-sub">Control devices and rooms, run scenes, check a sensor, or set up an automation — in plain language.</p>
                     <div class="examples">
                         {#each EXAMPLES as ex}
                             <button class="example" onclick={() => useExample(ex)}>{ex}</button>

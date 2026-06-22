@@ -253,6 +253,11 @@ func systemPrompt(snap stateSnapshot) string {
 		"- If a name is ambiguous or missing, ask the user rather than guessing.",
 		"- Bulk actions (whole room, group, or all devices) need confirmation — the app",
 		"  handles that automatically when you call the tool; tell the user what you're about to do.",
+		"- You CAN create automations with create_automation — rules that run actions",
+		"  automatically on a time, sunrise/sunset, a sensor crossing a threshold, or a",
+		"  device changing state. Use it when the user wants something to happen on its own",
+		"  rather than right now. Gather the trigger and the action(s) first; ask if either",
+		"  is unclear. The app shows a confirmation card before it is saved.",
 		"- Keep replies short and concrete. Numbers and device names, not fluff.",
 		"- You cannot create or delete schedules, scenes, or groups yet; point the user to the app for that.",
 		"",
@@ -322,6 +327,9 @@ func confirmationSig(secret []byte, payload string) string {
 // confirmationSummary produces a human sentence and the list of affected
 // device names for the confirmation card.
 func (s *Server) confirmationSummary(user *store.User, tool string, args map[string]any) (string, []string) {
+	if tool == "create_automation" {
+		return summarizeAutomation(args)
+	}
 	action := normalizeAction(argString(args, "action"))
 	switch tool {
 	case "all_devices":
