@@ -4,8 +4,8 @@
     import { backOut } from "svelte/easing";
     import { api } from "../lib/api";
     import { data, toasts } from "../lib/stores.svelte";
-    import { DAY_SHORT, DAY_NAMES } from "../lib/utils";
-    import type { Socket, Schedule, TargetType, ScheduleTimeMode } from "../lib/types";
+    import { DAY_SHORT, DAY_NAMES, lampEmoji, haptic } from "../lib/utils";
+    import type { Schedule, TargetType, ScheduleTimeMode } from "../lib/types";
 
     interface Props {
         onClose: () => void;
@@ -29,11 +29,20 @@
     let days = $state<number[]>(untrack(() => [...(existing?.days ?? [])]));
     let saving = $state(false);
 
-    function lampEmoji(lamp: Socket): string {
-        return lamp.emoji?.trim() ? lamp.emoji : "💡";
+    // One-tap presets — fill in the common bedtime / wake-up routines so a kid
+    // rarely has to fiddle with the time picker.
+    const PRESETS = [
+        { label: "Bedtime", emoji: "🌙", time: "20:00", action: "off" as const },
+        { label: "Wake up", emoji: "☀️", time: "07:00", action: "on" as const },
+    ];
+    function applyPreset(p: (typeof PRESETS)[number]) {
+        haptic();
+        time = p.time;
+        action = p.action;
     }
 
     function toggleDay(idx: number) {
+        haptic();
         if (days.includes(idx)) {
             days = days.filter(d => d !== idx);
         } else {
@@ -85,6 +94,22 @@
             <h2>⏰ {isEdit ? "Edit schedule" : "New schedule"}</h2>
             <button class="ks-close" onclick={onClose} aria-label="Close">✕</button>
         </header>
+
+        <!-- Quick picks -->
+        <div class="ks-section">
+            <p class="ks-label">Quick picks</p>
+            <div class="ks-presets">
+                {#each PRESETS as p (p.label)}
+                    <button class="ks-preset"
+                        class:sel={time === p.time && action === p.action}
+                        onclick={() => applyPreset(p)}
+                        aria-pressed={time === p.time && action === p.action}>
+                        <span class="ks-preset-emoji">{p.emoji}</span>
+                        <span>{p.label}</span>
+                    </button>
+                {/each}
+            </div>
+        </div>
 
         <!-- Which lamp? -->
         <div class="ks-section">
@@ -234,6 +259,34 @@
         opacity: 0.75;
     }
 
+    /* ── Quick-pick presets ── */
+    .ks-presets { display: flex; gap: var(--space-3); }
+    .ks-preset {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: var(--space-2);
+        padding: 12px;
+        min-height: 52px;
+        font-size: 1rem;
+        font-weight: 800;
+        border-radius: var(--radius-lg);
+        border: 2px solid var(--border);
+        background: var(--bg);
+        color: var(--text-muted);
+        cursor: pointer;
+        transition: all 0.15s ease;
+        -webkit-tap-highlight-color: transparent;
+    }
+    .ks-preset:active { transform: scale(0.95); }
+    .ks-preset.sel {
+        background: var(--kid-sel-grad);
+        border-color: var(--kid-accent);
+        color: var(--text);
+    }
+    .ks-preset-emoji { font-size: 1.4rem; line-height: 1; }
+
     /* ── Lamp grid ── */
     .ks-lamp-grid {
         display: grid;
@@ -256,8 +309,8 @@
     }
     .ks-lamp:active { transform: scale(0.93); }
     .ks-lamp.sel {
-        border-color: #ffd23f;
-        background: linear-gradient(160deg, #2b2011, #1e1a0e);
+        border-color: var(--kid-accent);
+        background: var(--kid-sel-grad);
     }
     .ks-lamp-emoji {
         font-size: 1.9rem;
@@ -289,14 +342,14 @@
     }
     .ks-act:active { transform: scale(0.95); }
     .ks-on.sel {
-        background: linear-gradient(160deg, #fff3c4, #ffd23f);
-        border-color: #ffd23f;
-        color: #5e4500;
+        background: var(--kid-accent-grad);
+        border-color: var(--kid-accent);
+        color: var(--kid-on-text);
     }
     .ks-off.sel {
-        background: #1a2140;
-        border-color: #4460a8;
-        color: #a0bcf0;
+        background: var(--kid-off-bg);
+        border-color: var(--kid-off-border);
+        color: var(--kid-off-text);
     }
 
     /* ── Time input ── */
@@ -306,6 +359,7 @@
         font-size: 2.2rem;
         font-weight: 800;
         font-family: var(--font-mono);
+        font-feature-settings: "tnum" 1;
         padding: 10px 16px;
         border-radius: var(--radius-lg);
         border: 2px solid var(--border);
@@ -330,6 +384,7 @@
         aspect-ratio: 1;
         min-width: 36px;
         max-width: 54px;
+        position: relative;
         border-radius: 50%;
         border: 2px solid var(--border);
         background: var(--bg);
@@ -345,12 +400,16 @@
     }
     .ks-day:active { transform: scale(0.85); }
     .ks-day.sel {
-        background: #ffd23f;
-        border-color: #ffd23f;
-        color: #5e4500;
+        background: var(--kid-accent);
+        border-color: var(--kid-accent);
+        color: var(--kid-on-text);
     }
     @media (pointer: coarse) {
         .ks-day { min-width: 40px; min-height: 40px; }
+        /* Seven chips can't all be 44px wide on a narrow phone, so keep the
+           visual size and expand the touch target to ≥44 with a pseudo-element
+           (same trick as .icon-btn in app.css). */
+        .ks-day::after { content: ""; position: absolute; inset: -3px; }
     }
 
     /* ── Footer ── */
@@ -374,11 +433,11 @@
     }
     .ks-save {
         flex: 2;
-        background: linear-gradient(160deg, #fff3c4, #ffd23f);
-        color: #5e4500;
+        background: var(--kid-accent-grad);
+        color: var(--kid-on-text);
     }
 
     @media (prefers-reduced-motion: reduce) {
-        .ks-lamp, .ks-act, .ks-day, .ks-btn, .ks-close { transition: none; }
+        .ks-lamp, .ks-act, .ks-day, .ks-btn, .ks-close, .ks-preset { transition: none; }
     }
 </style>

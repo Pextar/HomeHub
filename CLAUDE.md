@@ -108,7 +108,8 @@ is already up-to-date it's skipped.
 
 ## Key design rules (from DESIGN.md §2)
 
-- No emoji outside `KidHome.svelte`.
+- No emoji outside the Kid module (`KidHome.svelte`, `KidLampPanel.svelte`,
+  `KidScheduleSheet.svelte`).
 - No gradients except `.tile.on` and the day/night timeline.
 - No pure black; deepest surface is `--bg` (`#14130f`).
 - No tabs inside views — use chip filters.

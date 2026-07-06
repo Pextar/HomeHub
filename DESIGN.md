@@ -19,7 +19,8 @@ over decoration.
 
 ## 2. Hard rules (don't bend these)
 
-- **No emoji** anywhere. (One exception: `KidHome.svelte`.)
+- **No emoji** anywhere. (One exception: the Kid module — `KidHome.svelte`,
+  `KidLampPanel.svelte`, and `KidScheduleSheet.svelte`.)
 - **No decorative SVG.** Icons only when functional. For missing imagery use
   the `.placeholder` striped fill with a monospace caption — never invent a
   picture.
@@ -333,7 +334,7 @@ Is it a list of things?
 - Spinner → use skeleton
 - Brand gradient (purple/blue/teal) → warm-only palette
 - Pure black surface → `--bg` is the floor (Console is the only exception)
-- Emoji outside Kid mode
+- Emoji outside the Kid module (KidHome / KidLampPanel / KidScheduleSheet)
 - Icon-only button smaller than 44×44 hit area
 - Numbers in sans → must be mono
 - Tab bar visible on detail/form/Matter step/Console screens
@@ -351,7 +352,7 @@ Is it a list of things?
 - [ ] Every list row matches the 44–60px / 36-icon / chevron-right pattern
 - [ ] Tab bar is hidden on detail / form / Matter step screens
 - [ ] Notification indicator is exactly 7×7 amber (`--on`)
-- [ ] No emoji outside Kid mode
+- [ ] No emoji outside the Kid module (KidHome / KidLampPanel / KidScheduleSheet)
 - [ ] No new colors invented — only tokens from §3
 - [ ] Reduced-motion media query collapses your animations to 0.001ms
 - [ ] Hit areas ≥ 44×44 on touch
