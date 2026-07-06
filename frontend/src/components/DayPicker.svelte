@@ -14,7 +14,7 @@
 </script>
 
 <div class="picker" role="group" aria-label="Days of week">
-    {#each DAY_SHORT as label, i}
+    {#each DAY_SHORT as label, i (i)}
         <button
             type="button"
             class="day-chip"

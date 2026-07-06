@@ -42,8 +42,7 @@ registerRoute(new NavigationRoute(navHandler, { denylist: [/^\/api/] }));
 
 // Handle incoming push messages and show a system notification.
 self.addEventListener("push", (event: PushEvent) => {
-  let payload: { title?: string; body?: string; url?: string; tag?: string } =
-    {};
+  let payload: { title?: string; body?: string; url?: string; tag?: string };
   try {
     payload = event.data?.json() ?? {};
   } catch {

@@ -1,0 +1,25 @@
+# golangci-lint v2 configuration.
+# Starts from the standard linter set and trims a few checks that fight
+# this codebase's deliberate conventions rather than catching real issues.
+version: "2"
+
+linters:
+  default: standard
+  settings:
+    errcheck:
+      # Unchecked Close()/Remove() on cleanup and defer paths is idiomatic
+      # here — there's nothing actionable to do with the error.
+      exclude-functions:
+        - (io.Closer).Close
+        - (io.ReadCloser).Close
+        - (*os.File).Close
+        - os.Remove
+    staticcheck:
+      checks:
+        - all
+        # ST1005: validation messages are intentionally capitalized,
+        # user-facing strings surfaced verbatim in the UI.
+        - -ST1005
+        # QF1001: applying De Morgan's law hurts readability on the
+        # range/bounds checks where it triggers.
+        - -QF1001

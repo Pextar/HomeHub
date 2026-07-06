@@ -6,6 +6,7 @@
     import { sortedSockets } from "../lib/utils";
     import { copyText } from "../lib/clipboard";
     import { untrack } from "svelte";
+    import { SvelteSet } from "svelte/reactivity";
     import Icon from "../components/Icon.svelte";
     import type { User } from "../lib/types";
 
@@ -18,7 +19,7 @@
     let password = $state("");
     let admin = $state(untrack(() => existing?.admin ?? false));
     let kid = $state(untrack(() => existing?.kid ?? false));
-    let selected = $state(untrack(() => new Set(existing?.socket_ids ?? [])));
+    let selected = new SvelteSet(untrack(() => existing?.socket_ids ?? []));
     // The code an existing limited profile signs in with. Shown so the admin
     // can re-share it; "Regenerate" issues a new one on save.
     let loginCode = $state(untrack(() => existing?.login_code ?? ""));
@@ -37,7 +38,6 @@
     function toggle(id: string) {
         if (selected.has(id)) selected.delete(id);
         else selected.add(id);
-        selected = new Set(selected);
     }
 
     async function copyCode() {

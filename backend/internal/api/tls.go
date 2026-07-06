@@ -6,6 +6,7 @@
 // about the cert the first time, but the rest of the stack — fetch from
 // the PWA, getUserMedia for QR scanning, service workers — only cares
 // that the page was served over HTTPS at all.
+
 package api
 
 import (
@@ -93,9 +94,7 @@ func generateSelfSigned(extraHosts []string) (certPEM, keyPEM []byte, err error)
 	// Discover this host's outbound IP and add it as a SAN so connecting
 	// via e.g. https://192.168.1.50:8443 doesn't trigger a name-mismatch
 	// warning on top of the self-signed warning.
-	for _, ip := range localIPs() {
-		tmpl.IPAddresses = append(tmpl.IPAddresses, ip)
-	}
+	tmpl.IPAddresses = append(tmpl.IPAddresses, localIPs()...)
 
 	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &priv.PublicKey, priv)
 	if err != nil {

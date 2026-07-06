@@ -51,6 +51,7 @@
     // regions (busiest rooms first), then lay each room's nodes out in a
     // sub-grid inside its region with headroom at the top for the label.
     function defaultLayout(sockets: Socket[]): Record<string, Pos> {
+        // eslint-disable-next-line svelte/prefer-svelte-reactivity -- transient local Map, built and consumed synchronously
         const groups = new Map<string, Socket[]>();
         for (const s of sockets) {
             const r = roomOf(s);
@@ -104,6 +105,7 @@
             };
         });
 
+        // eslint-disable-next-line svelte/prefer-svelte-reactivity -- transient local Map, built and consumed synchronously
         const byRoom = new Map<string, Node[]>();
         for (const node of nodes) {
             if (!byRoom.has(node.room)) byRoom.set(node.room, []);

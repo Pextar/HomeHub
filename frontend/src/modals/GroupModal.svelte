@@ -5,6 +5,7 @@
     import { data, toasts } from "../lib/stores.svelte";
     import { sortedSockets } from "../lib/utils";
     import { untrack } from "svelte";
+    import { SvelteSet } from "svelte/reactivity";
     import type { Group } from "../lib/types";
 
     interface Props { existing?: Group | null; }
@@ -13,14 +14,13 @@
 
     const sockets = $derived(sortedSockets(data.value.sockets));
     let name = $state(untrack(() => existing?.name ?? ""));
-    let selected = $state(untrack(() => new Set(existing?.socket_ids ?? [])));
+    let selected = new SvelteSet(untrack(() => existing?.socket_ids ?? []));
     let saving = $state(false);
     let nameError = $state("");
 
     function toggle(id: string) {
         if (selected.has(id)) selected.delete(id);
         else selected.add(id);
-        selected = new Set(selected);
     }
 
     async function save() {

@@ -156,7 +156,7 @@
             <div class="field">
                 <label for="sock-proto">Protocol</label>
                 <select id="sock-proto" bind:value={protocol}>
-                    {#each PROTOCOLS as p}
+                    {#each PROTOCOLS as p (p.value)}
                         <option value={p.value}>{p.label}</option>
                     {/each}
                 </select>
@@ -204,7 +204,7 @@
                 <div class="field" style="margin-top:var(--space-4)">
                     <span class="field-label">Icon <span class="opt">(for kid mode)</span></span>
                     <div class="emoji-grid" role="group" aria-label="Pick an icon">
-                        {#each EMOJI_CHOICES as e}
+                        {#each EMOJI_CHOICES as e (e)}
                             <button type="button" class="emoji-btn" class:active={emoji === e}
                                 aria-pressed={emoji === e}
                                 onclick={() => emoji = emoji === e ? "" : e}>{e}</button>
@@ -216,7 +216,7 @@
                     <div class="field">
                         <label for="sock-proto">Protocol</label>
                         <select id="sock-proto" bind:value={protocol}>
-                            {#each PROTOCOLS as p}
+                            {#each PROTOCOLS as p (p.value)}
                                 <option value={p.value}>{p.label}</option>
                             {/each}
                         </select>

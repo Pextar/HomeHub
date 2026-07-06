@@ -253,7 +253,7 @@
                 <div class="field transport-pick">
                     <span class="field-label">Network type</span>
                     <div class="tabs" role="radiogroup">
-                        {#each availableTransports as t}
+                        {#each availableTransports as t (t)}
                             <button class="tab" class:active={transport === t}
                                 role="radio" aria-checked={transport === t}
                                 onclick={() => transport = t}>

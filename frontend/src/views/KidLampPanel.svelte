@@ -7,7 +7,7 @@
     import { fly, fade } from "svelte/transition";
     import { backOut } from "svelte/easing";
     import { api } from "../lib/api";
-    import { toasts, data } from "../lib/stores.svelte";
+    import { toasts } from "../lib/stores.svelte";
     import type { Socket } from "../lib/types";
 
     interface Props { socket: Socket; onClose: () => void; }

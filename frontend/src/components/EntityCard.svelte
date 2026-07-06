@@ -17,7 +17,7 @@
       <div class="meta">{meta}</div>
       {#if chips.length}
         <div class="chips">
-          {#each chips as c}
+          {#each chips as c (c.text)}
             <span class="entity-chip" data-tone={c.tone ?? ""}>{c.text}</span>
           {/each}
         </div>

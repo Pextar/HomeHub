@@ -100,7 +100,7 @@
                     <p class="empty-title">Ask your home anything</p>
                     <p class="empty-sub">Control devices and rooms, run scenes, or check a sensor — in plain language.</p>
                     <div class="examples">
-                        {#each EXAMPLES as ex}
+                        {#each EXAMPLES as ex (ex)}
                             <button class="example" onclick={() => useExample(ex)}>{ex}</button>
                         {/each}
                     </div>
@@ -112,7 +112,7 @@
                     <div class="bubble {m.role}" class:error={m.error}>
                         {#if m.role === "assistant" && m.tools && m.tools.length}
                             <div class="tools">
-                                {#each m.tools as t}
+                                {#each m.tools as t (t.name)}
                                     <span class="tool-chip">
                                         <Icon name="check" size={13} />
                                         <span class="tool-name">{t.name}</span>
@@ -138,7 +138,7 @@
                         <p class="confirm-summary">{pending.summary}</p>
                         {#if pending.affected && pending.affected.length}
                             <div class="affected">
-                                {#each pending.affected.slice(0, 8) as name}
+                                {#each pending.affected.slice(0, 8) as name (name)}
                                     <span class="affected-chip">{name}</span>
                                 {/each}
                                 {#if pending.affected.length > 8}

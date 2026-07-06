@@ -1,5 +1,6 @@
 <script lang="ts">
     import { onMount, onDestroy } from "svelte";
+    import { SvelteSet } from "svelte/reactivity";
     import { fade, scale } from "svelte/transition";
     import { backOut } from "svelte/easing";
     import { api } from "../lib/api";
@@ -119,14 +120,12 @@
     });
 
     // ── Toggle with optimistic flip + a little bounce ───────────────────
-    let popping = $state<Set<string>>(new Set());
+    let popping = new SvelteSet<string>();
 
     function bump(id: string) {
         popping.add(id);
-        popping = new Set(popping);
         setTimeout(() => {
             popping.delete(id);
-            popping = new Set(popping);
         }, 450);
     }
 
