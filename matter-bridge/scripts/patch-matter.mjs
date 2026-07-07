@@ -114,3 +114,54 @@ patch(
   `expiryLengthSeconds: this.#collectedCommissioningData.basicCommissioningInfo?.failSafeExpiryLengthSeconds`,
   `expiryLengthSeconds: Math.min(Math.max(this.#collectedCommissioningData.basicCommissioningInfo?.failSafeExpiryLengthSeconds ?? 60, 180), this.#collectedCommissioningData.basicCommissioningInfo?.maxCumulativeFailsafeSeconds ?? 900)`,
 );
+
+// Patch 5: extend the operational (CASE-over-IP) discovery window from 120s to
+// 170s during the post-connectNetwork reconnect step.
+//
+// Root cause (observed live on a successful Thread join): after ConnectNetwork
+// the device attaches to the Thread mesh and registers SRP, but the OTBR
+// advertising proxy can take >120s to mirror that SRP record into LAN mDNS
+// (the `_matter._tcp` operational record). Stock 0.12.6 hardcodes
+// `timeoutSeconds: 120` for this discovery, so matter.js gives up ~120s in and
+// throws "operational device cannot be found on the network" — even though the
+// record appears on the wire seconds later (confirmed via avahi-browse on eth0).
+//
+// Patch 4 already keeps the DEVICE alive for 180s (armFailSafe >=180). This
+// patch widens matter.js's own discovery window to 170s so it is still looking
+// when the slow advertising-proxy record finally appears, while staying under
+// the 180s device failsafe (leaving ~10s for the CASE handshake to complete
+// before the device would roll back).
+patch(
+  "@matter/protocol/dist/esm/peer/ControllerCommissioner.js",
+  "ControllerCommissioner: extend operational discovery window 120s -> 170s",
+  `timeoutSeconds: 120,`,
+  `timeoutSeconds: 170,`,
+);
+
+// Patch 6: cap the mDNS re-query backoff at 15s (was 1 hour).
+//
+// Root cause (observed live, and the reason Patch 5 alone wasn't enough):
+// MdnsScanner doubles its DNS-SD query interval each round — 1.5, 3, 6, 12, 24,
+// 48, 96, 192s … capped only at 60*60 (1 hour). So during a commissioning
+// discovery window the LAST active query goes out at ~T+94s and the next would
+// not be until ~T+190s. But the OTBR advertising proxy mirrors a freshly-joined
+// Thread device's SRP record into LAN mDNS only at ~T+128s — i.e. AFTER
+// matter.js has gone silent. The record is provably on the wire (avahi-browse
+// sees it on eth0) yet matter.js never re-queries in time, so discovery times
+// out even with Patch 5's longer window (extra time spent only passively
+// listening, and the openthread mDNS proxy answers queries rather than sending
+// gratuitous announcements matter.js could catch passively).
+//
+// Capping the interval at 15s makes matter.js keep actively querying (…24, then
+// every 15s) for the whole window, so it re-queries within ~15s of the record
+// appearing and completes CASE. Slightly chattier mDNS while a discovery is
+// pending — negligible on a home LAN, and it also speeds up normal operational
+// reconnects.
+patch(
+  "@matter/protocol/dist/esm/mdns/MdnsScanner.js",
+  "MdnsScanner: cap re-query backoff at 15s so late Thread SRP records are still queried",
+  `      nextAnnounceInterval,
+      60 * 60`,
+  `      nextAnnounceInterval,
+      15`,
+);

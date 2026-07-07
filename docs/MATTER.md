@@ -113,10 +113,23 @@ ls /dev/ttyACM*
 docker run --name otbr --sysctl "net.ipv6.conf.all.disable_ipv6=0 \
   net.ipv4.conf.all.forwarding=1 net.ipv6.conf.all.forwarding=1" \
   -p 8080:80 --dns=127.0.0.1 --restart unless-stopped -d \
+  --tmpfs /run \
+  -v otbr-data:/var/lib/thread \
   --volume /dev/ttyACM0:/dev/ttyACM0 \
   --privileged openthread/otbr \
   --radio-url spinel+hdlc+uart:///dev/ttyACM0
 ```
+
+> **`--tmpfs /run` and `-v otbr-data:/var/lib/thread` are not optional — they
+> are what makes OTBR survive a reboot.** The container's `/run` is otherwise on
+> the persistent overlay layer, so a stale `dbus` pid/socket from an unclean stop
+> survives the auto-restart, blocks D-Bus, and puts `otbr-agent` into a silent
+> crash-loop (container shows "Up" but only `otbr-web` runs — no `wpan0`, no SRP
+> server, no Thread). A tmpfs `/run` is wiped on every start so D-Bus always comes
+> up clean. The named volume keeps your formed Thread network (dataset) across
+> `docker rm`/upgrades so commissioned devices don't get orphaned. If OTBR ever
+> comes up dead anyway, the in-place repair is:
+> `docker exec otbr sh -c 'rm -f /run/dbus/pid /run/dbus/system_bus_socket; service dbus start; service otbr-agent restart'`.
 
 OTBR's web UI is now at `http://<pi-ip>:8080`. On first run, go there and click
 **Form** to create a new Thread network (leave all defaults or pick a name).
@@ -161,6 +174,13 @@ MATTER_BRIDGE_THREAD_DATASET=0e080000000000010000000300001235...
 # Only set this if the bridge refuses to start with a "Could not determine
 # Thread network name" error (shouldn't happen with a well-formed dataset).
 #MATTER_BRIDGE_THREAD_NETWORK_NAME=MyThreadNet
+
+# REQUIRED on a dual-NIC Pi (wired eth0 + Wi-Fi wlan0). Pin the bridge's mDNS
+# to the interface that faces your LAN / border router, or operational
+# discovery splits across the two same-subnet interfaces and commissioning
+# ends in "operational device cannot be found on the network". See the
+# Troubleshooting section below.
+MATTER_MDNS_NETWORKINTERFACE=eth0
 ```
 
 Then restart the bridge:
@@ -215,6 +235,38 @@ devices are discovered over BLE). Make sure the service user is in the
 ```sh
 sudo usermod -aG bluetooth <your-service-user>
 ```
+
+**Reliable BLE on a Raspberry Pi.** The onboard radio is marginal — slow
+(~40 s) connects and frequent "unexpected state error" corruption that only a
+process restart clears. The durable setup is a **USB BLE dongle** (e.g. ASUS
+USB-BT500 / RTL8761B) with bluetoothd stopped so it can't contend for the
+adapter:
+
+```sh
+hciconfig -a                              # find indices; dongle is usually hci1
+sudo systemctl mask --now bluetooth       # stop BlueZ contending for the HCI
+# then in .env:  MATTER_BRIDGE_HCI_ID=1   # point Noble at the dongle
+sudo systemctl restart matter-bridge
+```
+
+Use `mask`, **not** `disable` — bluetoothd is re-activated via D-Bus/socket
+activation and comes back after a reboot; only `mask` keeps it down. Taking the
+onboard radio (`hci0`) down to avoid 2.4 GHz coexistence is handled
+automatically by the `matter-bridge` unit's `ExecStartPre` whenever
+`MATTER_BRIDGE_HCI_ID` is set, so it survives reboots too.
+
+The bridge drives the HCI directly via Noble (raw HCI), not through
+bluetoothd, so BlueZ is a contender, not a dependency. On a BLE failure the
+bridge exits and systemd restarts it with a clean Noble instance — the **first
+commissioning attempt right after a restart is the one that reliably catches**,
+so if a commission fails on Bluetooth just trigger it again.
+
+If a commission reaches Thread but ends in "operational device cannot be found",
+that is usually the OTBR advertising proxy publishing the device's `_matter._tcp`
+record to LAN mDNS slowly; the bundled matter.js patches
+(`matter-bridge/scripts/patch-matter.mjs`) widen the discovery window and keep
+re-querying to absorb that delay. If OTBR itself is unhealthy (no `wpan0`, `ot-ctl`
+refuses), see the container-recovery note in Step 2.
 
 ---
 
@@ -274,6 +326,23 @@ field holds the Matter node id assigned at commissioning time.
   (`docker ps` or `systemctl status otbr`), the Operational Dataset in
   `MATTER_BRIDGE_THREAD_DATASET` matches the active network (`ot-ctl dataset
   active -x`), and the device is within BLE range of the Pi (~5 m).
+- **"operational device cannot be found on the network" (Thread)** — the
+  device joined the fabric over BLE but its operational `_matter._tcp` record
+  never reached the controller. Two known causes on this setup:
+  1. **Dual-NIC mDNS split.** If the Pi has two interfaces on the same subnet
+     (wired eth0 + Wi-Fi wlan0), matter.js queries mDNS on both and the record
+     is dropped (journal shows `UdpMulticastServer lo: send ENETUNREACH
+     ff02::fb:5353`). Fix: `MATTER_MDNS_NETWORKINTERFACE=eth0` in `.env` to pin
+     mDNS to the interface facing the border router, then restart the bridge.
+  2. **Stale Thread credentials.** A re-paired device that kept old credentials
+     reports "already connected", so ConnectNetwork is skipped and it never
+     re-registers SRP. Fully **factory-reset** the device (pairing mode alone
+     is not enough) so it re-attaches and re-registers.
+- **"unexpected state error" / Bluetooth drops mid-commission** — Noble's
+  per-peripheral state machine is corrupted; the bridge exits and systemd
+  restarts it with a clean BLE state. Just trigger commissioning again — the
+  first attempt after the restart is the reliable one. If it recurs, switch to
+  a USB BLE dongle and stop bluetoothd (see "Reliable BLE on a Raspberry Pi").
 - **"Could not determine Thread network name"** — the dataset TLV may be
   malformed. Re-run `ot-ctl dataset active -x` and re-paste. As a workaround
   set `MATTER_BRIDGE_THREAD_NETWORK_NAME` to your Thread network name manually.
