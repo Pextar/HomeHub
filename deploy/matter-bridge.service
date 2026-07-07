@@ -9,6 +9,13 @@ User=claw
 WorkingDirectory=/home/claw/rf-socket-controller/matter-bridge
 EnvironmentFile=-/home/claw/rf-socket-controller/.env
 Environment=MATTER_BRIDGE_DATA=/home/claw/rf-socket-controller/matter-bridge/data
+# BLE adapter prep (runs each start, with the unit's CAP_NET_ADMIN — no sudo):
+# when a specific USB dongle is selected via MATTER_BRIDGE_HCI_ID (non-zero),
+# take the onboard radio (hci0) down to avoid 2.4 GHz coexistence and bring the
+# dongle up. No-op on default single-adapter hosts (HCI_ID unset or 0), so this
+# is safe on a fresh deploy. Leading "-" ignores errors. Pair with
+# `systemctl mask bluetooth` so bluetoothd can't grab the HCI at boot.
+ExecStartPre=-/bin/sh -c 'if [ -n "$MATTER_BRIDGE_HCI_ID" ] && [ "$MATTER_BRIDGE_HCI_ID" != 0 ]; then hciconfig hci0 down; hciconfig "hci$MATTER_BRIDGE_HCI_ID" up; fi'
 ExecStart=/usr/bin/node /home/claw/rf-socket-controller/matter-bridge/dist/index.js
 Restart=on-failure
 RestartSec=5
@@ -18,6 +25,16 @@ RestartSec=5
 #   sudo usermod -aG bluetooth claw
 # Also give node raw BLE access (one-time, survives restarts):
 #   sudo setcap cap_net_raw+eip $(readlink -f $(which node))
+#
+# The bridge drives the HCI adapter directly via Noble (raw HCI), NOT through
+# bluetoothd — so BlueZ is a CONTENDER, not a dependency. On a Pi the built-in
+# radio is flaky; the durable setup is a USB BLE dongle selected with
+# MATTER_BRIDGE_HCI_ID in .env, with bluetoothd MASKED so it can't grab the
+# adapter: `sudo systemctl mask --now bluetooth`. Note `disable` is NOT enough —
+# bluetoothd gets re-activated via D-Bus/socket activation and comes back after a
+# reboot; only `mask` keeps it down. See deploy/env.example / docs/MATTER.md.
+# The After=bluetooth.service ordering above is a no-op once bluetoothd is masked;
+# it only matters if you fall back to the onboard radio + BlueZ.
 AmbientCapabilities=CAP_NET_RAW CAP_NET_ADMIN
 
 NoNewPrivileges=true

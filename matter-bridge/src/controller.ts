@@ -246,17 +246,26 @@ export async function startController(): Promise<MatterController> {
             // to retry: a failed BLE connect means no Matter protocol was exchanged,
             // so the device received no credentials and no fabric entry exists.
             //
-            //   "Timeout while connecting to peripheral …"   — HCI connect stalled.
-            //   "Error while connecting to peripheral …"     — HCI LE Create Connection
-            //                                                  returned a failure status.
-            //   "Can not connect to peripheral … unexpected state 'error'" (or "error")
-            //                                                  — Noble's per-peripheral
-            //       state machine is corrupted from a prior failed attempt and refuses
-            //       all further connects until the process restarts. After exhausting
-            //       retries we exit so systemd restarts us with a clean Noble instance.
+            // We split BLE failures into two classes with DIFFERENT remedies:
+            //
+            //   TRANSIENT — a fresh HCI connect stalled or returned a failure
+            //   status. One in-process retry sometimes catches.
+            //     "Timeout while connecting to peripheral …"  — HCI connect stalled.
+            //     "Error while connecting to peripheral …"    — HCI LE Create
+            //                                                   Connection returned a
+            //                                                   failure status.
+            //
+            //   PERMANENT — Noble's per-peripheral state machine is corrupted from a
+            //   prior failed attempt and refuses ALL further connects until the
+            //   process restarts. In-process retries just waste ~40 s each, so we exit
+            //   IMMEDIATELY and let systemd restart us with a clean Noble instance
+            //   (the first attempt after a restart is the one that reliably catches).
+            //     "Can not connect to peripheral … unexpected state 'error'" (or "error")
             //       (Single or double quotes depending on Noble version.)
-            const BLE_TIMEOUT_RE =
-                /(?:timeout|error) while connecting to peripheral|can ?not connect to peripheral|unexpected state\s*["']?error["']?/i;
+            const BLE_TRANSIENT_RE =
+                /(?:timeout|error) while connecting to peripheral/i;
+            const BLE_PERMANENT_RE =
+                /can ?not connect to peripheral|unexpected state\s*["']?error["']?/i;
 
             // matter.js throws this once BLE + network provisioning have already
             // succeeded but the post-commissioning operational (CASE-over-IP)
@@ -290,7 +299,9 @@ export async function startController(): Promise<MatterController> {
                     return key(nodeId);
                 } catch (err) {
                     const msg = (err as Error).message ?? "";
-                    const isBleTimeout = BLE_TIMEOUT_RE.test(msg);
+                    const isBlePermanent = BLE_PERMANENT_RE.test(msg);
+                    const isBleTransient = BLE_TRANSIENT_RE.test(msg);
+                    const isBleFailure = isBlePermanent || isBleTransient;
 
                     // Clean up any partial fabric entries before retrying or surfacing the error.
                     const orphaned = commissioning.getCommissionedNodes()
@@ -309,21 +320,37 @@ export async function startController(): Promise<MatterController> {
                         }
                     }
 
-                    if (isBleTimeout && attempt < MAX_BLE_RETRIES) {
-                        console.warn(`[matter-bridge] BLE error on attempt ${attempt + 1} — retrying`);
+                    // A transient fault (fresh HCI connect stalled) can catch on
+                    // one in-process retry. A permanent fault (Noble state
+                    // corrupted) never will — skip straight to the restart path.
+                    if (isBleTransient && !isBlePermanent && attempt < MAX_BLE_RETRIES) {
+                        console.warn(`[matter-bridge] transient BLE error on attempt ${attempt + 1} — retrying`);
                         continue;
                     }
 
-                    // All BLE retries exhausted. Noble's per-peripheral state
-                    // machine is permanently corrupted until the process restarts.
-                    // Exit now so systemd restarts the bridge with a clean Noble
-                    // instance — the next commissioning attempt will succeed.
-                    if (isBleTimeout) {
+                    // Either Noble's per-peripheral state machine is permanently
+                    // corrupted, or a transient fault has exhausted its retries.
+                    // Both require a fresh process: exit now so systemd restarts the
+                    // bridge with a clean Noble instance — the first attempt after a
+                    // restart is the one that reliably catches. We exit IMMEDIATELY on
+                    // a permanent fault rather than burning ~40 s per pointless retry.
+                    if (isBleFailure) {
                         console.error(
-                            `[matter-bridge] BLE error persists after ${MAX_BLE_RETRIES + 1} attempts — ` +
-                            `exiting so systemd can restart with a clean BLE state`,
+                            isBlePermanent
+                                ? `[matter-bridge] BLE peripheral state corrupted (${msg}) — ` +
+                                  `exiting immediately for a clean Noble restart`
+                                : `[matter-bridge] transient BLE error persists after ${attempt + 1} attempt(s) — ` +
+                                  `exiting so systemd can restart with a clean BLE state`,
                         );
                         setTimeout(() => process.exit(1), 100);
+                        throw new Error(
+                            "Bluetooth commissioning failed — the Pi's BLE adapter dropped the connection. " +
+                            "The bridge is restarting with a clean Bluetooth state; wait a few seconds and " +
+                            "trigger commissioning again (the first attempt after a restart is the reliable one). " +
+                            "If this keeps happening, use a USB BLE dongle (set MATTER_BRIDGE_HCI_ID) and stop " +
+                            "bluetoothd (`sudo systemctl disable --now bluetooth`). " +
+                            `(underlying error: ${msg})`,
+                        );
                     }
 
                     // BLE + network provisioning worked, but the device's
