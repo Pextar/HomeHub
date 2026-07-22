@@ -11,7 +11,9 @@ export interface Socket {
 }
 
 export type TargetType = "socket" | "group" | "room" | "scene";
-export type SocketAction = "on" | "off" | "toggle";
+// "set" changes a smart light's brightness/colour only, without an on/off
+// change — automation actions only (schedules/timers reject it).
+export type SocketAction = "on" | "off" | "toggle" | "set";
 export type SceneActionKind = "on" | "off";
 
 // "fixed" fires at the wall-clock `time`. "sunrise"/"sunset" fire at the
