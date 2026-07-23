@@ -85,7 +85,7 @@ func ssdpProbe(ctx context.Context, wait time.Duration) []string {
 	if err != nil {
 		return nil
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	dst, err := net.ResolveUDPAddr("udp4", ssdpAddr)
 	if err != nil {
