@@ -310,6 +310,10 @@ export const api = {
     return req<void>("/spotify/config", { method: "PUT", body: json({ client_id: clientId }) });
   },
   spotifyLoginURL() { return req<{ url: string }>("/spotify/login"); },
+  // Manual-flow finish: pass the full address the browser landed on after consent.
+  spotifyExchange(url: string) {
+    return req<void>("/spotify/exchange", { method: "POST", body: json({ url }) });
+  },
   spotifyDisconnect() { return req<void>("/spotify/disconnect", { method: "POST" }); },
   spotifySearch(q: string, limit = 8) {
     return req<SpotifyResults>(`/spotify/search?q=${encodeURIComponent(q)}&limit=${limit}`);

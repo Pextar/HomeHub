@@ -7,6 +7,7 @@
     import { api } from "../lib/api";
     import { toasts, route } from "../lib/stores.svelte";
     import { openModal } from "../lib/modal.svelte";
+    import { copyText } from "../lib/clipboard";
     import { fly } from "svelte/transition";
     import { cubicOut } from "svelte/easing";
     import { dur } from "../lib/motion";
@@ -229,12 +230,49 @@
         }
     }
 
+    let pasteUrl = $state("");
+    let finishing = $state(false);
+    let copied = $state(false);
+
+    async function copyRedirect() {
+        if (!spotify) return;
+        if (await copyText(spotify.redirect_uri)) {
+            copied = true;
+            setTimeout(() => (copied = false), 1800);
+        }
+    }
+
     async function connectSpotify() {
+        // Manual flow: keep this page open — the consent tab is opened
+        // synchronously (before the await) so popup blockers allow it,
+        // then pointed at the authorize URL once it arrives.
+        const tab = spotify?.manual ? window.open("about:blank", "_blank") : null;
         try {
             const { url } = await api.spotifyLoginURL();
-            window.location.href = url; // Spotify consent page; bounces back here
+            if (spotify?.manual) {
+                if (tab) tab.location.href = url;
+                else window.location.href = url; // popup blocked — same tab still works
+            } else {
+                window.location.href = url; // bounces back here automatically
+            }
         } catch (e) {
+            tab?.close();
             toasts.error("Couldn't start Spotify login", (e as Error).message);
+        }
+    }
+
+    async function finishConnect() {
+        if (finishing || !pasteUrl.trim()) return;
+        finishing = true;
+        try {
+            await api.spotifyExchange(pasteUrl);
+            pasteUrl = "";
+            toasts.success("Spotify connected");
+            await loadSpotify();
+        } catch (e) {
+            toasts.error("Couldn't finish the login", (e as Error).message);
+        } finally {
+            finishing = false;
         }
     }
 
@@ -456,15 +494,27 @@
                 <div class="card-header"><h2>Spotify search</h2></div>
                 <p class="sp-help">
                     Search Spotify's catalog and play straight to your speakers.
-                    Create a free app at
-                    <span class="mono">developer.spotify.com/dashboard</span>, add the
-                    redirect URI below to it, then paste its Client ID here.
-                    Playback uses the Spotify account already linked to your Sonos.
+                    One-time setup — playback itself uses the Spotify account
+                    already linked to your Sonos.
                 </p>
-                <div class="sp-redirect">
-                    <span class="sp-redirect-label">Redirect URI</span>
-                    <code class="mono">{spotify.redirect_uri}</code>
-                </div>
+                <ol class="sp-steps">
+                    <li>
+                        <a class="sp-link" href="https://developer.spotify.com/dashboard"
+                            target="_blank" rel="noopener noreferrer">Open the Spotify dashboard</a>
+                        and create an app (any name, "Web API" is enough).
+                    </li>
+                    <li>
+                        Give the app this Redirect URI:
+                        <span class="sp-redirect">
+                            <code class="mono">{spotify.redirect_uri}</code>
+                            <button type="button" class="chip" onclick={copyRedirect}>
+                                <Icon name={copied ? "check" : "copy"} size={13} />
+                                {copied ? "Copied" : "Copy"}
+                            </button>
+                        </span>
+                    </li>
+                    <li>Paste the app's Client ID here:</li>
+                </ol>
                 <form class="sp-config" onsubmit={(e) => { e.preventDefault(); saveClientId(); }}>
                     <input type="text" class="mono" placeholder="Client ID"
                         aria-label="Spotify client ID" bind:value={clientId} />
@@ -478,8 +528,10 @@
             {:else if !spotify.connected}
                 <div class="card-header"><h2>Spotify search</h2></div>
                 <p class="sp-help">
-                    Client ID saved. Connect your Spotify account to enable search —
-                    you'll approve access once on Spotify's own page.
+                    Client ID saved — now connect your Spotify account. You'll
+                    approve access once on Spotify's page{spotify.manual
+                        ? "; it opens in a new tab and ends on an unreachable 127.0.0.1 address — that's expected."
+                        : ", then land back here."}
                 </p>
                 <div class="sp-actions">
                     <button class="btn btn-primary" onclick={connectSpotify}>Connect Spotify</button>
@@ -487,6 +539,22 @@
                         Change client ID
                     </button>
                 </div>
+                {#if spotify.manual}
+                    <div class="field sp-paste">
+                        <label for="sp-paste-input">
+                            After approving, copy the full address from that tab and paste it here to finish:
+                        </label>
+                        <div class="sp-config">
+                            <input id="sp-paste-input" type="text" class="mono"
+                                placeholder="http://127.0.0.1:…/api/spotify/callback?code=…"
+                                bind:value={pasteUrl} />
+                            <button type="button" class="btn btn-primary"
+                                disabled={finishing || !pasteUrl.trim()} onclick={finishConnect}>
+                                {finishing ? "Finishing…" : "Finish"}
+                            </button>
+                        </div>
+                    </div>
+                {/if}
             {:else}
                 <div class="card-header sp-head">
                     <h2>Search</h2>
@@ -761,22 +829,31 @@
 
     /* ── Spotify search ── */
     .sp-help { font-size: 12.5px; color: var(--text-mute); line-height: 1.5; }
-    .sp-redirect {
-        display: flex; flex-direction: column; gap: 4px;
-        background: var(--card-2);
-        border: 1px solid var(--hairline);
-        border-radius: var(--r-md);
-        padding: var(--space-3);
+    .sp-steps {
+        margin: 0; padding-left: 20px;
+        display: flex; flex-direction: column; gap: var(--space-2);
+        font-size: 12.5px; color: var(--text-mute); line-height: 1.5;
     }
-    .sp-redirect-label {
+    .sp-steps li::marker {
         font-family: var(--font-mono);
-        font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase;
         color: var(--text-dim);
     }
+    .sp-link { color: var(--on); text-decoration: underline; text-underline-offset: 2px; }
+    .sp-redirect {
+        display: flex; align-items: center; gap: var(--space-2);
+        flex-wrap: wrap;
+        margin-top: 4px;
+    }
     .sp-redirect code {
+        font-family: var(--font-mono);
         font-size: 12px; color: var(--text);
+        background: var(--card-2);
+        border: 1px solid var(--hairline);
+        border-radius: var(--r-sm);
+        padding: 4px 8px;
         word-break: break-all; user-select: all;
     }
+    .sp-paste label { font-size: 12.5px; color: var(--text-mute); }
     .sp-config { display: flex; gap: var(--space-2); align-items: center; }
     .sp-config input { flex: 1; min-width: 0; }
     .sp-actions { display: flex; gap: var(--space-2); }

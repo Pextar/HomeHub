@@ -51,10 +51,14 @@ type persisted struct {
 	DisplayName  string    `json:"display_name,omitempty"`
 }
 
-// pendingAuth is one in-flight PKCE authorization, keyed by state.
+// pendingAuth is one in-flight PKCE authorization, keyed by state. The
+// redirect URI is captured at start so the token exchange always uses
+// exactly what the authorize request carried — regardless of which path
+// (automatic callback or pasted URL) finishes the flow.
 type pendingAuth struct {
-	verifier string
-	expires  time.Time
+	verifier    string
+	redirectURI string
+	expires     time.Time
 }
 
 // Client is the Spotify Web API client. Safe for concurrent use.
@@ -170,7 +174,7 @@ func (c *Client) AuthURL(redirectURI string) (string, error) {
 			delete(c.pending, k)
 		}
 	}
-	c.pending[state] = pendingAuth{verifier: verifier, expires: now.Add(10 * time.Minute)}
+	c.pending[state] = pendingAuth{verifier: verifier, redirectURI: redirectURI, expires: now.Add(10 * time.Minute)}
 
 	q := url.Values{
 		"client_id":             {c.p.ClientID},
@@ -186,7 +190,8 @@ func (c *Client) AuthURL(redirectURI string) (string, error) {
 
 // HandleCallback finishes the PKCE flow: verifies state, exchanges the code
 // for tokens, fetches the profile for the "connected as" label, persists.
-func (c *Client) HandleCallback(ctx context.Context, code, state, redirectURI string) error {
+// The redirect URI stored when the flow started is used for the exchange.
+func (c *Client) HandleCallback(ctx context.Context, code, state string) error {
 	c.mu.Lock()
 	pa, ok := c.pending[state]
 	if ok {
@@ -201,7 +206,7 @@ func (c *Client) HandleCallback(ctx context.Context, code, state, redirectURI st
 	tok, err := c.tokenRequest(ctx, url.Values{
 		"grant_type":    {"authorization_code"},
 		"code":          {code},
-		"redirect_uri":  {redirectURI},
+		"redirect_uri":  {pa.redirectURI},
 		"client_id":     {clientID},
 		"code_verifier": {pa.verifier},
 	})
@@ -234,6 +239,35 @@ func (c *Client) HandleCallback(ctx context.Context, code, state, redirectURI st
 		c.mu.Unlock()
 	}
 	return nil
+}
+
+// ExchangeRedirect finishes the flow from a pasted redirect URL — the
+// fallback when HomeHub is served over plain HTTP and the redirect URI is
+// a parked loopback address the browser can't load. The user copies the
+// address Spotify sent them to and pastes it back; the code and state are
+// in its query string.
+func (c *Client) ExchangeRedirect(ctx context.Context, rawURL string) error {
+	raw := strings.TrimSpace(rawURL)
+	if raw == "" {
+		return errors.New("spotify: paste the full address from the browser's address bar")
+	}
+	// Accept a bare query string too ("?code=…" or "code=…").
+	if !strings.Contains(raw, "://") {
+		raw = "http://127.0.0.1/?" + strings.TrimPrefix(strings.TrimPrefix(raw, "?"), "&")
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return errors.New("spotify: that doesn't look like a web address — paste the full address from the browser's address bar")
+	}
+	q := u.Query()
+	if e := q.Get("error"); e != "" {
+		return fmt.Errorf("spotify: login was refused (%s)", e)
+	}
+	code, state := q.Get("code"), q.Get("state")
+	if code == "" || state == "" {
+		return errors.New("spotify: no login code in that address — paste the full address, including everything after the question mark")
+	}
+	return c.HandleCallback(ctx, code, state)
 }
 
 type tokenResponse struct {

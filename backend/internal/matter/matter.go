@@ -186,4 +186,3 @@ func (c *Client) do(ctx context.Context, method, path string, in, out any) error
 	}
 	return nil
 }
-

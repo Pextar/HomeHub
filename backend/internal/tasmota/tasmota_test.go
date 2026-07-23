@@ -20,18 +20,18 @@ func TestValidateHost(t *testing.T) {
 
 	rejected := []string{
 		"",
-		"127.0.0.1",                 // loopback
-		"169.254.169.254",           // cloud metadata (link-local)
-		"0.0.0.0",                   // unspecified
-		"224.0.0.1",                 // multicast
-		"192.168.1.5/../admin",      // path escape
-		"192.168.1.5?x=1",           // query escape
-		"evil.com/redirect",         // path escape via hostname
-		"user@192.168.1.5",          // userinfo
-		"192.168.1.5:99999",         // port out of range
-		"192.168.1.5:abc",           // non-numeric port
-		"http://192.168.1.5",        // embedded scheme
-		"192.168.1.5 8080",          // whitespace
+		"127.0.0.1",            // loopback
+		"169.254.169.254",      // cloud metadata (link-local)
+		"0.0.0.0",              // unspecified
+		"224.0.0.1",            // multicast
+		"192.168.1.5/../admin", // path escape
+		"192.168.1.5?x=1",      // query escape
+		"evil.com/redirect",    // path escape via hostname
+		"user@192.168.1.5",     // userinfo
+		"192.168.1.5:99999",    // port out of range
+		"192.168.1.5:abc",      // non-numeric port
+		"http://192.168.1.5",   // embedded scheme
+		"192.168.1.5 8080",     // whitespace
 	}
 	for _, h := range rejected {
 		if err := ValidateHost(h); err == nil {

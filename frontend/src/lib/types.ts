@@ -386,6 +386,13 @@ export interface SpotifyStatus {
   display_name?: string;
   /** Exact redirect URI to register in the Spotify developer dashboard. */
   redirect_uri: string;
+  /**
+   * True when HomeHub is served over plain HTTP: the redirect URI is a
+   * parked loopback address, and the user finishes the login by pasting
+   * the address they land on (see api.spotifyExchange). Over HTTPS the
+   * callback completes automatically.
+   */
+  manual: boolean;
 }
 
 export interface SpotifyItem {

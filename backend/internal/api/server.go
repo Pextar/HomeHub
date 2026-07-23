@@ -259,6 +259,7 @@ func (s *Server) Handler() http.Handler {
 	api.HandleFunc("/spotify/config", s.requireAdmin(s.spotifySetConfig)).Methods("PUT")
 	api.HandleFunc("/spotify/login", s.requireAdmin(s.spotifyLogin)).Methods("GET")
 	api.HandleFunc("/spotify/callback", s.requireAdmin(s.spotifyCallback)).Methods("GET")
+	api.HandleFunc("/spotify/exchange", s.requireAdmin(s.spotifyExchange)).Methods("POST")
 	api.HandleFunc("/spotify/disconnect", s.requireAdmin(s.spotifyDisconnect)).Methods("POST")
 	api.HandleFunc("/spotify/search", s.requireAdmin(s.spotifySearch)).Methods("GET")
 	api.HandleFunc("/spotify/playlists", s.requireAdmin(s.spotifyPlaylists)).Methods("GET")

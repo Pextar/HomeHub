@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -16,21 +17,31 @@ import (
 
 const spotifyTimeout = 10 * time.Second
 
-// spotifyRedirectURI computes the OAuth redirect URI for the origin the
-// request arrived on. It must be registered verbatim in the Spotify app, so
-// the status endpoint surfaces it for the user to copy. Spotify requires
-// HTTPS (or a loopback address) for redirect URIs — hence HomeHub's HTTPS
-// listener is the natural host for this.
-func spotifyRedirectURI(r *http.Request) string {
-	scheme := "http"
+// spotifyRedirectURI computes the OAuth redirect URI to use for the origin
+// the request arrived on. It must be registered verbatim in the Spotify
+// app, so the status endpoint surfaces it for the user to copy.
+//
+// Spotify only accepts HTTPS or loopback redirect URIs. Over HTTPS the
+// URI points back at this server and the flow completes automatically.
+// Over plain HTTP (the common LAN setup) a parked loopback URI is used
+// instead: the browser can't load it, but the authorization code is in the
+// address bar and the user pastes that address back into the Music view
+// (see spotifyExchange). manual reports which of the two flows applies.
+func spotifyRedirectURI(r *http.Request) (uri string, manual bool) {
 	if isSecureRequest(r) {
-		scheme = "https"
+		host := r.Host
+		if xfh := r.Header.Get("X-Forwarded-Host"); xfh != "" {
+			host = xfh
+		}
+		return "https://" + host + "/api/spotify/callback", false
 	}
-	host := r.Host
-	if xfh := r.Header.Get("X-Forwarded-Host"); xfh != "" {
-		host = xfh
+	// Match the real listen port so that a browser running on the HomeHub
+	// host itself still completes automatically.
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
 	}
-	return scheme + "://" + host + "/api/spotify/callback"
+	return "http://127.0.0.1:" + port + "/api/spotify/callback", true
 }
 
 func (s *Server) requireSpotify(w http.ResponseWriter) bool {
@@ -47,11 +58,13 @@ func (s *Server) spotifyStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	st := s.Spotify.Status()
+	uri, manual := spotifyRedirectURI(r)
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"configured":   st.Configured,
 		"connected":    st.Connected,
 		"display_name": st.DisplayName,
-		"redirect_uri": spotifyRedirectURI(r),
+		"redirect_uri": uri,
+		"manual":       manual,
 	})
 }
 
@@ -84,7 +97,8 @@ func (s *Server) spotifyLogin(w http.ResponseWriter, r *http.Request) {
 	if !s.requireSpotify(w) {
 		return
 	}
-	u, err := s.Spotify.AuthURL(spotifyRedirectURI(r))
+	uri, _ := spotifyRedirectURI(r)
+	u, err := s.Spotify.AuthURL(uri)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -111,11 +125,34 @@ func (s *Server) spotifyCallback(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), spotifyTimeout)
 	defer cancel()
-	if err := s.Spotify.HandleCallback(ctx, code, state, spotifyRedirectURI(r)); err != nil {
+	if err := s.Spotify.HandleCallback(ctx, code, state); err != nil {
 		http.Redirect(w, r, "/#/music?spotify_error="+err.Error(), http.StatusFound)
 		return
 	}
 	http.Redirect(w, r, "/#/music?spotify=connected", http.StatusFound)
+}
+
+// spotifyExchange handles POST /api/spotify/exchange — the paste-the-URL
+// finish for the manual (plain-HTTP) flow. Body: {"url": "<address the
+// browser landed on after consent>"}.
+func (s *Server) spotifyExchange(w http.ResponseWriter, r *http.Request) {
+	if !s.requireSpotify(w) {
+		return
+	}
+	var body struct {
+		URL string `json:"url"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), spotifyTimeout)
+	defer cancel()
+	if err := s.Spotify.ExchangeRedirect(ctx, body.URL); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // spotifyDisconnect handles POST /api/spotify/disconnect.
