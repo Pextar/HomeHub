@@ -8,10 +8,10 @@ import (
 	"context"
 	"strings"
 
-	"rf-socket-controller/internal/matter"
-	"rf-socket-controller/internal/mqtt"
-	"rf-socket-controller/internal/rf"
-	"rf-socket-controller/internal/tasmota"
+	"homehub/internal/matter"
+	"homehub/internal/mqtt"
+	"homehub/internal/rf"
+	"homehub/internal/tasmota"
 )
 
 // Multi dispatches Send calls based on the protocol field on the socket.

@@ -1,5 +1,5 @@
 {
-  "name": "rf-socket-controller-matter-bridge",
+  "name": "homehub-matter-bridge",
   "version": "0.1.0",
   "private": true,
   "description": "matter.js-based controller sidecar that exposes commissioned Matter devices over a local HTTP API to the Go backend.",

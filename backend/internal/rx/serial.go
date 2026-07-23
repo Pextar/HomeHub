@@ -22,7 +22,7 @@ import (
 	"strings"
 	"time"
 
-	"rf-socket-controller/internal/store"
+	"homehub/internal/store"
 )
 
 // SerialListener reads JSON sensor packets from a serial / USB-CDC port.

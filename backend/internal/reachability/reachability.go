@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
-	"rf-socket-controller/internal/matter"
-	"rf-socket-controller/internal/push"
-	"rf-socket-controller/internal/store"
-	"rf-socket-controller/internal/tasmota"
+	"homehub/internal/matter"
+	"homehub/internal/push"
+	"homehub/internal/store"
+	"homehub/internal/tasmota"
 )
 
 const (

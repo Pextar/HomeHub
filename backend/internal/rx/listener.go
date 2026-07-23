@@ -22,7 +22,7 @@ import (
 	"strings"
 	"time"
 
-	"rf-socket-controller/internal/store"
+	"homehub/internal/store"
 )
 
 // Listener runs an external 433MHz receiver and dispatches decoded

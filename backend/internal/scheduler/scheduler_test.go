@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"rf-socket-controller/internal/store"
+	"homehub/internal/store"
 )
 
 func TestDayMatches(t *testing.T) {

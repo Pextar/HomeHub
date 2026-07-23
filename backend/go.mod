@@ -1,4 +1,4 @@
-module rf-socket-controller
+module homehub
 
 go 1.25.0
 

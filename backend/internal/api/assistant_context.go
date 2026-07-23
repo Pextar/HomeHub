@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"rf-socket-controller/internal/store"
+	"homehub/internal/store"
 )
 
 // assistant_context.go builds the compact, read-only snapshot of the home

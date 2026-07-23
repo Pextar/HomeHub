@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"rf-socket-controller/internal/llm"
-	"rf-socket-controller/internal/store"
+	"homehub/internal/llm"
+	"homehub/internal/store"
 )
 
 // assistant_tools.go is the bridge between the model's tool calls and the

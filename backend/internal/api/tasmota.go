@@ -7,7 +7,7 @@ import (
 
 	"github.com/gorilla/mux"
 
-	"rf-socket-controller/internal/tasmota"
+	"homehub/internal/tasmota"
 )
 
 // tasmotaGetState handles GET /api/tasmota/{socketId}.

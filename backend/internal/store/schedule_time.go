@@ -3,7 +3,7 @@ package store
 import (
 	"time"
 
-	"rf-socket-controller/internal/solar"
+	"homehub/internal/solar"
 )
 
 // Schedule time modes. An empty string is treated as ModeFixed for

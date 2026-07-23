@@ -1,5 +1,5 @@
 [Unit]
-Description=RF Socket Controller
+Description=HomeHub
 # Ordering hint only: when a local Mosquitto broker is installed (deploy with
 # SETUP_MOSQUITTO=1), start after it so the broker is ready first. This is a
 # soft After= with no Requires/Wants — the MQTT client retries and reconnects
@@ -10,9 +10,9 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=claw
-WorkingDirectory=/home/claw/rf-socket-controller
-EnvironmentFile=-/home/claw/rf-socket-controller/.env
-ExecStart=/home/claw/rf-socket-controller/rf-controller
+WorkingDirectory=/home/claw/homehub
+EnvironmentFile=-/home/claw/homehub/.env
+ExecStart=/home/claw/homehub/homehub
 Restart=on-failure
 RestartSec=5
 
@@ -20,7 +20,7 @@ RestartSec=5
 NoNewPrivileges=true
 ProtectSystem=full
 ProtectHome=read-only
-ReadWritePaths=/home/claw/rf-socket-controller/data /home/claw/rf-socket-controller
+ReadWritePaths=/home/claw/homehub/data /home/claw/homehub
 PrivateTmp=true
 
 [Install]

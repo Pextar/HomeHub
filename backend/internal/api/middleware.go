@@ -9,7 +9,7 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
-	"rf-socket-controller/internal/store"
+	"homehub/internal/store"
 )
 
 // ctxKey is the private type for request-context keys so values set here

@@ -52,7 +52,7 @@ type Client struct {
 // Recognised variables:
 //
 //	MQTT_BROKER_URL   broker address, e.g. tcp://host:1883 or ssl://host:8883
-//	MQTT_CLIENT_ID    client id (default "rf-socket-controller")
+//	MQTT_CLIENT_ID    client id (default "homehub")
 //	MQTT_USERNAME     optional username
 //	MQTT_PASSWORD     optional password
 //	MQTT_TLS_INSECURE "true" to skip TLS cert verification (self-signed brokers)
@@ -64,7 +64,7 @@ func FromEnv() *Client {
 
 	clientID := strings.TrimSpace(os.Getenv("MQTT_CLIENT_ID"))
 	if clientID == "" {
-		clientID = "rf-socket-controller"
+		clientID = "homehub"
 	}
 
 	opts := paho.NewClientOptions()

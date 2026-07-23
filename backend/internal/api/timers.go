@@ -11,7 +11,7 @@ import (
 
 	"github.com/gorilla/mux"
 
-	"rf-socket-controller/internal/store"
+	"homehub/internal/store"
 )
 
 func (s *Server) getTimers(w http.ResponseWriter, r *http.Request) {

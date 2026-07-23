@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"time"
 
-	"rf-socket-controller/internal/push"
-	"rf-socket-controller/internal/store"
+	"homehub/internal/push"
+	"homehub/internal/store"
 )
 
 // autoEngine evaluates automations on every scheduler tick. It keeps the

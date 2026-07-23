@@ -1,14 +1,14 @@
 [Unit]
-Description=Matter Bridge (sidecar for rf-socket-controller)
+Description=Matter Bridge (sidecar for homehub)
 After=network-online.target bluetooth.service
 Wants=network-online.target
 
 [Service]
 Type=simple
 User=claw
-WorkingDirectory=/home/claw/rf-socket-controller/matter-bridge
-EnvironmentFile=-/home/claw/rf-socket-controller/.env
-Environment=MATTER_BRIDGE_DATA=/home/claw/rf-socket-controller/matter-bridge/data
+WorkingDirectory=/home/claw/homehub/matter-bridge
+EnvironmentFile=-/home/claw/homehub/.env
+Environment=MATTER_BRIDGE_DATA=/home/claw/homehub/matter-bridge/data
 # BLE adapter prep (runs each start, with the unit's CAP_NET_ADMIN — no sudo):
 # when a specific USB dongle is selected via MATTER_BRIDGE_HCI_ID (non-zero),
 # take the onboard radio (hci0) down to avoid 2.4 GHz coexistence and bring the
@@ -16,7 +16,7 @@ Environment=MATTER_BRIDGE_DATA=/home/claw/rf-socket-controller/matter-bridge/dat
 # is safe on a fresh deploy. Leading "-" ignores errors. Pair with
 # `systemctl mask bluetooth` so bluetoothd can't grab the HCI at boot.
 ExecStartPre=-/bin/sh -c 'if [ -n "$MATTER_BRIDGE_HCI_ID" ] && [ "$MATTER_BRIDGE_HCI_ID" != 0 ]; then hciconfig hci0 down; hciconfig "hci$MATTER_BRIDGE_HCI_ID" up; fi'
-ExecStart=/usr/bin/node /home/claw/rf-socket-controller/matter-bridge/dist/index.js
+ExecStart=/usr/bin/node /home/claw/homehub/matter-bridge/dist/index.js
 Restart=on-failure
 RestartSec=5
 
@@ -40,7 +40,7 @@ AmbientCapabilities=CAP_NET_RAW CAP_NET_ADMIN
 NoNewPrivileges=true
 ProtectSystem=full
 ProtectHome=read-only
-ReadWritePaths=/home/claw/rf-socket-controller/matter-bridge/data
+ReadWritePaths=/home/claw/homehub/matter-bridge/data
 PrivateTmp=true
 
 [Install]
