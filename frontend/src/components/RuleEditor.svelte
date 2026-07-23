@@ -43,13 +43,14 @@
             target_id: a.target_id,
             action: (a.target_type === "scene" ? "activate" : a.action) as AutomationAction["action"],
         };
-        if (a.action === "on") {
+        if (a.action === "on" || a.action === "set") {
             if (a.target_type === "socket") {
                 base.level = a.level ?? 100;
                 if (a.color) base.color = a.color;
             } else if (a.target_type === "group" || a.target_type === "room") {
-                // Uniform: only attach lighting info when the user moved it off the default.
-                if (a.color || a.level !== 100) {
+                // "set" changes brightness/colour only, so always carry the
+                // level; an "on" only attaches lighting when moved off default.
+                if (a.action === "set" || a.color || a.level !== 100) {
                     base.level = a.level ?? 100;
                     if (a.color) base.color = a.color;
                 }
@@ -156,6 +157,24 @@
         if (a.target_type === "scene") a.action = "activate";
         else if (a.action === "activate") a.action = "on";
         a.perLamp = undefined; // membership changed — drop any per-lamp overrides
+        normalizeAction(a);
+    }
+
+    // "Set colour / brightness" is only meaningful for a target that has smart
+    // lights; a plain socket or an all-RF group/room can't accept it.
+    function canSetLight(a: RuleActionDraft): boolean {
+        if (a.target_type === "socket") {
+            return isSmart(v.sockets.find(s => s.id === a.target_id)?.protocol ?? "");
+        }
+        if (a.target_type === "group" || a.target_type === "room") {
+            return membersOf(a).some(m => isSmart(m.protocol));
+        }
+        return false;
+    }
+    // Keep the action valid after the target changes: a "set" that the new
+    // target can't accept falls back to a plain "on".
+    function normalizeAction(a: RuleActionDraft) {
+        if (a.action === "set" && !canSetLight(a)) a.action = "on";
     }
 
     // ── Per-lamp authoring (group/room "on" actions) ──────────────────
@@ -183,8 +202,9 @@
         if (isNaN(level)) return;
         for (const m of membersOf(a)) if (isSmart(m.protocol)) setLamp(a, m.id, { level, state: "on" });
     }
-    function setAllLampColor(a: RuleActionDraft, color: string) {
-        for (const m of membersOf(a)) if (isSmart(m.protocol)) setLamp(a, m.id, { color, state: "on" });
+    // Apply a whole preset (brightness + colour together) to every smart member.
+    function setAllLampPreset(a: RuleActionDraft, level: number, color: string) {
+        for (const m of membersOf(a)) if (isSmart(m.protocol)) setLamp(a, m.id, { level, color, state: "on" });
     }
     // Representative bulk values — the first smart member. After a bulk apply
     // every smart member matches, so this reflects the shared setting.
@@ -214,6 +234,32 @@
         draft.conditions = draft.conditions.filter((_, idx) => idx !== i);
     }
 </script>
+
+<!-- Named brightness+colour presets, shared by every smart-light picker
+     (single socket, uniform group/room, and each per-lamp row) so the palette
+     reads identically everywhere. onPick receives the preset's level + colour. -->
+{#snippet lightPresets(curColor: string, onPick: (level: number, color: string) => void)}
+    <div class="preset-chips" role="group" aria-label="Lighting preset">
+        <button type="button" class="preset-chip auto"
+            class:active={!curColor}
+            title="No preset"
+            aria-label="No lighting preset" aria-pressed={!curColor}
+            onclick={() => onPick(100, "")}>
+            —
+        </button>
+        {#each MATTER_PRESETS as p (p.label)}
+            <button type="button" class="preset-chip"
+                class:active={curColor === p.color}
+                style="--pc: {p.cssColor}"
+                title="{p.label} · {p.level}%"
+                aria-label="{p.label} preset" aria-pressed={curColor === p.color}
+                onclick={() => onPick(p.level, p.color)}>
+                <span class="preset-dot" style="background:{p.cssColor}"></span>
+                {p.label}
+            </button>
+        {/each}
+    </div>
+{/snippet}
 
 <!-- WHEN -->
 <div class="block when">
@@ -382,7 +428,7 @@
                     </select>
                 </div>
                 <div class="field">
-                    <select bind:value={a.target_id}>
+                    <select bind:value={a.target_id} onchange={() => normalizeAction(a)}>
                         {#if a.target_id && targetMissing(a)}
                             <option value={a.target_id} disabled>(removed)</option>
                         {/if}
@@ -398,10 +444,13 @@
                         <option value="on">Turn on</option>
                         <option value="off">Turn off</option>
                         <option value="toggle">Toggle</option>
+                        {#if canSetLight(a)}
+                            <option value="set">Set colour / brightness</option>
+                        {/if}
                     {/if}
                 </select>
             </div>
-            {#if a.action === "on"}
+            {#if a.action === "on" || a.action === "set"}
                 {#if a.target_type === "socket" && isSmart(v.sockets.find(s => s.id === a.target_id)?.protocol ?? "")}
                     <div class="action-light-row">
                         <div class="bright">
@@ -409,165 +458,128 @@
                             <input type="range" min="1" max="100" step="1" bind:value={a.level} aria-label="Brightness" />
                             <span class="bright-val mono">{a.level ?? 100}%</span>
                         </div>
-                        <div class="swatches">
-                            {#each COLOURS as c (c.name)}
-                                <button type="button" class="swatch"
-                                    class:active={(a.color ?? "") === c.hex}
-                                    class:auto={c.hex === ""}
-                                    style={c.hex ? `background:#${c.hex}` : ""}
-                                    title={c.name}
-                                    aria-label="{c.name} color"
-                                    onclick={() => a.color = c.hex}>
-                                    {#if c.hex === ""}<Icon name="close" size={12} />{/if}
-                                </button>
-                            {/each}
-                        </div>
+                        {@render lightPresets(a.color ?? "", (lvl, col) => { a.level = lvl; a.color = col; })}
                     </div>
                 {:else if a.target_type === "group" || a.target_type === "room"}
-                    <div class="lamp-mode" role="group" aria-label="Lighting detail">
-                        <button type="button" class="mode-btn" class:active={!a.perLamp}
-                            aria-pressed={!a.perLamp}
-                            onclick={() => a.perLamp = undefined}>All the same</button>
-                        <button type="button" class="mode-btn" class:active={!!a.perLamp}
-                            aria-pressed={!!a.perLamp}
-                            onclick={() => enablePerLamp(a)}>Per lamp</button>
-                    </div>
-                    {#if !a.perLamp}
-                        <div class="action-light-row">
-                            <div class="bright">
-                                <span class="bright-ico"><Icon name="sun" size={14} /></span>
-                                <input type="range" min="1" max="100" step="1" bind:value={a.level} aria-label="Brightness" />
-                                <span class="bright-val mono">{a.level ?? 100}%</span>
-                            </div>
-                            <div class="preset-chips" role="group" aria-label="Lighting preset">
-                                <button type="button" class="preset-chip auto"
-                                    class:active={!a.color}
-                                    title="No preset — turn on at previous brightness"
-                                    aria-label="No lighting preset" aria-pressed={!a.color}
-                                    onclick={() => { a.color = ""; a.level = 100; }}>
-                                    —
-                                </button>
-                                {#each MATTER_PRESETS as p (p.label)}
-                                    <button type="button" class="preset-chip"
-                                        class:active={a.color === p.color}
-                                        style="--pc: {p.cssColor}"
-                                        title="{p.label} · {p.level}%"
-                                        aria-label="{p.label} preset" aria-pressed={a.color === p.color}
-                                        onclick={() => { a.level = p.level; a.color = p.color; }}>
-                                        <span class="preset-dot" style="background:{p.cssColor}"></span>
-                                        {p.label}
-                                    </button>
-                                {/each}
-                            </div>
-                        </div>
-                    {:else}
+                    {#if a.action === "set"}
+                        <!-- Brightness/colour only — applied uniformly to every
+                             smart member, with no per-lamp on/off matrix. -->
                         {@const members = membersOf(a)}
-                        {#if members.length === 0}
-                            <div class="lamp-empty mono">No devices in this {a.target_type}</div>
-                        {:else}
-                            <div class="lamp-matrix">
-                                <div class="bulk-bar">
-                                    <span class="bulk-lbl">Set all<span class="bulk-n mono">{members.length}</span></span>
-                                    <div class="state-group" role="group" aria-label="Set all lamps">
-                                        <button type="button" class="state-btn"
-                                            onclick={() => setAllLamps(a, 'ignore')}
-                                            aria-label="Leave all lamps unchanged">—</button>
-                                        <button type="button" class="state-btn s-on"
-                                            onclick={() => setAllLamps(a, 'on')}
-                                            aria-label="Turn all lamps on">On</button>
-                                        <button type="button" class="state-btn s-off"
-                                            onclick={() => setAllLamps(a, 'off')}
-                                            aria-label="Turn all lamps off">Off</button>
-                                    </div>
-                                    {#if members.some(m => isSmart(m.protocol))}
-                                        <div class="bulk-light">
-                                            <div class="bright">
-                                                <span class="bright-ico"><Icon name="sun" size={14} /></span>
-                                                <input type="range" min="1" max="100" step="1"
-                                                    value={bulkLampLevel(a)}
-                                                    oninput={(e) => setAllLampLevel(a, parseInt((e.target as HTMLInputElement).value, 10))}
-                                                    aria-label="Brightness for all lamps" />
-                                                <span class="bright-val mono">{bulkLampLevel(a)}%</span>
-                                            </div>
-                                            <div class="swatches">
-                                                {#each COLOURS as c (c.name)}
-                                                    <button type="button" class="swatch"
-                                                        class:active={bulkLampColor(a) === c.hex}
-                                                        class:auto={c.hex === ""}
-                                                        style={c.hex ? `background:#${c.hex}` : ""}
-                                                        title="{c.name} for all lamps"
-                                                        aria-label="{c.name} for all lamps"
-                                                        onclick={() => setAllLampColor(a, c.hex)}>
-                                                        {#if c.hex === ""}<Icon name="close" size={12} />{/if}
-                                                    </button>
-                                                {/each}
-                                            </div>
-                                        </div>
-                                    {/if}
+                        {#if members.some(m => isSmart(m.protocol))}
+                            <div class="action-light-row">
+                                <div class="bright">
+                                    <span class="bright-ico"><Icon name="sun" size={14} /></span>
+                                    <input type="range" min="1" max="100" step="1" bind:value={a.level} aria-label="Brightness" />
+                                    <span class="bright-val mono">{a.level ?? 100}%</span>
                                 </div>
-                                <div class="lamp-rows">
-                                    {#each members as m, mi (m.id)}
-                                        {@const cfg = lampCfg(a, m.id)}
-                                        {#if mi > 0}<div class="row-sep" aria-hidden="true"></div>{/if}
-                                        <div class="lamp-row" class:row-on={cfg.state === 'on'}>
-                                            <div class="lamp-main">
-                                                <div class="row-bulb"
-                                                    class:bulb-on={cfg.state === 'on'}
-                                                    class:bulb-off={cfg.state === 'off'}
-                                                    aria-hidden="true">
-                                                    <Icon name="light" size={14} />
-                                                </div>
-                                                <div class="row-info">
-                                                    <span class="row-name">{m.name}</span>
-                                                    <span class="row-room">{m.room || "Unassigned"}</span>
-                                                </div>
-                                                <div class="state-group" role="group" aria-label="Action for {m.name}">
-                                                    <button type="button" class="state-btn"
-                                                        class:s-active={cfg.state === 'ignore'}
-                                                        onclick={() => setLamp(a, m.id, { state: 'ignore' })}
-                                                        aria-pressed={cfg.state === 'ignore'}
-                                                        aria-label="Leave {m.name} unchanged">—</button>
-                                                    <button type="button" class="state-btn s-on"
-                                                        class:s-active={cfg.state === 'on'}
-                                                        onclick={() => setLamp(a, m.id, { state: 'on' })}
-                                                        aria-pressed={cfg.state === 'on'}
-                                                        aria-label="Turn {m.name} on">On</button>
-                                                    <button type="button" class="state-btn s-off"
-                                                        class:s-active={cfg.state === 'off'}
-                                                        onclick={() => setLamp(a, m.id, { state: 'off' })}
-                                                        aria-pressed={cfg.state === 'off'}
-                                                        aria-label="Turn {m.name} off">Off</button>
-                                                </div>
-                                            </div>
-                                            {#if cfg.state === 'on' && isSmart(m.protocol)}
-                                                <div class="light-row">
-                                                    <div class="bright">
-                                                        <span class="bright-ico"><Icon name="sun" size={14} /></span>
-                                                        <input type="range" min="1" max="100" step="1"
-                                                            value={cfg.level}
-                                                            oninput={(e) => setLamp(a, m.id, { level: parseInt((e.target as HTMLInputElement).value, 10) })}
-                                                            aria-label="Brightness for {m.name}" />
-                                                        <span class="bright-val mono">{cfg.level}%</span>
-                                                    </div>
-                                                    <div class="swatches">
-                                                        {#each COLOURS as c (c.name)}
-                                                            <button type="button" class="swatch"
-                                                                class:active={cfg.color === c.hex}
-                                                                class:auto={c.hex === ""}
-                                                                style={c.hex ? `background:#${c.hex}` : ""}
-                                                                title={c.name}
-                                                                aria-label="{c.name} for {m.name}"
-                                                                onclick={() => setLamp(a, m.id, { color: c.hex })}>
-                                                                {#if c.hex === ""}<Icon name="close" size={12} />{/if}
-                                                            </button>
-                                                        {/each}
-                                                    </div>
-                                                </div>
-                                            {/if}
-                                        </div>
-                                    {/each}
-                                </div>
+                                {@render lightPresets(a.color ?? "", (lvl, col) => { a.level = lvl; a.color = col; })}
                             </div>
+                        {:else}
+                            <div class="lamp-empty mono">No smart lights in this {a.target_type}</div>
+                        {/if}
+                    {:else}
+                        <div class="lamp-mode" role="group" aria-label="Lighting detail">
+                            <button type="button" class="mode-btn" class:active={!a.perLamp}
+                                aria-pressed={!a.perLamp}
+                                onclick={() => a.perLamp = undefined}>All the same</button>
+                            <button type="button" class="mode-btn" class:active={!!a.perLamp}
+                                aria-pressed={!!a.perLamp}
+                                onclick={() => enablePerLamp(a)}>Per lamp</button>
+                        </div>
+                        {#if !a.perLamp}
+                            <div class="action-light-row">
+                                <div class="bright">
+                                    <span class="bright-ico"><Icon name="sun" size={14} /></span>
+                                    <input type="range" min="1" max="100" step="1" bind:value={a.level} aria-label="Brightness" />
+                                    <span class="bright-val mono">{a.level ?? 100}%</span>
+                                </div>
+                                {@render lightPresets(a.color ?? "", (lvl, col) => { a.level = lvl; a.color = col; })}
+                            </div>
+                        {:else}
+                            {@const members = membersOf(a)}
+                            {#if members.length === 0}
+                                <div class="lamp-empty mono">No devices in this {a.target_type}</div>
+                            {:else}
+                                <div class="lamp-matrix">
+                                    <div class="bulk-bar">
+                                        <span class="bulk-lbl">Set all<span class="bulk-n mono">{members.length}</span></span>
+                                        <div class="state-group" role="group" aria-label="Set all lamps">
+                                            <button type="button" class="state-btn"
+                                                onclick={() => setAllLamps(a, 'ignore')}
+                                                aria-label="Leave all lamps unchanged">—</button>
+                                            <button type="button" class="state-btn s-on"
+                                                onclick={() => setAllLamps(a, 'on')}
+                                                aria-label="Turn all lamps on">On</button>
+                                            <button type="button" class="state-btn s-off"
+                                                onclick={() => setAllLamps(a, 'off')}
+                                                aria-label="Turn all lamps off">Off</button>
+                                        </div>
+                                        {#if members.some(m => isSmart(m.protocol))}
+                                            <div class="bulk-light">
+                                                <div class="bright">
+                                                    <span class="bright-ico"><Icon name="sun" size={14} /></span>
+                                                    <input type="range" min="1" max="100" step="1"
+                                                        value={bulkLampLevel(a)}
+                                                        oninput={(e) => setAllLampLevel(a, parseInt((e.target as HTMLInputElement).value, 10))}
+                                                        aria-label="Brightness for all lamps" />
+                                                    <span class="bright-val mono">{bulkLampLevel(a)}%</span>
+                                                </div>
+                                                {@render lightPresets(bulkLampColor(a), (lvl, col) => setAllLampPreset(a, lvl, col))}
+                                            </div>
+                                        {/if}
+                                    </div>
+                                    <div class="lamp-rows">
+                                        {#each members as m, mi (m.id)}
+                                            {@const cfg = lampCfg(a, m.id)}
+                                            {#if mi > 0}<div class="row-sep" aria-hidden="true"></div>{/if}
+                                            <div class="lamp-row" class:row-on={cfg.state === 'on'}>
+                                                <div class="lamp-main">
+                                                    <div class="row-bulb"
+                                                        class:bulb-on={cfg.state === 'on'}
+                                                        class:bulb-off={cfg.state === 'off'}
+                                                        aria-hidden="true">
+                                                        <Icon name="light" size={14} />
+                                                    </div>
+                                                    <div class="row-info">
+                                                        <span class="row-name">{m.name}</span>
+                                                        <span class="row-room">{m.room || "Unassigned"}</span>
+                                                    </div>
+                                                    <div class="state-group" role="group" aria-label="Action for {m.name}">
+                                                        <button type="button" class="state-btn"
+                                                            class:s-active={cfg.state === 'ignore'}
+                                                            onclick={() => setLamp(a, m.id, { state: 'ignore' })}
+                                                            aria-pressed={cfg.state === 'ignore'}
+                                                            aria-label="Leave {m.name} unchanged">—</button>
+                                                        <button type="button" class="state-btn s-on"
+                                                            class:s-active={cfg.state === 'on'}
+                                                            onclick={() => setLamp(a, m.id, { state: 'on' })}
+                                                            aria-pressed={cfg.state === 'on'}
+                                                            aria-label="Turn {m.name} on">On</button>
+                                                        <button type="button" class="state-btn s-off"
+                                                            class:s-active={cfg.state === 'off'}
+                                                            onclick={() => setLamp(a, m.id, { state: 'off' })}
+                                                            aria-pressed={cfg.state === 'off'}
+                                                            aria-label="Turn {m.name} off">Off</button>
+                                                    </div>
+                                                </div>
+                                                {#if cfg.state === 'on' && isSmart(m.protocol)}
+                                                    <div class="light-row">
+                                                        <div class="bright">
+                                                            <span class="bright-ico"><Icon name="sun" size={14} /></span>
+                                                            <input type="range" min="1" max="100" step="1"
+                                                                value={cfg.level}
+                                                                oninput={(e) => setLamp(a, m.id, { level: parseInt((e.target as HTMLInputElement).value, 10) })}
+                                                                aria-label="Brightness for {m.name}" />
+                                                            <span class="bright-val mono">{cfg.level}%</span>
+                                                        </div>
+                                                        {@render lightPresets(cfg.color, (lvl, col) => setLamp(a, m.id, { level: lvl, color: col }))}
+                                                    </div>
+                                                {/if}
+                                            </div>
+                                        {/each}
+                                    </div>
+                                </div>
+                            {/if}
                         {/if}
                     {/if}
                 {/if}
@@ -796,24 +808,12 @@
     .bright-ico { color: var(--on); display: inline-flex; flex-shrink: 0; }
     .bright input[type="range"] { flex: 1; }
     .bright-val { font-size: 12px; color: var(--text-muted); min-width: 38px; text-align: right; }
-    .swatches { display: flex; gap: 6px; flex-wrap: wrap; }
-    .swatch {
-        width: 24px; height: 24px; border-radius: 50%;
-        border: 1px solid var(--hairline); cursor: pointer;
-        display: grid; place-items: center; padding: 0;
-        color: var(--text-muted); touch-action: manipulation;
-        transition: box-shadow var(--t-fast);
-    }
-    .swatch.auto { background: var(--card-3); }
-    .swatch.active { box-shadow: 0 0 0 2px var(--on), 0 0 0 4px var(--bg-elevated); }
 
     /* ── Mobile ──────────────────────────────────────────────────── */
     @media (max-width: 600px) {
-        .swatch { width: 28px; height: 28px; }
         .bright input[type="range"] { height: 28px; }
     }
     @media (pointer: coarse) {
         input[type="range"] { height: 28px; }
-        .swatch { width: 30px; height: 30px; }
     }
 </style>

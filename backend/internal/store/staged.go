@@ -32,6 +32,11 @@ type StagedSend struct {
 	Protocol string
 	State    bool // desired state
 	Err      error
+	// LightOnly marks a "set" action: only the queued brightness/colour is
+	// applied (via FlushLights). No on/off command is transmitted and the
+	// socket's tracked state is left unchanged, so SendStaged/ApplyStaged skip
+	// it. The colour/level fan-out itself is queued by the staging caller.
+	LightOnly bool
 }
 
 // isNetworkProtocol mirrors the routing in sender.Multi: these protocols go
@@ -141,6 +146,12 @@ func (s *Store) stageSocket(socketID, action string) StagedSend {
 	if !ok {
 		return StagedSend{SocketID: socketID, Err: fmt.Errorf("socket %q no longer exists", socketID)}
 	}
+	if action == "set" {
+		// Light-only: change brightness/colour without a relay on/off
+		// transmit or a tracked-state change. The colour/level command is
+		// queued separately by the staging caller and drained by FlushLights.
+		return StagedSend{SocketID: sock.ID, Name: sock.Name, Protocol: sock.Protocol, LightOnly: true}
+	}
 	var desired bool
 	switch action {
 	case "on":
@@ -193,7 +204,9 @@ func (s *Store) StageAutomationActions(actions []AutomationAction) []StagedSend 
 			continue
 		}
 		out = append(out, staged...)
-		if act.Action == "on" && (act.Level != nil || act.Color != "") {
+		// "on" attaches optional brightness/colour; "set" is brightness/colour
+		// only (no relay change) and always carries at least one of them.
+		if (act.Action == "on" || act.Action == "set") && (act.Level != nil || act.Color != "") {
 			switch act.TargetType {
 			case "socket":
 				if sock, ok := s.Sockets[act.TargetID]; ok {
@@ -230,7 +243,7 @@ func (s *Store) SendStaged(staged []StagedSend) {
 	var wg sync.WaitGroup
 	for i := range staged {
 		c := &staged[i]
-		if c.Err != nil || !isNetworkProtocol(c.Protocol) {
+		if c.Err != nil || c.LightOnly || !isNetworkProtocol(c.Protocol) {
 			continue
 		}
 		wg.Add(1)
@@ -243,7 +256,7 @@ func (s *Store) SendStaged(staged []StagedSend) {
 		c := &staged[i]
 		// Protocol check first: network entries are owned by their goroutine
 		// above until wg.Wait(), so their Err must not be read here.
-		if isNetworkProtocol(c.Protocol) || c.Err != nil {
+		if isNetworkProtocol(c.Protocol) || c.Err != nil || c.LightOnly {
 			continue
 		}
 		c.Err = s.Transmit(c.Code, c.Protocol, c.State)
@@ -266,6 +279,9 @@ func (s *Store) ApplyStaged(staged []StagedSend) error {
 				firstErr = c.Err
 			}
 			continue
+		}
+		if c.LightOnly {
+			continue // brightness/colour only — no tracked-state change
 		}
 		sock, ok := s.Sockets[c.SocketID]
 		if !ok {

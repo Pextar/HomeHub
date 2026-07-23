@@ -226,12 +226,13 @@ func (s *Store) validateRule(a *AutomationRule) error {
 		}
 		if act.TargetType == "scene" {
 			act.Action = "activate"
-		} else if act.Action != "on" && act.Action != "off" && act.Action != "toggle" {
-			return errors.New("action must be on/off/toggle")
+		} else if act.Action != "on" && act.Action != "off" && act.Action != "toggle" && act.Action != "set" {
+			return errors.New("action must be on/off/toggle/set")
 		}
-		// Level/colour apply to smart sockets, groups, and rooms being switched on.
+		// Level/colour apply to smart sockets, groups, and rooms being switched
+		// on, or targeted by a "set" (brightness/colour only, no on/off change).
 		// Scheduler fans out QueueLight to each smart socket inside the target.
-		if act.Action == "on" && (act.TargetType == "socket" || act.TargetType == "group" || act.TargetType == "room") {
+		if (act.Action == "on" || act.Action == "set") && (act.TargetType == "socket" || act.TargetType == "group" || act.TargetType == "room") {
 			if act.Level != nil {
 				if *act.Level < 1 || *act.Level > 100 {
 					return errors.New("action level must be between 1 and 100")

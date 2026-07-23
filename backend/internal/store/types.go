@@ -97,7 +97,7 @@ type AutomationCondition struct {
 type AutomationAction struct {
 	TargetType string `json:"target_type"` // "socket" | "group" | "room" | "scene"
 	TargetID   string `json:"target_id"`
-	Action     string `json:"action"`          // "on" | "off" | "toggle" | "activate"
+	Action     string `json:"action"`          // "on" | "off" | "toggle" | "set" | "activate"
 	Level      *int   `json:"level,omitempty"` // 1-100, smart lights only
 	Color      string `json:"color,omitempty"` // "RRGGBB", smart lights only
 }
@@ -301,11 +301,11 @@ type SceneStep struct {
 // slice. On first load those are migrated to a single step with
 // DelayMinutes=0; the Actions field is then cleared.
 type Scene struct {
-	ID    string `json:"id"`
-	Name  string `json:"name"`
-	Room  string `json:"room,omitempty"`  // optional room tag for organisation
-	Icon  string `json:"icon,omitempty"`  // optional icon name for the tile (frontend icon set)
-	Color string `json:"color,omitempty"` // optional accent preset key (amber|cool|violet|orange|green|gold)
+	ID    string      `json:"id"`
+	Name  string      `json:"name"`
+	Room  string      `json:"room,omitempty"`  // optional room tag for organisation
+	Icon  string      `json:"icon,omitempty"`  // optional icon name for the tile (frontend icon set)
+	Color string      `json:"color,omitempty"` // optional accent preset key (amber|cool|violet|orange|green|gold)
 	Steps []SceneStep `json:"steps"`
 	// Actions is the legacy single-step field kept for on-disk
 	// backward-compatibility. Populated by old scenes; migrated to
