@@ -48,6 +48,7 @@ type Store struct {
 	Automations map[string]*Automation
 	Sensors     map[string]*Sensor
 	Rooms       map[string]*Room
+	Sonos       map[string]*SonosSpeaker
 	// Readings is a rolling window of recent values per sensor id.
 	// Trimmed to ReadingsHistorySize on each append.
 	Readings  map[string][]SensorReading
@@ -118,6 +119,7 @@ const (
 	settingsFile    = "settings.json"
 	usersFile       = "users.json"
 	roomsFile       = "rooms.json"
+	sonosFile       = "sonos.json"
 
 	// ReadingsHistorySize caps how many readings are kept per sensor.
 	// At one sample per minute that's ~16 hours; at one per five minutes
@@ -137,6 +139,7 @@ func New(dataDir string, rf RFSender) *Store {
 		Automations: make(map[string]*Automation),
 		Sensors:     make(map[string]*Sensor),
 		Rooms:       make(map[string]*Room),
+		Sonos:       make(map[string]*SonosSpeaker),
 		Readings:    make(map[string][]SensorReading),
 		Users:       make(map[string]*User),
 		Settings:    &Settings{},
@@ -187,6 +190,9 @@ func (s *Store) Load() error {
 	if err := readJSON(filepath.Join(s.DataDir, roomsFile), &s.Rooms); err != nil {
 		return fmt.Errorf("loading rooms: %w", err)
 	}
+	if err := readJSON(filepath.Join(s.DataDir, sonosFile), &s.Sonos); err != nil {
+		return fmt.Errorf("loading sonos speakers: %w", err)
+	}
 	if s.Settings == nil {
 		s.Settings = &Settings{}
 	}
@@ -216,6 +222,9 @@ func (s *Store) Load() error {
 	}
 	if s.Readings == nil {
 		s.Readings = make(map[string][]SensorReading)
+	}
+	if s.Sonos == nil {
+		s.Sonos = make(map[string]*SonosSpeaker)
 	}
 	if s.Rooms == nil {
 		// First run: rooms.json absent — derive rooms from socket/sensor strings.
@@ -293,6 +302,9 @@ func (s *Store) Save() error {
 	}
 	if err := writeJSON(filepath.Join(s.DataDir, roomsFile), s.Rooms); err != nil {
 		return fmt.Errorf("saving rooms: %w", err)
+	}
+	if err := writeJSON(filepath.Join(s.DataDir, sonosFile), s.Sonos); err != nil {
+		return fmt.Errorf("saving sonos speakers: %w", err)
 	}
 	return nil
 }

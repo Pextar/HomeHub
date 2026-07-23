@@ -13,15 +13,16 @@ import (
 // Profiles and password hashes are deliberately excluded so a backup file
 // can be shared or version-controlled without leaking credentials.
 type configBundle struct {
-	Version     int                          `json:"version"`
-	ExportedAt  time.Time                    `json:"exported_at"`
-	Sockets     map[string]*store.Socket     `json:"sockets"`
-	Schedules   map[string]*store.Schedule   `json:"schedules"`
-	Groups      map[string]*store.Group      `json:"groups"`
-	Scenes      map[string]*store.Scene      `json:"scenes"`
-	Automations map[string]*store.Automation `json:"automations"`
-	Sensors     map[string]*store.Sensor     `json:"sensors"`
-	Settings    *store.Settings              `json:"settings"`
+	Version     int                            `json:"version"`
+	ExportedAt  time.Time                      `json:"exported_at"`
+	Sockets     map[string]*store.Socket       `json:"sockets"`
+	Schedules   map[string]*store.Schedule     `json:"schedules"`
+	Groups      map[string]*store.Group        `json:"groups"`
+	Scenes      map[string]*store.Scene        `json:"scenes"`
+	Automations map[string]*store.Automation   `json:"automations"`
+	Sensors     map[string]*store.Sensor       `json:"sensors"`
+	Sonos       map[string]*store.SonosSpeaker `json:"sonos,omitempty"`
+	Settings    *store.Settings                `json:"settings"`
 }
 
 // exportConfig returns the current configuration as a downloadable JSON
@@ -39,6 +40,7 @@ func (s *Server) exportConfig(w http.ResponseWriter, _ *http.Request) {
 		Scenes:      s.Store.Scenes,
 		Automations: s.Store.Automations,
 		Sensors:     s.Store.Sensors,
+		Sonos:       s.Store.Sonos,
 		Settings:    &settings,
 	}
 	body, err := json.MarshalIndent(bundle, "", "  ")
@@ -98,6 +100,9 @@ func (s *Server) importConfig(w http.ResponseWriter, r *http.Request) {
 	if bundle.Sensors != nil {
 		s.Store.Sensors = bundle.Sensors
 	}
+	if bundle.Sonos != nil {
+		s.Store.Sonos = bundle.Sonos
+	}
 	if bundle.Settings != nil {
 		s.Store.Settings = bundle.Settings
 	}
@@ -140,11 +145,16 @@ func validateBundle(bundle *configBundle, live *store.Store) error {
 	if pickSensors == nil {
 		pickSensors = live.Sensors
 	}
+	pickSonos := bundle.Sonos
+	if pickSonos == nil {
+		pickSonos = live.Sonos
+	}
 	scratch := &store.Store{
 		Sockets:     pickSockets,
 		Groups:      pickGroups,
 		Scenes:      pickScenes,
 		Sensors:     pickSensors,
+		Sonos:       pickSonos,
 		Schedules:   map[string]*store.Schedule{},
 		Automations: map[string]*store.Automation{},
 		Rooms:       live.Rooms, // rooms aren't part of the bundle
@@ -211,6 +221,18 @@ func validateBundle(bundle *configBundle, live *store.Store) error {
 		}
 		if err := scratch.ValidateSensor(v); err != nil {
 			return fmt.Errorf("sensor %q: %w", k, err)
+		}
+	}
+	for k, v := range bundle.Sonos {
+		var id *string
+		if v != nil {
+			id = &v.ID
+		}
+		if err := normalizeID("sonos speaker", k, id); err != nil {
+			return err
+		}
+		if err := scratch.ValidateSonosSpeaker(v); err != nil {
+			return fmt.Errorf("sonos speaker %q: %w", k, err)
 		}
 	}
 	// Schedules and automations reference the collections above, so they

@@ -282,10 +282,10 @@ func (s *Server) doControlSocket(id, action string) (sock store.Socket, found bo
 // socket via the regular POST /sockets with the returned code.
 //
 // Workflow:
-//   1. User long-presses the physical socket's button (learn mode).
-//   2. Frontend hits this endpoint.
-//   3. Socket associates with the code; user verifies the socket clicked
-//      and then saves it.
+//  1. User long-presses the physical socket's button (learn mode).
+//  2. Frontend hits this endpoint.
+//  3. Socket associates with the code; user verifies the socket clicked
+//     and then saves it.
 //
 // For the Nexa self-learning protocol the code is "<houseID>:<unit>" —
 // each socket gets its own random 26-bit house id, so they never

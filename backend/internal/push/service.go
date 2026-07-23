@@ -186,4 +186,3 @@ func (s *Service) send(sub PushSubscription, body []byte) {
 		}
 	}
 }
-

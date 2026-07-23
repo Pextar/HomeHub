@@ -13,6 +13,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gorilla/handlers"
@@ -22,6 +23,8 @@ import (
 	"homehub/internal/matter"
 	"homehub/internal/mqtt"
 	"homehub/internal/push"
+	"homehub/internal/sonos"
+	"homehub/internal/spotify"
 	"homehub/internal/store"
 )
 
@@ -32,10 +35,11 @@ const maxRequestBody = 1 << 20 // 1 MiB
 // Server wires HTTP handlers to a Store.
 type Server struct {
 	Store         *store.Store
-	Matter        *matter.Client // optional; nil-safe via Matter.Enabled()
-	MQTT          *mqtt.Client   // optional; nil-safe via MQTT.Enabled()
-	LLM           *llm.Client    // optional; nil-safe via LLM.Enabled(). Powers the assistant.
-	Push          *push.Service  // optional; nil means push notifications are disabled
+	Matter        *matter.Client  // optional; nil-safe via Matter.Enabled()
+	MQTT          *mqtt.Client    // optional; nil-safe via MQTT.Enabled()
+	LLM           *llm.Client     // optional; nil-safe via LLM.Enabled(). Powers the assistant.
+	Push          *push.Service   // optional; nil means push notifications are disabled
+	Spotify       *spotify.Client // optional; nil disables Spotify search in the Music view
 	AuthUser      string
 	AuthPass      string
 	SessionSecret []byte // HMAC key for cookie sessions; see LoadOrCreateSessionSecret
@@ -53,6 +57,18 @@ type Server struct {
 	// logins throttles repeated failed logins per client IP. Created
 	// lazily in Handler().
 	logins *loginLimiter
+
+	// sonosAccts caches per-speaker streaming-service account lookups
+	// (sid/sn) for the play-item path. Guarded by sonosAcctMu; created
+	// lazily on first use.
+	sonosAcctMu sync.Mutex
+	sonosAccts  map[string]sonosAcctEntry
+}
+
+// sonosAcctEntry is one cached service-account resolution.
+type sonosAcctEntry struct {
+	acct *sonos.ServiceAccount
+	at   time.Time
 }
 
 // Handler returns the configured router with logging, optional basic
@@ -216,6 +232,37 @@ func (s *Server) Handler() http.Handler {
 	api.HandleFunc("/tasmota/probe", s.requireAdmin(s.tasmotaProbe)).Methods("GET")
 	api.HandleFunc("/tasmota/{socketId}", s.tasmotaGetState).Methods("GET")
 	api.HandleFunc("/tasmota/{socketId}/state", s.tasmotaSetState).Methods("PUT")
+
+	// Sonos speakers: local UPnP control (playback, volume, grouping,
+	// favorites). Admin-gated like the other whole-home surfaces.
+	api.HandleFunc("/sonos/status", s.requireAdmin(s.sonosStatus)).Methods("GET")
+	api.HandleFunc("/sonos/discover", s.requireAdmin(s.sonosDiscover)).Methods("GET")
+	api.HandleFunc("/sonos/speakers", s.requireAdmin(s.sonosCreateSpeaker)).Methods("POST")
+	api.HandleFunc("/sonos/speakers/{id}", s.requireAdmin(s.sonosUpdateSpeaker)).Methods("PUT")
+	api.HandleFunc("/sonos/speakers/{id}", s.requireAdmin(s.sonosDeleteSpeaker)).Methods("DELETE")
+	api.HandleFunc("/sonos/{id}/play", s.requireAdmin(s.sonosTransport(sonos.Play))).Methods("POST")
+	api.HandleFunc("/sonos/{id}/pause", s.requireAdmin(s.sonosTransport(sonos.Pause))).Methods("POST")
+	api.HandleFunc("/sonos/{id}/next", s.requireAdmin(s.sonosTransport(sonos.Next))).Methods("POST")
+	api.HandleFunc("/sonos/{id}/previous", s.requireAdmin(s.sonosTransport(sonos.Previous))).Methods("POST")
+	api.HandleFunc("/sonos/{id}/leave", s.requireAdmin(s.sonosTransport(sonos.Leave))).Methods("POST")
+	api.HandleFunc("/sonos/{id}/join", s.requireAdmin(s.sonosJoin)).Methods("POST")
+	api.HandleFunc("/sonos/{id}/volume", s.requireAdmin(s.sonosSetVolume)).Methods("PUT")
+	api.HandleFunc("/sonos/{id}/mute", s.requireAdmin(s.sonosSetMute)).Methods("PUT")
+	api.HandleFunc("/sonos/{id}/favorites", s.requireAdmin(s.sonosFavorites)).Methods("GET")
+	api.HandleFunc("/sonos/{id}/favorites/play", s.requireAdmin(s.sonosPlayFavorite)).Methods("POST")
+	api.HandleFunc("/sonos/{id}/art", s.requireAdmin(s.sonosArt)).Methods("GET")
+	api.HandleFunc("/sonos/{id}/play-item", s.requireAdmin(s.sonosPlayItem)).Methods("POST")
+
+	// Spotify search/browse for the Music view. OAuth is the user's own
+	// account (PKCE); playback stays local via the play-item route above.
+	api.HandleFunc("/spotify/status", s.requireAdmin(s.spotifyStatus)).Methods("GET")
+	api.HandleFunc("/spotify/config", s.requireAdmin(s.spotifySetConfig)).Methods("PUT")
+	api.HandleFunc("/spotify/login", s.requireAdmin(s.spotifyLogin)).Methods("GET")
+	api.HandleFunc("/spotify/callback", s.requireAdmin(s.spotifyCallback)).Methods("GET")
+	api.HandleFunc("/spotify/exchange", s.requireAdmin(s.spotifyExchange)).Methods("POST")
+	api.HandleFunc("/spotify/disconnect", s.requireAdmin(s.spotifyDisconnect)).Methods("POST")
+	api.HandleFunc("/spotify/search", s.requireAdmin(s.spotifySearch)).Methods("GET")
+	api.HandleFunc("/spotify/playlists", s.requireAdmin(s.spotifyPlaylists)).Methods("GET")
 
 	api.HandleFunc("/matter/transport", s.requireAdmin(s.matterTransport)).Methods("GET")
 	api.HandleFunc("/matter/devices", s.requireAdmin(s.matterListDevices)).Methods("GET")

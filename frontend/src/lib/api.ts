@@ -29,6 +29,13 @@ import type {
   AssistantStreamEvent,
   AssistantMessage,
   AssistantConfirmation,
+  SonosStatus,
+  SonosSpeaker,
+  SonosCandidate,
+  SonosFavorite,
+  SpotifyStatus,
+  SpotifyItem,
+  SpotifyResults,
 } from "./types";
 
 const BASE = "/api";
@@ -259,6 +266,59 @@ export const api = {
       body: json(update),
     });
   },
+
+  // Sonos speakers (local UPnP control)
+  sonosStatus() { return req<SonosStatus>("/sonos/status"); },
+  sonosDiscover() { return req<SonosCandidate[]>("/sonos/discover"); },
+  sonosCreateSpeaker(body: { ip: string; name?: string; room?: string }) {
+    return req<SonosSpeaker>("/sonos/speakers", { method: "POST", body: json(body) });
+  },
+  sonosUpdateSpeaker(id: string, body: { ip?: string; name?: string; room?: string }) {
+    return req<SonosSpeaker>(`/sonos/speakers/${encodeURIComponent(id)}`, { method: "PUT", body: json(body) });
+  },
+  sonosDeleteSpeaker(id: string) {
+    return req<void>(`/sonos/speakers/${encodeURIComponent(id)}`, { method: "DELETE" });
+  },
+  // Transport actions go to the group coordinator.
+  sonosPlay(id: string) { return req<void>(`/sonos/${encodeURIComponent(id)}/play`, { method: "POST" }); },
+  sonosPause(id: string) { return req<void>(`/sonos/${encodeURIComponent(id)}/pause`, { method: "POST" }); },
+  sonosNext(id: string) { return req<void>(`/sonos/${encodeURIComponent(id)}/next`, { method: "POST" }); },
+  sonosPrevious(id: string) { return req<void>(`/sonos/${encodeURIComponent(id)}/previous`, { method: "POST" }); },
+  sonosSetVolume(id: string, level: number, group = false) {
+    return req<void>(`/sonos/${encodeURIComponent(id)}/volume`, { method: "PUT", body: json({ level, group }) });
+  },
+  sonosSetMute(id: string, muted: boolean) {
+    return req<void>(`/sonos/${encodeURIComponent(id)}/mute`, { method: "PUT", body: json({ muted }) });
+  },
+  sonosJoin(id: string, targetId: string) {
+    return req<void>(`/sonos/${encodeURIComponent(id)}/join`, { method: "POST", body: json({ target_id: targetId }) });
+  },
+  sonosLeave(id: string) { return req<void>(`/sonos/${encodeURIComponent(id)}/leave`, { method: "POST" }); },
+  sonosFavorites(id: string) { return req<SonosFavorite[]>(`/sonos/${encodeURIComponent(id)}/favorites`); },
+  sonosPlayFavorite(id: string, fav: SonosFavorite) {
+    return req<void>(`/sonos/${encodeURIComponent(id)}/favorites/play`, { method: "POST", body: json(fav) });
+  },
+  // Plays a streaming-service item (from Spotify search) on the group led
+  // by speaker {id}; the speaker streams with its own linked account.
+  sonosPlayItem(id: string, body: { service: string; uri: string; title: string }) {
+    return req<void>(`/sonos/${encodeURIComponent(id)}/play-item`, { method: "POST", body: json(body) });
+  },
+
+  // Spotify search/browse (user's own account via PKCE — configured in the Music view)
+  spotifyStatus() { return req<SpotifyStatus>("/spotify/status"); },
+  spotifySetConfig(clientId: string) {
+    return req<void>("/spotify/config", { method: "PUT", body: json({ client_id: clientId }) });
+  },
+  spotifyLoginURL() { return req<{ url: string }>("/spotify/login"); },
+  // Manual-flow finish: pass the full address the browser landed on after consent.
+  spotifyExchange(url: string) {
+    return req<void>("/spotify/exchange", { method: "POST", body: json({ url }) });
+  },
+  spotifyDisconnect() { return req<void>("/spotify/disconnect", { method: "POST" }); },
+  spotifySearch(q: string, limit = 8) {
+    return req<SpotifyResults>(`/spotify/search?q=${encodeURIComponent(q)}&limit=${limit}`);
+  },
+  spotifyMyPlaylists() { return req<SpotifyItem[]>("/spotify/playlists"); },
 
   // Push notifications
   getPushVapidKey() {

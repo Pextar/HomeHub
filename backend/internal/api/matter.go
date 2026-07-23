@@ -63,7 +63,7 @@ func (s *Server) matterCommission(w http.ResponseWriter, r *http.Request) {
 
 	job := s.matterJobs.create()
 	pairingCode := body.PairingCode
-	transport   := body.Transport
+	transport := body.Transport
 
 	go func() {
 		// Detached from r.Context() — the HTTP request will close almost
