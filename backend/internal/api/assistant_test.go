@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"rf-socket-controller/internal/store"
+	"homehub/internal/store"
 )
 
 // noopRF is a transmitter that always succeeds, so tool executors run the full

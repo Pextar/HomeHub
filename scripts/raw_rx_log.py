@@ -7,7 +7,7 @@ sync event (gap > SYNC_MIN_US) and prints them to stdout, one burst per line.
 Use this to reverse-engineer an unknown sensor protocol or to check whether
 the timing thresholds in ft007th_rx.py match what your sensor actually sends.
 
-Usage (run while rf-controller service is stopped):
+Usage (run while homehub service is stopped):
     RF_RX_GPIO=4 python3 raw_rx_log.py
 
 Output format:

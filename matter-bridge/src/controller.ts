@@ -86,8 +86,8 @@ export async function startController(): Promise<MatterController> {
 
     const commissioning = new CommissioningController({
         autoConnect: false,             // we connect lazily on first use
-        adminFabricLabel: "rf-socket-controller",
-        environment: { environment: Environment.default, id: "rf-socket-controller" },
+        adminFabricLabel: "homehub",
+        environment: { environment: Environment.default, id: "homehub" },
     });
     await matterServer.addCommissioningController(commissioning);
     await matterServer.start();

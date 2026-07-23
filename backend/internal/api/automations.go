@@ -10,7 +10,7 @@ import (
 
 	"github.com/gorilla/mux"
 
-	"rf-socket-controller/internal/store"
+	"homehub/internal/store"
 )
 
 type automationResponse struct {

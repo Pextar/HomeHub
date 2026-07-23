@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"rf-socket-controller/internal/store"
+	"homehub/internal/store"
 )
 
 // reconcileInterval controls how often the listener re-reads the store to

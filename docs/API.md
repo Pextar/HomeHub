@@ -1,4 +1,4 @@
-# RF Socket Controller - API Documentation
+# HomeHub - API Documentation
 
 ## Base URL
 

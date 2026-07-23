@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Install and configure Mosquitto as the local MQTT broker for the
-# RF Socket Controller. Run this ON THE PI (it uses apt + sudo + systemctl).
+# HomeHub. Run this ON THE PI (it uses apt + sudo + systemctl).
 #
 # The controller connects to the broker at tcp://127.0.0.1:1883; the broker
 # also listens on the LAN so Wi-Fi devices (Tasmota, Zigbee2MQTT, etc.) and
@@ -22,8 +22,8 @@
 set -euo pipefail
 
 CONF_SRC="$(cd "$(dirname "$0")" && pwd)/mosquitto.conf"
-CONF=/etc/mosquitto/conf.d/rf-socket-controller.conf
-PWFILE=/etc/mosquitto/rf-socket-controller.passwd
+CONF=/etc/mosquitto/conf.d/homehub.conf
+PWFILE=/etc/mosquitto/homehub.passwd
 
 USER="${MQTT_USERNAME:-}"
 PASS="${MQTT_PASSWORD:-}"

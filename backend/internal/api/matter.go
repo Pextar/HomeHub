@@ -11,7 +11,7 @@ import (
 
 	"github.com/gorilla/mux"
 
-	"rf-socket-controller/internal/matter"
+	"homehub/internal/matter"
 )
 
 // matterListDevices handles GET /api/matter/devices — returns every node

@@ -11,8 +11,8 @@ import (
 	"math/rand"
 	"time"
 
-	"rf-socket-controller/internal/push"
-	"rf-socket-controller/internal/store"
+	"homehub/internal/push"
+	"homehub/internal/store"
 )
 
 // pendingFire holds a randomly-delayed fire time for a schedule that has

@@ -18,11 +18,11 @@ import (
 	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
 
-	"rf-socket-controller/internal/llm"
-	"rf-socket-controller/internal/matter"
-	"rf-socket-controller/internal/mqtt"
-	"rf-socket-controller/internal/push"
-	"rf-socket-controller/internal/store"
+	"homehub/internal/llm"
+	"homehub/internal/matter"
+	"homehub/internal/mqtt"
+	"homehub/internal/push"
+	"homehub/internal/store"
 )
 
 // maxRequestBody caps API request bodies. Generous for this app's config

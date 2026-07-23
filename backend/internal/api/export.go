@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"time"
 
-	"rf-socket-controller/internal/store"
+	"homehub/internal/store"
 )
 
 // configBundle is a portable snapshot of everything except users/auth.

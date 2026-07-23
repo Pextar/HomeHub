@@ -1,4 +1,4 @@
-# RF Socket Controller - Installation Guide
+# HomeHub - Installation Guide
 
 ## Hardware Requirements
 
@@ -75,7 +75,7 @@ sudo pip3 install lgpio
 Set `SENSOR_RX_CMD` in `.env`:
 
 ```dotenv
-SENSOR_RX_CMD=python3 /home/pi/rf-socket-controller/scripts/ft007th_rx.py
+SENSOR_RX_CMD=python3 /home/pi/homehub/scripts/ft007th_rx.py
 ```
 
 Optional environment variables (add to `.env` if needed):
@@ -95,7 +95,7 @@ python3 scripts/ft007th_rx.py
 Restart the service and pair via the UI:
 
 ```bash
-sudo systemctl restart rf-controller
+sudo systemctl restart homehub
 ```
 
 ---
@@ -120,7 +120,7 @@ sudo modprobe -r dvb_usb_rtl28xxu rtl2832 rtl2830
 `SENSOR_RX_CMD` stays **unset** — the controller defaults to `rtl_433 -F json`.
 
 ```bash
-sudo systemctl restart rf-controller
+sudo systemctl restart homehub
 ```
 
 ---
@@ -157,7 +157,7 @@ SETUP_MOSQUITTO=1 scripts/deploy-pi.sh
 SETUP_MOSQUITTO=1 MQTT_USERNAME=ctrl MQTT_PASSWORD=secret scripts/deploy-pi.sh
 ```
 
-This installs Mosquitto, writes `/etc/mosquitto/conf.d/rf-socket-controller.conf`
+This installs Mosquitto, writes `/etc/mosquitto/conf.d/homehub.conf`
 (listening on `1883` for the controller on `127.0.0.1` and for LAN devices),
 optionally creates a password file, enables the `mosquitto` service, and adds
 `MQTT_BROKER_URL` (plus credentials, if any) to the controller's `.env` — so
@@ -166,9 +166,9 @@ the controller starts using the broker on its next restart.
 To set it up by hand on the Pi instead, run the bundled script directly:
 
 ```bash
-cd ~/rf-socket-controller
+cd ~/homehub
 MQTT_USERNAME=ctrl MQTT_PASSWORD=secret ENV_FILE=.env ./setup-mosquitto.sh
-sudo systemctl restart rf-controller
+sudo systemctl restart homehub
 ```
 
 Then in the app: add a socket with protocol **MQTT** and its command topic
@@ -188,8 +188,8 @@ For a 64-bit Pi (Pi 3/4/5 on 64-bit Pi OS or Ubuntu) you do NOT need Go or
 Node on the Pi. Build a release locally and rsync it over SSH:
 
 ```bash
-git clone https://github.com/Pextar/rf-socket-controller.git
-cd rf-socket-controller
+git clone https://github.com/Pextar/homehub.git
+cd homehub
 
 # 1. Build a release into dist/release/  (binary + frontend + systemd unit)
 scripts/build-pi.sh
@@ -201,21 +201,21 @@ scripts/deploy-pi.sh                  # or: scripts/deploy-pi.sh pi@192.168.1.42
 
 `scripts/deploy-pi.sh` does the following on the Pi:
 
-- rsyncs the binary and `frontend/dist/` to `~/rf-socket-controller/`,
+- rsyncs the binary and `frontend/dist/` to `~/homehub/`,
 - seeds `.env` from `env.example` on first run (never overwrites an
   existing `.env`),
-- installs `rf-controller.service` into `/etc/systemd/system/`, then
+- installs `homehub.service` into `/etc/systemd/system/`, then
   `daemon-reload` + `enable` + `restart`.
 
 After the first deploy, set credentials and (optionally) the port:
 
 ```bash
-ssh pi@raspberrypi.local 'nano ~/rf-socket-controller/.env \
-  && sudo systemctl restart rf-controller'
+ssh pi@raspberrypi.local 'nano ~/homehub/.env \
+  && sudo systemctl restart homehub'
 ```
 
 The systemd unit assumes the SSH user is `pi`; if not, edit
-`deploy/rf-controller.service` (User= and the WorkingDirectory paths)
+`deploy/homehub.service` (User= and the WorkingDirectory paths)
 before `scripts/build-pi.sh`.
 
 ### Authentication & profiles
@@ -251,8 +251,8 @@ required on the Pi:
 
 ```bash
 cd frontend && npm install && npm run build && cd ..
-cd backend  && go build -o rf-controller && cd ..
-AUTH_USER=admin AUTH_PASS=secret PORT=8080 ./backend/rf-controller
+cd backend  && go build -o homehub && cd ..
+AUTH_USER=admin AUTH_PASS=secret PORT=8080 ./backend/homehub
 ```
 
 ### Access the web UI
@@ -335,7 +335,7 @@ For live-reload hacking on the UI without rebuilding each time:
 
 ```bash
 # Terminal 1 — backend
-cd backend && ./rf-controller
+cd backend && ./homehub
 
 # Terminal 2 — Vite dev server
 cd frontend && npm run dev
@@ -370,13 +370,13 @@ Data is stored in `./data/` directory:
 
 ## Autostart
 
-`scripts/deploy-pi.sh` installs `deploy/rf-controller.service` for you.
+`scripts/deploy-pi.sh` installs `deploy/homehub.service` for you.
 If you ever need to reinstall by hand:
 
 ```bash
-sudo install -m 644 ~/rf-socket-controller/rf-controller.service \
-  /etc/systemd/system/rf-controller.service
+sudo install -m 644 ~/homehub/homehub.service \
+  /etc/systemd/system/homehub.service
 sudo systemctl daemon-reload
-sudo systemctl enable --now rf-controller
-journalctl -u rf-controller -f
+sudo systemctl enable --now homehub
+journalctl -u homehub -f
 ```

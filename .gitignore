@@ -1,4 +1,4 @@
-# RF Socket Controller
+# HomeHub
 
 node_modules/
 dist/
@@ -11,7 +11,7 @@ config.json
 
 # Persistent runtime state and compiled binary
 backend/data/
-backend/rf-controller
+backend/homehub
 
 # Frontend tooling
 frontend/node_modules/

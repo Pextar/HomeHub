@@ -12,7 +12,7 @@ the nearest existing pattern in `frontend/src/` rather than inventing.
 ## Project layout
 
 ```
-rf-socket-controller/
+homehub/
 ├── DESIGN.md              ← design system (read first, always)
 ├── CLAUDE.md              ← this file
 ├── design/                ← reference assets: mockup JSX, spec HTML,

@@ -77,7 +77,7 @@ func generateSelfSigned(extraHosts []string) (certPEM, keyPEM []byte, err error)
 	}
 	tmpl := &x509.Certificate{
 		SerialNumber: serial,
-		Subject:      pkix.Name{CommonName: "rf-socket-controller"},
+		Subject:      pkix.Name{CommonName: "homehub"},
 		NotBefore:    time.Now().Add(-1 * time.Hour),
 		NotAfter:     time.Now().Add(10 * 365 * 24 * time.Hour),
 		KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,

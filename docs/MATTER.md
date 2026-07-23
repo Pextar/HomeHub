@@ -59,13 +59,13 @@ that lets you commission devices onto that Thread network.
 | Item | Notes |
 |------|-------|
 | **nRF52840 Dongle** (Nordic PCA10059) | ~$10 from Mouser, Digikey, or Nordic directly. **Get the official Nordic PCA10059** — clones exist but the pre-built firmware and guides all target this specific board. |
-| **Raspberry Pi** | The same Pi that runs rf-socket-controller is fine. It gains a second role as the Thread Border Router. |
+| **Raspberry Pi** | The same Pi that runs homehub is fine. It gains a second role as the Thread Border Router. |
 
 > **Why not Apple TV or HomePod mini?**
 > Apple TV 4K and HomePod mini do act as Thread Border Routers for Apple Home,
 > but Apple provides no way to export the Operational Dataset from them to a
 > third-party controller. The nRF52840 dongle approach gives you a Thread network
-> you fully control — and Thread devices you commission via rf-socket-controller
+> you fully control — and Thread devices you commission via homehub
 > will live on *your* network, not Apple's.
 
 ---
@@ -215,17 +215,17 @@ manual steps if you need them:
 sudo apt install -y nodejs npm
 
 # 2. Build the bridge
-cd ~/rf-socket-controller/matter-bridge
+cd ~/homehub/matter-bridge
 npm install --omit=dev
 npx tsc -p tsconfig.json
 
 # 3. Install + start the systemd unit
-sudo cp ~/rf-socket-controller/matter-bridge.service /etc/systemd/system/
+sudo cp ~/homehub/matter-bridge.service /etc/systemd/system/
 sudo systemctl enable --now matter-bridge
 
 # 4. The Go backend reads MATTER_BRIDGE_URL from .env; the default
 #    (http://127.0.0.1:8765) Just Works when both run on the same Pi.
-sudo systemctl restart rf-controller
+sudo systemctl restart homehub
 ```
 
 The Pi's Bluetooth adapter is used for BLE commissioning (both Wi-Fi and Thread

@@ -16,18 +16,18 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
-	"rf-socket-controller/internal/api"
-	"rf-socket-controller/internal/llm"
-	"rf-socket-controller/internal/matter"
-	"rf-socket-controller/internal/mqtt"
-	"rf-socket-controller/internal/push"
-	"rf-socket-controller/internal/reachability"
-	"rf-socket-controller/internal/rf"
-	"rf-socket-controller/internal/rx"
-	"rf-socket-controller/internal/scheduler"
-	"rf-socket-controller/internal/sender"
-	"rf-socket-controller/internal/store"
-	"rf-socket-controller/internal/tasmota"
+	"homehub/internal/api"
+	"homehub/internal/llm"
+	"homehub/internal/matter"
+	"homehub/internal/mqtt"
+	"homehub/internal/push"
+	"homehub/internal/reachability"
+	"homehub/internal/rf"
+	"homehub/internal/rx"
+	"homehub/internal/scheduler"
+	"homehub/internal/sender"
+	"homehub/internal/store"
+	"homehub/internal/tasmota"
 )
 
 // lightControl applies scene brightness/colour to smart lights. It satisfies
@@ -273,7 +273,7 @@ func main() {
 	go reachability.Run(schedCtx, st, matterClient, pushSvc)
 
 	go func() {
-		log.Printf("RF Socket Controller listening on http://:%s", port)
+		log.Printf("HomeHub listening on http://:%s", port)
 		if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatalf("http server: %v", err)
 		}

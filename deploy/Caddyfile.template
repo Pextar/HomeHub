@@ -1,4 +1,4 @@
-# Caddy reverse-proxy config for rf-socket-controller + Tailscale HTTPS.
+# Caddy reverse-proxy config for homehub + Tailscale HTTPS.
 #
 # This is a template — the setup script (deploy/tailscale-https-setup.sh)
 # fills in your actual Tailscale hostname and writes the real config to

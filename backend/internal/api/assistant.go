@@ -25,8 +25,8 @@ import (
 	"sync"
 	"time"
 
-	"rf-socket-controller/internal/llm"
-	"rf-socket-controller/internal/store"
+	"homehub/internal/llm"
+	"homehub/internal/store"
 )
 
 const (

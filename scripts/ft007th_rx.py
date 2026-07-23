@@ -8,7 +8,7 @@ FT007TH / Proove AB 313160, and emits one JSON object per line to stdout —
 the same format produced by `rtl_433 -F json`.
 
 Set SENSOR_RX_CMD in .env:
-    SENSOR_RX_CMD=python3 /home/pi/rf-socket-controller/scripts/ft007th_rx.py
+    SENSOR_RX_CMD=python3 /home/pi/homehub/scripts/ft007th_rx.py
 
 Environment variables:
     RF_RX_GPIO   BCM pin number wired to the receiver DATA pin   (default 4)

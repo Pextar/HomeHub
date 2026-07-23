@@ -157,4 +157,4 @@ echo
 echo "Ollama is running on 127.0.0.1:11434."
 echo "  binaries/libs: $LIB_DIR    models: $MODELS_DIR    model: $MODEL"
 echo "Restart the controller so it picks up the assistant settings:"
-echo "  sudo systemctl restart rf-controller"
+echo "  sudo systemctl restart homehub"

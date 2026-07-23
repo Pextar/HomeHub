@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"rf-socket-controller/internal/store"
+	"homehub/internal/store"
 )
 
 func (s *Server) getSettings(w http.ResponseWriter, _ *http.Request) {

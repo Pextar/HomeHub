@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"rf-socket-controller/internal/push"
-	"rf-socket-controller/internal/store"
+	"homehub/internal/push"
+	"homehub/internal/store"
 )
 
 // notifyBulkState sends a single summary "device state" notification for a

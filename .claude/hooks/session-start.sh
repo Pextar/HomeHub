@@ -1,5 +1,5 @@
 #!/bin/bash
-# SessionStart hook for the RF Socket Controller repo.
+# SessionStart hook for the HomeHub repo.
 #
 # Prepares the web sandbox so Claude can immediately run / test / lint
 # both halves of the project:
@@ -22,7 +22,7 @@ fi
 
 cd "$CLAUDE_PROJECT_DIR"
 
-echo ">> SessionStart: preparing rf-socket-controller workspace"
+echo ">> SessionStart: preparing homehub workspace"
 
 # ---------- Backend (Go) ----------
 if [ -f backend/go.mod ]; then

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build a release for the Raspberry Pi.
 #
-# Output: dist/release/{rf-controller, frontend/dist/, rf-controller.service, env.example}
+# Output: dist/release/{homehub, frontend/dist/, homehub.service, env.example}
 #
 # Defaults to 64-bit Pi (Pi 3/4/5 running 64-bit Pi OS / Ubuntu).
 # For 32-bit Pi OS or Pi Zero/1/2:
@@ -33,7 +33,7 @@ echo "==> Cross-compiling backend (GOOS=linux GOARCH=$GOARCH${GOARM:+ GOARM=$GOA
 (
   cd "$ROOT/backend"
   env CGO_ENABLED=0 GOOS=linux GOARCH="$GOARCH" ${GOARM_VAR[@]+"${GOARM_VAR[@]}"} \
-    go build -trimpath -ldflags='-s -w' -o "$RELEASE/rf-controller" .
+    go build -trimpath -ldflags='-s -w' -o "$RELEASE/homehub" .
 )
 
 # Matter bridge is platform-independent (JS) — package the sources and let
@@ -51,7 +51,7 @@ if [ "${SKIP_MATTER_BRIDGE:-}" != "1" ]; then
   cp    "$ROOT/deploy/matter-bridge.service" "$RELEASE/"
 fi
 
-cp "$ROOT/deploy/rf-controller.service" "$RELEASE/"
+cp "$ROOT/deploy/homehub.service" "$RELEASE/"
 cp "$ROOT/deploy/env.example"            "$RELEASE/"
 cp "$ROOT/scripts/nexa_tx.py"            "$RELEASE/"
 cp "$ROOT/scripts/ft007th_rx.py"         "$RELEASE/"

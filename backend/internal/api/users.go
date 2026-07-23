@@ -28,7 +28,7 @@ import (
 	"github.com/gorilla/mux"
 	"golang.org/x/crypto/bcrypt"
 
-	"rf-socket-controller/internal/store"
+	"homehub/internal/store"
 )
 
 // userView is the client-facing shape of a user — everything except the

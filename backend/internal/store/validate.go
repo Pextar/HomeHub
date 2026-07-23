@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"rf-socket-controller/internal/tasmota"
+	"homehub/internal/tasmota"
 )
 
 // ValidateSchedule normalizes and validates a schedule. Caller must
