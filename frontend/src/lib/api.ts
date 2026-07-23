@@ -29,6 +29,10 @@ import type {
   AssistantStreamEvent,
   AssistantMessage,
   AssistantConfirmation,
+  SonosStatus,
+  SonosSpeaker,
+  SonosCandidate,
+  SonosFavorite,
 } from "./types";
 
 const BASE = "/api";
@@ -258,6 +262,38 @@ export const api = {
       method: "PUT",
       body: json(update),
     });
+  },
+
+  // Sonos speakers (local UPnP control)
+  sonosStatus() { return req<SonosStatus>("/sonos/status"); },
+  sonosDiscover() { return req<SonosCandidate[]>("/sonos/discover"); },
+  sonosCreateSpeaker(body: { ip: string; name?: string; room?: string }) {
+    return req<SonosSpeaker>("/sonos/speakers", { method: "POST", body: json(body) });
+  },
+  sonosUpdateSpeaker(id: string, body: { ip?: string; name?: string; room?: string }) {
+    return req<SonosSpeaker>(`/sonos/speakers/${encodeURIComponent(id)}`, { method: "PUT", body: json(body) });
+  },
+  sonosDeleteSpeaker(id: string) {
+    return req<void>(`/sonos/speakers/${encodeURIComponent(id)}`, { method: "DELETE" });
+  },
+  // Transport actions go to the group coordinator.
+  sonosPlay(id: string) { return req<void>(`/sonos/${encodeURIComponent(id)}/play`, { method: "POST" }); },
+  sonosPause(id: string) { return req<void>(`/sonos/${encodeURIComponent(id)}/pause`, { method: "POST" }); },
+  sonosNext(id: string) { return req<void>(`/sonos/${encodeURIComponent(id)}/next`, { method: "POST" }); },
+  sonosPrevious(id: string) { return req<void>(`/sonos/${encodeURIComponent(id)}/previous`, { method: "POST" }); },
+  sonosSetVolume(id: string, level: number, group = false) {
+    return req<void>(`/sonos/${encodeURIComponent(id)}/volume`, { method: "PUT", body: json({ level, group }) });
+  },
+  sonosSetMute(id: string, muted: boolean) {
+    return req<void>(`/sonos/${encodeURIComponent(id)}/mute`, { method: "PUT", body: json({ muted }) });
+  },
+  sonosJoin(id: string, targetId: string) {
+    return req<void>(`/sonos/${encodeURIComponent(id)}/join`, { method: "POST", body: json({ target_id: targetId }) });
+  },
+  sonosLeave(id: string) { return req<void>(`/sonos/${encodeURIComponent(id)}/leave`, { method: "POST" }); },
+  sonosFavorites(id: string) { return req<SonosFavorite[]>(`/sonos/${encodeURIComponent(id)}/favorites`); },
+  sonosPlayFavorite(id: string, fav: SonosFavorite) {
+    return req<void>(`/sonos/${encodeURIComponent(id)}/favorites/play`, { method: "POST", body: json(fav) });
   },
 
   // Push notifications

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"homehub/internal/sonos"
 	"homehub/internal/tasmota"
 )
 
@@ -397,6 +398,38 @@ func (s *Store) ValidateSensor(sn *Sensor) error {
 	}
 	if sn.Unit == "" {
 		sn.Unit = defaultUnitForKind(sn.Kind)
+	}
+	return nil
+}
+
+// ValidateSonosSpeaker normalizes and validates a Sonos speaker. Caller
+// must hold Mu so IP/UUID uniqueness can be checked against the registry.
+func (s *Store) ValidateSonosSpeaker(sp *SonosSpeaker) error {
+	sp.Name = strings.TrimSpace(sp.Name)
+	sp.IP = strings.TrimSpace(sp.IP)
+	sp.UUID = strings.TrimSpace(sp.UUID)
+	sp.Room = strings.TrimSpace(sp.Room)
+	sp.Model = strings.TrimSpace(sp.Model)
+
+	if sp.Name == "" {
+		return errors.New("name is required")
+	}
+	if err := sonos.ValidateHost(sp.IP); err != nil {
+		return err
+	}
+	if sp.UUID != "" && !strings.HasPrefix(sp.UUID, "RINCON_") {
+		return errors.New("uuid must be a Sonos RINCON_… identifier")
+	}
+	for _, other := range s.Sonos {
+		if other.ID == sp.ID {
+			continue
+		}
+		if other.IP == sp.IP {
+			return fmt.Errorf("speaker %q already uses address %s", other.Name, sp.IP)
+		}
+		if sp.UUID != "" && other.UUID == sp.UUID {
+			return fmt.Errorf("speaker %q is already registered (same device id)", other.Name)
+		}
 	}
 	return nil
 }

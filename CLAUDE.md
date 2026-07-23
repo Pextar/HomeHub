@@ -27,6 +27,7 @@ homehub/
 │       ├── scheduler/     ← schedule + automation engine (5-sec tick)
 │       ├── rf/            ← 433 MHz transmitter
 │       ├── tasmota/       ← Wi-Fi smart-light bridge
+│       ├── sonos/         ← Sonos speaker bridge (local UPnP/SOAP)
 │       └── matter/        ← Matter/Thread bridge
 └── frontend/              ← Svelte 5 + Vite
     └── src/

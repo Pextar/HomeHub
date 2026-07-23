@@ -18,6 +18,20 @@ type Socket struct {
 	ReadOnly bool   `json:"readonly,omitempty"` // sensor / monitoring device — no on/off commands
 }
 
+// SonosSpeaker is a registered Sonos zone player. Speakers are controlled
+// live over their local UPnP API (internal/sonos) — only the identity is
+// persisted here. UUID is the stable RINCON_… id Sonos uses to address
+// speakers in grouping and topology; it is captured when the speaker is
+// added and used to correlate live topology with registered speakers.
+type SonosSpeaker struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	IP    string `json:"ip"`
+	UUID  string `json:"uuid"`
+	Room  string `json:"room,omitempty"`
+	Model string `json:"model,omitempty"`
+}
+
 // Schedule represents a recurring timer for a socket, group, or scene.
 //
 // Targets:

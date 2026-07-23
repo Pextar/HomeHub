@@ -309,7 +309,74 @@ export interface BulkResult {
   failures: { socket_id: string; error: string }[];
 }
 
-export type Route = "dashboard" | "rooms" | "floorplan" | "sockets" | "groups" | "scenes" | "schedules" | "sensors" | "automations" | "insights" | "activity" | "users" | "settings" | "console";
+export type Route = "dashboard" | "rooms" | "floorplan" | "sockets" | "music" | "groups" | "scenes" | "schedules" | "sensors" | "automations" | "insights" | "activity" | "users" | "settings" | "console";
+
+// ---- Sonos (local UPnP control) ----
+
+export interface SonosSpeaker {
+  id: string;
+  name: string;
+  ip: string;
+  uuid: string;
+  room?: string;
+  model?: string;
+}
+
+export interface SonosTrack {
+  title?: string;
+  artist?: string;
+  album?: string;
+  /** Absolute URL or an /api/sonos/{id}/art proxy path — usable as <img src> directly. */
+  art_uri?: string;
+}
+
+export interface SonosState {
+  transport_state: string; // PLAYING | PAUSED_PLAYBACK | STOPPED | TRANSITIONING
+  playing: boolean;
+  volume: number; // 0-100
+  muted: boolean;
+  track?: SonosTrack;
+  position?: string; // H:MM:SS
+  duration?: string; // H:MM:SS, empty for live streams
+}
+
+/** A registered speaker plus its live state (state omitted when unreachable). */
+export interface SonosSpeakerView extends SonosSpeaker {
+  reachable: boolean;
+  state?: SonosState;
+}
+
+/** One live zone group, expressed in registered speaker ids. */
+export interface SonosGroupView {
+  coordinator_id: string;
+  member_ids: string[];
+  /** Zone names grouped on the Sonos side but not registered in HomeHub. */
+  unregistered?: string[];
+}
+
+export interface SonosStatus {
+  speakers: SonosSpeakerView[];
+  groups: SonosGroupView[];
+}
+
+/** A discovered (not necessarily registered) speaker on the LAN. */
+export interface SonosCandidate {
+  ip: string;
+  uuid: string;
+  room: string;
+  model: string;
+  registered: boolean;
+}
+
+/** One "My Sonos" favorite. uri/metadata round-trip to the play endpoint untouched. */
+export interface SonosFavorite {
+  id: string;
+  title: string;
+  art_uri?: string;
+  uri: string;
+  metadata?: string;
+  service?: string;
+}
 
 // ---- Assistant (local LLM) ----
 

@@ -22,6 +22,7 @@ import (
 	"homehub/internal/matter"
 	"homehub/internal/mqtt"
 	"homehub/internal/push"
+	"homehub/internal/sonos"
 	"homehub/internal/store"
 )
 
@@ -216,6 +217,25 @@ func (s *Server) Handler() http.Handler {
 	api.HandleFunc("/tasmota/probe", s.requireAdmin(s.tasmotaProbe)).Methods("GET")
 	api.HandleFunc("/tasmota/{socketId}", s.tasmotaGetState).Methods("GET")
 	api.HandleFunc("/tasmota/{socketId}/state", s.tasmotaSetState).Methods("PUT")
+
+	// Sonos speakers: local UPnP control (playback, volume, grouping,
+	// favorites). Admin-gated like the other whole-home surfaces.
+	api.HandleFunc("/sonos/status", s.requireAdmin(s.sonosStatus)).Methods("GET")
+	api.HandleFunc("/sonos/discover", s.requireAdmin(s.sonosDiscover)).Methods("GET")
+	api.HandleFunc("/sonos/speakers", s.requireAdmin(s.sonosCreateSpeaker)).Methods("POST")
+	api.HandleFunc("/sonos/speakers/{id}", s.requireAdmin(s.sonosUpdateSpeaker)).Methods("PUT")
+	api.HandleFunc("/sonos/speakers/{id}", s.requireAdmin(s.sonosDeleteSpeaker)).Methods("DELETE")
+	api.HandleFunc("/sonos/{id}/play", s.requireAdmin(s.sonosTransport(sonos.Play))).Methods("POST")
+	api.HandleFunc("/sonos/{id}/pause", s.requireAdmin(s.sonosTransport(sonos.Pause))).Methods("POST")
+	api.HandleFunc("/sonos/{id}/next", s.requireAdmin(s.sonosTransport(sonos.Next))).Methods("POST")
+	api.HandleFunc("/sonos/{id}/previous", s.requireAdmin(s.sonosTransport(sonos.Previous))).Methods("POST")
+	api.HandleFunc("/sonos/{id}/leave", s.requireAdmin(s.sonosTransport(sonos.Leave))).Methods("POST")
+	api.HandleFunc("/sonos/{id}/join", s.requireAdmin(s.sonosJoin)).Methods("POST")
+	api.HandleFunc("/sonos/{id}/volume", s.requireAdmin(s.sonosSetVolume)).Methods("PUT")
+	api.HandleFunc("/sonos/{id}/mute", s.requireAdmin(s.sonosSetMute)).Methods("PUT")
+	api.HandleFunc("/sonos/{id}/favorites", s.requireAdmin(s.sonosFavorites)).Methods("GET")
+	api.HandleFunc("/sonos/{id}/favorites/play", s.requireAdmin(s.sonosPlayFavorite)).Methods("POST")
+	api.HandleFunc("/sonos/{id}/art", s.requireAdmin(s.sonosArt)).Methods("GET")
 
 	api.HandleFunc("/matter/transport", s.requireAdmin(s.matterTransport)).Methods("GET")
 	api.HandleFunc("/matter/devices", s.requireAdmin(s.matterListDevices)).Methods("GET")
