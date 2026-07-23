@@ -87,7 +87,15 @@ export async function startController(): Promise<MatterController> {
     const commissioning = new CommissioningController({
         autoConnect: false,             // we connect lazily on first use
         adminFabricLabel: "homehub",
-        environment: { environment: Environment.default, id: "homehub" },
+        // The environment id is the storage namespace key under which
+        // matter.js persists the fabric and the commissioned-node registry
+        // inside MATTER_BRIDGE_DATA. It MUST stay "rf-socket-controller":
+        // every existing device was commissioned under that namespace, and
+        // changing it (e.g. during the HomeHub rename) makes the controller
+        // boot into an empty namespace and report every device as
+        // "not commissioned". This is an on-disk storage key, not a
+        // user-facing name, so it intentionally keeps the original value.
+        environment: { environment: Environment.default, id: "rf-socket-controller" },
     });
     await matterServer.addCommissioningController(commissioning);
     await matterServer.start();
