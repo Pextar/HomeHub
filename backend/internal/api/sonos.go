@@ -429,6 +429,82 @@ func (s *Server) sonosPlayFavorite(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// sonosPlayItem handles POST /api/sonos/{id}/play-item — plays a streaming-
+// service item (currently Spotify) on the group led by speaker {id}. The
+// body carries the canonical service URI from search/browse results:
+// {"service": "Spotify", "uri": "spotify:track:…", "title": "…"}.
+// The speaker streams with the household's linked account; sid/sn are
+// resolved from the speaker and cached per address.
+func (s *Server) sonosPlayItem(w http.ResponseWriter, r *http.Request) {
+	sp, ok := s.sonosSpeaker(w, r)
+	if !ok {
+		return
+	}
+	var body struct {
+		Service string `json:"service"`
+		URI     string `json:"uri"`
+		Title   string `json:"title"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+	if body.Service == "" {
+		body.Service = "Spotify"
+	}
+	if !strings.EqualFold(body.Service, "Spotify") {
+		writeError(w, http.StatusBadRequest, "only Spotify items are supported so far")
+		return
+	}
+
+	// Item playback is several SOAP round-trips (+ account resolution on
+	// the first play); give it more room than a single call.
+	ctx, cancel := context.WithTimeout(r.Context(), 3*sonos.DefaultTimeout)
+	defer cancel()
+
+	acct, err := s.sonosServiceAccount(ctx, sp.IP, body.Service)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	uri, meta, err := sonos.SpotifyItem(body.URI, body.Title, acct)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := sonos.PlayServiceItem(ctx, sp.IP, sp.UUID, uri, meta); err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// sonosServiceAccount resolves (and caches) a speaker's account for a
+// streaming service. The sid/sn pair only changes when the household's
+// service links change, so an hour of caching keeps play taps at four SOAP
+// calls instead of six.
+func (s *Server) sonosServiceAccount(ctx context.Context, ip, service string) (*sonos.ServiceAccount, error) {
+	key := ip + "|" + strings.ToLower(service)
+	s.sonosAcctMu.Lock()
+	if s.sonosAccts == nil {
+		s.sonosAccts = make(map[string]sonosAcctEntry)
+	}
+	if e, ok := s.sonosAccts[key]; ok && time.Since(e.at) < time.Hour {
+		s.sonosAcctMu.Unlock()
+		return e.acct, nil
+	}
+	s.sonosAcctMu.Unlock()
+
+	acct, err := sonos.GetServiceAccount(ctx, ip, service)
+	if err != nil {
+		return nil, err
+	}
+	s.sonosAcctMu.Lock()
+	s.sonosAccts[key] = sonosAcctEntry{acct: acct, at: time.Now()}
+	s.sonosAcctMu.Unlock()
+	return acct, nil
+}
+
 // sonosArtURL rewrites a speaker-relative album-art path into our proxy
 // endpoint (the app may be served over HTTPS, where a plain-http image from
 // the speaker would be blocked as mixed content). Absolute URLs — typically

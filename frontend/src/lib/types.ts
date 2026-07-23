@@ -378,6 +378,31 @@ export interface SonosFavorite {
   service?: string;
 }
 
+// ---- Spotify search (plays back through the speakers' linked account) ----
+
+export interface SpotifyStatus {
+  configured: boolean; // client ID set
+  connected: boolean;  // OAuth completed
+  display_name?: string;
+  /** Exact redirect URI to register in the Spotify developer dashboard. */
+  redirect_uri: string;
+}
+
+export interface SpotifyItem {
+  kind: "track" | "album" | "playlist";
+  /** Canonical Spotify URI (spotify:track:…) — what the play endpoint takes. */
+  uri: string;
+  name: string;
+  sub?: string;     // artist / owner line
+  art_url?: string; // https CDN image
+}
+
+export interface SpotifyResults {
+  tracks: SpotifyItem[];
+  albums: SpotifyItem[];
+  playlists: SpotifyItem[];
+}
+
 // ---- Assistant (local LLM) ----
 
 export interface AssistantStatus {

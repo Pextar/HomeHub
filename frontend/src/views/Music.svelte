@@ -5,12 +5,15 @@
     import Icon from "../components/Icon.svelte";
     import SonosSpeakerModal from "../modals/SonosSpeakerModal.svelte";
     import { api } from "../lib/api";
-    import { toasts } from "../lib/stores.svelte";
+    import { toasts, route } from "../lib/stores.svelte";
     import { openModal } from "../lib/modal.svelte";
     import { fly } from "svelte/transition";
     import { cubicOut } from "svelte/easing";
     import { dur } from "../lib/motion";
-    import type { SonosStatus, SonosSpeakerView, SonosGroupView, SonosFavorite } from "../lib/types";
+    import type {
+        SonosStatus, SonosSpeakerView, SonosGroupView, SonosFavorite,
+        SpotifyStatus, SpotifyItem, SpotifyResults,
+    } from "../lib/types";
 
     let status = $state<SonosStatus | null>(null);
     let loaded = $state(false);
@@ -171,6 +174,117 @@
     function playFavorite(f: SonosFavorite) {
         if (!favTarget) return;
         void run("fav:" + f.id, () => api.sonosPlayFavorite(favTarget!, f), "Couldn't play favorite");
+    }
+
+    // ── Spotify search ───────────────────────────────────────────────────
+    let spotify = $state<SpotifyStatus | null>(null);
+    let spotifySetup = $state(false); // client-ID form expanded
+    let clientId = $state("");
+    let spotifySaving = $state(false);
+    let query = $state("");
+    let searching = $state(false);
+    let results = $state<SpotifyResults | null>(null);
+    let kindFilter = $state<"tracks" | "albums" | "playlists">("tracks");
+    let myPlaylists = $state<SpotifyItem[]>([]);
+    let myPlaylistsLoaded = false;
+
+    async function loadSpotify() {
+        try {
+            spotify = await api.spotifyStatus();
+            if (spotify.connected && !myPlaylistsLoaded) {
+                myPlaylistsLoaded = true;
+                myPlaylists = await api.spotifyMyPlaylists().catch(() => []);
+            }
+        } catch {
+            spotify = null; // integration unavailable — hide the card
+        }
+    }
+
+    // The OAuth callback bounces back to /#/music?spotify=… — surface the
+    // outcome once, then clean the query off the URL.
+    onMount(() => {
+        const q = route.query;
+        if (q.spotify === "connected") {
+            toasts.success("Spotify connected");
+            route.go("music");
+        } else if (q.spotify_error) {
+            toasts.error("Spotify login failed", q.spotify_error);
+            route.go("music");
+        }
+        void loadSpotify();
+    });
+
+    async function saveClientId() {
+        if (spotifySaving || !clientId.trim()) return;
+        spotifySaving = true;
+        try {
+            await api.spotifySetConfig(clientId.trim());
+            spotifySetup = false;
+            await loadSpotify();
+            toasts.success("Client ID saved", "Now connect your Spotify account.");
+        } catch (e) {
+            toasts.error("Save failed", (e as Error).message);
+        } finally {
+            spotifySaving = false;
+        }
+    }
+
+    async function connectSpotify() {
+        try {
+            const { url } = await api.spotifyLoginURL();
+            window.location.href = url; // Spotify consent page; bounces back here
+        } catch (e) {
+            toasts.error("Couldn't start Spotify login", (e as Error).message);
+        }
+    }
+
+    async function disconnectSpotify() {
+        try {
+            await api.spotifyDisconnect();
+            results = null;
+            query = "";
+            myPlaylists = [];
+            myPlaylistsLoaded = false;
+            await loadSpotify();
+        } catch (e) {
+            toasts.error("Disconnect failed", (e as Error).message);
+        }
+    }
+
+    let searchTimer: ReturnType<typeof setTimeout> | undefined;
+    let searchSeq = 0;
+    function onQueryInput() {
+        clearTimeout(searchTimer);
+        searchTimer = setTimeout(doSearch, 400);
+    }
+    async function doSearch() {
+        const q = query.trim();
+        const seq = ++searchSeq;
+        if (!q) { results = null; searching = false; return; }
+        searching = true;
+        try {
+            const r = await api.spotifySearch(q, 8);
+            if (seq !== searchSeq) return;
+            results = r;
+        } catch (e) {
+            if (seq !== searchSeq) return;
+            toasts.error("Search failed", (e as Error).message);
+        } finally {
+            if (seq === searchSeq) searching = false;
+        }
+    }
+
+    const shownItems = $derived<SpotifyItem[]>(
+        results ? results[kindFilter] : myPlaylists,
+    );
+
+    function playItem(item: SpotifyItem) {
+        if (!favTarget) return;
+        void run(
+            "item:" + item.uri,
+            () => api.sonosPlayItem(favTarget!, { service: "Spotify", uri: item.uri, title: item.name }),
+            "Couldn't play",
+        );
     }
 
     async function openSpeakerModal(sp?: SonosSpeakerView) {
@@ -335,6 +449,105 @@
             </section>
         {/each}
     </div>
+
+    {#if spotify}
+        <section class="card">
+            {#if !spotify.configured || spotifySetup}
+                <div class="card-header"><h2>Spotify search</h2></div>
+                <p class="sp-help">
+                    Search Spotify's catalog and play straight to your speakers.
+                    Create a free app at
+                    <span class="mono">developer.spotify.com/dashboard</span>, add the
+                    redirect URI below to it, then paste its Client ID here.
+                    Playback uses the Spotify account already linked to your Sonos.
+                </p>
+                <div class="sp-redirect">
+                    <span class="sp-redirect-label">Redirect URI</span>
+                    <code class="mono">{spotify.redirect_uri}</code>
+                </div>
+                <form class="sp-config" onsubmit={(e) => { e.preventDefault(); saveClientId(); }}>
+                    <input type="text" class="mono" placeholder="Client ID"
+                        aria-label="Spotify client ID" bind:value={clientId} />
+                    <button type="submit" class="btn btn-primary" disabled={spotifySaving || !clientId.trim()}>
+                        {spotifySaving ? "Saving…" : "Save"}
+                    </button>
+                    {#if spotifySetup}
+                        <button type="button" class="btn btn-ghost" onclick={() => (spotifySetup = false)}>Cancel</button>
+                    {/if}
+                </form>
+            {:else if !spotify.connected}
+                <div class="card-header"><h2>Spotify search</h2></div>
+                <p class="sp-help">
+                    Client ID saved. Connect your Spotify account to enable search —
+                    you'll approve access once on Spotify's own page.
+                </p>
+                <div class="sp-actions">
+                    <button class="btn btn-primary" onclick={connectSpotify}>Connect Spotify</button>
+                    <button class="btn btn-ghost" onclick={() => { clientId = ""; spotifySetup = true; }}>
+                        Change client ID
+                    </button>
+                </div>
+            {:else}
+                <div class="card-header sp-head">
+                    <h2>Search</h2>
+                    <div class="sp-account">
+                        <span class="sp-user mono">{spotify.display_name || "Spotify"}</span>
+                        <button class="chip" onclick={disconnectSpotify}>Disconnect</button>
+                    </div>
+                </div>
+                <input
+                    type="search"
+                    class="sp-input"
+                    placeholder="Search songs, albums, playlists…"
+                    aria-label="Search Spotify"
+                    bind:value={query}
+                    oninput={onQueryInput}
+                />
+                <div class="sp-filters">
+                    {#if results}
+                        <button class="chip" class:active={kindFilter === "tracks"} onclick={() => (kindFilter = "tracks")}>Songs</button>
+                        <button class="chip" class:active={kindFilter === "albums"} onclick={() => (kindFilter = "albums")}>Albums</button>
+                        <button class="chip" class:active={kindFilter === "playlists"} onclick={() => (kindFilter = "playlists")}>Playlists</button>
+                    {:else if myPlaylists.length > 0}
+                        <span class="sp-browse-label">Your playlists</span>
+                    {/if}
+                    {#if groups.length > 1}
+                        <div class="fav-targets sp-targets" role="radiogroup" aria-label="Play on">
+                            {#each groups as g (g.coordinator_id)}
+                                <button class="chip" class:on={favTarget === g.coordinator_id}
+                                    onclick={() => (favTarget = g.coordinator_id)}>
+                                    {groupTitle(g)}
+                                </button>
+                            {/each}
+                        </div>
+                    {/if}
+                </div>
+                {#if searching}
+                    <div class="skeleton sp-skeleton"></div>
+                {:else if results && shownItems.length === 0}
+                    <div class="sp-none">No {kindFilter} matched "{query.trim()}".</div>
+                {:else}
+                    <div class="sp-results">
+                        {#each shownItems as item (item.uri)}
+                            <button class="sp-row" disabled={busy["item:" + item.uri] || !favTarget}
+                                onclick={() => playItem(item)}>
+                                {#if item.art_url}
+                                    <img class="sp-art" src={item.art_url} alt="" loading="lazy" />
+                                {:else}
+                                    <div class="sp-art placeholder">[ art ]</div>
+                                {/if}
+                                <span class="sp-meta">
+                                    <span class="sp-name">{item.name}</span>
+                                    {#if item.sub}<span class="sp-sub">{item.sub}</span>{/if}
+                                </span>
+                                <span class="sp-play"><Icon name="play" size={16} /></span>
+                            </button>
+                        {/each}
+                    </div>
+                {/if}
+            {/if}
+        </section>
+    {/if}
 
     {#if offline.length > 0}
         <section class="card">
@@ -546,6 +759,86 @@
     }
     .fav-sub { font-size: 10px; color: var(--text-dim); letter-spacing: 0.04em; }
 
+    /* ── Spotify search ── */
+    .sp-help { font-size: 12.5px; color: var(--text-mute); line-height: 1.5; }
+    .sp-redirect {
+        display: flex; flex-direction: column; gap: 4px;
+        background: var(--card-2);
+        border: 1px solid var(--hairline);
+        border-radius: var(--r-md);
+        padding: var(--space-3);
+    }
+    .sp-redirect-label {
+        font-family: var(--font-mono);
+        font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase;
+        color: var(--text-dim);
+    }
+    .sp-redirect code {
+        font-size: 12px; color: var(--text);
+        word-break: break-all; user-select: all;
+    }
+    .sp-config { display: flex; gap: var(--space-2); align-items: center; }
+    .sp-config input { flex: 1; min-width: 0; }
+    .sp-actions { display: flex; gap: var(--space-2); }
+
+    .sp-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
+    .sp-account { display: flex; align-items: center; gap: var(--space-2); }
+    .sp-user { font-size: 11px; color: var(--text-mute); }
+
+    .sp-filters {
+        display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap;
+    }
+    .sp-browse-label {
+        font-family: var(--font-mono);
+        font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase;
+        color: var(--text-dim);
+    }
+    .sp-targets { margin-left: auto; }
+    .sp-skeleton { height: 120px; border-radius: var(--r-md); }
+    .sp-none { font-size: 12.5px; color: var(--text-mute); }
+
+    .sp-results { display: flex; flex-direction: column; gap: 2px; }
+    .sp-row {
+        display: flex; align-items: center; gap: var(--space-3);
+        min-height: 52px;
+        padding: 6px var(--space-2);
+        background: transparent;
+        border: 0; border-radius: var(--r-md);
+        color: var(--text);
+        cursor: pointer; text-align: left; font: inherit;
+        transition: background 150ms ease;
+    }
+    .sp-row:hover:not(:disabled) { background: var(--card-2); }
+    .sp-row:active:not(:disabled) { background: var(--card-3); }
+    .sp-row:disabled { opacity: 0.5; cursor: default; }
+    .sp-art {
+        width: 40px; height: 40px;
+        border-radius: var(--r-sm);
+        object-fit: cover;
+        background: var(--card-2);
+        border: 1px solid var(--hairline);
+        flex-shrink: 0;
+    }
+    div.sp-art { font-size: 8px; }
+    .sp-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+    .sp-name {
+        font-size: 13.5px; font-weight: 500;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .sp-sub {
+        font-size: 11.5px; color: var(--text-mute);
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .sp-play {
+        width: 36px; height: 36px;
+        display: grid; place-items: center;
+        border-radius: 50%;
+        color: var(--text-mute);
+        flex-shrink: 0;
+        transition: color 150ms ease, background 150ms ease;
+    }
+    .sp-row:hover .sp-play { background: var(--on-soft); color: var(--on); }
+
     /* Touch: sliders and hit areas grow to the 44px floor. */
     @media (pointer: coarse) {
         .t-btn { width: 44px; height: 44px; }
@@ -555,6 +848,8 @@
         input[type="range"]::-webkit-slider-thumb { width: 26px; height: 26px; }
         input[type="range"]::-moz-range-thumb { width: 26px; height: 26px; }
         .member .m-name { width: 90px; }
+        .sp-play { width: 44px; height: 44px; }
+        .sp-input { font-size: 16px; } /* prevents iOS auto-zoom */
     }
 
     @media (max-width: 600px) {

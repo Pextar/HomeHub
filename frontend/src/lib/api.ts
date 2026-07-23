@@ -33,6 +33,9 @@ import type {
   SonosSpeaker,
   SonosCandidate,
   SonosFavorite,
+  SpotifyStatus,
+  SpotifyItem,
+  SpotifyResults,
 } from "./types";
 
 const BASE = "/api";
@@ -295,6 +298,23 @@ export const api = {
   sonosPlayFavorite(id: string, fav: SonosFavorite) {
     return req<void>(`/sonos/${encodeURIComponent(id)}/favorites/play`, { method: "POST", body: json(fav) });
   },
+  // Plays a streaming-service item (from Spotify search) on the group led
+  // by speaker {id}; the speaker streams with its own linked account.
+  sonosPlayItem(id: string, body: { service: string; uri: string; title: string }) {
+    return req<void>(`/sonos/${encodeURIComponent(id)}/play-item`, { method: "POST", body: json(body) });
+  },
+
+  // Spotify search/browse (user's own account via PKCE — configured in the Music view)
+  spotifyStatus() { return req<SpotifyStatus>("/spotify/status"); },
+  spotifySetConfig(clientId: string) {
+    return req<void>("/spotify/config", { method: "PUT", body: json({ client_id: clientId }) });
+  },
+  spotifyLoginURL() { return req<{ url: string }>("/spotify/login"); },
+  spotifyDisconnect() { return req<void>("/spotify/disconnect", { method: "POST" }); },
+  spotifySearch(q: string, limit = 8) {
+    return req<SpotifyResults>(`/spotify/search?q=${encodeURIComponent(q)}&limit=${limit}`);
+  },
+  spotifyMyPlaylists() { return req<SpotifyItem[]>("/spotify/playlists"); },
 
   // Push notifications
   getPushVapidKey() {

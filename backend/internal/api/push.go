@@ -48,8 +48,8 @@ func (s *Server) subscribePush(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body struct {
-		Endpoint string          `json:"endpoint"`
-		Keys     push.SubKeys    `json:"keys"`
+		Endpoint string       `json:"endpoint"`
+		Keys     push.SubKeys `json:"keys"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())

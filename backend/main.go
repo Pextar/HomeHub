@@ -26,6 +26,7 @@ import (
 	"homehub/internal/rx"
 	"homehub/internal/scheduler"
 	"homehub/internal/sender"
+	"homehub/internal/spotify"
 	"homehub/internal/store"
 	"homehub/internal/tasmota"
 )
@@ -198,12 +199,20 @@ func main() {
 	}
 	log.Printf("Web Push notifications enabled (VAPID public key: %s...)", vapidKeys.PublicKey[:min(12, len(vapidKeys.PublicKey))])
 
+	// Spotify search for the Music view. Configuration (client ID + OAuth)
+	// happens in the UI; tokens live in data/spotify.json.
+	spotifyClient, err := spotify.New(dataDir)
+	if err != nil {
+		log.Fatalf("failed to load spotify state: %v", err)
+	}
+
 	server := &api.Server{
 		Store:         st,
 		Matter:        matterClient,
 		MQTT:          mqttClient,
 		LLM:           llmClient,
 		Push:          pushSvc,
+		Spotify:       spotifyClient,
 		AuthUser:      os.Getenv("AUTH_USER"),
 		AuthPass:      os.Getenv("AUTH_PASS"),
 		SessionSecret: secret,
