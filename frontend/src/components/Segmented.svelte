@@ -9,8 +9,20 @@
         value: string;
         options: Option[];
         onChange?: (value: string) => void;
+        /** Stretch to fill the container, each option taking an equal share. */
+        full?: boolean;
+        /** Amber active pill instead of the neutral raised one. Used where the
+            control is the primary way through a view (Music's subnav). */
+        accent?: boolean;
     }
-    let { name, value = $bindable(), options, onChange }: Props = $props();
+    let {
+        name,
+        value = $bindable(),
+        options,
+        onChange,
+        full = false,
+        accent = false,
+    }: Props = $props();
 
     function pick(v: string) {
         value = v;
@@ -18,7 +30,7 @@
     }
 </script>
 
-<div class="segmented" role="radiogroup">
+<div class="segmented" class:full class:accent role="radiogroup">
     {#each options as opt (opt.value)}
         <input
             type="radio"
@@ -76,6 +88,16 @@
         box-shadow: var(--focus-ring);
     }
     .segmented label.disabled { opacity: 0.4; cursor: not-allowed; }
+
+    /* Variants */
+    .segmented.full { display: flex; width: 100%; }
+    .segmented.full label { flex: 1; }
+    .segmented.accent input:checked + label {
+        background: var(--on);
+        color: var(--primary-fg);
+        box-shadow: none;
+        font-weight: 600;
+    }
     /* Touch: taller labels that meet the 44px target */
     @media (pointer: coarse) {
         .segmented { padding: 4px; }
