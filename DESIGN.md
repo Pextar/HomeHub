@@ -29,7 +29,10 @@ over decoration.
   ever.
 - **No pure black.** The deepest surface is `#0a0907` (Console only). App
   background is `#14130f`.
-- **No tabs inside views.** Use chip filters.
+- **No tabs inside views.** Use chip filters. *One sanctioned exception:*
+  the Music subnav (§15) — a pill segmented control switching between a
+  module's own screens. It is nav, not filtering, and it never reshapes the
+  global tab bar. Don't generalise it to other views without design review.
 - **No drawers from the side.** Use bottom sheets.
 - **No spinners.** Use the existing skeleton primitive.
 - **No icon-only button under 44×44** hit area.
@@ -211,6 +214,28 @@ For missing imagery / not-yet-built widgets:
 
 Caption format: `[ what goes here ]`, e.g. `[ floor plan SVG ]`.
 
+### 6.8 Waveform — the "playing" motif (Music only)
+
+A four-bar animated equaliser that marks anything **actually playing** in the
+Music module. It replaces the plain status dot (§6.6) *only there* — a dot
+says "on", a waveform says "audio is moving". Bars use `--on`, animate on a
+staggered 950ms loop, and collapse to a static 8px height under reduced
+motion. Nowhere outside Music.
+
+```css
+.wave { display: flex; align-items: flex-end; gap: 2.5px; height: 13px; }
+.wave i {
+  width: 2.5px; border-radius: 1px; background: var(--on); height: 4px;
+  animation: wv 950ms ease-in-out infinite;
+}
+.wave i:nth-child(1) { animation-delay: 0s; }
+.wave i:nth-child(2) { animation-delay: 0.15s; }
+.wave i:nth-child(3) { animation-delay: 0.3s; }
+.wave i:nth-child(4) { animation-delay: 0.1s; }
+@keyframes wv { 0%, 100% { height: 3px; } 50% { height: 13px; } }
+@media (prefers-reduced-motion: reduce) { .wave i { animation: none; height: 8px; } }
+```
+
 ---
 
 ## 7. Shells
@@ -329,7 +354,9 @@ Is it a list of things?
 
 ## 12. Anti-patterns — reject these on sight
 
-- Tabs nested inside a view → use chip filters
+- Tabs nested inside a view → use chip filters (except Music's subnav, §15)
+- A module that reshapes the global tab bar to its own destinations → the
+  app-level nav is fixed; put module screens in a subnav instead
 - Side drawer → use sheet
 - Spinner → use skeleton
 - Brand gradient (purple/blue/teal) → warm-only palette
@@ -386,7 +413,66 @@ When adding a brand-new view, place it in `views/`, register the route in
 
 ---
 
-## 15. When in doubt
+## 15. Music module (Sonos + Spotify)
+
+The Music view (`views/Music.svelte`) is the one place with a live-audio
+character. It reuses the shared primitives but layers a few module-specific
+patterns on top. Keep these consistent if you extend it.
+
+- **Music stays amber.** Music is a peer view in the nav, not a separate
+  app, so it uses the same incandescent accent as everything else. A
+  module-specific accent was tried and rejected: recolouring one top-level
+  view invites every other view to claim its own hue, and the waveform
+  already does the differentiating work. **Don't reintroduce a Music-only
+  palette.**
+- **Playing surface.** A group card, room puck, or the mini-player that is
+  playing uses the sanctioned `.tile.on` warm gradient
+  (`var(--tile-on-gradient)` + `var(--tile-on-border)`) — the same "ON" look
+  as a lit device. No separate music gradient exists or should be invented.
+- **Waveform, not dot.** Anything playing shows the §6.8 waveform where a
+  status dot would otherwise sit — in group cards, room pucks, and the
+  mini-player. Idle uses the `speaker` icon. This animated motif, not
+  colour, is what marks Music as its own module.
+- **Three screens behind a subnav.** Music has its own Home / Rooms /
+  Search screens, switched by a sticky pill segmented control at the top of
+  the view (`<Segmented full accent>`, `position: sticky`). This is the §2
+  exception. Two rules make it work:
+  - **The global tab bar never changes shape.** Music is one destination
+    among the app's nav entries; entering it must not swap the app-level
+    bar for module-specific tabs. The subnav lives *inside* the view,
+    above the fold — never stacked on the tab bar.
+  - **Subnav is navigation, not filtering.** Kind filters inside Search
+    (Songs / Albums / Playlists) remain chip filters, per §2.
+
+  Screen contents: **Home** = Playing now + Favorites + room chips
+  (each opens that room's player; "Manage" jumps to Rooms). **Rooms** =
+  the grouping puck grid + unreachable speakers. **Search** = Spotify.
+  The mini-player and the full-player sheet persist across all three.
+- **Docked mini-player.** When something is playing, a compact bar sticks to
+  the bottom of the view (`position: sticky`, cleared above the mobile tab
+  bar and safe area): art, track, waveform, play/pause. Tapping it — or any
+  "Playing now" card — expands the **full player**.
+- **Full player = bottom sheet.** A bottom sheet on mobile (`--r-xl` top
+  radius, `transition:sheet`, scrim, body-scroll-lock), a centered dialog
+  ≥ 601px. Holds big art, a **display-only** progress rail, transport
+  (prev / play / next), group + per-speaker volume, and join/leave.
+  Rendered inline (not the modal stack) so it stays live against the 5s poll.
+  It carries the full §5 dismiss kit — **grabber, collapse chevron, close X,
+  Escape, and backdrop click** — because it is the only surface in the app
+  that covers the nav; a user must never feel stuck in it.
+- **Rooms grouping is a puck grid, not a list.** Each reachable speaker is a
+  tap-to-select puck (amber ring + filled check when selected). Selecting 2+
+  raises a floating "Group" bar. Existing multi-speaker zones sit inside a
+  dashed enclosure (`--tile-on-border`) with an "Ungroup" affordance.
+- **Stay honest about the backend.** The local Sonos bridge exposes
+  transport, volume, mute, join/leave, favorites — but **no seek, queue, or
+  shuffle/repeat state**. So the scrubber is read-only and there is no
+  up-next list or shuffle/repeat control. Don't add UI for capabilities the
+  bridge can't back; wire the endpoint first.
+
+---
+
+## 16. When in doubt
 
 1. Open `index.html` in the design project — it's the source of truth.
 2. Pick the nearest existing screen and copy its skeleton.
