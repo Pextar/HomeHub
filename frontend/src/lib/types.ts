@@ -338,12 +338,40 @@ export interface SonosState {
   track?: SonosTrack;
   position?: string; // H:MM:SS
   duration?: string; // H:MM:SS, empty for live streams
+  /** 1-based position in the group queue; absent on radio / line-in. */
+  queue_track?: number;
+}
+
+export type SonosRepeat = "off" | "all" | "one";
+
+/**
+ * Playback settings that belong to a zone group rather than to one speaker.
+ * Only present on a coordinator's view — followers never carry it.
+ */
+export interface SonosGroupState {
+  shuffle: boolean;
+  repeat: SonosRepeat;
+  crossfade: boolean;
+  queue_length: number;
+  /** True when the group is playing from its queue rather than a stream. */
+  from_queue: boolean;
+}
+
+/** One track in a group queue. */
+export interface SonosQueueItem {
+  track: number; // 1-based
+  title?: string;
+  artist?: string;
+  album?: string;
+  art_uri?: string;
+  duration?: string; // H:MM:SS
 }
 
 /** A registered speaker plus its live state (state omitted when unreachable). */
 export interface SonosSpeakerView extends SonosSpeaker {
   reachable: boolean;
   state?: SonosState;
+  group_state?: SonosGroupState;
 }
 
 /** One live zone group, expressed in registered speaker ids. */

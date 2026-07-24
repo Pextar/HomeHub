@@ -33,6 +33,8 @@ import type {
   SonosSpeaker,
   SonosCandidate,
   SonosFavorite,
+  SonosQueueItem,
+  SonosRepeat,
   SpotifyStatus,
   SpotifyItem,
   SpotifyResults,
@@ -298,6 +300,42 @@ export const api = {
   sonosPlayFavorite(id: string, fav: SonosFavorite) {
     return req<void>(`/sonos/${encodeURIComponent(id)}/favorites/play`, { method: "POST", body: json(fav) });
   },
+  // Transport extras — all group-level, so {id} must be the coordinator.
+  sonosSeek(id: string, position: string) {
+    return req<void>(`/sonos/${encodeURIComponent(id)}/seek`, { method: "PUT", body: json({ position }) });
+  },
+  // Jumps to a 1-based queue position, switching the group back to its
+  // queue first if it was parked on a stream.
+  sonosSeekTrack(id: string, track: number) {
+    return req<void>(`/sonos/${encodeURIComponent(id)}/seek`, { method: "PUT", body: json({ track }) });
+  },
+  // Shuffle and repeat go together: Sonos stores them as one value.
+  sonosSetPlayMode(id: string, shuffle: boolean, repeat: SonosRepeat) {
+    return req<void>(`/sonos/${encodeURIComponent(id)}/playmode`, { method: "PUT", body: json({ shuffle, repeat }) });
+  },
+  sonosSetCrossfade(id: string, enabled: boolean) {
+    return req<void>(`/sonos/${encodeURIComponent(id)}/crossfade`, { method: "PUT", body: json({ enabled }) });
+  },
+
+  // Group queue. Adding never disturbs what is playing — pass next: true to
+  // drop the item in after the current track instead of at the end.
+  sonosQueue(id: string) { return req<SonosQueueItem[]>(`/sonos/${encodeURIComponent(id)}/queue`); },
+  sonosQueueAdd(
+    id: string,
+    body: { service?: string; uri: string; title?: string; metadata?: string; next?: boolean },
+  ) {
+    return req<{ track: number; length: number }>(`/sonos/${encodeURIComponent(id)}/queue`, {
+      method: "POST",
+      body: json(body),
+    });
+  },
+  sonosQueueRemove(id: string, track: number) {
+    return req<void>(`/sonos/${encodeURIComponent(id)}/queue/${track}`, { method: "DELETE" });
+  },
+  sonosQueueClear(id: string) {
+    return req<void>(`/sonos/${encodeURIComponent(id)}/queue`, { method: "DELETE" });
+  },
+
   // Plays a streaming-service item (from Spotify search) on the group led
   // by speaker {id}; the speaker streams with its own linked account.
   sonosPlayItem(id: string, body: { service: string; uri: string; title: string }) {

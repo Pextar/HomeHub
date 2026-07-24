@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -24,11 +25,15 @@ import (
 // of the other whole-home surfaces.
 
 // sonosSpeakerView is a registered speaker plus its live state. State is
-// nil when the speaker didn't answer within the status timeout.
+// nil when the speaker didn't answer within the status timeout. GroupState
+// is present only on coordinators — shuffle, repeat, crossfade and the queue
+// belong to the group, and asking every follower for them would triple the
+// poll for no new information.
 type sonosSpeakerView struct {
 	store.SonosSpeaker
-	Reachable bool         `json:"reachable"`
-	State     *sonos.State `json:"state,omitempty"`
+	Reachable  bool              `json:"reachable"`
+	State      *sonos.State      `json:"state,omitempty"`
+	GroupState *sonos.GroupState `json:"group_state,omitempty"`
 }
 
 // sonosGroupView is one live zone group mapped onto registered speaker IDs.
@@ -85,9 +90,39 @@ func (s *Server) sonosStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	wg.Wait()
 
+	groups := s.sonosMapGroups(topology, speakers)
+
+	// Second pass: the group-level settings, for coordinators only. This
+	// needs the topology, which only exists once the first pass is done.
+	index := make(map[string]int, len(speakers))
+	for i, sp := range speakers {
+		index[sp.ID] = i
+	}
+	var wg2 sync.WaitGroup
+	for _, g := range groups {
+		i, ok := index[g.CoordinatorID]
+		if !ok || !views[i].Reachable {
+			continue
+		}
+		wg2.Add(1)
+		go func(i int, ip string) {
+			defer wg2.Done()
+			ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+			defer cancel()
+			gs, err := sonos.GetGroupState(ctx, ip)
+			if err != nil {
+				return // leave it absent; the UI hides the controls
+			}
+			mu.Lock()
+			views[i].GroupState = gs
+			mu.Unlock()
+		}(i, speakers[i].IP)
+	}
+	wg2.Wait()
+
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"speakers": views,
-		"groups":   s.sonosMapGroups(topology, speakers),
+		"groups":   groups,
 	})
 }
 
@@ -338,6 +373,212 @@ func (s *Server) sonosSetMute(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), sonos.DefaultTimeout)
 	defer cancel()
 	if err := sonos.SetMute(ctx, sp.IP, body.Muted); err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// sonosSeek handles PUT /api/sonos/{id}/seek. Either {"position":"0:01:23"}
+// to move within the current track, or {"track": 4} to jump to a queue
+// position. A track jump goes through PlayFromQueue so it also works when
+// the group is parked on another source (radio, line-in), where a bare seek
+// would be refused.
+func (s *Server) sonosSeek(w http.ResponseWriter, r *http.Request) {
+	sp, ok := s.sonosSpeaker(w, r)
+	if !ok {
+		return
+	}
+	var body struct {
+		Position string `json:"position"`
+		Track    int    `json:"track"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+	if body.Position == "" && body.Track == 0 {
+		writeError(w, http.StatusBadRequest, "either position or track is required")
+		return
+	}
+
+	// A track jump is three SOAP calls; give it the wider budget.
+	ctx, cancel := context.WithTimeout(r.Context(), 2*sonos.DefaultTimeout)
+	defer cancel()
+	var err error
+	if body.Track > 0 {
+		err = sonos.PlayFromQueue(ctx, sp.IP, sp.UUID, body.Track)
+	} else {
+		err = sonos.Seek(ctx, sp.IP, body.Position)
+	}
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// sonosSetPlayMode handles PUT /api/sonos/{id}/playmode with
+// {"shuffle": bool, "repeat": "off"|"all"|"one"}. Both axes are always sent
+// together because Sonos stores them as one composite value.
+func (s *Server) sonosSetPlayMode(w http.ResponseWriter, r *http.Request) {
+	sp, ok := s.sonosSpeaker(w, r)
+	if !ok {
+		return
+	}
+	var mode sonos.PlayMode
+	if err := json.NewDecoder(r.Body).Decode(&mode); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+	if mode.Repeat == "" {
+		mode.Repeat = sonos.RepeatOff
+	}
+	if !mode.Valid() {
+		writeError(w, http.StatusBadRequest, `repeat must be "off", "all" or "one"`)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), sonos.DefaultTimeout)
+	defer cancel()
+	if err := sonos.SetPlayMode(ctx, sp.IP, mode); err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// sonosSetCrossfade handles PUT /api/sonos/{id}/crossfade with
+// {"enabled": bool}.
+func (s *Server) sonosSetCrossfade(w http.ResponseWriter, r *http.Request) {
+	sp, ok := s.sonosSpeaker(w, r)
+	if !ok {
+		return
+	}
+	var body struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), sonos.DefaultTimeout)
+	defer cancel()
+	if err := sonos.SetCrossfade(ctx, sp.IP, body.Enabled); err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// sonosQueue handles GET /api/sonos/{id}/queue — the group queue of the
+// coordinator {id}, capped at sonos.MaxQueueFetch entries.
+func (s *Server) sonosQueue(w http.ResponseWriter, r *http.Request) {
+	sp, ok := s.sonosSpeaker(w, r)
+	if !ok {
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), sonos.DefaultTimeout)
+	defer cancel()
+	items, err := sonos.ListQueue(ctx, sp.IP)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	for i := range items {
+		items[i].ArtURI = s.sonosArtURL(sp.ID, items[i].ArtURI)
+	}
+	writeJSON(w, http.StatusOK, items)
+}
+
+// sonosQueueAdd handles POST /api/sonos/{id}/queue — enqueue without
+// disturbing what is playing. The body is either a streaming-service item
+// ({"service":"Spotify","uri":"spotify:track:…","title":"…"}) or a favorite's
+// raw uri/metadata pair. With {"next": true} it lands after the current
+// track instead of at the end.
+func (s *Server) sonosQueueAdd(w http.ResponseWriter, r *http.Request) {
+	sp, ok := s.sonosSpeaker(w, r)
+	if !ok {
+		return
+	}
+	var body struct {
+		Service  string `json:"service"`
+		URI      string `json:"uri"`
+		Title    string `json:"title"`
+		Metadata string `json:"metadata"`
+		Next     bool   `json:"next"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+	if strings.TrimSpace(body.URI) == "" {
+		writeError(w, http.StatusBadRequest, "uri is required")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 3*sonos.DefaultTimeout)
+	defer cancel()
+
+	uri, meta := body.URI, body.Metadata
+	// A service item arrives as a canonical service URI and has to be
+	// resolved against the household's linked account first; a favorite
+	// already carries a playable uri/metadata pair, so it passes straight
+	// through.
+	if body.Service != "" {
+		if !strings.EqualFold(body.Service, "Spotify") {
+			writeError(w, http.StatusBadRequest, "only Spotify items are supported so far")
+			return
+		}
+		acct, err := s.sonosServiceAccount(ctx, sp.IP, body.Service)
+		if err != nil {
+			writeError(w, http.StatusBadGateway, err.Error())
+			return
+		}
+		uri, meta, err = sonos.SpotifyItem(body.URI, body.Title, acct)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+
+	added, err := sonos.AddToQueue(ctx, sp.IP, uri, meta, body.Next)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, added)
+}
+
+// sonosQueueRemove handles DELETE /api/sonos/{id}/queue/{track}.
+func (s *Server) sonosQueueRemove(w http.ResponseWriter, r *http.Request) {
+	sp, ok := s.sonosSpeaker(w, r)
+	if !ok {
+		return
+	}
+	track, err := strconv.Atoi(mux.Vars(r)["track"])
+	if err != nil || track < 1 {
+		writeError(w, http.StatusBadRequest, "track must be a positive number")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), sonos.DefaultTimeout)
+	defer cancel()
+	if err := sonos.RemoveFromQueue(ctx, sp.IP, track); err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// sonosQueueClear handles DELETE /api/sonos/{id}/queue — empties the group
+// queue, which also stops playback.
+func (s *Server) sonosQueueClear(w http.ResponseWriter, r *http.Request) {
+	sp, ok := s.sonosSpeaker(w, r)
+	if !ok {
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), sonos.DefaultTimeout)
+	defer cancel()
+	if err := sonos.ClearQueue(ctx, sp.IP); err != nil {
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
