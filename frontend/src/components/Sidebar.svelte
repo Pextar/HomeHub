@@ -109,6 +109,20 @@
   // highlight the "More" tab so the user knows where they are.
   const moreActive = $derived(overflow.some((i) => i.route === route.current));
 
+  // ── Mobile tab dock lens (DESIGN.md §7) ─────────────────────────────
+  // The active slot is marked by a single amber capsule that slides
+  // between slots, so its position is derived from the active index
+  // rather than painted onto the item. Slots are equal-width flex
+  // children, so index maths lands exactly on a slot without measuring:
+  // the dock's inner track is the full width minus its 10px side padding.
+  const slotCount = $derived(primary.length + 1); // + the More button
+  const activeSlot = $derived.by(() => {
+    const i = primary.findIndex((it) => it.route === route.current);
+    if (i >= 0) return i;
+    return moreActive ? primary.length : -1;
+  });
+  const slotWidth = $derived(`calc((100% - 20px) / ${slotCount})`);
+
   // ── Drag-to-dismiss for the More drawer ─────────────────────────────
   // Two entry points:
   //   - The handle row: always drags (touch-action: none).
@@ -261,24 +275,38 @@
   </nav>
 
   <nav class="nav nav-mobile" aria-label="Sections">
-    {#each primary as item (item.route)}
+    <!-- Sliding amber lens behind the active icon. Hidden outright when
+         no slot matches, so a stray route never leaves it parked on the
+         wrong item. -->
+    <i
+      class="tab-lens"
+      class:hidden={activeSlot < 0}
+      aria-hidden="true"
+      style:left={`calc(${Math.max(activeSlot, 0)} * ${slotWidth} + 10px)`}
+      style:width={slotWidth}
+    ></i>
+    {#each primary as item, i (item.route)}
       <a
         href="#/{item.route}"
         class="nav-item"
+        class:lit={activeSlot === i}
+        aria-label={item.label}
         aria-current={route.current === item.route ? "page" : undefined}
       >
-        <span class="nav-icon"><Icon name={item.icon} size={20} /></span>
+        <span class="nav-icon"><Icon name={item.icon} size={22} /></span>
         <span class="nav-label">{item.label}</span>
       </a>
     {/each}
     <button
       class="nav-item more-btn"
+      class:lit={activeSlot === primary.length}
+      aria-label="More"
       aria-haspopup="menu"
       aria-expanded={moreOpen}
       aria-current={moreActive && !moreOpen ? "page" : undefined}
       onclick={() => (moreOpen = !moreOpen)}
     >
-      <span class="nav-icon"><Icon name="more" size={20} /></span>
+      <span class="nav-icon"><Icon name="more" size={22} /></span>
       <span class="nav-label">More</span>
     </button>
   </nav>
@@ -785,9 +813,10 @@
     }
   }
 
-  /* ---------- Mobile bottom nav — warm-dark tab bar ---------- */
-  /* On mobile the sidebar becomes a fixed bottom bar — the desktop
-     collapse feature doesn't apply here. Reset everything. */
+  /* ---------- Mobile bottom nav — floating glass dock ---------- */
+  /* On mobile the sidebar becomes the transparent frame around a
+     detached glass pill (DESIGN.md §7) — the desktop collapse feature
+     doesn't apply here, so reset everything. */
   @media (max-width: 900px) {
     .collapse-btn { display: none; }
     .sidebar {
@@ -803,17 +832,12 @@
       flex-direction: row;
       align-items: stretch;
       border-right: none;
-      /* Use the theme-aware --bg-bar token so this gradient renders correctly
-         in both dark and light modes (the old hardcoded rgba was near-black,
-         which looked broken on the warm cream light background in Safari). */
-      background: linear-gradient(to top, var(--bg) 60%, var(--bg-bar));
-      backdrop-filter: saturate(180%) blur(28px);
-      -webkit-backdrop-filter: saturate(180%) blur(28px);
-      border-top: 1px solid var(--hairline);
-      /* Subtle upward shadow gives the bar depth and separates it from content */
-      box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.07);
-      padding: 8px 14px;
-      padding-bottom: calc(8px + env(safe-area-inset-bottom));
+      background: none;
+      box-shadow: none;
+      /* The frame itself is only a positioner — it must not swallow taps
+         on the content showing either side of the pill. */
+      pointer-events: none;
+      padding: 0 14px var(--tabdock-inset);
       z-index: 100;
       gap: 0;
     }
@@ -826,97 +850,92 @@
     .nav-desktop {
       display: none;
     }
+    /* The dock: warm translucent glass with a specular top edge. */
     .nav-mobile {
+      position: relative;
       display: flex;
       flex: 1;
       flex-direction: row;
-      justify-content: space-around;
       gap: 0;
+      padding: 9px 10px;
+      border-radius: var(--r-pill);
+      background: var(--dock-fill);
+      backdrop-filter: blur(26px) saturate(1.7);
+      -webkit-backdrop-filter: blur(26px) saturate(1.7);
+      border: 1px solid var(--dock-edge);
+      box-shadow: var(--dock-shadow);
+      pointer-events: auto;
     }
     .nav-mobile .nav-item {
       flex: 1;
-      flex-direction: column;
+      /* Above the lens, so the icon reads against the amber. */
+      position: relative;
+      z-index: 1;
       align-items: center;
       justify-content: center;
-      gap: 4px;
-      padding: 6px 10px;
-      border-radius: 0;
-      font-size: 10.5px;
-      font-weight: 500;
-      letter-spacing: 0.02em;
-      text-transform: uppercase;
-      /* --text-mute is more legible than --text-dim at this tiny size,
-         especially on the warm-cream light background */
-      color: var(--text-mute);
-      text-align: center;
+      gap: 0;
+      min-height: 44px;
+      padding: 0;
+      border-radius: var(--r-pill);
+      color: var(--text-dim);
       width: auto;
-      position: relative;
+      transition: color 200ms ease, transform 90ms ease;
     }
     .nav-mobile .nav-item:hover {
       background: transparent;
-      color: var(--text-mute);
+      color: var(--text-dim);
+    }
+    .nav-mobile .nav-item:active {
+      transform: scale(0.97);
+    }
+    .nav-mobile .nav-icon {
+      display: grid;
+      place-items: center;
     }
     .nav-mobile .nav-item :global(svg) {
-      width: 22px;
-      height: 22px;
-      /* Spring easing for the scale pop; ease for the amber glow fade */
-      transition: transform 0.28s var(--spring), filter 0.22s ease;
+      /* The rail tints the active icon amber; here the amber is the lens
+         behind it, so the icon has to follow the item's own colour. */
+      color: inherit;
+      transition: transform 320ms var(--spring);
     }
-    /* Active = amber text color */
-    .nav-mobile .nav-item[aria-current="page"] {
+    /* Active state is the lens behind the icon — the icon itself only
+       flips to the ink-on-amber token and lifts a hair. */
+    .nav-mobile .nav-item.lit {
       background: transparent;
-      color: var(--on);
+      color: var(--primary-fg);
       box-shadow: none;
     }
-    /* Lamp fixture: amber bar at the very top with a two-layer glow —
-       first layer hugs the bar itself, second fans downward onto the icon */
-    .nav-mobile .nav-item[aria-current="page"]::before {
-      content: '';
+    .nav-mobile .nav-item.lit :global(svg) {
+      transform: translateY(-1px) scale(1.08);
+    }
+    /* Icon-only bar: the label stays in the DOM for the desktop rail but
+       is dropped here, so each item carries an aria-label instead. */
+    .nav-mobile .nav-label {
+      display: none;
+    }
+    .tab-lens {
       position: absolute;
-      top: 0;
-      left: 50%;
-      transform: translateX(-50%);
-      width: 28px;
-      height: 3px;
-      border-radius: 0 0 var(--r-pill) var(--r-pill);
+      top: 11px;
+      bottom: 11px;
+      border-radius: var(--r-pill);
       background: var(--on);
       box-shadow:
-        0 0 10px 4px var(--on-glow),
-        0 22px 36px 6px var(--on-glow);
+        0 0 20px 2px var(--on-glow),
+        inset 0 1px 0 rgba(255, 255, 255, 0.45);
+      transition:
+        left 440ms var(--spring),
+        width 440ms var(--spring),
+        opacity 200ms ease;
     }
-    /* Icon bubble — the lit surface beneath the lamp; softer glow
-       so it reads as receiving light rather than emitting it */
-    .nav-mobile .nav-icon {
-      width: 52px;
-      height: 30px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      border-radius: var(--r-pill);
-      transition: background 0.22s ease, box-shadow 0.22s ease;
+    .tab-lens.hidden {
+      opacity: 0;
     }
-    .nav-mobile .nav-item[aria-current="page"] .nav-icon {
-      background: var(--on-soft);
-      box-shadow: 0 0 0 1px var(--on-soft), 0 0 14px 3px var(--on-glow);
-    }
-    .nav-mobile .nav-item[aria-current="page"] :global(svg) {
-      color: var(--on);
-      transform: scale(1.1);
-      filter: drop-shadow(0 0 8px var(--on-glow));
-    }
-    /* Quick dip on press for tactile feedback. */
-    .nav-mobile .nav-item:active :global(svg) {
-      transform: scale(0.9);
-      transition-duration: 90ms;
-    }
-    .nav-mobile .nav-label {
-      line-height: 1;
-      letter-spacing: 0.02em;
-      text-transform: uppercase;
-      /* Reset desktop collapse styles that bleed in via .nav-label */
-      max-width: none !important;
-      opacity: 1 !important;
-      overflow: visible;
+    @media (prefers-reduced-motion: reduce) {
+      .tab-lens,
+      .nav-mobile .nav-item,
+      .nav-mobile .nav-item :global(svg) {
+        transition-duration: 0.001ms;
+      }
     }
   }
 
@@ -944,8 +963,7 @@
     border-top: 1px solid var(--hairline);
     border-top-left-radius: var(--r-xl);
     border-top-right-radius: var(--r-xl);
-    padding: 0 var(--space-4)
-      calc(var(--space-4) + 56px + env(safe-area-inset-bottom));
+    padding: 0 var(--space-4) calc(var(--space-4) + var(--nav-clear));
     display: flex;
     flex-direction: column;
     gap: var(--space-2);

@@ -114,8 +114,8 @@
     .fab {
         position: fixed;
         right: 16px;
-        /* Clear the fixed bottom tab bar (≈60px) + safe area + extra breathing room. */
-        bottom: calc(86px + env(safe-area-inset-bottom));
+        /* Clear the floating tab dock + safe area, with breathing room. */
+        bottom: calc(var(--nav-clear) + var(--space-3));
         width: 56px;
         height: 56px;
         border-radius: var(--r-pill);

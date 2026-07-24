@@ -726,7 +726,7 @@
            bottom nav (main already reserves space for it). */
         .console {
             margin: calc(var(--space-4) * -1) calc(var(--space-4) * -1) 0;
-            min-height: calc(100vh - 60px - var(--space-4) * 2 - env(safe-area-inset-bottom));
+            min-height: calc(100vh - var(--nav-clear) - var(--space-4) * 2);
         }
     }
 

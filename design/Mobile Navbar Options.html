@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="design_doc_mode" content="canvas">
+<title>HomeHub — mobile navbar directions</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet"/>
+<style>
+:root{--font-sans:"Geist",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;--font-mono:"Geist Mono",ui-monospace,"SF Mono",Menlo,monospace;
+--bg:#14130f;--bg-2:#1c1a15;--card:#1f1d17;--card-2:#26231c;--card-3:#2e2a22;--hairline:#2a2720;--border:#34302a;
+--text:#eceae4;--text-mute:#9c988e;--text-dim:#66635c;--on:#f5bd6e;--on-soft:rgba(245,189,110,0.14);--on-glow:rgba(245,189,110,0.45);--cool:#84acc4;--r-pill:999px;--spring:cubic-bezier(0.34,1.56,0.64,1);}
+*{box-sizing:border-box}
+html,body{margin:0;background:#0a0a08;color:var(--text);font-family:var(--font-sans)}
+button{font-family:inherit;border:0;background:none;color:inherit;cursor:pointer;padding:0}
+a{color:var(--on)}a:hover{color:#ffd79a}
+.label{position:absolute;font-family:var(--font-mono);font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--on);white-space:nowrap}
+.desc{position:absolute;font-size:13px;color:var(--text-mute);width:360px;line-height:1.5;text-wrap:pretty}
+.desc b{color:var(--text);font-weight:600}
+.phone{position:absolute;width:378px;height:758px;border-radius:44px;background:#000;padding:9px;box-shadow:0 1px 0 1px #2a2720,0 30px 60px -18px rgba(0,0,0,.85)}
+.screen{width:100%;height:100%;border-radius:36px;overflow:hidden;background:var(--bg);position:relative}
+.notch{position:absolute;top:8px;left:50%;transform:translateX(-50%);width:96px;height:24px;background:#000;border-radius:14px;z-index:40}
+.app{position:absolute;inset:0;overflow:hidden;padding-top:54px}
+.hdr{padding:6px 22px 0;display:flex;justify-content:space-between;align-items:flex-start}
+.hdr h1{margin:0;font-size:26px;font-weight:600;letter-spacing:-.03em}
+.hdr .sub{margin-top:4px;font-size:12.5px;color:var(--text-mute)}
+.mono{font-family:var(--font-mono);font-feature-settings:"tnum" 1}
+.eyebrow{font-family:var(--font-mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--text-mute)}
+.iconchip{width:36px;height:36px;border-radius:10px;background:var(--card-2);border:1px solid var(--hairline);display:grid;place-items:center;color:var(--text-mute)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:0 22px}
+.tile{background:var(--card);border:1px solid var(--hairline);border-radius:22px;padding:16px;display:flex;flex-direction:column;gap:12px;position:relative;overflow:hidden}
+.tile.on{background:linear-gradient(155deg,#2b2419 0%,#221d14 60%,#1d180f 100%);border-color:rgba(245,189,110,.18)}
+.bulb{width:34px;height:34px;border-radius:50%;background:var(--card-3);display:grid;place-items:center;color:var(--text-mute)}
+.tile.on .bulb{background:var(--on);color:#3a2400;box-shadow:0 0 0 1px var(--on),0 0 24px 4px var(--on-glow)}
+.tname{font-weight:600;font-size:15px}
+.tsub{color:var(--text-mute);font-size:12px;margin-top:2px}
+.rail{height:6px;border-radius:3px;background:var(--card-3);overflow:hidden;margin-top:10px}
+.rail>i{display:block;height:100%;background:var(--on)}
+.sw{width:44px;height:26px;border-radius:999px;background:var(--card-3);position:relative;flex:none}
+.sw::after{content:"";position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:#b5b1a8;transition:transform 220ms var(--spring)}
+.sw.on{background:var(--on)}.sw.on::after{transform:translateX(18px);background:#fff}
+.row{display:flex;align-items:center;gap:12px;padding:13px 16px;background:var(--card);border:1px solid var(--hairline);border-radius:18px}
+.sect{padding:24px 22px 12px;display:flex;justify-content:space-between;align-items:baseline}
+.sect h2{margin:0;font-size:17px;font-weight:600;letter-spacing:-.02em}
+.ico{display:block;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.tiletop{display:flex;justify-content:space-between;align-items:flex-start}
+.iconchip.flat{border:0;background:var(--card-2)}
+.grow{flex:1}.min0{min-width:0}
+.roomlist{display:flex;flex-direction:column;gap:10px;padding:0 22px 150px}
+.eyebrow.abs{position:absolute}
+.track{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.playbtn{width:36px;height:36px;border-radius:50%;background:var(--on-soft);color:var(--on);display:grid;place-items:center;flex:none}
+
+/* ── glass ─────────────────────────────────────────── */
+.glass{background:rgba(36,33,26,.52);-webkit-backdrop-filter:blur(26px) saturate(1.7);backdrop-filter:blur(26px) saturate(1.7);border:1px solid rgba(255,255,255,.10);box-shadow:0 10px 34px rgba(0,0,0,.5),inset 0 1px 0 rgba(255,255,255,.14),inset 0 -1px 0 rgba(0,0,0,.25)}
+.navwrap{position:absolute;left:0;right:0;bottom:0;z-index:20;padding:0 14px 26px;pointer-events:none}
+.navwrap>*{pointer-events:auto}
+.nav{display:flex;align-items:center;justify-content:space-between}
+.nitem{flex:1;display:flex;flex-direction:column;align-items:center;gap:5px;color:var(--text-dim);min-height:44px;justify-content:center;font-size:10.5px;font-weight:500;letter-spacing:.02em;text-transform:uppercase;transition:color 160ms ease}
+.nitem.active{color:var(--on)}
+.nitem>svg{transition:transform 320ms var(--spring)}
+.nitem.active>svg{transform:translateY(-1px) scale(1.08)}
+.nitem,.arcitem,.orb{transition:transform 90ms ease,color 160ms ease,background 220ms ease,box-shadow 260ms ease}
+.nitem:active,.arcitem:active,.orb:active{transform:scale(.97)}
+
+/* A — floating pill, icon-only + amber lens */
+.dockA{border-radius:999px;padding:9px 10px;display:flex;gap:2px;position:relative}
+.dockA .nitem{gap:0;border-radius:999px;padding:9px 0;position:relative;z-index:1}
+.dockA .nitem span{display:none}
+.dockA .nitem.active{color:#3a2400}
+.lensbar{position:absolute;top:11px;bottom:11px;border-radius:999px;background:var(--on);box-shadow:0 0 20px 2px var(--on-glow),inset 0 1px 0 rgba(255,255,255,.45);z-index:0;transition:left 440ms var(--spring),width 440ms var(--spring)}
+
+/* B — full-bleed glass dock, labels */
+.dockB{position:absolute;left:0;right:0;bottom:0;padding:10px 8px 30px;border-radius:0;border-left:0;border-right:0;border-bottom:0;display:flex}
+.dockB .nitem{position:relative}
+.glowbar{position:absolute;top:4px;height:3px;width:34px;border-radius:2px;background:var(--on);box-shadow:0 0 14px 3px var(--on-glow);transition:left 400ms var(--spring)}
+
+/* C — adaptive lens: active expands to icon + label */
+.dockC{border-radius:26px;padding:8px;display:flex;gap:2px;align-items:center}
+.dockC .nitem{flex:0 0 auto;width:38px;height:44px;border-radius:16px;position:relative;flex-direction:row;gap:0;justify-content:center;overflow:hidden;transition:width 440ms var(--spring),gap 440ms var(--spring),background 220ms ease,color 220ms ease,box-shadow 260ms ease}
+.dockC .nitem span{display:block;max-width:0;opacity:0;white-space:nowrap;font-size:11px;font-weight:600;letter-spacing:.04em;transition:max-width 440ms var(--spring),opacity 200ms ease 60ms}
+.dockC .nitem::before{content:"";position:absolute;inset:0 -3px}
+.dockC .nitem.active{width:114px;gap:8px;padding:0 12px;background:var(--on);color:#3a2400;box-shadow:0 0 22px -2px var(--on-glow),inset 0 1px 0 rgba(255,255,255,.45)}
+.dockC .nitem.active span{max-width:62px;opacity:1}
+
+/* D — music-fused stack */
+.miniglass{border-radius:22px;padding:9px 12px;display:flex;align-items:center;gap:11px;margin-bottom:8px}
+.art{width:38px;height:38px;border-radius:12px;background-image:repeating-linear-gradient(-45deg,var(--card-2) 0 8px,var(--card-3) 8px 16px);flex:none}
+.wave{display:flex;align-items:flex-end;gap:2.5px;height:16px}
+.wave i{width:2.5px;background:var(--on);border-radius:2px;animation:bounce 900ms ease-in-out infinite}
+.wave i:nth-child(1){height:60%;animation-delay:0ms}.wave i:nth-child(2){height:100%;animation-delay:120ms}.wave i:nth-child(3){height:45%;animation-delay:240ms}.wave i:nth-child(4){height:80%;animation-delay:360ms}
+@keyframes bounce{0%,100%{transform:scaleY(.4)}50%{transform:scaleY(1)}}
+.dockD{border-radius:28px;padding:8px 6px;display:flex}
+.dockD .nitem{border-radius:20px;padding:8px 0}
+.dockD .nitem{transition:background 240ms ease,color 200ms ease}
+.dockD .nitem.active{background:var(--on-soft);color:var(--on)}
+
+/* E — out-of-the-box thumb dial */
+.orb{position:absolute;right:22px;bottom:30px;width:66px;height:66px;border-radius:50%;background:var(--on);color:#3a2400;display:grid;place-items:center;box-shadow:0 10px 30px -4px rgba(0,0,0,.6),0 0 34px -2px var(--on-glow),inset 0 2px 0 rgba(255,255,255,.5);z-index:22}
+.orb.open{background:rgba(36,33,26,.6);color:var(--on);-webkit-backdrop-filter:blur(26px) saturate(1.7);backdrop-filter:blur(26px) saturate(1.7);border:1px solid rgba(255,255,255,.12);box-shadow:0 10px 30px -4px rgba(0,0,0,.6),inset 0 1px 0 rgba(255,255,255,.14)}
+.arcveil{position:absolute;inset:0;background:radial-gradient(120% 60% at 88% 100%,rgba(10,9,7,.72) 0%,rgba(10,9,7,.35) 45%,transparent 72%);z-index:18}
+@keyframes bloom{from{transform:translate(52px,74px) scale(.32);opacity:0}to{transform:none;opacity:1}}
+.arcgroup.bloom .arcitem{animation:bloom 520ms var(--spring) both}
+.arcgroup.bloom .arcitem:nth-child(1){animation-delay:0ms}
+.arcgroup.bloom .arcitem:nth-child(2){animation-delay:34ms}
+.arcgroup.bloom .arcitem:nth-child(3){animation-delay:68ms}
+.arcgroup.bloom .arcitem:nth-child(4){animation-delay:102ms}
+.arcgroup.bloom .arcitem:nth-child(5){animation-delay:136ms}
+.arcgroup.bloom .arcitem:nth-child(6){animation-delay:170ms}
+.arcgroup.bloom .cap{animation:fadecap 300ms ease both 240ms}
+@keyframes fadecap{from{opacity:0}to{opacity:1}}
+.arcitem.active{box-shadow:0 10px 34px rgba(0,0,0,.5),inset 0 1px 0 rgba(255,255,255,.14),0 0 0 1px rgba(245,189,110,.45),0 0 22px -2px var(--on-glow)}
+.arcitem{position:absolute;width:60px;height:60px;border-radius:50%;display:grid;place-items:center;color:var(--text);z-index:21}
+.arcitem .cap{position:absolute;bottom:-16px;left:50%;transform:translateX(-50%);font-family:var(--font-mono);font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-mute);white-space:nowrap}
+.arcitem .cap.left{bottom:auto;left:auto;right:100%;top:50%;transform:translateY(-50%);margin-right:9px}
+.arcitem.active{color:var(--on);border-color:rgba(245,189,110,.4)}
+.arcitem.active .cap{color:var(--on)}
+.hint{position:absolute;left:22px;bottom:48px;font-family:var(--font-mono);font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--text-dim);z-index:22}
+@media (prefers-reduced-motion:reduce){*{animation-duration:.001ms!important;transition-duration:.001ms!important}}
+</style>
+</head>
+<body>
+<div class="label" style="left:60px;top:164px">Option A — Floating glass pill — icon-only</div><div class="desc" style="left:60px;top:190px">Edge-detached capsule floating 26px off the bottom. Icons only; the active item is a solid amber <b>lens</b> that slides between slots. The most literal read of the glass language and the lightest footprint over content — but six unlabelled icons lean on icon recognition.</div>
+<div class="phone" style="left:60px;top:312px"><div class="notch"></div><div class="screen"><div class="app">
+<div class="hdr"><div><h1>Good evening</h1><div class="sub"><span class="mono">14</span> devices on · <span class="mono">2.1</span> kW</div></div><div class="iconchip"><svg class="ico" viewBox="0 0 24 24" width="18" height="18" style="stroke-width:1.7"><path d="M12 5v14M5 12h14"></path></svg></div></div>
+<div class="sect"><h2>Favorites</h2><div class="eyebrow">4 rooms</div></div>
+<div class="grid2">
+<div class="tile on"><div class="tiletop"><div class="bulb"><svg class="ico" viewBox="0 0 24 24" width="18" height="18" style="stroke-width:1.7"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-4 10.5c.7.8 1 1.5 1 2.5h6c0-1 .3-1.7 1-2.5A6 6 0 0 0 12 3z"></path></svg></div><div class="sw on"></div></div><div><div class="tname">Ceiling</div><div class="tsub">On · <span class="mono">72%</span> · Living</div><div class="rail"><i style="width:72%"></i></div></div></div>
+<div class="tile"><div class="tiletop"><div class="bulb"><svg class="ico" viewBox="0 0 24 24" width="18" height="18" style="stroke-width:1.7"><path d="M14 4a2 2 0 1 0-4 0v10a4 4 0 1 0 4 0V4z"></path></svg></div><div class="sw"></div></div><div><div class="tname">Radiator</div><div class="tsub">Off · <span class="mono">21.5°</span></div></div></div>
+<div class="tile on"><div class="tiletop"><div class="bulb"><svg class="ico" viewBox="0 0 24 24" width="18" height="18" style="stroke-width:1.7"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-4 10.5c.7.8 1 1.5 1 2.5h6c0-1 .3-1.7 1-2.5A6 6 0 0 0 12 3z"></path></svg></div><div class="sw on"></div></div><div><div class="tname">Kitchen strip</div><div class="tsub">On · <span class="mono">40%</span></div><div class="rail"><i style="width:40%"></i></div></div></div>
+<div class="tile"><div class="tiletop"><div class="bulb"><svg class="ico" viewBox="0 0 24 24" width="18" height="18" style="stroke-width:1.7"><path d="M6 11h12v9H6zM9 11V8a3 3 0 0 1 6 0v3"></path></svg></div><div class="sw"></div></div><div><div class="tname">Front door</div><div class="tsub">Locked</div></div></div>
+</div>
+<div class="sect"><h2>Rooms</h2></div>
+<div class="roomlist">
+<div class="row"><div class="iconchip flat"><svg class="ico" viewBox="0 0 24 24" width="18" height="18" style="stroke-width:1.7"><path d="M3 4h7v7H3zM14 4h7v7h-7zM3 13h7v7H3zM14 13h7v7h-7z"></path></svg></div><div class="grow"><div class="tname">Living room</div><div class="tsub"><span class="mono">5</span> on</div></div><svg class="ico" viewBox="0 0 24 24" width="18" height="18" style="stroke-width:1.7"><path d="M9 6l6 6-6 6"></path></svg></div>
+<div class="row"><div class="iconchip flat"><svg class="ico" viewBox="0 0 24 24" width="18" height="18" style="stroke-width:1.7"><path d="M3 4h7v7H3zM14 4h7v7h-7zM3 13h7v7H3zM14 13h7v7h-7z"></path></svg></div><div class="grow"><div class="tname">Bedroom</div><div class="tsub"><span class="mono">2</span> on</div></div><svg class="ico" viewBox="0 0 24 24" width="18" height="18" style="stroke-width:1.7"><path d="M9 6l6 6-6 6"></path></svg></div>
+<div class="row"><div class="iconchip flat"><svg class="ico" viewBox="0 0 24 24" width="18" height="18" style="stroke-width:1.7"><path d="M3 4h7v7H3zM14 4h7v7h-7zM3 13h7v7H3zM14 13h7v7h-7z"></path></svg></div><div class="grow"><div class="tname">Kitchen</div><div class="tsub"><span class="mono">3</span> on</div></div><svg class="ico" viewBox="0 0 24 24" width="18" height="18" style="stroke-width:1.7"><path d="M9 6l6 6-6 6"></path></svg></div>
+</div></div><div class="navwrap"><div class="dockA glass" data-nav><i class="lensbar"></i><button class="nitem active" data-id="home"><svg class="ico" viewBox="0 0 24 24" width="22" height="22" style="stroke-width:1.7"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-7h-6v7H4a1 1 0 0 1-1-1z"></path></svg><span>Home</span></button><button class="nitem " data-id="rooms"><svg class="ico" viewBox="0 0 24 24" width="22" height="22" style="stroke-width:1.7"><path d="M3 4h7v7H3zM14 4h7v7h-7zM3 13h7v7H3zM14 13h7v7h-7z"></path></svg><span>Rooms</span></button><button class="nitem " data-id="music"><svg class="ico" viewBox="0 0 24 24" width="22" height="22" style="stroke-width:1.7"><path d="M9 18V5l11-2v13M9 18a3 3 0 1 1-6 0 3 3 0 0 1 6 0zM20 16a3 3 0 1 1-6 0 3 3 0 0 1 6 0z"></path></svg><span>Music</span></button><button class="nitem " data-id="scenes"><svg class="ico" viewBox="0 0 24 24" width="22" height="22" style="stroke-width:1.7"><path d="M12 3l2.4 5.8L20 10l-4.6 3.4L17 19l-5-3-5 3 1.6-5.6L4 10l5.6-1.2z"></path></svg><span>Scenes</span></button><button class="nitem " data-id="schedule"><svg class="ico" viewBox="0 0 24 24" width="22" height="22" style="stroke-width:1.7"><path d="M12 7v5l3 2M12 22a10 10 0 1 1 0-20 10 10 0 0 1 0 20z"></path></svg><span>Schedule</span></button><button class="nitem " data-id="settings"><svg class="ico" viewBox="0 0 24 24" width="22" height="22" style="stroke-width:1.7"><path d="M4 6h7M14 6h6M4 12h3M10 12h10M4 18h12M19 18h1M11 4v4M7 10v4M16 16v4"></path></svg><span>Settings</span></button></div></div></div></div>
+<div class="label" style="left:530px;top:164px">Option B — Full-bleed glass dock — labels kept</div><div class="desc" style="left:530px;top:190px">Today’s silhouette (edge-to-edge, 60px + safe area) rebuilt as glass: blurred warm translucency, specular top hairline, and a 3px amber glow bar above the active item instead of only amber text. The safest migration — labels and hit targets unchanged.</div>
+<div class="phone" style="left:530px;top:312px"><div class="notch"></div><div class="screen"><div class="app">
+<div class="hdr"><div><h1>Good evening</h1><div class="sub"><span class="mono">14</span> devices on · <span class="mono">2.1</span> kW</div></div><div class="iconchip"><svg class="ico" viewBox="0 0 24 24" width="18" height="18" style="stroke-width:1.7"><path d="M12 5v14M5 12h14"></path></svg></div></div>
+<div class="sect"><h2>Favorites</h2><div class="eyebrow">4 rooms</div></div>
+<div class="grid2">
+<div class="tile on"><div class="tiletop"><div class="bulb"><svg class="ico" viewBox="0 0 24 24" width="18" height="18" style="stroke-width:1.7"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-4 10.5c.7.8 1 1.5 1 2.5h6c0-1 .3-1.7 1-2.5A6 6 0 0 0 12 3z"></path></svg></div><div class="sw on"></div></div><div><div class="tname">Ceiling</div><div class="tsub">On · <span class="mono">72%</span> · Living</div><div class="rail"><i style="width:72%"></i></div></div></div>
+<div class="tile"><div class="tiletop"><div class="bulb"><svg class="ico" viewBox="0 0 24 24" width="18" height="18" style="stroke-width:1.7"><path d="M14 4a2 2 0 1 0-4 0v10a4 4 0 1 0 4 0V4z"></path></svg></div><div class="sw"></div></div><div><div class="tname">Radiator</div><div class="tsub">Off · <span class="mono">21.5°</span></div></div></div>
+<div class="tile on"><div class="tiletop"><div class="bulb"><svg class="ico" viewBox="0 0 24 24" width="18" height="18" style="stroke-width:1.7"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-4 10.5c.7.8 1 1.5 1 2.5h6c0-1 .3-1.7 1-2.5A6 6 0 0 0 12 3z"></path></svg></div><div class="sw on"></div></div><div><div class="tname">Kitchen strip</div><div class="tsub">On · <span class="mono">40%</span></div><div class="rail"><i style="width:40%"></i></div></div></div>
+<div class="tile"><div class="tiletop"><div class="bulb"><svg class="ico" viewBox="0 0 24 24" width="18" height="18" style="stroke-width:1.7"><path d="M6 11h12v9H6zM9 11V8a3 3 0 0 1 6 0v3"></path></svg></div><div class="sw"></div></div><div><div class="tname">Front door</div><div class="tsub">Locked</div></div></div>
+</div>
+<div class="sect"><h2>Rooms</h2></div>
+<div class="roomlist">
+<div class="row"><div class="iconchip flat"><svg class="ico" viewBox="0 0 24 24" width="18" height="18" style="stroke-width:1.7"><path d="M3 4h7v7H3zM14 4h7v7h-7zM3 13h7v7H3zM14 13h7v7h-7z"></path></svg></div><div class="grow"><div class="tname">Living room</div><div class="tsub"><span class="mono">5</span> on</div></div><svg class="ico" viewBox="0 0 24 24" width="18" height="18" style="stroke-width:1.7"><path d="M9 6l6 6-6 6"></path></svg></div>
+<div class="row"><div class="iconchip flat"><svg class="ico" viewBox="0 0 24 24" width="18" height="18" style="stroke-width:1.7"><path d="M3 4h7v7H3zM14 4h7v7h-7zM3 13h7v7H3zM14 13h7v7h-7z"></path></svg></div><div class="grow"><div class="tname">Bedroom</div><div class="tsub"><span class="mono">2</span> on</div></div><svg class="ico" viewBox="0 0 24 24" width="18" height="18" style="stroke-width:1.7"><path d="M9 6l6 6-6 6"></path></svg></div>
+<div class="row"><div class="iconchip flat"><svg class="ico" viewBox="0 0 24 24" width="18" height="18" style="stroke-width:1.7"><path d="M3 4h7v7H3zM14 4h7v7h-7zM3 13h7v7H3zM14 13h7v7h-7z"></path></svg></div><div class="grow"><div class="tname">Kitchen</div><div class="tsub"><span class="mono">3</span> on</div></div><svg class="ico" viewBox="0 0 24 24" width="18" height="18" style="stroke-width:1.7"><path d="M9 6l6 6-6 6"></path></svg></div>
+</div></div><div class="dockB glass" data-nav><i class="glowbar"></i><button class="nitem active" data-id="home"><svg class="ico" viewBox="0 0 24 24" width="22" height="22" style="stroke-width:1.7"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-7h-6v7H4a1 1 0 0 1-1-1z"></path></svg><span>Home</span></button><button class="nitem " data-id="rooms"><svg class="ico" viewBox="0 0 24 24" width="22" height="22" style="stroke-width:1.7"><path d="M3 4h7v7H3zM14 4h7v7h-7zM3 13h7v7H3zM14 13h7v7h-7z"></path></svg><span>Rooms</span></button><button class="nitem " data-id="music"><svg class="ico" viewBox="0 0 24 24" width="22" height="22" style="stroke-width:1.7"><path d="M9 18V5l11-2v13M9 18a3 3 0 1 1-6 0 3 3 0 0 1 6 0zM20 16a3 3 0 1 1-6 0 3 3 0 0 1 6 0z"></path></svg><span>Music</span></button><button class="nitem " data-id="scenes"><svg class="ico" viewBox="0 0 24 24" width="22" height="22" style="stroke-width:1.7"><path d="M12 3l2.4 5.8L20 10l-4.6 3.4L17 19l-5-3-5 3 1.6-5.6L4 10l5.6-1.2z"></path></svg><span>Scenes</span></button><button class="nitem " data-id="schedule"><svg class="ico" viewBox="0 0 24 24" width="22" height="22" style="stroke-width:1.7"><path d="M12 7v5l3 2M12 22a10 10 0 1 1 0-20 10 10 0 0 1 0 20z"></path></svg><span>Schedule</span></button><button class="nitem " data-id="settings"><svg class="ico" viewBox="0 0 24 24" width="22" height="22" style="stroke-width:1.7"><path d="M4 6h7M14 6h6M4 12h3M10 12h10M4 18h12M19 18h1M11 4v4M7 10v4M16 16v4"></path></svg><span>Settings</span></button></div></div></div>
+<div class="label" style="left:1000px;top:164px">Option C — Adaptive lens — active expands</div><div class="desc" style="left:1000px;top:190px">Icons sit as 44px glass squares; the active one stretches into an amber pill carrying its label. Only one label on screen at a time, so it stays legible at six items and the stretch animation carries the transition. Costs a small width shuffle on every tap.</div>
+<div class="phone" style="left:1000px;top:312px"><div class="notch"></div><div class="screen"><div class="app">
+<div class="hdr"><div><h1>Good evening</h1><div class="sub"><span class="mono">14</span> devices on · <span class="mono">2.1</span> kW</div></div><div class="iconchip"><svg class="ico" viewBox="0 0 24 24" width="18" height="18" style="stroke-width:1.7"><path d="M12 5v14M5 12h14"></path></svg></div></div>
+<div class="sect"><h2>Favorites</h2><div class="eyebrow">4 rooms</div></div>
+<div class="grid2">
+<div class="tile on"><div class="tiletop"><div class="bulb"><svg class="ico" viewBox="0 0 24 24" width="18" height="18" style="stroke-width:1.7"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-4 10.5c.7.8 1 1.5 1 2.5h6c0-1 .3-1.7 1-2.5A6 6 0 0 0 12 3z"></path></svg></div><div class="sw on"></div></div><div><div class="tname">Ceiling</div><div class="tsub">On · <span class="mono">72%</span> · Living</div><div class="rail"><i style="width:72%"></i></div></div></div>
+<div class="tile"><div class="tiletop"><div class="bulb"><svg class="ico" viewBox="0 0 24 24" width="18" height="18" style="stroke-width:1.7"><path d="M14 4a2 2 0 1 0-4 0v10a4 4 0 1 0 4 0V4z"></path></svg></div><div class="sw"></div></div><div><div class="tname">Radiator</div><div class="tsub">Off · <span class="mono">21.5°</span></div></div></div>
+<div class="tile on"><div class="tiletop"><div class="bulb"><svg class="ico" viewBox="0 0 24 24" width="18" height="18" style="stroke-width:1.7"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-4 10.5c.7.8 1 1.5 1 2.5h6c0-1 .3-1.7 1-2.5A6 6 0 0 0 12 3z"></path></svg></div><div class="sw on"></div></div><div><div class="tname">Kitchen strip</div><div class="tsub">On · <span class="mono">40%</span></div><div class="rail"><i style="width:40%"></i></div></div></div>
+<div class="tile"><div class="tiletop"><div class="bulb"><svg class="ico" viewBox="0 0 24 24" width="18" height="18" style="stroke-width:1.7"><path d="M6 11h12v9H6zM9 11V8a3 3 0 0 1 6 0v3"></path></svg></div><div class="sw"></div></div><div><div class="tname">Front door</div><div class="tsub">Locked</div></div></div>
+</div>
+<div class="sect"><h2>Rooms</h2></div>
+<div class="roomlist">
+<div class="row"><div class="iconchip flat"><svg class="ico" viewBox="0 0 24 24" width="18" height="18" style="stroke-width:1.7"><path d="M3 4h7v7H3zM14 4h7v7h-7zM3 13h7v7H3zM14 13h7v7h-7z"></path></svg></div><div class="grow"><div class="tname">Living room</div><div class="tsub"><span class="mono">5</span> on</div></div><svg class="ico" viewBox="0 0 24 24" width="18" height="18" style="stroke-width:1.7"><path d="M9 6l6 6-6 6"></path></svg></div>
+<div class="row"><div class="iconchip flat"><svg class="ico" viewBox="0 0 24 24" width="18" height="18" style="stroke-width:1.7"><path d="M3 4h7v7H3zM14 4h7v7h-7zM3 13h7v7H3zM14 13h7v7h-7z"></path></svg></div><div class="grow"><div class="tname">Bedroom</div><div class="tsub"><span class="mono">2</span> on</div></div><svg class="ico" viewBox="0 0 24 24" width="18" height="18" style="stroke-width:1.7"><path d="M9 6l6 6-6 6"></path></svg></div>
+<div class="row"><div class="iconchip flat"><svg class="ico" viewBox="0 0 24 24" width="18" height="18" style="stroke-width:1.7"><path d="M3 4h7v7H3zM14 4h7v7h-7zM3 13h7v7H3zM14 13h7v7h-7z"></path></svg></div><div class="grow"><div class="tname">Kitchen</div><div class="tsub"><span class="mono">3</span> on</div></div><svg class="ico" viewBox="0 0 24 24" width="18" height="18" style="stroke-width:1.7"><path d="M9 6l6 6-6 6"></path></svg></div>
+</div></div><div class="navwrap"><div class="dockC glass" data-nav><button class="nitem active" data-id="home"><svg class="ico" viewBox="0 0 24 24" width="22" height="22" style="stroke-width:1.7"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-7h-6v7H4a1 1 0 0 1-1-1z"></path></svg><span>Home</span></button><button class="nitem " data-id="rooms"><svg class="ico" viewBox="0 0 24 24" width="22" height="22" style="stroke-width:1.7"><path d="M3 4h7v7H3zM14 4h7v7h-7zM3 13h7v7H3zM14 13h7v7h-7z"></path></svg><span>Rooms</span></button><button class="nitem " data-id="music"><svg class="ico" viewBox="0 0 24 24" width="22" height="22" style="stroke-width:1.7"><path d="M9 18V5l11-2v13M9 18a3 3 0 1 1-6 0 3 3 0 0 1 6 0zM20 16a3 3 0 1 1-6 0 3 3 0 0 1 6 0z"></path></svg><span>Music</span></button><button class="nitem " data-id="scenes"><svg class="ico" viewBox="0 0 24 24" width="22" height="22" style="stroke-width:1.7"><path d="M12 3l2.4 5.8L20 10l-4.6 3.4L17 19l-5-3-5 3 1.6-5.6L4 10l5.6-1.2z"></path></svg><span>Scenes</span></button><button class="nitem " data-id="schedule"><svg class="ico" viewBox="0 0 24 24" width="22" height="22" style="stroke-width:1.7"><path d="M12 7v5l3 2M12 22a10 10 0 1 1 0-20 10 10 0 0 1 0 20z"></path></svg><span>Schedule</span></button><button class="nitem " data-id="settings"><svg class="ico" viewBox="0 0 24 24" width="22" height="22" style="stroke-width:1.7"><path d="M4 6h7M14 6h6M4 12h3M10 12h10M4 18h12M19 18h1M11 4v4M7 10v4M16 16v4"></path></svg><span>Settings</span></button></div></div></div></div>
+<div class="label" style="left:1470px;top:164px">Option D — Fused stack — music inside the glass</div><div class="desc" style="left:1470px;top:190px">Two glass layers reading as one object: the mini-player docks onto the nav whenever audio is playing (§16 of the brief). Active tab is amber-soft rather than a hard fill so the player stays the loudest thing. Costs ~56px of content height.</div>
+<div class="phone" style="left:1470px;top:312px"><div class="notch"></div><div class="screen"><div class="app">
+<div class="hdr"><div><h1>Good evening</h1><div class="sub"><span class="mono">14</span> devices on · <span class="mono">2.1</span> kW</div></div><div class="iconchip"><svg class="ico" viewBox="0 0 24 24" width="18" height="18" style="stroke-width:1.7"><path d="M12 5v14M5 12h14"></path></svg></div></div>
+<div class="sect"><h2>Favorites</h2><div class="eyebrow">4 rooms</div></div>
+<div class="grid2">
+<div class="tile on"><div class="tiletop"><div class="bulb"><svg class="ico" viewBox="0 0 24 24" width="18" height="18" style="stroke-width:1.7"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-4 10.5c.7.8 1 1.5 1 2.5h6c0-1 .3-1.7 1-2.5A6 6 0 0 0 12 3z"></path></svg></div><div class="sw on"></div></div><div><div class="tname">Ceiling</div><div class="tsub">On · <span class="mono">72%</span> · Living</div><div class="rail"><i style="width:72%"></i></div></div></div>
+<div class="tile"><div class="tiletop"><div class="bulb"><svg class="ico" viewBox="0 0 24 24" width="18" height="18" style="stroke-width:1.7"><path d="M14 4a2 2 0 1 0-4 0v10a4 4 0 1 0 4 0V4z"></path></svg></div><div class="sw"></div></div><div><div class="tname">Radiator</div><div class="tsub">Off · <span class="mono">21.5°</span></div></div></div>
+<div class="tile on"><div class="tiletop"><div class="bulb"><svg class="ico" viewBox="0 0 24 24" width="18" height="18" style="stroke-width:1.7"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-4 10.5c.7.8 1 1.5 1 2.5h6c0-1 .3-1.7 1-2.5A6 6 0 0 0 12 3z"></path></svg></div><div class="sw on"></div></div><div><div class="tname">Kitchen strip</div><div class="tsub">On · <span class="mono">40%</span></div><div class="rail"><i style="width:40%"></i></div></div></div>
+<div class="tile"><div class="tiletop"><div class="bulb"><svg class="ico" viewBox="0 0 24 24" width="18" height="18" style="stroke-width:1.7"><path d="M6 11h12v9H6zM9 11V8a3 3 0 0 1 6 0v3"></path></svg></div><div class="sw"></div></div><div><div class="tname">Front door</div><div class="tsub">Locked</div></div></div>
+</div>
+<div class="sect"><h2>Rooms</h2></div>
+<div class="roomlist">
+<div class="row"><div class="iconchip flat"><svg class="ico" viewBox="0 0 24 24" width="18" height="18" style="stroke-width:1.7"><path d="M3 4h7v7H3zM14 4h7v7h-7zM3 13h7v7H3zM14 13h7v7h-7z"></path></svg></div><div class="grow"><div class="tname">Living room</div><div class="tsub"><span class="mono">5</span> on</div></div><svg class="ico" viewBox="0 0 24 24" width="18" height="18" style="stroke-width:1.7"><path d="M9 6l6 6-6 6"></path></svg></div>
+<div class="row"><div class="iconchip flat"><svg class="ico" viewBox="0 0 24 24" width="18" height="18" style="stroke-width:1.7"><path d="M3 4h7v7H3zM14 4h7v7h-7zM3 13h7v7H3zM14 13h7v7h-7z"></path></svg></div><div class="grow"><div class="tname">Bedroom</div><div class="tsub"><span class="mono">2</span> on</div></div><svg class="ico" viewBox="0 0 24 24" width="18" height="18" style="stroke-width:1.7"><path d="M9 6l6 6-6 6"></path></svg></div>
+<div class="row"><div class="iconchip flat"><svg class="ico" viewBox="0 0 24 24" width="18" height="18" style="stroke-width:1.7"><path d="M3 4h7v7H3zM14 4h7v7h-7zM3 13h7v7H3zM14 13h7v7h-7z"></path></svg></div><div class="grow"><div class="tname">Kitchen</div><div class="tsub"><span class="mono">3</span> on</div></div><svg class="ico" viewBox="0 0 24 24" width="18" height="18" style="stroke-width:1.7"><path d="M9 6l6 6-6 6"></path></svg></div>
+</div></div><div class="navwrap"><div class="miniglass glass"><div class="art"></div><div class="grow min0"><div class="track">Sunset Boulevard</div><div class="tsub">Kitchen · Sonos One</div></div><div class="wave"><i></i><i></i><i></i><i></i></div><button class="playbtn"><svg class="ico" viewBox="0 0 24 24" width="16" height="16" style="stroke-width:1.7"><path d="M8 5l11 7-11 7z"></path></svg></button></div><div class="dockD glass" data-nav><button class="nitem " data-id="home"><svg class="ico" viewBox="0 0 24 24" width="22" height="22" style="stroke-width:1.7"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-7h-6v7H4a1 1 0 0 1-1-1z"></path></svg><span>Home</span></button><button class="nitem " data-id="rooms"><svg class="ico" viewBox="0 0 24 24" width="22" height="22" style="stroke-width:1.7"><path d="M3 4h7v7H3zM14 4h7v7h-7zM3 13h7v7H3zM14 13h7v7h-7z"></path></svg><span>Rooms</span></button><button class="nitem active" data-id="music"><svg class="ico" viewBox="0 0 24 24" width="22" height="22" style="stroke-width:1.7"><path d="M9 18V5l11-2v13M9 18a3 3 0 1 1-6 0 3 3 0 0 1 6 0zM20 16a3 3 0 1 1-6 0 3 3 0 0 1 6 0z"></path></svg><span>Music</span></button><button class="nitem " data-id="scenes"><svg class="ico" viewBox="0 0 24 24" width="22" height="22" style="stroke-width:1.7"><path d="M12 3l2.4 5.8L20 10l-4.6 3.4L17 19l-5-3-5 3 1.6-5.6L4 10l5.6-1.2z"></path></svg><span>Scenes</span></button><button class="nitem " data-id="schedule"><svg class="ico" viewBox="0 0 24 24" width="22" height="22" style="stroke-width:1.7"><path d="M12 7v5l3 2M12 22a10 10 0 1 1 0-20 10 10 0 0 1 0 20z"></path></svg><span>Schedule</span></button><button class="nitem " data-id="settings"><svg class="ico" viewBox="0 0 24 24" width="22" height="22" style="stroke-width:1.7"><path d="M4 6h7M14 6h6M4 12h3M10 12h10M4 18h12M19 18h1M11 4v4M7 10v4M16 16v4"></path></svg><span>Settings</span></button></div></div></div></div>
+<div class="label" style="left:1940px;top:164px">Option E — Out-of-the-box — thumb dial</div><div class="desc" style="left:1940px;top:190px">No bar at all. A single amber orb in the thumb arc; tap or long-press and navigation blooms as a quarter-arc of glass pucks over a dimmed room. Frees ~90px of vertical space and turns nav into a gesture — but destinations stay hidden until asked, so first run needs a coach mark.</div>
+<div class="phone" style="left:1940px;top:312px"><div class="notch"></div><div class="screen"><div class="app">
+<div class="hdr"><div><h1>Good evening</h1><div class="sub"><span class="mono">14</span> devices on · <span class="mono">2.1</span> kW</div></div><div class="iconchip"><svg class="ico" viewBox="0 0 24 24" width="18" height="18" style="stroke-width:1.7"><path d="M12 5v14M5 12h14"></path></svg></div></div>
+<div class="sect"><h2>Favorites</h2><div class="eyebrow">4 rooms</div></div>
+<div class="grid2">
+<div class="tile on"><div class="tiletop"><div class="bulb"><svg class="ico" viewBox="0 0 24 24" width="18" height="18" style="stroke-width:1.7"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-4 10.5c.7.8 1 1.5 1 2.5h6c0-1 .3-1.7 1-2.5A6 6 0 0 0 12 3z"></path></svg></div><div class="sw on"></div></div><div><div class="tname">Ceiling</div><div class="tsub">On · <span class="mono">72%</span> · Living</div><div class="rail"><i style="width:72%"></i></div></div></div>
+<div class="tile"><div class="tiletop"><div class="bulb"><svg class="ico" viewBox="0 0 24 24" width="18" height="18" style="stroke-width:1.7"><path d="M14 4a2 2 0 1 0-4 0v10a4 4 0 1 0 4 0V4z"></path></svg></div><div class="sw"></div></div><div><div class="tname">Radiator</div><div class="tsub">Off · <span class="mono">21.5°</span></div></div></div>
+<div class="tile on"><div class="tiletop"><div class="bulb"><svg class="ico" viewBox="0 0 24 24" width="18" height="18" style="stroke-width:1.7"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-4 10.5c.7.8 1 1.5 1 2.5h6c0-1 .3-1.7 1-2.5A6 6 0 0 0 12 3z"></path></svg></div><div class="sw on"></div></div><div><div class="tname">Kitchen strip</div><div class="tsub">On · <span class="mono">40%</span></div><div class="rail"><i style="width:40%"></i></div></div></div>
+<div class="tile"><div class="tiletop"><div class="bulb"><svg class="ico" viewBox="0 0 24 24" width="18" height="18" style="stroke-width:1.7"><path d="M6 11h12v9H6zM9 11V8a3 3 0 0 1 6 0v3"></path></svg></div><div class="sw"></div></div><div><div class="tname">Front door</div><div class="tsub">Locked</div></div></div>
+</div>
+<div class="sect"><h2>Rooms</h2></div>
+<div class="roomlist">
+<div class="row"><div class="iconchip flat"><svg class="ico" viewBox="0 0 24 24" width="18" height="18" style="stroke-width:1.7"><path d="M3 4h7v7H3zM14 4h7v7h-7zM3 13h7v7H3zM14 13h7v7h-7z"></path></svg></div><div class="grow"><div class="tname">Living room</div><div class="tsub"><span class="mono">5</span> on</div></div><svg class="ico" viewBox="0 0 24 24" width="18" height="18" style="stroke-width:1.7"><path d="M9 6l6 6-6 6"></path></svg></div>
+<div class="row"><div class="iconchip flat"><svg class="ico" viewBox="0 0 24 24" width="18" height="18" style="stroke-width:1.7"><path d="M3 4h7v7H3zM14 4h7v7h-7zM3 13h7v7H3zM14 13h7v7h-7z"></path></svg></div><div class="grow"><div class="tname">Bedroom</div><div class="tsub"><span class="mono">2</span> on</div></div><svg class="ico" viewBox="0 0 24 24" width="18" height="18" style="stroke-width:1.7"><path d="M9 6l6 6-6 6"></path></svg></div>
+<div class="row"><div class="iconchip flat"><svg class="ico" viewBox="0 0 24 24" width="18" height="18" style="stroke-width:1.7"><path d="M3 4h7v7H3zM14 4h7v7h-7zM3 13h7v7H3zM14 13h7v7h-7z"></path></svg></div><div class="grow"><div class="tname">Kitchen</div><div class="tsub"><span class="mono">3</span> on</div></div><svg class="ico" viewBox="0 0 24 24" width="18" height="18" style="stroke-width:1.7"><path d="M9 6l6 6-6 6"></path></svg></div>
+</div></div><div class="hint">Hold anywhere · or tap the dial</div><button class="orb"><svg class="ico" viewBox="0 0 24 24" width="26" height="26" style="stroke-width:1.8"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-7h-6v7H4a1 1 0 0 1-1-1z"></path></svg></button></div></div>
+<div class="eyebrow abs" style="left:1940px;top:292px">Collapsed</div>
+<div class="phone" style="left:2390px;top:312px"><div class="notch"></div><div class="screen"><div class="app">
+<div class="hdr"><div><h1>Good evening</h1><div class="sub"><span class="mono">14</span> devices on · <span class="mono">2.1</span> kW</div></div><div class="iconchip"><svg class="ico" viewBox="0 0 24 24" width="18" height="18" style="stroke-width:1.7"><path d="M12 5v14M5 12h14"></path></svg></div></div>
+<div class="sect"><h2>Favorites</h2><div class="eyebrow">4 rooms</div></div>
+<div class="grid2">
+<div class="tile on"><div class="tiletop"><div class="bulb"><svg class="ico" viewBox="0 0 24 24" width="18" height="18" style="stroke-width:1.7"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-4 10.5c.7.8 1 1.5 1 2.5h6c0-1 .3-1.7 1-2.5A6 6 0 0 0 12 3z"></path></svg></div><div class="sw on"></div></div><div><div class="tname">Ceiling</div><div class="tsub">On · <span class="mono">72%</span> · Living</div><div class="rail"><i style="width:72%"></i></div></div></div>
+<div class="tile"><div class="tiletop"><div class="bulb"><svg class="ico" viewBox="0 0 24 24" width="18" height="18" style="stroke-width:1.7"><path d="M14 4a2 2 0 1 0-4 0v10a4 4 0 1 0 4 0V4z"></path></svg></div><div class="sw"></div></div><div><div class="tname">Radiator</div><div class="tsub">Off · <span class="mono">21.5°</span></div></div></div>
+<div class="tile on"><div class="tiletop"><div class="bulb"><svg class="ico" viewBox="0 0 24 24" width="18" height="18" style="stroke-width:1.7"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-4 10.5c.7.8 1 1.5 1 2.5h6c0-1 .3-1.7 1-2.5A6 6 0 0 0 12 3z"></path></svg></div><div class="sw on"></div></div><div><div class="tname">Kitchen strip</div><div class="tsub">On · <span class="mono">40%</span></div><div class="rail"><i style="width:40%"></i></div></div></div>
+<div class="tile"><div class="tiletop"><div class="bulb"><svg class="ico" viewBox="0 0 24 24" width="18" height="18" style="stroke-width:1.7"><path d="M6 11h12v9H6zM9 11V8a3 3 0 0 1 6 0v3"></path></svg></div><div class="sw"></div></div><div><div class="tname">Front door</div><div class="tsub">Locked</div></div></div>
+</div>
+<div class="sect"><h2>Rooms</h2></div>
+<div class="roomlist">
+<div class="row"><div class="iconchip flat"><svg class="ico" viewBox="0 0 24 24" width="18" height="18" style="stroke-width:1.7"><path d="M3 4h7v7H3zM14 4h7v7h-7zM3 13h7v7H3zM14 13h7v7h-7z"></path></svg></div><div class="grow"><div class="tname">Living room</div><div class="tsub"><span class="mono">5</span> on</div></div><svg class="ico" viewBox="0 0 24 24" width="18" height="18" style="stroke-width:1.7"><path d="M9 6l6 6-6 6"></path></svg></div>
+<div class="row"><div class="iconchip flat"><svg class="ico" viewBox="0 0 24 24" width="18" height="18" style="stroke-width:1.7"><path d="M3 4h7v7H3zM14 4h7v7h-7zM3 13h7v7H3zM14 13h7v7h-7z"></path></svg></div><div class="grow"><div class="tname">Bedroom</div><div class="tsub"><span class="mono">2</span> on</div></div><svg class="ico" viewBox="0 0 24 24" width="18" height="18" style="stroke-width:1.7"><path d="M9 6l6 6-6 6"></path></svg></div>
+<div class="row"><div class="iconchip flat"><svg class="ico" viewBox="0 0 24 24" width="18" height="18" style="stroke-width:1.7"><path d="M3 4h7v7H3zM14 4h7v7h-7zM3 13h7v7H3zM14 13h7v7h-7z"></path></svg></div><div class="grow"><div class="tname">Kitchen</div><div class="tsub"><span class="mono">3</span> on</div></div><svg class="ico" viewBox="0 0 24 24" width="18" height="18" style="stroke-width:1.7"><path d="M9 6l6 6-6 6"></path></svg></div>
+</div></div><div class="arcveil"></div><div class="arcgroup bloom" data-nav><button class="arcitem glass active" data-id="home" style="right:28px;bottom:238px"><svg class="ico" viewBox="0 0 24 24" width="22" height="22" style="stroke-width:1.7"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-7h-6v7H4a1 1 0 0 1-1-1z"></path></svg><span class="cap">Home</span></button><button class="arcitem glass " data-id="rooms" style="right:89px;bottom:229px"><svg class="ico" viewBox="0 0 24 24" width="22" height="22" style="stroke-width:1.7"><path d="M3 4h7v7H3zM14 4h7v7h-7zM3 13h7v7H3zM14 13h7v7h-7z"></path></svg><span class="cap">Rooms</span></button><button class="arcitem glass " data-id="music" style="right:145px;bottom:201px"><svg class="ico" viewBox="0 0 24 24" width="22" height="22" style="stroke-width:1.7"><path d="M9 18V5l11-2v13M9 18a3 3 0 1 1-6 0 3 3 0 0 1 6 0zM20 16a3 3 0 1 1-6 0 3 3 0 0 1 6 0z"></path></svg><span class="cap">Music</span></button><button class="arcitem glass " data-id="scenes" style="right:190px;bottom:159px"><svg class="ico" viewBox="0 0 24 24" width="22" height="22" style="stroke-width:1.7"><path d="M12 3l2.4 5.8L20 10l-4.6 3.4L17 19l-5-3-5 3 1.6-5.6L4 10l5.6-1.2z"></path></svg><span class="cap left">Scenes</span></button><button class="arcitem glass " data-id="schedule" style="right:220px;bottom:105px"><svg class="ico" viewBox="0 0 24 24" width="22" height="22" style="stroke-width:1.7"><path d="M12 7v5l3 2M12 22a10 10 0 1 1 0-20 10 10 0 0 1 0 20z"></path></svg><span class="cap left">Sched.</span></button><button class="arcitem glass " data-id="settings" style="right:233px;bottom:44px"><svg class="ico" viewBox="0 0 24 24" width="22" height="22" style="stroke-width:1.7"><path d="M4 6h7M14 6h6M4 12h3M10 12h10M4 18h12M19 18h1M11 4v4M7 10v4M16 16v4"></path></svg><span class="cap left">Setup</span></button></div><button class="orb open"><svg class="ico" viewBox="0 0 24 24" width="24" height="24" style="stroke-width:1.8"><path d="M6 6l12 12M6 18L18 6"></path></svg></button></div></div>
+<div class="eyebrow abs" style="left:2390px;top:292px">Bloomed</div>
+<script>
+function place(dock){
+  var a=dock.querySelector(".nitem.active"); if(!a) return;
+  var lens=dock.querySelector(".lensbar");
+  if(lens){lens.style.left=a.offsetLeft+"px";lens.style.width=a.offsetWidth+"px";}
+  var glow=dock.querySelector(".glowbar");
+  if(glow){glow.style.left=(a.offsetLeft+(a.offsetWidth-34)/2)+"px";}
+}
+function initAll(){document.querySelectorAll(".dockA,.dockB").forEach(place)}
+window.addEventListener("load",initAll);document.addEventListener("DOMContentLoaded",initAll);initAll();
+document.addEventListener("click",function(e){
+  var orb=e.target.closest?e.target.closest(".orb.open"):null;
+  if(orb){
+    var g=orb.parentElement.querySelector(".arcgroup");
+    if(g){g.classList.remove("bloom");void g.offsetWidth;g.classList.add("bloom");}
+    return;
+  }
+  var b=e.target.closest?e.target.closest(".nitem,.arcitem"):null; if(!b) return;
+  var scope=b.closest("[data-nav]"); if(!scope) return;
+  var arc=b.classList.contains("arcitem"), id=b.getAttribute("data-id");
+  scope.querySelectorAll(arc?".arcitem":".nitem").forEach(function(n){
+    n.classList.toggle("active",n.getAttribute("data-id")===id);
+  });
+  if(!arc) place(scope);
+});
+</script>
+</body>
+</html>

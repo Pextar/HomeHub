@@ -1670,7 +1670,7 @@
     .sel-go { margin-left: auto; border-radius: var(--r-pill); flex-shrink: 0; }
     @media (max-width: 900px) {
         .selbar {
-            bottom: calc(60px + var(--space-3) + env(safe-area-inset-bottom));
+            bottom: calc(var(--nav-clear) + var(--space-3));
             /* Clear the floating assistant button (56px @ right:16px), which
                shares this band — otherwise it covers the primary action. */
             padding-right: 64px;
@@ -1692,7 +1692,7 @@
     }
     @media (max-width: 900px) {
         .mini {
-            bottom: calc(60px + var(--space-3) + env(safe-area-inset-bottom));
+            bottom: calc(var(--nav-clear) + var(--space-3));
             /* Same reserved gutter as .selbar — keep the play/pause control
                out from under the floating assistant button. */
             padding-right: 64px;
