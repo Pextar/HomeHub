@@ -252,6 +252,13 @@ func (s *Server) Handler() http.Handler {
 	api.HandleFunc("/sonos/{id}/favorites/play", s.requireAdmin(s.sonosPlayFavorite)).Methods("POST")
 	api.HandleFunc("/sonos/{id}/art", s.requireAdmin(s.sonosArt)).Methods("GET")
 	api.HandleFunc("/sonos/{id}/play-item", s.requireAdmin(s.sonosPlayItem)).Methods("POST")
+	api.HandleFunc("/sonos/{id}/seek", s.requireAdmin(s.sonosSeek)).Methods("PUT")
+	api.HandleFunc("/sonos/{id}/playmode", s.requireAdmin(s.sonosSetPlayMode)).Methods("PUT")
+	api.HandleFunc("/sonos/{id}/crossfade", s.requireAdmin(s.sonosSetCrossfade)).Methods("PUT")
+	api.HandleFunc("/sonos/{id}/queue", s.requireAdmin(s.sonosQueue)).Methods("GET")
+	api.HandleFunc("/sonos/{id}/queue", s.requireAdmin(s.sonosQueueAdd)).Methods("POST")
+	api.HandleFunc("/sonos/{id}/queue", s.requireAdmin(s.sonosQueueClear)).Methods("DELETE")
+	api.HandleFunc("/sonos/{id}/queue/{track}", s.requireAdmin(s.sonosQueueRemove)).Methods("DELETE")
 
 	// Spotify search/browse for the Music view. OAuth is the user's own
 	// account (PKCE); playback stays local via the play-item route above.

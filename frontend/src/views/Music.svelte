@@ -10,12 +10,13 @@
     import { toasts, route } from "../lib/stores.svelte";
     import { openModal } from "../lib/modal.svelte";
     import { copyText } from "../lib/clipboard";
-    import { fly, fade } from "svelte/transition";
+    import { fly, fade, scale } from "svelte/transition";
     import { cubicOut } from "svelte/easing";
     import { dur, sheet } from "../lib/motion";
     import { lockBodyScroll, unlockBodyScroll } from "../lib/scroll-lock";
     import type {
         SonosStatus, SonosSpeakerView, SonosGroupView, SonosFavorite,
+        SonosQueueItem, SonosRepeat,
         SpotifyStatus, SpotifyItem, SpotifyResults,
     } from "../lib/types";
 
@@ -37,6 +38,11 @@
     // Actions in flight (play/pause/join/…) keyed by "<action>:<id>".
     let busy = $state<Record<string, boolean>>({});
 
+    // Wall-clock of the last successful poll. The player advances the track
+    // position from here so the scrubber moves every second instead of
+    // jumping every five.
+    let polledAt = $state(0);
+
     const speakerById = $derived(new Map((status?.speakers ?? []).map((s) => [s.id, s])));
     const groups = $derived(status?.groups ?? []);
     // Registered speakers the live topology doesn't mention — offline or on
@@ -56,6 +62,12 @@
 
     function coordinatorOf(g: SonosGroupView): SonosSpeakerView | undefined {
         return speakerById.get(g.coordinator_id) ?? speakerById.get(g.member_ids[0]);
+    }
+
+    // Shuffle / repeat / crossfade / queue length belong to the group, so the
+    // backend only reports them on the coordinator's view.
+    function groupStateOf(g: SonosGroupView) {
+        return coordinatorOf(g)?.group_state;
     }
 
     function groupTitle(g: SonosGroupView): string {
@@ -89,7 +101,8 @@
             const st = await api.sonosStatus();
             if (seq !== statusSeq) return;
             status = st;
-            const now = Date.now();
+            polledAt = Date.now();
+            const now = polledAt;
             for (const sp of st.speakers) {
                 const ov = volOverride[sp.id];
                 if (ov && now - ov.at < 3000) continue; // user just moved it
@@ -197,9 +210,11 @@
         void run("leave:" + speakerId, () => api.sonosLeave(speakerId), "Ungrouping failed");
     }
 
-    function playFavorite(f: SonosFavorite) {
-        if (!favTarget) return;
-        void run("fav:" + f.id, () => api.sonosPlayFavorite(favTarget!, f), "Couldn't play favorite");
+    // Favorites play on the chip-selected target, except inside the player
+    // sheet, where the group being viewed is the obvious destination.
+    function playFavorite(f: SonosFavorite, target: string | null = favTarget) {
+        if (!target) return;
+        void run("fav:" + f.id, () => api.sonosPlayFavorite(target, f), "Couldn't play favorite");
     }
 
     // ── Screens ──────────────────────────────────────────────────────────
@@ -286,10 +301,17 @@
     function closePlayer() {
         if (playerGroupId === null) return;
         playerGroupId = null;
+        queuePane = false;
+        scrubSec = null;
         unlockBodyScroll();
     }
     function onWindowKey(e: KeyboardEvent) {
-        if (e.key === "Escape" && playerOpen) closePlayer();
+        if (e.key !== "Escape") return;
+        // Escape always leaves the player outright rather than stepping back
+        // through the queue pane — the sheet covers the nav, so one press
+        // must always be enough to get out (DESIGN.md §15).
+        if (playerOpen) closePlayer();
+        else if (menuFor) menuFor = null;
     }
     // A regroup between polls can retire the coordinator the sheet is bound
     // to. Close instead of leaving an empty sheet — and, more importantly,
@@ -319,15 +341,222 @@
         const p = t.split(":").map(Number);
         return p.reduce((acc, n) => acc * 60 + (Number.isFinite(n) ? n : 0), 0);
     }
-    function progressPct(state?: SonosSpeakerView["state"]): number {
-        const d = secs(state?.duration);
-        if (!d) return 0;
-        return Math.min(100, Math.max(0, (secs(state?.position) / d) * 100));
-    }
     // "0:03:12" → "3:12" (Sonos always sends leading hours)
     function clock(t?: string): string {
         if (!t) return "";
         return t.replace(/^0:0?/, "");
+    }
+    // seconds → "3:12" for display
+    function fmtSecs(t: number): string {
+        const total = Math.max(0, Math.round(t));
+        const s = String(total % 60).padStart(2, "0");
+        const m = Math.floor(total / 60);
+        if (m < 60) return `${m}:${s}`;
+        return `${Math.floor(m / 60)}:${String(m % 60).padStart(2, "0")}:${s}`;
+    }
+    // seconds → "0:03:12", the H:MM:SS form the seek endpoint takes
+    function toClock(t: number): string {
+        const total = Math.max(0, Math.round(t));
+        return `${Math.floor(total / 3600)}:${String(Math.floor(total / 60) % 60).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+    }
+
+    // ── Scrubbing ────────────────────────────────────────────────────────
+    // The position is only polled every 5s, so between polls the player
+    // extrapolates from the last reading. `tick` exists purely to re-run that
+    // derivation once a second, and only while the sheet is open.
+    let tick = $state(0);
+    $effect(() => {
+        if (!playerOpen) return;
+        const t = setInterval(() => tick++, 1000);
+        return () => clearInterval(t);
+    });
+
+    // Non-null while a finger/pointer is on the scrubber.
+    let scrubSec = $state<number | null>(null);
+    // A just-issued seek wins over the polled position until the speaker has
+    // had time to report it — same idea as volOverride.
+    let seekOverride: { sec: number; at: number } | null = $state(null);
+
+    const activeState = $derived(activeGroup ? coordinatorOf(activeGroup)?.state : undefined);
+    // Sources without a duration (radio, line-in, TV) can't be seeked.
+    const durationSec = $derived(secs(activeState?.duration));
+
+    const livePos = $derived.by(() => {
+        if (scrubSec !== null) return scrubSec;
+        void tick; // re-derive once a second
+        const now = Date.now();
+        const ov = seekOverride;
+        const base = ov && now - ov.at < 4000 ? ov.sec : secs(activeState?.position);
+        const since = ov && now - ov.at < 4000 ? ov.at : polledAt;
+        if (!activeState?.playing || !since) return base;
+        const advanced = base + (now - since) / 1000;
+        return durationSec ? Math.min(durationSec, advanced) : advanced;
+    });
+
+    function commitSeek(g: SonosGroupView, sec: number) {
+        const c = coordinatorOf(g);
+        scrubSec = null;
+        if (!c) return;
+        seekOverride = { sec, at: Date.now() };
+        api.sonosSeek(c.id, toClock(sec)).catch((e) => {
+            seekOverride = null;
+            toasts.error("Seek failed", (e as Error).message);
+        });
+    }
+
+    // Drop the scrub/seek overrides when the track or the target changes, so
+    // a new song never inherits the previous one's position. The guard
+    // matters: every poll replaces the status objects, so this effect re-runs
+    // on the 5s tick — without it, a drag in progress would be cancelled and
+    // a fresh seek discarded each time a poll landed.
+    let lastTrackKey = "";
+    $effect(() => {
+        const key = `${playerGroupId ?? ""}|${activeState?.track?.title ?? ""}`;
+        if (key === lastTrackKey) return;
+        lastTrackKey = key;
+        scrubSec = null;
+        seekOverride = null;
+    });
+
+    // ── Play modes ───────────────────────────────────────────────────────
+    // Sonos stores shuffle and repeat as one composite value, so both axes
+    // are always sent together; the patch fills in whichever isn't changing.
+    const NEXT_REPEAT: Record<SonosRepeat, SonosRepeat> = { off: "all", all: "one", one: "off" };
+
+    function setPlayMode(g: SonosGroupView, patch: { shuffle?: boolean; repeat?: SonosRepeat }) {
+        const c = coordinatorOf(g);
+        const gs = groupStateOf(g);
+        if (!c || !gs) return;
+        void run(
+            "mode:" + c.id,
+            () => api.sonosSetPlayMode(c.id, patch.shuffle ?? gs.shuffle, patch.repeat ?? gs.repeat),
+            "Couldn't change play mode",
+        );
+    }
+    function toggleCrossfade(g: SonosGroupView) {
+        const c = coordinatorOf(g);
+        const gs = groupStateOf(g);
+        if (!c || !gs) return;
+        void run("xfade:" + c.id, () => api.sonosSetCrossfade(c.id, !gs.crossfade), "Couldn't change crossfade");
+    }
+    function repeatLabel(r?: SonosRepeat): string {
+        if (r === "all") return "Repeat all — tap for repeat one";
+        if (r === "one") return "Repeat one — tap to turn repeat off";
+        return "Repeat off — tap to repeat all";
+    }
+
+    // ── Queue ────────────────────────────────────────────────────────────
+    let queuePane = $state(false);
+    // The two panes share one scroll container, so switching has to rewind
+    // it — otherwise the queue opens halfway down at the player's offset.
+    let scrollEl = $state<HTMLElement | null>(null);
+    $effect(() => {
+        void queuePane;
+        if (scrollEl) scrollEl.scrollTop = 0;
+    });
+    let queue = $state<SonosQueueItem[]>([]);
+    let queueLoading = $state(false);
+    let queueSeq = 0;
+
+    async function loadQueue(coordinatorId: string, skeleton = false) {
+        const seq = ++queueSeq;
+        if (skeleton) queueLoading = true;
+        try {
+            const q = await api.sonosQueue(coordinatorId);
+            if (seq !== queueSeq) return;
+            queue = q;
+        } catch {
+            if (seq === queueSeq) queue = []; // an unreachable coordinator shows empty
+        } finally {
+            if (seq === queueSeq) queueLoading = false;
+        }
+    }
+
+    // Load the queue whenever the player binds to a group: the "Up next" row
+    // needs a real track name, not just a count.
+    $effect(() => {
+        const id = playerGroupId;
+        if (id === null) {
+            queueSeq++; // cancel any in-flight load
+            queue = [];
+            return;
+        }
+        void loadQueue(id, true);
+    });
+
+    // The first queued track after the one playing.
+    const nextInQueue = $derived.by(() => {
+        const cur = activeState?.queue_track ?? 0;
+        return queue.find((q) => q.track > cur);
+    });
+
+    function jumpTo(g: SonosGroupView, track: number) {
+        const c = coordinatorOf(g);
+        if (!c) return;
+        void run("jump:" + track, () => api.sonosSeekTrack(c.id, track), "Couldn't play that track");
+    }
+
+    async function removeQueued(g: SonosGroupView, track: number) {
+        const c = coordinatorOf(g);
+        if (!c) return;
+        await run("qrm:" + track, () => api.sonosQueueRemove(c.id, track), "Couldn't remove that track");
+        // Removing renumbers everything below it, so re-read rather than
+        // splicing locally.
+        void loadQueue(c.id);
+    }
+
+    async function clearQueue(g: SonosGroupView) {
+        const c = coordinatorOf(g);
+        if (!c) return;
+        // Clearing stops playback, so it gets the same confirm treatment as
+        // any other destructive action.
+        const ok = await openModal<boolean>(ConfirmModal, {
+            title: "Clear the queue?",
+            message: `Every track queued on ${groupTitle(g)} will be removed, and playback stops.`,
+            confirmLabel: "Clear queue",
+            danger: true,
+        });
+        if (!ok) return;
+        await run("qclear:" + c.id, () => api.sonosQueueClear(c.id), "Couldn't clear the queue");
+        void loadQueue(c.id);
+    }
+
+    // Enqueue without disturbing what's playing. Used by search results and
+    // favorites; `next` drops it in after the current track.
+    async function enqueue(
+        item: { uri: string; title?: string; service?: string; metadata?: string },
+        next: boolean,
+        target: string | null = favTarget,
+    ) {
+        if (!target) return;
+        const key = "q:" + item.uri;
+        if (busy[key]) return;
+        busy[key] = true;
+        try {
+            const added = await api.sonosQueueAdd(target, { ...item, next });
+            const where = added.track ? `position ${added.track} of ${added.length}` : "the queue";
+            toasts.success(next ? "Playing next" : "Added to queue", `${item.title ?? "Track"} · ${where}`);
+            if (playerGroupId === target) void loadQueue(target);
+        } catch (e) {
+            toasts.error("Couldn't add to the queue", (e as Error).message);
+        } finally {
+            busy[key] = false;
+        }
+    }
+
+    // ── Row overflow menus (search results, favorites) ───────────────────
+    // Keyed by item URI: at most one menu is open at a time.
+    let menuFor = $state<string | null>(null);
+    $effect(() => {
+        if (!menuFor) return;
+        const close = () => (menuFor = null);
+        // The opening click calls stopPropagation, so it never reaches here.
+        document.addEventListener("click", close);
+        return () => document.removeEventListener("click", close);
+    });
+    function toggleMenu(e: MouseEvent, uri: string) {
+        e.stopPropagation();
+        menuFor = menuFor === uri ? null : uri;
     }
 
     // ── Spotify search ───────────────────────────────────────────────────
@@ -607,16 +836,7 @@
             </div>
             <div class="favs h-scroll">
                 {#each favorites as f (f.id)}
-                    <button class="fav" disabled={busy["fav:" + f.id] || !favTarget}
-                        onclick={() => playFavorite(f)}>
-                        {#if f.art_uri}
-                            <img class="fav-art" src={f.art_uri} alt="" loading="lazy" />
-                        {:else}
-                            <div class="fav-art placeholder">[ art ]</div>
-                        {/if}
-                        <span class="fav-title">{f.title}</span>
-                        {#if f.service}<span class="fav-sub mono">{f.service}</span>{/if}
-                    </button>
+                    {@render favCard(f, favTarget)}
                 {/each}
             </div>
         </section>
@@ -823,19 +1043,43 @@
                 {:else}
                     <div class="sp-results">
                         {#each shownItems as item (item.uri)}
-                            <button class="sp-row" disabled={busy["item:" + item.uri] || !favTarget}
-                                onclick={() => playItem(item)}>
-                                {#if item.art_url}
-                                    <img class="sp-art" src={item.art_url} alt="" loading="lazy" />
-                                {:else}
-                                    <div class="sp-art placeholder">[ art ]</div>
+                            <div class="sp-row">
+                                <button class="sp-open" disabled={busy["item:" + item.uri] || !favTarget}
+                                    onclick={() => playItem(item)}>
+                                    {#if item.art_url}
+                                        <img class="sp-art" src={item.art_url} alt="" loading="lazy" />
+                                    {:else}
+                                        <div class="sp-art placeholder">[ art ]</div>
+                                    {/if}
+                                    <span class="sp-meta">
+                                        <span class="sp-name">{item.name}</span>
+                                        {#if item.sub}<span class="sp-sub">{item.sub}</span>{/if}
+                                    </span>
+                                    <span class="sp-play"><Icon name="play" size={16} /></span>
+                                </button>
+                                <!-- Tapping the row plays now; queueing without
+                                     interrupting lives behind the overflow. -->
+                                <button class="icon-btn sp-more" aria-label="More for {item.name}"
+                                    aria-haspopup="menu" aria-expanded={menuFor === item.uri}
+                                    disabled={busy["q:" + item.uri] || !favTarget}
+                                    onclick={(e) => toggleMenu(e, item.uri)}>
+                                    <Icon name="more" size={16} />
+                                </button>
+                                {#if menuFor === item.uri}
+                                    <div class="overflow-menu" role="menu"
+                                        in:scale={{ start: 0.95, duration: dur(140), easing: cubicOut, opacity: 0 }}
+                                        out:scale={{ start: 0.95, duration: dur(100), easing: cubicOut, opacity: 0 }}>
+                                        <button class="overflow-item" role="menuitem"
+                                            onclick={() => enqueue({ service: "Spotify", uri: item.uri, title: item.name }, true)}>
+                                            <Icon name="skipNext" size={16} /><span>Play next</span>
+                                        </button>
+                                        <button class="overflow-item" role="menuitem"
+                                            onclick={() => enqueue({ service: "Spotify", uri: item.uri, title: item.name }, false)}>
+                                            <Icon name="queue" size={16} /><span>Add to queue</span>
+                                        </button>
+                                    </div>
                                 {/if}
-                                <span class="sp-meta">
-                                    <span class="sp-name">{item.name}</span>
-                                    {#if item.sub}<span class="sp-sub">{item.sub}</span>{/if}
-                                </span>
-                                <span class="sp-play"><Icon name="play" size={16} /></span>
-                            </button>
+                            </div>
                         {/each}
                     </div>
                 {/if}
@@ -907,6 +1151,7 @@
     {@const g = activeGroup}
     {@const c = coordinatorOf(g)}
     {@const st = c?.state}
+    {@const gs = c?.group_state}
     {@const grouped = g.member_ids.length > 1}
     <div class="scrim" transition:fade={{ duration: dur(200) }} onclick={closePlayer} aria-hidden="true"></div>
     <div
@@ -921,13 +1166,17 @@
         <!-- Grabber + close X, per DESIGN.md §5 — the sheet must read as
              dismissible at a glance, not only via the collapse chevron. -->
         <div class="grabber" aria-hidden="true"></div>
-        <div class="player-scroll">
+        <div class="player-scroll" bind:this={scrollEl}>
             <header class="player-head">
-                <button class="icon-btn p-icon" aria-label="Collapse player" onclick={closePlayer}>
-                    <Icon name="chevronDown" size={18} />
+                <button
+                    class="icon-btn p-icon"
+                    aria-label={queuePane ? "Back to now playing" : "Collapse player"}
+                    onclick={() => (queuePane ? (queuePane = false) : closePlayer())}
+                >
+                    <Icon name={queuePane ? "chevronLeft" : "chevronDown"} size={18} />
                 </button>
                 <div class="p-onair">
-                    <div class="eyrow">Playing on</div>
+                    <div class="eyrow">{queuePane ? "Queue" : "Playing on"}</div>
                     <div class="p-onair-name">{groupTitle(g)}</div>
                 </div>
                 <button class="icon-btn p-icon" aria-label="Close player" onclick={closePlayer}>
@@ -935,104 +1184,257 @@
                 </button>
             </header>
 
-            <div class="p-art">
-                {#if st?.track?.art_uri}
-                    <img src={st.track.art_uri} alt="" />
-                {:else}
-                    <div class="p-art-ph">[ album art ]</div>
-                {/if}
-            </div>
-
-            <div class="p-meta">
-                {#if st?.track?.title}
-                    <div class="p-title">{st.track.title}</div>
-                    <div class="p-sub">{[st.track.artist, st.track.album].filter(Boolean).join(" · ")}</div>
-                {:else}
-                    <div class="p-title idle">Nothing playing</div>
-                    <div class="p-sub">Pick a favorite, or start from any Sonos-aware app.</div>
-                {/if}
-            </div>
-
-            {#if st?.duration}
-                <div class="p-scrub">
-                    <div class="rail"><i style="width:{progressPct(st)}%"></i></div>
-                    <div class="p-times mono">
-                        <span>{clock(st.position)}</span><span>{clock(st.duration)}</span>
-                    </div>
+            {#if queuePane}
+                <!-- ── Queue pane ──────────────────────────────────────── -->
+                <div class="q-bar">
+                    <span class="q-total mono">
+                        {gs?.queue_length ?? queue.length}
+                        {(gs?.queue_length ?? queue.length) === 1 ? "track" : "tracks"}
+                    </span>
+                    <button class="chip" disabled={!c || busy["qclear:" + c?.id] || queue.length === 0}
+                        onclick={() => clearQueue(g)}>Clear</button>
                 </div>
-            {/if}
 
-            <div class="p-transport">
-                <button class="icon-btn t-btn" aria-label="Previous track"
-                    disabled={!c || busy["previous:" + c?.id]} onclick={() => skip(g, "previous")}>
-                    <Icon name="skipPrev" size={22} />
-                </button>
-                <button class="p-play" class:playing={st?.playing}
-                    aria-label={st?.playing ? "Pause" : "Play"}
-                    disabled={!c || busy["play:" + c?.id]} onclick={() => togglePlay(g)}>
-                    <Icon name={st?.playing ? "pause" : "play"} size={26} />
-                </button>
-                <button class="icon-btn t-btn" aria-label="Next track"
-                    disabled={!c || busy["next:" + c?.id]} onclick={() => skip(g, "next")}>
-                    <Icon name="skipNext" size={22} />
-                </button>
-            </div>
-
-            {#if grouped}
-                <div class="p-vol">
-                    <Icon name="volume" size={17} />
-                    <input type="range" min="0" max="100" step="1" aria-label="Group volume"
-                        value={groupVol[g.coordinator_id] ?? 0}
-                        oninput={(e) => (groupVol[g.coordinator_id] = e.currentTarget.valueAsNumber)}
-                        onchange={(e) => setGroupVolume(g.coordinator_id, e.currentTarget.valueAsNumber)} />
-                    <span class="vol-num mono">{groupVol[g.coordinator_id] ?? 0}</span>
-                </div>
-            {/if}
-
-            <div class="p-speakers">
-                <div class="eyrow">Speakers</div>
-                {#each g.member_ids as id (id)}
-                    {@const sp = speakerById.get(id)}
-                    {#if sp}
-                        <div class="member">
-                            <button class="icon-btn m-mute"
-                                aria-label={sp.state?.muted ? `Unmute ${sp.name}` : `Mute ${sp.name}`}
-                                disabled={busy["mute:" + sp.id]} onclick={() => toggleMute(sp)}>
-                                <Icon name={sp.state?.muted ? "volumeOff" : "volume"} size={16} />
-                            </button>
-                            <span class="m-name" class:muted={sp.state?.muted}>{sp.name}</span>
-                            <input type="range" min="0" max="100" step="1" aria-label="{sp.name} volume"
-                                value={localVol[sp.id] ?? sp.state?.volume ?? 0}
-                                oninput={(e) => (localVol[sp.id] = e.currentTarget.valueAsNumber)}
-                                onchange={(e) => setVolume(sp.id, e.currentTarget.valueAsNumber)} />
-                            <span class="vol-num mono">{localVol[sp.id] ?? sp.state?.volume ?? 0}</span>
-                            {#if grouped}
-                                <button class="icon-btn m-act" aria-label="Remove {sp.name} from group"
-                                    disabled={busy["leave:" + sp.id]} onclick={() => leave(sp.id)}>
+                {#if queueLoading}
+                    <div class="skeleton q-skeleton"></div>
+                {:else if queue.length === 0}
+                    <p class="q-none">
+                        Nothing queued. Play a favorite or a Spotify result and it lands here —
+                        radio and line-in play straight through without a queue.
+                    </p>
+                {:else}
+                    <div class="q-list">
+                        {#each queue as item (item.track)}
+                            {@const current = item.track === st?.queue_track}
+                            <div class="q-row" class:current>
+                                <button class="q-open" disabled={busy["jump:" + item.track]}
+                                    onclick={() => jumpTo(g, item.track)}>
+                                    <span class="q-num mono">
+                                        {#if current && st?.playing}
+                                            {@render wave()}
+                                        {:else}
+                                            {item.track}
+                                        {/if}
+                                    </span>
+                                    <span class="q-meta">
+                                        <span class="q-title">{item.title || "Unknown track"}</span>
+                                        {#if item.artist}<span class="q-sub">{item.artist}</span>{/if}
+                                    </span>
+                                    {#if item.duration}
+                                        <span class="q-dur mono">{clock(item.duration)}</span>
+                                    {/if}
+                                </button>
+                                <button class="icon-btn q-rm"
+                                    aria-label="Remove {item.title || 'track ' + item.track} from the queue"
+                                    disabled={busy["qrm:" + item.track]} onclick={() => removeQueued(g, item.track)}>
                                     <Icon name="close" size={14} />
                                 </button>
-                            {/if}
-                        </div>
-                    {/if}
-                {/each}
-                {#if joinables(g).length > 0}
-                    <div class="joiners">
-                        {#each joinables(g) as sp (sp.id)}
-                            <button class="chip" disabled={busy["join:" + sp.id]} onclick={() => join(sp.id, g)}>
-                                <Icon name="plus" size={13} /> {sp.name}
-                            </button>
+                            </div>
                         {/each}
                     </div>
+                    {#if (gs?.queue_length ?? 0) > queue.length}
+                        <div class="q-more mono">
+                            showing the first {queue.length} of {gs?.queue_length}
+                        </div>
+                    {/if}
                 {/if}
-                {#if g.unregistered?.length}
-                    <div class="unreg mono">
-                        also in this group: {g.unregistered.join(", ")} — add them to control here
+            {:else}
+                <!-- ── Now playing ─────────────────────────────────────── -->
+                <div class="p-art">
+                    {#if st?.track?.art_uri}
+                        <img src={st.track.art_uri} alt="" />
+                    {:else}
+                        <div class="p-art-ph">[ album art ]</div>
+                    {/if}
+                </div>
+
+                <div class="p-meta">
+                    {#if st?.track?.title}
+                        <div class="p-title">{st.track.title}</div>
+                        <div class="p-sub">
+                            {[st.track.artist, st.track.album].filter(Boolean).join(" · ")}
+                        </div>
+                    {:else}
+                        <div class="p-title idle">Nothing playing</div>
+                        <div class="p-sub">Start a favorite below, or search Spotify.</div>
+                    {/if}
+                </div>
+
+                <!-- The rail is a real control only where the source reports a
+                     duration. Radio and line-in don't, so they get an honest
+                     label instead of a scrubber that would be refused. -->
+                {#if durationSec > 0}
+                    <div class="p-scrub">
+                        <input
+                            class="scrub"
+                            type="range"
+                            min="0"
+                            max={durationSec}
+                            step="1"
+                            aria-label="Seek"
+                            aria-valuetext="{fmtSecs(livePos)} of {fmtSecs(durationSec)}"
+                            disabled={!c}
+                            value={livePos}
+                            oninput={(e) => (scrubSec = e.currentTarget.valueAsNumber)}
+                            onchange={(e) => commitSeek(g, e.currentTarget.valueAsNumber)}
+                        />
+                        <div class="p-times mono">
+                            <span>{fmtSecs(livePos)}</span><span>{fmtSecs(durationSec)}</span>
+                        </div>
+                    </div>
+                {:else if st?.track?.title}
+                    <div class="p-live mono">live stream — no track position</div>
+                {/if}
+
+                <div class="p-transport">
+                    <button
+                        class="icon-btn t-mode"
+                        class:on={gs?.shuffle}
+                        aria-label={gs?.shuffle ? "Shuffle on" : "Shuffle off"}
+                        aria-pressed={gs?.shuffle ?? false}
+                        disabled={!gs || !c || busy["mode:" + c?.id]}
+                        onclick={() => setPlayMode(g, { shuffle: !gs?.shuffle })}
+                    >
+                        <Icon name="shuffle" size={18} />
+                    </button>
+                    <button class="icon-btn t-btn" aria-label="Previous track"
+                        disabled={!c || busy["previous:" + c?.id]} onclick={() => skip(g, "previous")}>
+                        <Icon name="skipPrev" size={22} />
+                    </button>
+                    <button class="p-play" class:playing={st?.playing}
+                        aria-label={st?.playing ? "Pause" : "Play"}
+                        disabled={!c || busy["play:" + c?.id]} onclick={() => togglePlay(g)}>
+                        <Icon name={st?.playing ? "pause" : "play"} size={26} />
+                    </button>
+                    <button class="icon-btn t-btn" aria-label="Next track"
+                        disabled={!c || busy["next:" + c?.id]} onclick={() => skip(g, "next")}>
+                        <Icon name="skipNext" size={22} />
+                    </button>
+                    <button
+                        class="icon-btn t-mode"
+                        class:on={gs && gs.repeat !== "off"}
+                        aria-label={repeatLabel(gs?.repeat)}
+                        disabled={!gs || !c || busy["mode:" + c?.id]}
+                        onclick={() => setPlayMode(g, { repeat: NEXT_REPEAT[gs?.repeat ?? "off"] })}
+                    >
+                        <Icon name={gs?.repeat === "one" ? "repeatOne" : "repeat"} size={18} />
+                    </button>
+                </div>
+
+                {#if gs}
+                    <div class="p-extras">
+                        <button class="chip" class:on={gs.crossfade} aria-pressed={gs.crossfade}
+                            disabled={!c || busy["xfade:" + c?.id]} onclick={() => toggleCrossfade(g)}>
+                            Crossfade
+                        </button>
+                        {#if gs.queue_length > 0}
+                            <button class="p-upnext" onclick={() => (queuePane = true)}>
+                                <Icon name="queue" size={17} />
+                                <span class="up-body">
+                                    <span class="up-label">Up next</span>
+                                    <span class="up-track">
+                                        {nextInQueue?.title ?? "End of the queue"}
+                                    </span>
+                                </span>
+                                <span class="up-count mono">{gs.queue_length}</span>
+                                <span class="up-go" aria-hidden="true"><Icon name="chevronLeft" size={16} /></span>
+                            </button>
+                        {/if}
                     </div>
                 {/if}
-            </div>
+
+                <!-- Idle groups get somewhere to go rather than a dead end. -->
+                {#if !st?.track?.title && favorites.length > 0}
+                    <div class="p-idle">
+                        <div class="eyrow">Start something</div>
+                        <div class="favs h-scroll">
+                            {#each favorites as f (f.id)}
+                                {@render favCard(f, g.coordinator_id)}
+                            {/each}
+                        </div>
+                    </div>
+                {/if}
+
+                <div class="p-speakers">
+                    <div class="eyrow">Volume</div>
+                    {#if grouped}
+                        <div class="member">
+                            <span class="m-icon" aria-hidden="true"><Icon name="volume" size={16} /></span>
+                            <span class="m-name">All rooms</span>
+                            <input type="range" min="0" max="100" step="1" aria-label="Group volume"
+                                value={groupVol[g.coordinator_id] ?? 0}
+                                oninput={(e) => (groupVol[g.coordinator_id] = e.currentTarget.valueAsNumber)}
+                                onchange={(e) => setGroupVolume(g.coordinator_id, e.currentTarget.valueAsNumber)} />
+                            <span class="vol-num mono">{groupVol[g.coordinator_id] ?? 0}</span>
+                        </div>
+                        <div class="m-divider" aria-hidden="true"></div>
+                    {/if}
+                    {#each g.member_ids as id (id)}
+                        {@const sp = speakerById.get(id)}
+                        {#if sp}
+                            <div class="member">
+                                <button class="icon-btn m-mute"
+                                    aria-label={sp.state?.muted ? `Unmute ${sp.name}` : `Mute ${sp.name}`}
+                                    disabled={busy["mute:" + sp.id]} onclick={() => toggleMute(sp)}>
+                                    <Icon name={sp.state?.muted ? "volumeOff" : "volume"} size={16} />
+                                </button>
+                                <span class="m-name" class:muted={sp.state?.muted}>{sp.name}</span>
+                                <input type="range" min="0" max="100" step="1" aria-label="{sp.name} volume"
+                                    value={localVol[sp.id] ?? sp.state?.volume ?? 0}
+                                    oninput={(e) => (localVol[sp.id] = e.currentTarget.valueAsNumber)}
+                                    onchange={(e) => setVolume(sp.id, e.currentTarget.valueAsNumber)} />
+                                <span class="vol-num mono">{localVol[sp.id] ?? sp.state?.volume ?? 0}</span>
+                                {#if grouped}
+                                    <button class="icon-btn m-act" aria-label="Remove {sp.name} from group"
+                                        disabled={busy["leave:" + sp.id]} onclick={() => leave(sp.id)}>
+                                        <Icon name="close" size={14} />
+                                    </button>
+                                {/if}
+                            </div>
+                        {/if}
+                    {/each}
+                    {#if joinables(g).length > 0}
+                        <div class="joiners">
+                            {#each joinables(g) as sp (sp.id)}
+                                <button class="chip" disabled={busy["join:" + sp.id]} onclick={() => join(sp.id, g)}>
+                                    <Icon name="plus" size={13} /> {sp.name}
+                                </button>
+                            {/each}
+                        </div>
+                    {/if}
+                    {#if g.unregistered?.length}
+                        <div class="unreg mono">
+                            also in this group: {g.unregistered.join(", ")} — add them to control here
+                        </div>
+                    {/if}
+                </div>
+            {/if}
         </div>
     </div>
 {/if}
+
+<!-- ── Favorite card ───────────────────────────────────────────────────
+     Shared by the Home shelf and the idle player: tap the art to play it
+     on `target`, or the corner button to queue it without interrupting. -->
+{#snippet favCard(f: SonosFavorite, target: string | null)}
+    <div class="fav">
+        <button class="fav-play" disabled={busy["fav:" + f.id] || !target}
+            onclick={() => playFavorite(f, target)}>
+            {#if f.art_uri}
+                <img class="fav-art" src={f.art_uri} alt="" loading="lazy" />
+            {:else}
+                <div class="fav-art placeholder">[ art ]</div>
+            {/if}
+            <span class="fav-title">{f.title}</span>
+            {#if f.service}<span class="fav-sub mono">{f.service}</span>{/if}
+        </button>
+        <button class="icon-btn fav-add" aria-label="Add {f.title} to the queue"
+            disabled={busy["q:" + f.uri] || !target}
+            onclick={() => enqueue({ uri: f.uri, title: f.title, metadata: f.metadata }, false, target)}>
+            <Icon name="plus" size={14} />
+        </button>
+    </div>
+{/snippet}
 
 <style>
     .sk { height: 180px; border-radius: var(--r-md); }
@@ -1154,12 +1556,13 @@
     /* ── Favorites ── */
     .fav-targets { display: flex; gap: var(--space-2); flex-wrap: wrap; }
     .favs { display: flex; gap: var(--space-3); padding-bottom: var(--space-1); }
-    .fav {
-        display: flex; flex-direction: column; gap: 6px; width: 112px;
+    .fav { position: relative; width: 112px; }
+    .fav-play {
+        display: flex; flex-direction: column; gap: 6px; width: 100%;
         background: transparent; border: 0; padding: 0;
         cursor: pointer; text-align: left; color: var(--text); font: inherit;
     }
-    .fav:disabled { opacity: 0.5; cursor: default; }
+    .fav-play:disabled { opacity: 0.5; cursor: default; }
     .fav-art {
         width: 112px; height: 112px; border-radius: var(--r-md);
         object-fit: cover; background: var(--card-2);
@@ -1167,13 +1570,22 @@
         transition: transform 120ms ease;
     }
     div.fav-art { display: grid; place-items: center; font-size: 10px; color: var(--text-dim); }
-    @media (hover: hover) { .fav:hover .fav-art { transform: translateY(-1px); } }
-    .fav:active .fav-art { transform: scale(0.97); }
+    @media (hover: hover) { .fav-play:hover .fav-art { transform: translateY(-1px); } }
+    .fav-play:active .fav-art { transform: scale(0.97); }
     .fav-title {
         font-size: 12.5px; font-weight: 500;
         overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
     .fav-sub { font-size: 10px; color: var(--text-dim); letter-spacing: 0.04em; }
+    /* Queue-without-interrupting, parked on the art's corner. */
+    .fav-add {
+        position: absolute; top: 6px; right: 6px;
+        width: 30px; height: 30px; border-radius: 50%;
+        background: var(--bg-bar); border: 1px solid var(--hairline);
+        color: var(--text);
+        backdrop-filter: blur(6px);
+    }
+    .fav-add:disabled { opacity: 0.4; }
 
     /* ── Room grid ── */
     .rooms { display: flex; flex-direction: column; gap: var(--space-3); }
@@ -1407,16 +1819,47 @@
     .sp-none { font-size: 12.5px; color: var(--text-mute); }
 
     .sp-results { display: flex; flex-direction: column; gap: 2px; }
+    /* The row is a container, not a control: tapping the body plays now,
+       the trailing overflow queues without interrupting. */
     .sp-row {
+        position: relative;
+        display: flex; align-items: center; gap: var(--space-1);
+        border-radius: var(--r-md);
+        transition: background 150ms ease;
+    }
+    @media (hover: hover) { .sp-row:hover { background: var(--card-2); } }
+    .sp-open {
+        flex: 1; min-width: 0;
         display: flex; align-items: center; gap: var(--space-3);
         min-height: 52px; padding: 6px var(--space-2);
         background: transparent; border: 0; border-radius: var(--r-md);
         color: var(--text); cursor: pointer; text-align: left; font: inherit;
-        transition: background 150ms ease;
     }
-    .sp-row:hover:not(:disabled) { background: var(--card-2); }
-    .sp-row:active:not(:disabled) { background: var(--card-3); }
-    .sp-row:disabled { opacity: 0.5; cursor: default; }
+    .sp-open:active:not(:disabled) { background: var(--card-3); }
+    .sp-open:disabled { opacity: 0.5; cursor: default; }
+    .sp-more { width: 36px; height: 36px; flex-shrink: 0; margin-right: 4px; }
+    .sp-more:disabled { opacity: 0.4; }
+
+    .overflow-menu {
+        position: absolute; right: 8px; top: 46px; z-index: 12;
+        min-width: 180px;
+        display: flex; flex-direction: column;
+        background: var(--card-2);
+        border: 1px solid var(--border-strong);
+        border-radius: var(--r-md);
+        overflow: hidden;
+        box-shadow: var(--shadow-md);
+    }
+    .overflow-item {
+        display: flex; align-items: center; gap: var(--space-3);
+        padding: 12px var(--space-4);
+        background: transparent; border: 0;
+        border-bottom: 1px solid var(--hairline);
+        cursor: pointer; font: inherit; font-size: 14px;
+        color: var(--text); text-align: left;
+    }
+    .overflow-item:last-child { border-bottom: 0; }
+    @media (hover: hover) { .overflow-item:hover { background: var(--card-3); } }
     .sp-art {
         width: 40px; height: 40px; border-radius: var(--r-sm);
         object-fit: cover; background: var(--card-2);
@@ -1440,12 +1883,15 @@
     .sp-row:hover .sp-play { background: var(--on-soft); color: var(--on); }
 
     /* ── Full player sheet ── */
+    /* Above the mobile nav bar (z 100) and the nav drawer (120), below the
+       modal stack (150) — DESIGN.md §15 has the player covering the nav, and
+       a "Clear queue" confirm still has to land on top of the player. */
     .scrim {
-        position: fixed; inset: 0; z-index: 60;
+        position: fixed; inset: 0; z-index: 125;
         background: rgba(0, 0, 0, 0.5);
     }
     .player {
-        position: fixed; z-index: 61;
+        position: fixed; z-index: 126;
         left: 0; right: 0; bottom: 0;
         max-height: 92vh;
         background: var(--bg);
@@ -1461,7 +1907,7 @@
     }
     .player-scroll {
         max-height: calc(92vh - 12px); overflow-y: auto;
-        padding: var(--space-3) var(--space-5)
+        padding: 0 var(--space-5)
             calc(var(--space-8) + env(safe-area-inset-bottom));
         display: flex; flex-direction: column; gap: var(--space-5);
     }
@@ -1477,17 +1923,32 @@
         .player-scroll { max-height: calc(88vh - 12px); }
     }
 
-    .player-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
+    /* Sticky so a long queue never scrolls the way out of the sheet away.
+       The negative margin bleeds it over the scroll container's horizontal
+       padding, so rows pass fully underneath it. */
+    .player-head {
+        position: sticky; top: 0; z-index: 2;
+        display: flex; align-items: center; justify-content: space-between;
+        gap: var(--space-3);
+        margin: 0 calc(var(--space-5) * -1);
+        padding: var(--space-3) var(--space-5);
+        background: var(--bg);
+    }
     .p-icon { width: 38px; height: 38px; border-radius: 50%; background: var(--card-2); border: 1px solid var(--hairline); }
     .p-onair { text-align: center; min-width: 0; }
     .p-onair-name { font-size: 13px; font-weight: 600; margin-top: 2px; }
 
+    /* Art leads the sheet — it is the largest thing on screen, and the
+       glow underneath is the same bulb glow a lit device gets. */
     .p-art { display: flex; justify-content: center; padding: var(--space-2) 0 0; }
     .p-art img, .p-art-ph {
-        width: min(280px, 72vw); aspect-ratio: 1;
+        width: min(340px, 78vw); aspect-ratio: 1;
         border-radius: var(--r-lg); object-fit: cover;
     }
-    .p-art img { background: var(--card-3); border: 1px solid var(--tile-on-border); }
+    .p-art img {
+        background: var(--card-3); border: 1px solid var(--tile-on-border);
+        box-shadow: 0 18px 40px -18px var(--on-glow);
+    }
     .p-art-ph {
         display: grid; place-items: center;
         background: var(--tile-on-gradient); border: 1px solid var(--tile-on-border);
@@ -1495,17 +1956,33 @@
     }
 
     .p-meta { text-align: center; display: flex; flex-direction: column; gap: 4px; }
-    .p-title { font-size: 21px; font-weight: 600; letter-spacing: -0.02em; }
+    .p-title {
+        font-size: 22px; font-weight: 600; letter-spacing: -0.02em;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
     .p-title.idle { color: var(--text-mute); }
-    .p-sub { font-size: 14px; color: var(--text-mute); }
+    .p-sub {
+        font-size: 14px; color: var(--text-mute);
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
 
     .p-scrub { display: flex; flex-direction: column; gap: 6px; }
-    .rail { height: 6px; border-radius: 3px; background: var(--card-3); overflow: hidden; }
-    .rail i { display: block; height: 100%; border-radius: 3px; background: var(--on); }
+    /* A range input, not a decorative bar: it drags, it takes arrow keys,
+       and it inherits the volume sliders' touch sizing below. The selector
+       has to out-specify the generic input[type="range"] rule, whose
+       `flex: 1` would otherwise collapse it in this column. */
+    input[type="range"].scrub { flex: none; width: 100%; }
     .p-times { display: flex; justify-content: space-between; font-size: 11px; color: var(--text-dim); }
+    .p-live {
+        text-align: center; font-size: 10.5px; letter-spacing: 0.08em;
+        text-transform: uppercase; color: var(--text-dim);
+    }
 
-    .p-transport { display: flex; align-items: center; justify-content: center; gap: var(--space-5); }
+    .p-transport { display: flex; align-items: center; justify-content: center; gap: var(--space-4); }
     .t-btn { width: 48px; height: 48px; }
+    .t-mode { width: 42px; height: 42px; border-radius: 50%; color: var(--text-mute); }
+    .t-mode.on { background: var(--on-soft); color: var(--on); }
+    .t-mode:disabled { opacity: 0.35; }
     .p-play {
         width: 66px; height: 66px; border-radius: 50%;
         display: grid; place-items: center; flex-shrink: 0;
@@ -1515,24 +1992,105 @@
     .p-play:active { transform: scale(0.96); }
     .p-play:disabled { opacity: 0.5; }
 
-    .p-vol { display: flex; align-items: center; gap: var(--space-3); color: var(--text-mute); }
+    .p-extras { display: flex; flex-direction: column; gap: var(--space-3); }
+    .p-extras .chip { align-self: flex-start; }
+    /* Up next doubles as the way into the queue pane. */
+    .p-upnext {
+        display: flex; align-items: center; gap: var(--space-3);
+        min-height: 56px; padding: 10px var(--space-3);
+        background: var(--card); border: 1px solid var(--hairline);
+        border-radius: var(--r-md);
+        color: var(--text-mute); cursor: pointer; text-align: left; font: inherit;
+        transition: border-color var(--t-fast);
+    }
+    @media (hover: hover) { .p-upnext:hover { border-color: var(--border-strong); } }
+    .up-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+    .up-label {
+        font-family: var(--font-mono);
+        font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase;
+        color: var(--text-dim);
+    }
+    .up-track {
+        font-size: 13px; color: var(--text);
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .up-count { font-size: 12px; color: var(--text-dim); flex-shrink: 0; }
+    .up-go { display: flex; transform: rotate(180deg); flex-shrink: 0; }
+
+    .p-idle { display: flex; flex-direction: column; gap: var(--space-3); }
+
     .p-speakers { display: flex; flex-direction: column; gap: 2px; }
     .p-speakers .eyrow { margin-bottom: var(--space-1); }
+    .m-icon {
+        width: 36px; height: 36px; flex-shrink: 0;
+        display: grid; place-items: center; color: var(--text-mute);
+    }
+    .m-divider { height: 1px; background: var(--hairline); margin: var(--space-2) 0; }
+
+    /* ── Queue pane ── */
+    .q-bar { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
+    .q-total {
+        font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase;
+        color: var(--text-mute);
+    }
+    .q-skeleton { height: 220px; border-radius: var(--r-md); }
+    .q-none { font-size: 12.5px; color: var(--text-mute); line-height: 1.5; }
+    .q-list { display: flex; flex-direction: column; gap: 2px; }
+    .q-row {
+        display: flex; align-items: center; gap: var(--space-1);
+        border-radius: var(--r-md);
+        transition: background 150ms ease;
+    }
+    @media (hover: hover) { .q-row:hover { background: var(--card-2); } }
+    .q-row.current { background: var(--tile-on-gradient); }
+    .q-open {
+        flex: 1; min-width: 0;
+        display: flex; align-items: center; gap: var(--space-3);
+        min-height: 48px; padding: 6px var(--space-2);
+        background: transparent; border: 0; border-radius: var(--r-md);
+        color: var(--text); cursor: pointer; text-align: left; font: inherit;
+    }
+    .q-open:disabled { opacity: 0.5; cursor: default; }
+    .q-num {
+        width: 26px; flex-shrink: 0;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 11.5px; color: var(--text-dim);
+    }
+    .q-row.current .q-num { color: var(--on); }
+    .q-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+    .q-title {
+        font-size: 13.5px; font-weight: 500;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .q-row.current .q-title { color: var(--on); }
+    .q-sub {
+        font-size: 11.5px; color: var(--text-mute);
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .q-dur { font-size: 11px; color: var(--text-dim); flex-shrink: 0; }
+    .q-rm { width: 36px; height: 36px; flex-shrink: 0; margin-right: 4px; color: var(--text-mute); }
+    .q-rm:disabled { opacity: 0.4; }
+    .q-more { font-size: 10.5px; color: var(--text-dim); text-align: center; }
 
     /* ── Touch: hit areas grow to the 44px floor ── */
     @media (pointer: coarse) {
         .t-btn { width: 52px; height: 52px; }
-        .m-mute, .m-act { width: 44px; height: 44px; }
+        .t-mode { width: 48px; height: 48px; }
+        /* Five transport controls have to fit a 360px screen. */
+        .p-transport { gap: var(--space-3); }
+        .m-mute, .m-act, .m-icon { width: 44px; height: 44px; }
         input[type="range"] { height: 10px; border-radius: 5px; }
         input[type="range"]::-webkit-slider-thumb { width: 26px; height: 26px; }
         input[type="range"]::-moz-range-thumb { width: 26px; height: 26px; }
         .member .m-name { width: 90px; }
         .sp-play { width: 44px; height: 44px; }
+        .sp-more, .q-rm, .fav-add { width: 44px; height: 44px; }
         .sp-input, .sp-config input { font-size: 16px; } /* prevents iOS auto-zoom */
     }
 
     @media (prefers-reduced-motion: reduce) {
         .wave i { animation: none; height: 8px; }
-        .fav-art, .now-card, .puck, .p-play { transition-duration: 0.001ms; }
+        .fav-art, .now-card, .puck, .p-play,
+        .p-upnext, .q-row, .sp-row { transition-duration: 0.001ms; }
     }
 </style>

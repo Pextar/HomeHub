@@ -452,23 +452,66 @@ patterns on top. Keep these consistent if you extend it.
   the bottom of the view (`position: sticky`, cleared above the mobile tab
   bar and safe area): art, track, waveform, play/pause. Tapping it — or any
   "Playing now" card — expands the **full player**.
-- **Full player = bottom sheet.** A bottom sheet on mobile (`--r-xl` top
-  radius, `transition:sheet`, scrim, body-scroll-lock), a centered dialog
-  ≥ 601px. Holds big art, a **display-only** progress rail, transport
-  (prev / play / next), group + per-speaker volume, and join/leave.
-  Rendered inline (not the modal stack) so it stays live against the 5s poll.
+- **Full player = bottom sheet, art-led.** A bottom sheet on mobile (`--r-xl`
+  top radius, `transition:sheet`, scrim, body-scroll-lock), a centered dialog
+  ≥ 601px. Rendered inline (not the modal stack) so it stays live against the
+  5s poll. Album art is the largest element on the screen
+  (`min(340px, 78vw)`) and carries the bulb glow underneath
+  (`box-shadow` in `--on-glow`) — the same light a lit device gives off.
+  Below it, in order: title/artist, scrubber, transport, extras, volume.
   It carries the full §5 dismiss kit — **grabber, collapse chevron, close X,
   Escape, and backdrop click** — because it is the only surface in the app
-  that covers the nav; a user must never feel stuck in it.
+  that covers the nav; a user must never feel stuck in it. Covering the nav
+  is literal: the scrim/sheet sit at `z-index: 125/126`, above the mobile bar
+  (100) and the nav drawer (120), below the modal stack (150) so a confirm
+  still lands on top. Its header is `position: sticky` — a long queue must
+  never scroll the way out off the screen.
+- **The scrubber is a real control where the source allows it.** It is an
+  `<input type="range">`, not a decorative bar, so it drags, takes arrow
+  keys, and inherits the volume sliders' coarse-pointer sizing. Between
+  polls the player extrapolates the position locally so it advances once a
+  second rather than jumping every five. Sources that report no duration —
+  radio, line-in, TV — get an honest `live stream` label instead, because
+  the speaker would refuse a seek there.
+- **Shuffle and repeat flank the transport**; they are `.t-mode` circles
+  that take `--on-soft` + `--on` when engaged, deliberately quieter than the
+  amber play button. Repeat cycles off → all → one on tap and reports its
+  next state in `aria-label`. Crossfade is a plain `.chip.on` in the extras
+  row, not a switch — it is a preference, not a device state. All three are
+  group-level, so they only render when the coordinator reported a
+  `group_state`; a follower's view never carries one.
+- **The queue is a second pane inside the same sheet**, reached from an
+  "Up next" row that names the actual next track. Not a segmented control:
+  §2's Music exception covers the view's subnav only. The header's left
+  button becomes a back chevron, the close X stays put, and Escape still
+  leaves the player outright rather than stepping back a level. Rows show a
+  mono track number, replaced by the §6.8 waveform on the one playing; that
+  row takes `--tile-on-gradient`. Tapping a row jumps to it, the trailing X
+  removes it, and "Clear" is destructive enough to need a confirm.
+- **Queueing never interrupts.** Tapping a search result or favorite plays
+  it now; "Play next" and "Add to queue" live behind the row's overflow
+  (`role="menu"`), and favorites carry a corner `+` on the art. Each
+  confirms with a toast naming the position it landed in — queueing onto a
+  group playing radio is legal but silent, so the feedback has to be
+  explicit.
 - **Rooms grouping is a puck grid, not a list.** Each reachable speaker is a
   tap-to-select puck (amber ring + filled check when selected). Selecting 2+
   raises a floating "Group" bar. Existing multi-speaker zones sit inside a
   dashed enclosure (`--tile-on-border`) with an "Ungroup" affordance.
 - **Stay honest about the backend.** The local Sonos bridge exposes
-  transport, volume, mute, join/leave, favorites — but **no seek, queue, or
-  shuffle/repeat state**. So the scrubber is read-only and there is no
-  up-next list or shuffle/repeat control. Don't add UI for capabilities the
-  bridge can't back; wire the endpoint first.
+  transport, volume, mute, join/leave, favorites, seek, play modes
+  (shuffle × repeat × crossfade) and the group queue (browse, jump, add,
+  play-next, remove, clear). It does **not** expose sleep timers, EQ /
+  bass / treble, line-in or TV sources, or music-library browsing beyond
+  favorites — so there is no UI for any of those. Don't add UI for
+  capabilities the bridge can't back; wire the endpoint first. Two shapes
+  worth copying when you do:
+  - Settings that belong to a *group* rather than a speaker ride on the
+    coordinator's `group_state` in the status poll, fetched in a second
+    pass once the topology is known. Asking every follower would multiply
+    the poll for no new information.
+  - A control whose speaker-side call can be refused (seek on a stream)
+    renders as a label explaining why, never as a dead control.
 
 ---
 

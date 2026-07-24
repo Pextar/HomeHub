@@ -223,6 +223,24 @@ type State struct {
 	Track          *Track `json:"track,omitempty"`
 	Position       string `json:"position,omitempty"` // H:MM:SS
 	Duration       string `json:"duration,omitempty"` // H:MM:SS; empty for live streams
+	// QueueTrack is the 1-based position of the current track in the group
+	// queue. Zero when the source isn't the queue (radio, line-in, TV).
+	QueueTrack int `json:"queue_track,omitempty"`
+}
+
+// GroupState is the playback configuration that belongs to a zone group
+// rather than to one speaker: shuffle, repeat, crossfade and the queue.
+// Only meaningful on a coordinator, so it is fetched separately from State —
+// asking every follower for it would triple the poll for no new information.
+type GroupState struct {
+	Shuffle   bool   `json:"shuffle"`
+	Repeat    string `json:"repeat"` // off | all | one
+	Crossfade bool   `json:"crossfade"`
+	// QueueLength is how many tracks the group queue holds, and FromQueue
+	// says whether the group is currently playing *from* that queue — a
+	// group on radio still has a queue sitting behind the stream.
+	QueueLength int  `json:"queue_length"`
+	FromQueue   bool `json:"from_queue"`
 }
 
 const instance0 = "0"
@@ -317,6 +335,7 @@ func GetState(ctx context.Context, ip string) (*State, error) {
 	if body, err := soapCall(ctx, ip, avTransport, "GetPositionInfo", []arg{{"InstanceID", instance0}}); err == nil {
 		st.Position = normalizeClock(extractTag(body, "RelTime"))
 		st.Duration = normalizeClock(extractTag(body, "TrackDuration"))
+		st.QueueTrack, _ = strconv.Atoi(extractTag(body, "Track"))
 		if meta := extractTag(body, "TrackMetaData"); meta != "" && meta != "NOT_IMPLEMENTED" {
 			st.Track = ParseTrackMeta(meta)
 		}
