@@ -3,6 +3,7 @@
     import Topbar from "../components/Topbar.svelte";
     import EmptyState from "../components/EmptyState.svelte";
     import Icon from "../components/Icon.svelte";
+    import ConfirmModal from "../components/ConfirmModal.svelte";
     import SonosSpeakerModal from "../modals/SonosSpeakerModal.svelte";
     import Segmented from "../components/Segmented.svelte";
     import { api } from "../lib/api";
@@ -429,6 +430,17 @@
     }
 
     async function disconnectSpotify() {
+        // Confirm first: disconnecting drops the tokens, so the card drops
+        // back to the connect page and the only way back is the full OAuth
+        // flow again. An accidental tap must not strand the user there.
+        const who = spotify?.display_name ? `"${spotify.display_name}"` : "Your Spotify account";
+        const ok = await openModal<boolean>(ConfirmModal, {
+            title: "Disconnect Spotify?",
+            message: `${who} will be unlinked. To search again you'll need to reconnect through Spotify.`,
+            confirmLabel: "Disconnect",
+            danger: true,
+        });
+        if (!ok) return;
         try {
             await api.spotifyDisconnect();
             results = null;
@@ -765,8 +777,13 @@
                 <div class="card-header sp-head">
                     <h2>Search</h2>
                     <div class="sp-account">
-                        <span class="sp-user mono">{spotify.display_name || "Spotify"}</span>
-                        <button class="chip" onclick={disconnectSpotify}>Disconnect</button>
+                        <span class="sp-conn" title="Connected to Spotify">
+                            <span class="sp-dot" aria-hidden="true"></span>
+                            <span class="sp-conn-label">Connected</span>
+                            <span class="sp-user mono">{spotify.display_name || "Spotify"}</span>
+                        </span>
+                        <button class="chip" onclick={disconnectSpotify}
+                            aria-label="Disconnect Spotify">Disconnect</button>
                     </div>
                 </div>
                 <div class="sp-search">
@@ -1351,8 +1368,23 @@
     .sp-actions { display: flex; gap: var(--space-2); }
 
     .sp-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
-    .sp-account { display: flex; align-items: center; gap: var(--space-2); }
-    .sp-user { font-size: 11px; color: var(--text-mute); }
+    .sp-account { display: flex; align-items: center; gap: var(--space-3); }
+    /* Positive "you're connected" signal, so the neighbouring Disconnect
+       button reads as an action and not as the account's status. */
+    .sp-conn { display: flex; align-items: center; gap: 6px; min-width: 0; }
+    .sp-dot {
+        width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0;
+        background: var(--on); box-shadow: 0 0 0 4px var(--on-soft);
+    }
+    .sp-conn-label {
+        font-family: var(--font-mono);
+        font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase;
+        color: var(--on);
+    }
+    .sp-user {
+        font-size: 11px; color: var(--text-mute);
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
 
     .sp-search {
         display: flex; align-items: center; gap: var(--space-2);
