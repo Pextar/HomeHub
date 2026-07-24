@@ -20,6 +20,7 @@ function DesktopDashboard() {
   const nav = [
     { id: "home",      label: "Dashboard",  d: I.home,     active: true },
     { id: "rooms",     label: "Rooms",      d: I.rooms },
+    { id: "music",     label: "Music",      d: I.music },
     { id: "devices",   label: "Devices",    d: I.bulb },
     { id: "scenes",    label: "Scenes",     d: I.scenes },
     { id: "schedule",  label: "Schedules",  d: I.schedule },

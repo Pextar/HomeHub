@@ -93,7 +93,7 @@
 
     @media (max-width: 900px) {
         .toasts {
-            bottom: calc(60px + env(safe-area-inset-bottom) + var(--space-3));
+            bottom: calc(var(--nav-clear) + var(--space-3));
             right: var(--space-3);
             left: var(--space-3);
             max-width: none;

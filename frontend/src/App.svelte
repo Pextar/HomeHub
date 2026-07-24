@@ -192,7 +192,7 @@
     @media (max-width: 900px) {
         .main {
             padding: var(--space-4);
-            padding-bottom: calc(var(--space-4) + 60px + env(safe-area-inset-bottom));
+            padding-bottom: calc(var(--space-4) + var(--nav-clear));
         }
     }
 </style>

@@ -83,7 +83,7 @@ over decoration.
   --r-md: 14px;     /* inputs, segmented controls */
   --r-lg: 22px;     /* cards, tiles */
   --r-xl: 30px;     /* sheets, hero buttons */
-  --r-pill: 999px;
+  --r-pill: 999px;   /* chips, tab pill + lens */
 
   /* motion */
   --spring: cubic-bezier(0.34, 1.56, 0.64, 1);
@@ -250,12 +250,33 @@ motion. Nowhere outside Music.
 │  content scrolls             │
 │  padding-bottom: 90px        │
 ├──────────────────────────────┤
-│  tabbar (60px) + safe area   │
+│  glass tab pill + safe area  │
 └──────────────────────────────┘
 ```
 
-Tab bar items, in order: **Home · Rooms · Scenes · Schedule · Settings**.
-Max 5. Active item is amber.
+Tab bar items, in order: **Home · Rooms · Music · Scenes · Schedule ·
+Settings**. Max 6. The bar is a **floating glass pill** (`.tabbar` >
+`.tabdock`), detached 26px from the bottom edge with 14px side inset: warm
+translucent fill (`rgba(36,33,26,.52)`), `backdrop-filter: blur(26px)
+saturate(1.7)`, 1px white-10% edge + inset specular highlight. **Icon-only,
+22px** — every item carries an `aria-label`. The active item is a solid amber
+`.tab-lens` capsule behind the icon (the icon flips to the ink-on-amber
+`--primary-fg`; `#3a2400` in the mock); the lens is absolutely positioned
+from the active index and **slides** between slots (440ms `--spring`), so
+only one amber shape is ever on screen. Item hit area stays 44px min-height.
+
+The pill floats over content rather than sitting on an opaque bar, so its
+frame is `pointer-events: none` and the band it occupies — pill height plus
+the float gap, which grows with the safe area — is published as
+`--nav-clear`. Content padding and anything fixed above the dock (toasts,
+the assistant FAB, the Music mini-player and selection bar) offsets by that
+token instead of a hardcoded bar height. It is `0` on desktop.
+
+In this app the six slots are the four primary nav entries plus **More**,
+which opens the overflow sheet; the lens sits on More whenever the active
+route lives in that sheet. The rail and the dock are the same component
+(`components/Sidebar.svelte`), so the mock's `.tabbar` / `.tabdock` are
+`.sidebar` / `.nav-mobile` below 900px; `.tab-lens` keeps its name.
 
 Detail / form screens hide the tab bar and gain a back chevron in a 36×36
 icon chip top-left. Title centers; right side gets the action chip (Edit,
@@ -378,6 +399,10 @@ Is it a list of things?
 - [ ] Every section header is 17px / 600, left-padded 22px (mobile) or 0 (desktop)
 - [ ] Every list row matches the 44–60px / 36-icon / chevron-right pattern
 - [ ] Tab bar is hidden on detail / form / Matter step screens
+- [ ] Tab bar is the floating glass pill; active state is the sliding
+      `.tab-lens`, never an amber icon colour
+- [ ] Anything sitting above the tab dock offsets by `--nav-clear`, not a
+      literal bar height
 - [ ] Notification indicator is exactly 7×7 amber (`--on`)
 - [ ] No emoji outside the Kid module (KidHome / KidLampPanel / KidScheduleSheet)
 - [ ] No new colors invented — only tokens from §3

@@ -50,7 +50,18 @@
     --r-md: var(--radius-md);
     --r-lg: var(--radius-lg);
     --r-xl: var(--radius-xl);
-    --r-pill: 999px;
+    --r-pill: 999px;              /* chips, tab pill + lens */
+
+    /* ── Mobile floating tab dock (DESIGN.md §7) ─────────────────
+       The dock is a glass pill detached from the bottom edge, so the
+       band it occupies is its own height plus the float gap. Anything
+       fixed or sticky that has to sit above it offsets by --nav-clear
+       rather than a literal; it's 0 on desktop, where the nav is a
+       side rail. The gap grows with the safe area so the pill always
+       clears the home indicator. */
+    --tabdock-h: 64px;            /* 44px hit area + 9px padding ×2 + 1px border ×2 */
+    --tabdock-inset: max(26px, calc(env(safe-area-inset-bottom) + 8px));
+    --nav-clear: 0px;
 
     /* ── Kid module palette ──────────────────────────────────────
        The Kid surface (KidHome / KidLampPanel / KidScheduleSheet)
@@ -85,8 +96,15 @@
     --surface-hover: rgba(245, 240, 228, 0.08);
     --border: #2a2720;
     --border-strong: #34302a;
-    /* Frosted-glass surface for tab bar, bottom sheets, and overlays */
+    /* Frosted-glass surface for bottom sheets and overlays */
     --bg-bar: rgba(20, 19, 15, 0.82);
+    /* Floating mobile tab dock — warm translucent glass over content */
+    --dock-fill: rgba(36, 33, 26, 0.52);
+    --dock-edge: rgba(255, 255, 255, 0.10);
+    --dock-shadow:
+        0 10px 34px rgba(0, 0, 0, 0.5),
+        inset 0 1px 0 rgba(255, 255, 255, 0.14),
+        inset 0 -1px 0 rgba(0, 0, 0, 0.25);
     /* hairline separator (subtler than --border) */
     --separator: rgba(245, 240, 228, 0.08);
 
@@ -150,6 +168,11 @@
     --border: #e6dfd0;
     --border-strong: #dcd3bf;
     --bg-bar: rgba(245, 241, 234, 0.82);
+    --dock-fill: rgba(255, 255, 255, 0.60);
+    --dock-edge: rgba(0, 0, 0, 0.06);
+    --dock-shadow:
+        0 10px 30px rgba(0, 0, 0, 0.14),
+        inset 0 1px 0 rgba(255, 255, 255, 0.7);
     --separator: rgba(26, 24, 19, 0.10);
 
     --text: #1a1813;
@@ -196,6 +219,14 @@
     --kid-off-border: #88a8ec;
     --kid-off-text:   #34589c;
     color-scheme: light;
+}
+
+/* Below the desktop breakpoint the side rail becomes the floating tab
+   dock, so content and fixed overlays have to reserve room for it. */
+@media (max-width: 900px) {
+    :root {
+        --nav-clear: calc(var(--tabdock-h) + var(--tabdock-inset));
+    }
 }
 
 /* ---------- Base ---------- */

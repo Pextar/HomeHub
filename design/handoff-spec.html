@@ -208,7 +208,7 @@ td.mono { font-family: var(--mono); color: var(--text-mute); font-size: 12.5px; 
 <ul>
   <li>Status bar reserved: top 54px is empty padding.</li>
   <li>Bottom: 90px reserved for tab bar (60px bar + 30px safe area). All scroll content must use <code>padding-bottom: 90px</code>.</li>
-  <li>Tab bar items: 5 max. <code>.tabbar &gt; button.active</code> tints amber.</li>
+  <li>Tab bar: floating glass pill (<code>.tabbar &gt; .tabdock</code>), icon-only, 6 max. Translucent warm fill + <code>backdrop-filter: blur(26px) saturate(1.7)</code>, detached 26px from the bottom. Active state is the <code>.tab-lens</code> amber capsule — <code>left</code>/<code>width</code> set inline from the active index so it slides (440ms spring); active icon turns <code>#3a2400</code>. Every button needs an <code>aria-label</code>.</li>
   <li>Bottom sheets: 82% height by default, 28px top-radius, grabber + close X, sticky footer with primary (amber, 2fr) + optional secondary (card, 1fr).</li>
   <li>Detail screens (Light detail, Matter steps): no tab bar — they get a back chevron in the chip-style.</li>
 </ul>
@@ -361,6 +361,7 @@ td.mono { font-family: var(--mono); color: var(--text-mute); font-size: 12.5px; 
   KidHome.svelte                 <span class="c">// from KidHomeScreen</span>
   <span class="v">Notifications.svelte           // NEW — from NotificationsInboxScreen</span>
   <span class="v">Console.svelte                 // NEW — from ConsoleScreen; live tail of hub events, command input</span>
+  <span class="v">Music.svelte                   // NEW — from Music App.html; keeps global TabBar/NavRail (Music active), adds its own Home/Rooms/Search .subnav</span>
 
 <span class="k">modals/</span>
   SocketModal.svelte             <span class="c">// from SocketFormScreen</span>

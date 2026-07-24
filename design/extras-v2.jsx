@@ -77,14 +77,18 @@ const TabBar2 = ({ active }) => {
     { id: "schedule",  label: "Schedule", d: I.schedule },
     { id: "settings",  label: "Settings", d: I.settings },
   ];
+  const idx = Math.max(0, items.findIndex(it => it.id === active));
+  const slot = `(100% - 20px) / 5`;
   return (
     <div className="tabbar">
-      {items.map(it => (
-        <button key={it.id} className={it.id === active ? "active" : ""}>
-          <Icon d={it.d} size={22} stroke={1.7}/>
-          <span>{it.label}</span>
-        </button>
-      ))}
+      <div className="tabdock">
+        <i className="tab-lens" style={{ left: `calc(${idx} * (${slot}) + 10px)`, width: `calc(${slot})` }}/>
+        {items.map(it => (
+          <button key={it.id} aria-label={it.label} title={it.label} className={it.id === active ? "active" : ""}>
+            <Icon d={it.d} size={22} stroke={1.7}/>
+          </button>
+        ))}
+      </div>
     </div>
   );
 };
