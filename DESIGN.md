@@ -629,7 +629,10 @@ patterns on top. Keep these consistent if you extend it.
   group — art, the §6.8 waveform over the zone name, track, artist/album,
   play/pause (skips appear from 430px up) — on the `.tile.on` playing
   surface. Everything else about a group (scrubber, volume, queue, play
-  modes) stays in the full player; tapping the card goes there. It owns its
+  modes) stays in the full player; tapping the card goes there. The one thing
+  it carries beyond playback is the shared live-status chip in its section
+  head: how current this card is qualifies everything on it, so that belongs
+  wherever the card is, not only in the view it points at. It owns its
   own refresh — on the `music` SSE topic, with a slower backstop poll behind
   it — because Sonos state doesn't live in the shared data store,
   and it renders **nothing at all** when there are no speakers, when the
@@ -669,6 +672,36 @@ patterns on top. Keep these consistent if you extend it.
     one makes every open tab refetch every socket and sensor in the house
     each time somebody turns the kitchen up. Use `onLive(topic, fn)` from
     `lib/live.ts`, which shares one connection across the whole app.
+  - **Push has a face, and it is not a red light.** Subscriptions used to be
+    invisible in both directions: working, they were silent; failing, the app
+    was simply slower with nothing on screen admitting why. Three surfaces fix
+    that, and the split between them is deliberate — a **status chip** (`Live`
+    / `Polling`, amber `.chip.on` only when live) because the answer qualifies
+    everything under it; a **`Live updates` row on Rooms**, the §11 list-row
+    shape, because Rooms is where speakers are managed and a chip nobody
+    notices is not discoverable; and the **sheet they all open**
+    (`modals/SonosEventsModal.svelte`), which is the only place with room to
+    explain.
+    The chip is one component — `components/LiveStatusChip.svelte` — carried
+    by **both** the Music topbar and Home's "Playing now" head, and it must
+    stay one: the same word has to mean the same thing and lead to the same
+    place from either surface, which two hand-rolled copies would not survive.
+    It holds back until the first poll lands, because "Polling" before an
+    answer is a guess, not a report; below 380px it drops its label for the
+    icon alone and squares up to 44×44, keeping its `aria-label` either way.
+    The sheet answers in a fixed order — is push working, which
+    speaker isn't, what would fix it — and it is written to reassure, not to
+    alarm: polling is the *old* behaviour, not a fault, so its copy says what
+    the user actually loses (a few seconds) and states plainly that nothing is
+    broken. The address speakers must reach appears **only when it's
+    actionable**; when everything is live it is trivia. It carries the one
+    control that can change the outcome — **Try again**, hitting
+    `POST /api/sonos/events/retry`, which releases the watchers from a backoff
+    up to five minutes long — because a diagnostic screen that can only
+    describe a problem sends the user to a terminal.
+    Read `GET /api/sonos/events` for the per-speaker detail; it reports the
+    monitor's own bookkeeping and never touches the network, so polling it
+    while the sheet is open is free.
 
 ---
 

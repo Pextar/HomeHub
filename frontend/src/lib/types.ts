@@ -394,6 +394,48 @@ export interface SonosStatus {
   live?: boolean;
 }
 
+/**
+ * One speaker's push status. Timestamps are RFC3339 strings and absent when
+ * the thing they describe hasn't happened — no event yet, no renewal due.
+ */
+export interface SonosEventSpeaker {
+  id: string;
+  name: string;
+  ip: string;
+  /** Whether this speaker currently holds event subscriptions. */
+  subscribed: boolean;
+  reachable: boolean;
+  /** Subscribed service keys: transport, rendering, topology. */
+  services?: string[];
+  /** The URL this speaker was told to post its notifications to. */
+  callback?: string;
+  /** Notifications accepted from it since the hub started. */
+  events: number;
+  last_event?: string;
+  renew_at?: string;
+  /** Why the last subscription attempt failed; absent once one succeeds. */
+  error?: string;
+}
+
+/**
+ * How the push subsystem is doing, per speaker. Read by the "Live updates"
+ * sheet — the surface that explains why the app is or isn't getting speaker
+ * state pushed to it, and what to do about it.
+ */
+export interface SonosEventHealth {
+  /** At least one speaker is subscribed — matches SonosStatus.live. */
+  live: boolean;
+  /** The subscription supervisor is up. False is a hub problem, not a network one. */
+  running: boolean;
+  subscribed: number;
+  total: number;
+  /** The address speakers are told to reach the hub on. */
+  callback?: string;
+  /** Why that address couldn't be worked out at all. */
+  callback_error?: string;
+  speakers: SonosEventSpeaker[];
+}
+
 /** A discovered (not necessarily registered) speaker on the LAN. */
 export interface SonosCandidate {
   ip: string;
