@@ -1270,6 +1270,8 @@
         if (e.key === "Enter") {
             e.preventDefault();
             clearTimeout(searchTimer);
+            const q = query.trim();
+            if (q) addToHistory(q);
             void doSearch();
         } else if (e.key === "Escape" && query) {
             e.stopPropagation();
@@ -1299,6 +1301,56 @@
         } finally {
             if (seq === searchSeq) searching = false;
         }
+    }
+
+    // ── Search history ───────────────────────────────────────────────────
+    // Keyed by the room a search is played on (favTarget), since "recent
+    // searches" reads differently in the kitchen than in the bedroom. A
+    // single-zone home only ever has one key, which collapses this to a
+    // plain, unscoped history without any extra code path.
+    const HISTORY_KEY = "music.searchHistory.v1";
+    const HISTORY_MAX = 8;
+    function loadHistory(): Record<string, string[]> {
+        try {
+            const raw = localStorage.getItem(HISTORY_KEY);
+            return raw ? JSON.parse(raw) : {};
+        } catch { return {}; }
+    }
+    let searchHistory = $state<Record<string, string[]>>(loadHistory());
+    $effect(() => {
+        try { localStorage.setItem(HISTORY_KEY, JSON.stringify(searchHistory)); }
+        catch { /* private mode */ }
+    });
+    // Falls back to one shared bucket when there's no target yet (e.g. no
+    // groups loaded), so history still works before speakers are set up.
+    const historyKey = $derived(favTarget ?? "_all");
+    const historyList = $derived(searchHistory[historyKey] ?? []);
+    const historyTargetGroup = $derived(groups.find((g) => g.coordinator_id === favTarget));
+
+    function addToHistory(q: string) {
+        const key = historyKey;
+        const rest = (searchHistory[key] ?? []).filter((x) => x.toLowerCase() !== q.toLowerCase());
+        searchHistory = { ...searchHistory, [key]: [q, ...rest].slice(0, HISTORY_MAX) };
+    }
+    function removeHistoryEntry(q: string) {
+        const key = historyKey;
+        searchHistory = {
+            ...searchHistory,
+            [key]: (searchHistory[key] ?? []).filter((x) => x !== q),
+        };
+    }
+    function clearHistory() {
+        const key = historyKey;
+        const next = { ...searchHistory };
+        delete next[key];
+        searchHistory = next;
+    }
+    function runHistoryQuery(q: string) {
+        clearTimeout(searchTimer);
+        query = q;
+        addToHistory(q);
+        void doSearch();
+        searchEl?.focus();
     }
 
     const shownItems = $derived<SpotifyItem[]>(
@@ -2074,6 +2126,31 @@
                         </button>
                     {/if}
                 </div>
+                {#if !query && !results && historyList.length > 0}
+                    <div class="sp-history">
+                        <div class="sp-history-head">
+                            <span class="sp-browse-label">
+                                Recent searches{#if groups.length > 1 && historyTargetGroup} · {groupTitle(historyTargetGroup)}{/if}
+                            </span>
+                            <button type="button" class="chip sp-hist-clear" onclick={clearHistory}>Clear</button>
+                        </div>
+                        <div class="sp-history-list">
+                            {#each historyList as h (h)}
+                                <div class="sp-hist-chip">
+                                    <button type="button" class="sp-hist-run" onclick={() => runHistoryQuery(h)}>
+                                        <Icon name="search" size={12} />
+                                        <span>{h}</span>
+                                    </button>
+                                    <button type="button" class="icon-btn sp-hist-x"
+                                        aria-label={`Remove "${h}" from recent searches`}
+                                        onclick={() => removeHistoryEntry(h)}>
+                                        <Icon name="close" size={10} />
+                                    </button>
+                                </div>
+                            {/each}
+                        </div>
+                    </div>
+                {/if}
                 <div class="sp-filters">
                     {#if results}
                         <button class="chip" class:active={kindFilter === "tracks"} onclick={() => (kindFilter = "tracks")}>Songs</button>
@@ -3220,6 +3297,24 @@
     .sp-targets.pushed { margin-left: auto; }
     .sp-skeleton { height: 120px; border-radius: var(--r-md); }
     .sp-none { font-size: 12.5px; color: var(--text-mute); }
+
+    .sp-history { display: flex; flex-direction: column; gap: var(--space-2); }
+    .sp-history-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
+    .sp-hist-clear { padding: 3px 10px; font-size: 11px; }
+    .sp-history-list { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+    .sp-hist-chip {
+        display: inline-flex; align-items: center;
+        background: var(--card-2); border: 1px solid var(--hairline);
+        border-radius: var(--r-pill);
+    }
+    .sp-hist-run {
+        display: inline-flex; align-items: center; gap: 6px;
+        padding: 7px 4px 7px 12px;
+        background: transparent; border: 0; border-radius: var(--r-pill) 0 0 var(--r-pill);
+        font: inherit; font-size: 12.5px; color: var(--text-mute); cursor: pointer;
+    }
+    @media (hover: hover) { .sp-hist-run:hover { color: var(--text); } }
+    .sp-hist-chip .sp-hist-x { width: 26px; height: 26px; margin-right: 3px; color: var(--text-dim); }
 
     .sp-results { display: flex; flex-direction: column; gap: 2px; }
     /* The row is a container, not a control: tapping the body plays now,
