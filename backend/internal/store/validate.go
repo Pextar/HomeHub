@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"homehub/internal/kef"
 	"homehub/internal/sonos"
 	"homehub/internal/tasmota"
 )
@@ -428,6 +429,37 @@ func (s *Store) ValidateSonosSpeaker(sp *SonosSpeaker) error {
 			return fmt.Errorf("speaker %q already uses address %s", other.Name, sp.IP)
 		}
 		if sp.UUID != "" && other.UUID == sp.UUID {
+			return fmt.Errorf("speaker %q is already registered (same device id)", other.Name)
+		}
+	}
+	return nil
+}
+
+// ValidateKEFSpeaker normalizes and validates a KEF speaker. Caller must
+// hold Mu so IP/MAC uniqueness can be checked against the registry.
+func (s *Store) ValidateKEFSpeaker(sp *KEFSpeaker) error {
+	sp.Name = strings.TrimSpace(sp.Name)
+	sp.IP = strings.TrimSpace(sp.IP)
+	sp.Room = strings.TrimSpace(sp.Room)
+	sp.Model = strings.TrimSpace(sp.Model)
+	// Stored normalised, so the same speaker read through two firmware
+	// versions — one colon-separated, one not — is still one device.
+	sp.MAC = kef.NormalizeMAC(sp.MAC)
+
+	if sp.Name == "" {
+		return errors.New("name is required")
+	}
+	if err := kef.ValidateHost(sp.IP); err != nil {
+		return err
+	}
+	for _, other := range s.KEF {
+		if other.ID == sp.ID {
+			continue
+		}
+		if other.IP == sp.IP {
+			return fmt.Errorf("speaker %q already uses address %s", other.Name, sp.IP)
+		}
+		if sp.MAC != "" && other.MAC == sp.MAC {
 			return fmt.Errorf("speaker %q is already registered (same device id)", other.Name)
 		}
 	}

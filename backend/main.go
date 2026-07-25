@@ -293,6 +293,11 @@ func main() {
 		server.RunSonosEvents(sonosCtx)
 	}()
 
+	// KEF speakers are polled rather than subscribed to — their local API
+	// has no callback — so this one has nothing to release and simply rides
+	// on the scheduler's context.
+	go server.RunKEFEvents(schedCtx)
+
 	go func() {
 		log.Printf("HomeHub listening on http://:%s", port)
 		if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {

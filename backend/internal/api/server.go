@@ -19,6 +19,7 @@ import (
 	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
 
+	"homehub/internal/kef"
 	"homehub/internal/llm"
 	"homehub/internal/matter"
 	"homehub/internal/mqtt"
@@ -79,6 +80,13 @@ type Server struct {
 	// and caches what they report. Created lazily by sonosEvents().
 	sonosMonMu sync.Mutex
 	sonosMon   *sonos.Monitor
+
+	// kefMon polls the KEF speakers once for the whole process and caches
+	// what they report (see internal/kef/monitor.go). KEF's local API has no
+	// change notifications to subscribe to, so this is the closest thing to
+	// the Sonos monitor it can be. Created lazily by kefEvents().
+	kefMonMu sync.Mutex
+	kefMon   *kef.Monitor
 }
 
 // sonosAcctEntry is one cached service-account resolution.
@@ -290,6 +298,26 @@ func (s *Server) Handler() http.Handler {
 	api.HandleFunc("/sonos/{id}/queue", s.requireAdmin(s.sonosQueueAdd)).Methods("POST")
 	api.HandleFunc("/sonos/{id}/queue", s.requireAdmin(s.sonosQueueClear)).Methods("DELETE")
 	api.HandleFunc("/sonos/{id}/queue/{track}", s.requireAdmin(s.sonosQueueRemove)).Methods("DELETE")
+
+	// KEF speakers: local HTTP control (transport, volume, source, DSP
+	// settings). No grouping, queue or favorites — the speaker's API has
+	// none of them; see internal/kef.
+	api.HandleFunc("/kef/status", s.requireAdmin(s.kefStatus)).Methods("GET")
+	api.HandleFunc("/kef/discover", s.requireAdmin(s.kefDiscover)).Methods("GET")
+	api.HandleFunc("/kef/speakers", s.requireAdmin(s.kefCreateSpeaker)).Methods("POST")
+	api.HandleFunc("/kef/speakers/{id}", s.requireAdmin(s.kefUpdateSpeaker)).Methods("PUT")
+	api.HandleFunc("/kef/speakers/{id}", s.requireAdmin(s.kefDeleteSpeaker)).Methods("DELETE")
+	api.HandleFunc("/kef/{id}/play", s.requireAdmin(s.kefTransport(kef.Play))).Methods("POST")
+	api.HandleFunc("/kef/{id}/pause", s.requireAdmin(s.kefTransport(kef.Pause))).Methods("POST")
+	api.HandleFunc("/kef/{id}/next", s.requireAdmin(s.kefTransport(kef.Next))).Methods("POST")
+	api.HandleFunc("/kef/{id}/previous", s.requireAdmin(s.kefTransport(kef.Previous))).Methods("POST")
+	api.HandleFunc("/kef/{id}/volume", s.requireAdmin(s.kefSetVolume)).Methods("PUT")
+	api.HandleFunc("/kef/{id}/mute", s.requireAdmin(s.kefSetMute)).Methods("PUT")
+	api.HandleFunc("/kef/{id}/source", s.requireAdmin(s.kefSetSource)).Methods("PUT")
+	api.HandleFunc("/kef/{id}/power", s.requireAdmin(s.kefSetPower)).Methods("PUT")
+	api.HandleFunc("/kef/{id}/art", s.requireAdmin(s.kefArt)).Methods("GET")
+	api.HandleFunc("/kef/{id}/settings", s.requireAdmin(s.kefSettings)).Methods("GET")
+	api.HandleFunc("/kef/{id}/settings", s.requireAdmin(s.kefUpdateSettings)).Methods("PUT")
 
 	// Spotify search/browse for the Music view. OAuth is the user's own
 	// account (PKCE); playback stays local via the play-item route above.

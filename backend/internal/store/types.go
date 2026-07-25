@@ -32,6 +32,22 @@ type SonosSpeaker struct {
 	Model string `json:"model,omitempty"`
 }
 
+// KEFSpeaker is a registered KEF wireless speaker (LS50 Wireless II, LSX II,
+// LS60). Like SonosSpeaker, only the identity is persisted — everything else
+// is read live over the speaker's local HTTP API (internal/kef).
+//
+// MAC is the stable id: KEF has no equivalent of Sonos' RINCON, and a
+// speaker that moves to a new DHCP lease has to stay recognisable as the
+// same device. It is stored normalised (lower case, no separators).
+type KEFSpeaker struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	IP    string `json:"ip"`
+	MAC   string `json:"mac"`
+	Room  string `json:"room,omitempty"`
+	Model string `json:"model,omitempty"`
+}
+
 // Schedule represents a recurring timer for a socket, group, or scene.
 //
 // Targets:
