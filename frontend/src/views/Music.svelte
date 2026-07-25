@@ -1705,13 +1705,30 @@
     }
     .link-btn:hover { color: var(--text); }
 
-    /* ── Subnav — Music's own three screens ── */
+    /* ── Subnav — Music's own three screens ──
+       Sticks flush to the top and bleeds over the shell's page padding, so
+       nothing scrolls through a gap above it or past its sides — the pill
+       used to detach with cards sliding visibly through the gutters around
+       it. The band is the same glass as the player sheet's top bar:
+       translucent, blurred, with a fading bottom edge that content dissolves
+       under rather than being sliced against. */
     .subnav {
-        position: sticky; top: var(--space-2); z-index: 15;
-        /* Bleeds slightly wider than the content so the sticky pill reads as
-           a bar rather than a floating control when it detaches. */
-        padding: var(--space-1) 0;
-        background: var(--bg);
+        --fade: 18px;
+        position: sticky; top: 0; z-index: 15;
+        margin: 0 -36px calc(var(--fade) * -1);
+        padding: var(--space-3) 36px var(--fade);
+        background: var(--bg-bar);
+        backdrop-filter: blur(18px) saturate(1.3);
+        -webkit-backdrop-filter: blur(18px) saturate(1.3);
+        -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - var(--fade)), transparent);
+        mask-image: linear-gradient(to bottom, #000 calc(100% - var(--fade)), transparent);
+    }
+    /* Match the shell's mobile page padding (App.svelte `.main`). */
+    @media (max-width: 900px) {
+        .subnav {
+            margin: 0 calc(var(--space-4) * -1) calc(var(--fade) * -1);
+            padding: var(--space-2) var(--space-4) var(--fade);
+        }
     }
 
     /* ── Rooms at a glance (Home) ── */

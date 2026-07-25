@@ -470,6 +470,12 @@ patterns on top. Keep these consistent if you extend it.
     above the fold — never stacked on the tab bar.
   - **Subnav is navigation, not filtering.** Kind filters inside Search
     (Songs / Albums / Playlists) remain chip filters, per §2.
+  - **It sticks as a band, not as a floating pill.** `top: 0`, bled over the
+    shell's page padding (36px desktop, `--space-4` mobile) so nothing
+    scrolls through a gap above it or past its sides, on the same glass as
+    the player sheet's top bar: `--bg-bar`, `backdrop-filter`, and a fading
+    bottom edge. A pill that stuck 8px down over an unbled `--bg` strip left
+    cards visibly sliding through the gutters around it.
 
   Screen contents: **Home** = Playing now + Favorites + room chips
   (each opens that room's player; "Manage" jumps to Rooms). **Rooms** =
