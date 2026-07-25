@@ -246,6 +246,10 @@ func (s *Server) Handler() http.Handler {
 	// favorites). Admin-gated like the other whole-home surfaces.
 	api.HandleFunc("/sonos/status", s.requireAdmin(s.sonosStatus)).Methods("GET")
 	api.HandleFunc("/sonos/discover", s.requireAdmin(s.sonosDiscover)).Methods("GET")
+	// Registered ahead of the /sonos/{id}/… routes so "events" is never
+	// mistaken for a speaker id.
+	api.HandleFunc("/sonos/events", s.requireAdmin(s.sonosEventHealth)).Methods("GET")
+	api.HandleFunc("/sonos/events/retry", s.requireAdmin(s.sonosEventRetry)).Methods("POST")
 	api.HandleFunc("/sonos/speakers", s.requireAdmin(s.sonosCreateSpeaker)).Methods("POST")
 	api.HandleFunc("/sonos/speakers/{id}", s.requireAdmin(s.sonosUpdateSpeaker)).Methods("PUT")
 	api.HandleFunc("/sonos/speakers/{id}", s.requireAdmin(s.sonosDeleteSpeaker)).Methods("DELETE")

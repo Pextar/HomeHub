@@ -32,6 +32,7 @@ import type {
   SonosStatus,
   SonosSpeaker,
   SonosCandidate,
+  SonosEventHealth,
   SonosFavorite,
   SonosQueueItem,
   SonosRepeat,
@@ -272,6 +273,10 @@ export const api = {
   // Sonos speakers (local UPnP control)
   sonosStatus() { return req<SonosStatus>("/sonos/status"); },
   sonosDiscover() { return req<SonosCandidate[]>("/sonos/discover"); },
+  sonosEventHealth() { return req<SonosEventHealth>("/sonos/events"); },
+  // Asks every watcher to resubscribe now instead of at its own backoff. The
+  // work is asynchronous — re-read the health endpoint to see the outcome.
+  sonosEventRetry() { return req<{ ok: boolean }>("/sonos/events/retry", { method: "POST" }); },
   sonosCreateSpeaker(body: { ip: string; name?: string; room?: string }) {
     return req<SonosSpeaker>("/sonos/speakers", { method: "POST", body: json(body) });
   },

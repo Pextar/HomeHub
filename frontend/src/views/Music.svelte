@@ -5,6 +5,7 @@
     import Icon from "../components/Icon.svelte";
     import ConfirmModal from "../components/ConfirmModal.svelte";
     import SonosSpeakerModal from "../modals/SonosSpeakerModal.svelte";
+    import SonosEventsModal from "../modals/SonosEventsModal.svelte";
     import Segmented from "../components/Segmented.svelte";
     import { api } from "../lib/api";
     import { toasts, route, bottomBar } from "../lib/stores.svelte";
@@ -1213,6 +1214,14 @@
         const changed = await openModal<boolean>(SonosSpeakerModal, sp ? { existing: sp } : {});
         if (changed) void refresh();
     }
+
+    // The push-status sheet. Retrying inside it can turn subscriptions on, and
+    // that changes which poll interval this view should be using, so the
+    // status is re-read on the way out.
+    async function openEventsModal() {
+        await openModal(SonosEventsModal, {});
+        void refresh();
+    }
 </script>
 
 <svelte:window onkeydown={onWindowKey} />
@@ -1230,6 +1239,30 @@
         : "Sonos"}
 >
     {#snippet actions()}
+        <!-- Whether speaker state is being pushed or polled. It rides in the
+             topbar because it qualifies everything below it — how quickly any
+             of this reflects reality — and it is the tap that explains the
+             difference and offers the fix. -->
+        {#if loaded && (status?.speakers.length ?? 0) > 0}
+            <button
+                class="chip live-chip"
+                class:on={livePush}
+                onclick={openEventsModal}
+                aria-label={livePush
+                    ? "Live updates on — speakers push their changes. Open details"
+                    : "Live updates off — speakers are being polled. Open details"}
+                title={livePush
+                    ? "Speakers push their changes — updates land in under a second"
+                    : "Speakers are being polled — updates take a few seconds"}
+            >
+                {#if livePush}
+                    <Icon name="bolt" size={14} />
+                {:else}
+                    <Icon name="radio" size={14} />
+                {/if}
+                <span>{livePush ? "Live" : "Polling"}</span>
+            </button>
+        {/if}
         <button class="chip" onclick={() => openSpeakerModal()}>
             <Icon name="plus" size={14} /> Add speaker
         </button>
@@ -1432,6 +1465,27 @@
             {/if}
         </div>
     </section>
+
+    <!-- ── Live updates ────────────────────────────────────────────────
+         Rooms is where speakers are managed, so it is where the plumbing
+         behind them belongs. The topbar chip says which state we're in; this
+         row is the discoverable way in for someone who never noticed it. -->
+    <button class="lu-row" onclick={openEventsModal}>
+        <span class="lu-ico" class:on={livePush}>
+            <Icon name={livePush ? "bolt" : "radio"} size={18} />
+        </span>
+        <span class="lu-meta">
+            <span class="lu-title">Live updates</span>
+            <span class="lu-sub">
+                {#if livePush}
+                    Speakers push their changes — this app keeps up in real time
+                {:else}
+                    Speakers are being polled — changes take a few seconds to show
+                {/if}
+            </span>
+        </span>
+        <span class="lu-chev" aria-hidden="true"><Icon name="chevronDown" size={18} /></span>
+    </button>
 
     <!-- ── Unreachable ─────────────────────────────────────────────── -->
     {#if offline.length > 0}
@@ -2115,6 +2169,23 @@
        it. The band is the same glass as the player sheet's top bar:
        translucent, blurred, with a fading bottom edge that content dissolves
        under rather than being sliced against. */
+    /* Topbar push-status chip. Quieter than "Add speaker" — it reports,
+       it doesn't ask to be pressed — so it stays a plain chip and only
+       picks up the amber .on treatment when push is actually live. */
+    .live-chip :global(svg) { flex-shrink: 0; }
+    .live-chip span { font-variant-numeric: tabular-nums; }
+    @media (max-width: 380px) {
+        /* On the narrowest phones the label yields to "Add speaker". The
+           button keeps its aria-label, and squares up to the icon-only chip
+           shape (§6.3) rather than staying a pill with nothing in it. */
+        .live-chip span { display: none; }
+        .live-chip { width: 36px; padding: 0; justify-content: center; }
+    }
+    @media (max-width: 380px) and (pointer: coarse) {
+        /* §2: an icon-only control never drops under 44×44 on touch. */
+        .live-chip { width: 44px; min-height: 44px; }
+    }
+
     .subnav {
         --fade: 18px;
         position: sticky; top: 0; z-index: 15;
@@ -2476,6 +2547,49 @@
     .mini-s {
         font-size: 11px; color: var(--text-mute);
         overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+
+    /* ── Live-updates row (Rooms) ─────────────────────────────────────
+       The §11 list-row shape: icon left, content middle, chevron right.
+       Live takes the sanctioned "ON" treatment rather than a status colour
+       of its own — push being on is the same kind of fact as a lit lamp. */
+    .lu-row {
+        width: 100%;
+        margin-top: var(--space-4);
+        display: flex;
+        align-items: center;
+        gap: var(--space-3);
+        min-height: 60px;
+        padding: var(--space-3) var(--space-4);
+        text-align: left;
+        background: var(--bg-elevated);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-lg);
+        color: inherit;
+        font: inherit;
+        cursor: pointer;
+        transition: background var(--t-fast), border-color var(--t-fast);
+    }
+    .lu-ico {
+        flex-shrink: 0;
+        width: 36px;
+        height: 36px;
+        display: grid;
+        place-items: center;
+        border-radius: var(--radius-md);
+        background: var(--surface);
+        color: var(--text-mute);
+    }
+    .lu-ico.on {
+        background: var(--primary-soft);
+        color: var(--primary);
+    }
+    .lu-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+    .lu-title { font-size: 14px; font-weight: 600; letter-spacing: -0.01em; }
+    .lu-sub { font-size: 12px; color: var(--text-mute); line-height: 1.4; }
+    .lu-chev { flex-shrink: 0; display: flex; color: var(--text-dim); transform: rotate(-90deg); }
+    @media (hover: hover) {
+        .lu-row:hover { background: var(--bg-raised); border-color: var(--border-strong); }
     }
 
     /* ── Members / volume rows (shared: mini list + player sheet) ── */

@@ -133,3 +133,16 @@ func TestSSEHubRemove(t *testing.T) {
 		t.Errorf("a removed client still received %v", got)
 	}
 }
+
+// The per-speaker callback carries the token that guards the unauthenticated
+// NOTIFY route, so it must not travel out in a diagnostic response.
+func TestRedactTokenDropsTheCallbackToken(t *testing.T) {
+	const withToken = "http://192.168.1.5:8080/sonos/event/9f2c1ab4"
+	got := redactToken(withToken)
+	if want := "http://192.168.1.5:8080/sonos/event"; got != want {
+		t.Errorf("redactToken(%q) = %q, want %q", withToken, got, want)
+	}
+	if redactToken("") != "" {
+		t.Error("redactToken invented a URL for an empty callback")
+	}
+}

@@ -669,6 +669,28 @@ patterns on top. Keep these consistent if you extend it.
     one makes every open tab refetch every socket and sensor in the house
     each time somebody turns the kitchen up. Use `onLive(topic, fn)` from
     `lib/live.ts`, which shares one connection across the whole app.
+  - **Push has a face, and it is not a red light.** Subscriptions used to be
+    invisible in both directions: working, they were silent; failing, the app
+    was simply slower with nothing on screen admitting why. Three surfaces fix
+    that, and the split between them is deliberate — a **topbar chip** (`Live`
+    / `Polling`, amber `.chip.on` only when live) because the answer qualifies
+    everything under it; a **`Live updates` row on Rooms**, the §11 list-row
+    shape, because Rooms is where speakers are managed and a chip nobody
+    notices is not discoverable; and the **sheet both of them open**
+    (`modals/SonosEventsModal.svelte`), which is the only place with room to
+    explain. The sheet answers in a fixed order — is push working, which
+    speaker isn't, what would fix it — and it is written to reassure, not to
+    alarm: polling is the *old* behaviour, not a fault, so its copy says what
+    the user actually loses (a few seconds) and states plainly that nothing is
+    broken. The address speakers must reach appears **only when it's
+    actionable**; when everything is live it is trivia. It carries the one
+    control that can change the outcome — **Try again**, hitting
+    `POST /api/sonos/events/retry`, which releases the watchers from a backoff
+    up to five minutes long — because a diagnostic screen that can only
+    describe a problem sends the user to a terminal.
+    Read `GET /api/sonos/events` for the per-speaker detail; it reports the
+    monitor's own bookkeeping and never touches the network, so polling it
+    while the sheet is open is free.
 
 ---
 

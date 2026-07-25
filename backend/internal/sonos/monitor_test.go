@@ -2,7 +2,9 @@ package sonos
 
 import (
 	"bytes"
+	"context"
 	"encoding/xml"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -600,4 +602,109 @@ func TestReleaseAllIgnoresSupersededGeneration(t *testing.T) {
 func TestReleaseAllOnAMissingSpeakerIsANoop(t *testing.T) {
 	m, _, _ := testMonitor(t)
 	m.releaseAll("sonos_gone", 1) // must not panic
+}
+
+// ── Health ───────────────────────────────────────────────────────────────
+//
+// Health is what the UI reads to explain push to the user, so the states it
+// has to tell apart are: subscribed, failing with a reason, and never tried.
+
+func TestHealthReportsASubscribedSpeaker(t *testing.T) {
+	m, e, _ := testMonitor(t)
+	m.mu.Lock()
+	e.callback = "http://192.168.1.5:8080/sonos/event/abc"
+	e.events = 7
+	e.lastEvent = time.Now()
+	m.mu.Unlock()
+
+	h := m.Health()
+	if !h.Live || h.Subscribed != 1 || h.Total != 1 {
+		t.Fatalf("got live=%v subscribed=%d total=%d, want a single live speaker", h.Live, h.Subscribed, h.Total)
+	}
+	if len(h.Speakers) != 1 {
+		t.Fatalf("got %d speakers in the report, want 1", len(h.Speakers))
+	}
+	got := h.Speakers[0]
+	if !got.Subscribed || got.Events != 7 || got.Callback == "" {
+		t.Errorf("got %+v, want it subscribed with its event count and callback", got)
+	}
+	// Services are reported in EventServices order so the UI doesn't reshuffle.
+	if len(got.Services) != 3 || got.Services[0] != EventTransport.Key {
+		t.Errorf("got services %v, want all three in EventServices order", got.Services)
+	}
+}
+
+func TestHealthCarriesTheSubscribeFailure(t *testing.T) {
+	m, e, _ := testMonitor(t)
+	m.mu.Lock()
+	e.sids = map[string]string{} // nothing subscribed
+	m.mu.Unlock()
+	m.noteSubscribeErr("sonos_1", errors.New("no local address can reach 192.168.1.42"))
+
+	h := m.Health()
+	if h.Live || h.Subscribed != 0 {
+		t.Errorf("got live=%v subscribed=%d, want push reported as off", h.Live, h.Subscribed)
+	}
+	if h.Total != 1 {
+		t.Errorf("got total=%d, want the speaker still counted", h.Total)
+	}
+	if h.Speakers[0].Error == "" {
+		t.Error("Health dropped the reason the subscription failed")
+	}
+}
+
+// A speaker registered but never reached has no entry at all; it must still
+// appear, or the UI would silently list fewer speakers than the user has.
+func TestHealthIncludesSpeakersWithNoEntry(t *testing.T) {
+	m := NewMonitor(MonitorConfig{
+		Speakers: func() []Speaker {
+			return []Speaker{{ID: "sonos_2", IP: "192.168.1.9"}}
+		},
+	})
+	h := m.Health()
+	if h.Total != 1 || len(h.Speakers) != 1 {
+		t.Fatalf("got total=%d speakers=%d, want the unreached speaker listed", h.Total, len(h.Speakers))
+	}
+	if h.Speakers[0].Subscribed || h.Live {
+		t.Error("a speaker that was never reached is reported as subscribed")
+	}
+	if h.Running {
+		t.Error("Running is true for a monitor that was never started")
+	}
+}
+
+// Retry is the "try again" button. Its whole job is to release a watcher
+// early from a backoff that can be five minutes long.
+func TestRetryWakesABackingOffWatcher(t *testing.T) {
+	m, _, _ := testMonitor(t)
+	done := make(chan bool, 1)
+	go func() {
+		asked, alive := m.waitRetry(context.Background(), "sonos_1", time.Hour)
+		done <- asked && alive
+	}()
+
+	// Give the waiter a moment to park on the channel before signalling.
+	time.Sleep(20 * time.Millisecond)
+	m.Retry()
+
+	select {
+	case ok := <-done:
+		if !ok {
+			t.Error("waitRetry returned, but not as a retry that should continue")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Retry did not wake the watcher out of its backoff")
+	}
+}
+
+func TestWaitRetryStopsForARemovedSpeaker(t *testing.T) {
+	m, _, _ := testMonitor(t)
+	if asked, alive := m.waitRetry(context.Background(), "sonos_gone", time.Millisecond); asked || alive {
+		t.Errorf("got asked=%v alive=%v, want the watcher told to stop", asked, alive)
+	}
+}
+
+func TestRetryWithNoSpeakersIsANoop(t *testing.T) {
+	m := NewMonitor(MonitorConfig{})
+	m.Retry() // must not panic or block
 }

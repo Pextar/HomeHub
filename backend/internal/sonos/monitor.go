@@ -25,9 +25,11 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -107,6 +109,11 @@ type Monitor struct {
 
 	nudge chan struct{}
 
+	// running reports whether Run is supervising watchers. Without it a
+	// monitor that was never started looks exactly like one whose speakers
+	// all refuse subscriptions, and the two need different advice.
+	running atomic.Bool
+
 	// refreshMu serialises full synchronous fan-outs so a burst of client
 	// polls against a cold cache costs one sweep, not one per request.
 	refreshMu sync.Mutex
@@ -130,9 +137,22 @@ type entry struct {
 	reachable  bool
 	at         time.Time // last authoritative read attempt
 
+	// Health reporting. None of it is load-bearing for the cache — it exists
+	// so the UI can explain, in the user's own terms, whether push is working
+	// and what to do when it isn't (see Health).
+	callback  string    // callback URL this speaker was last handed
+	renewAt   time.Time // when the current subscriptions come up for renewal
+	lastEvent time.Time // last notification accepted from this speaker
+	events    int       // notifications accepted since the process started
+	lastErr   string    // why subscribing last failed; cleared once subscribed
+
 	// dirty carries "this speaker said something" to its watcher. Buffered
 	// and non-blocking: a burst collapses into one pending signal.
 	dirty chan struct{}
+	// retry wakes a watcher that is sitting in its backoff, so a user who
+	// has just fixed their network doesn't wait out the full interval.
+	// Buffered and non-blocking, like dirty.
+	retry chan struct{}
 }
 
 // NewMonitor builds a Monitor. It is usable — via Snapshot — without ever
@@ -158,6 +178,9 @@ func NewMonitor(cfg MonitorConfig) *Monitor {
 // Run supervises one watcher goroutine per registered speaker until ctx is
 // cancelled, at which point every subscription is released.
 func (m *Monitor) Run(ctx context.Context) {
+	m.running.Store(true)
+	defer m.running.Store(false)
+
 	ticker := time.NewTicker(reconcileEvery)
 	defer ticker.Stop()
 
@@ -241,15 +264,24 @@ func (m *Monitor) watch(ctx context.Context, sp Speaker) {
 	for ctx.Err() == nil {
 		gen, renewIn, err := m.subscribeAll(ctx, sp)
 		if err != nil {
+			m.noteSubscribeErr(sp.ID, err)
 			m.cfg.Logf("sonos: subscribing to %s (%s) failed: %v — retrying in %s", sp.ID, sp.IP, err, backoff)
 			// Events are out, but the speaker may still answer SOAP, and
 			// the snapshot path needs to know which. Keep reading it.
 			m.resync(ctx, sp.ID)
 			m.cfg.OnChange()
-			if !sleepCtx(ctx, backoff) {
+			asked, alive := m.waitRetry(ctx, sp.ID, backoff)
+			if !alive {
 				return
 			}
-			backoff = nextBackoff(backoff)
+			// An interval that was waited out earns a longer next one; one
+			// cut short by a user asking to retry starts over, so repeated
+			// taps don't inherit a five-minute backoff.
+			if asked {
+				backoff = minBackoff
+			} else {
+				backoff = nextBackoff(backoff)
+			}
 			continue
 		}
 		backoff = minBackoff
@@ -300,6 +332,9 @@ func (m *Monitor) serve(ctx context.Context, id string, renewIn time.Duration) {
 				return
 			}
 			renew.Reset(next)
+			m.mu.Lock()
+			e.renewAt = time.Now().Add(next)
+			m.mu.Unlock()
 
 		case <-resync.C:
 			m.resync(ctx, id)
@@ -342,6 +377,7 @@ func (m *Monitor) subscribeAll(ctx context.Context, sp Speaker) (gen int, renewI
 	gen = e.gen
 	e.sids = make(map[string]string, len(EventServices))
 	e.seqs = make(map[string]int, len(EventServices))
+	e.callback = callback
 	m.mu.Unlock()
 
 	shortest := SubscribeTimeout
@@ -367,7 +403,24 @@ func (m *Monitor) subscribeAll(ctx context.Context, sp Speaker) (gen int, renewI
 
 	// Renew at half the shortest grant: one missed renewal still leaves a
 	// full interval to notice and retry before anything actually expires.
-	return gen, shortest / 2, nil
+	renewIn = shortest / 2
+	m.mu.Lock()
+	e.lastErr = ""
+	e.renewAt = time.Now().Add(renewIn)
+	m.mu.Unlock()
+	return gen, renewIn, nil
+}
+
+// noteSubscribeErr records why a speaker has no event subscription, so the
+// UI can say which speaker is failing and why rather than only that push is
+// off somewhere in the house.
+func (m *Monitor) noteSubscribeErr(id string, err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if e := m.entries[id]; e != nil {
+		e.lastErr = err.Error()
+		e.renewAt = time.Time{}
+	}
 }
 
 // renewAll extends every subscription on one speaker. Any failure means the
@@ -505,6 +558,8 @@ func (m *Monitor) Notify(token, sid string, seq int, body, srcIP string) bool {
 		}
 	}
 	e.seqs[key] = seq
+	e.lastEvent = time.Now()
+	e.events++
 	dirty := e.dirty
 	m.mu.Unlock()
 
@@ -692,6 +747,139 @@ func (m *Monitor) read() Snapshot {
 	return out
 }
 
+// ── Health ───────────────────────────────────────────────────────────────
+
+// SpeakerEvents is one speaker's subscription health. Everything here is
+// reporting only — nothing the cache depends on — and it exists so a screen
+// can name the speaker that isn't pushing and say why.
+type SpeakerEvents struct {
+	ID string
+	// Subscribed is whether this speaker currently holds subscriptions.
+	Subscribed bool
+	// Services are the subscribed service keys, in EventServices order.
+	Services []string
+	// Callback is the URL this speaker was last told to POST to. The most
+	// useful single field when push isn't working: it names the address the
+	// speaker has to be able to reach.
+	Callback  string
+	RenewAt   time.Time
+	LastEvent time.Time
+	Events    int
+	// Error is why the last subscription attempt failed, empty once one
+	// succeeds.
+	Error     string
+	Reachable bool
+	LastRead  time.Time
+}
+
+// EventHealth is the whole subsystem's report: whether push is feeding the
+// cache at all, and the per-speaker detail behind that answer.
+type EventHealth struct {
+	// Live matches Snapshot.Live — at least one speaker is subscribed.
+	Live bool
+	// Running is whether the supervisor is up. False means nobody has
+	// called Run, which is a different problem from speakers refusing.
+	Running    bool
+	Subscribed int
+	Total      int
+	Speakers   []SpeakerEvents
+}
+
+// Health reports the state of the event subsystem, ordered by speaker ID so
+// a screen rendering it doesn't reshuffle between polls.
+func (m *Monitor) Health() EventHealth {
+	speakers := m.cfg.Speakers()
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := EventHealth{
+		Running:  m.running.Load(),
+		Total:    len(speakers),
+		Speakers: make([]SpeakerEvents, 0, len(speakers)),
+	}
+	for _, sp := range speakers {
+		se := SpeakerEvents{ID: sp.ID}
+		if e := m.entries[sp.ID]; e != nil {
+			se.Subscribed = len(e.sids) > 0
+			se.Callback = e.callback
+			se.RenewAt = e.renewAt
+			se.LastEvent = e.lastEvent
+			se.Events = e.events
+			se.Error = e.lastErr
+			se.Reachable = e.reachable
+			se.LastRead = e.at
+			for _, svc := range EventServices {
+				if _, ok := e.sids[svc.Key]; ok {
+					se.Services = append(se.Services, svc.Key)
+				}
+			}
+		}
+		if se.Subscribed {
+			out.Subscribed++
+			out.Live = true
+		}
+		out.Speakers = append(out.Speakers, se)
+	}
+	sort.Slice(out.Speakers, func(i, j int) bool { return out.Speakers[i].ID < out.Speakers[j].ID })
+	return out
+}
+
+// Retry asks every watcher to act now instead of at its own pace: one sitting
+// out a backoff resubscribes immediately, and one that is already subscribed
+// re-reads its speaker. It is what a "try again" control in the UI calls
+// after someone changes their network, so the answer arrives while they are
+// still looking at the screen rather than up to five minutes later.
+//
+// Fire-and-forget by design — the work happens on the watchers, and the
+// caller sees the result in the next Health or Snapshot.
+func (m *Monitor) Retry() {
+	m.mu.RLock()
+	entries := make([]*entry, 0, len(m.entries))
+	for _, e := range m.entries {
+		entries = append(entries, e)
+	}
+	m.mu.RUnlock()
+
+	for _, e := range entries {
+		// Both signals are buffered and non-blocking: whichever state the
+		// watcher is in, exactly one of these is what it is waiting on, and
+		// the other simply sits pending until it is drained or replaced.
+		select {
+		case e.retry <- struct{}{}:
+		default:
+		}
+		select {
+		case e.dirty <- struct{}{}:
+		default:
+		}
+	}
+	// Covers the case with no watchers to signal — a speaker added while the
+	// supervisor was between ticks.
+	m.Nudge()
+}
+
+// waitRetry waits out a watcher's backoff, returning early when Retry asks
+// for one. asked distinguishes the two; alive is false only when the watcher
+// should stop, either because its context ended or its speaker is gone.
+func (m *Monitor) waitRetry(ctx context.Context, id string, d time.Duration) (asked, alive bool) {
+	m.mu.RLock()
+	e := m.entries[id]
+	m.mu.RUnlock()
+	if e == nil {
+		return false, false
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return false, false
+	case <-e.retry:
+		return true, true
+	case <-t.C:
+		return false, true
+	}
+}
+
 // refreshAll reads every speaker synchronously — the cold path, and the
 // permanent path in a house where subscriptions can't be established.
 func (m *Monitor) refreshAll(ctx context.Context, speakers []Speaker) {
@@ -836,6 +1024,7 @@ func (m *Monitor) ensureEntry(sp Speaker) *entry {
 		sids:  make(map[string]string),
 		seqs:  make(map[string]int),
 		dirty: make(chan struct{}, 1),
+		retry: make(chan struct{}, 1),
 	}
 	m.entries[sp.ID] = e
 	m.byToken[e.token] = e
@@ -908,17 +1097,6 @@ func cloneGroupState(g *GroupState) *GroupState {
 	}
 	out := *g
 	return &out
-}
-
-func sleepCtx(ctx context.Context, d time.Duration) bool {
-	t := time.NewTimer(d)
-	defer t.Stop()
-	select {
-	case <-ctx.Done():
-		return false
-	case <-t.C:
-		return true
-	}
 }
 
 func nextBackoff(d time.Duration) time.Duration {
