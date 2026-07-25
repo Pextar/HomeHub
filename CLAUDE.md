@@ -28,6 +28,7 @@ homehub/
 │       ├── rf/            ← 433 MHz transmitter
 │       ├── tasmota/       ← Wi-Fi smart-light bridge
 │       ├── sonos/         ← Sonos speaker bridge (local UPnP/SOAP)
+│       ├── kef/           ← KEF speaker bridge (local HTTP JSON API)
 │       └── matter/        ← Matter/Thread bridge
 └── frontend/              ← Svelte 5 + Vite
     └── src/

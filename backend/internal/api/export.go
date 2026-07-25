@@ -22,6 +22,7 @@ type configBundle struct {
 	Automations map[string]*store.Automation   `json:"automations"`
 	Sensors     map[string]*store.Sensor       `json:"sensors"`
 	Sonos       map[string]*store.SonosSpeaker `json:"sonos,omitempty"`
+	KEF         map[string]*store.KEFSpeaker   `json:"kef,omitempty"`
 	Settings    *store.Settings                `json:"settings"`
 }
 
@@ -41,6 +42,7 @@ func (s *Server) exportConfig(w http.ResponseWriter, _ *http.Request) {
 		Automations: s.Store.Automations,
 		Sensors:     s.Store.Sensors,
 		Sonos:       s.Store.Sonos,
+		KEF:         s.Store.KEF,
 		Settings:    &settings,
 	}
 	body, err := json.MarshalIndent(bundle, "", "  ")
@@ -103,6 +105,9 @@ func (s *Server) importConfig(w http.ResponseWriter, r *http.Request) {
 	if bundle.Sonos != nil {
 		s.Store.Sonos = bundle.Sonos
 	}
+	if bundle.KEF != nil {
+		s.Store.KEF = bundle.KEF
+	}
 	if bundle.Settings != nil {
 		s.Store.Settings = bundle.Settings
 	}
@@ -149,12 +154,17 @@ func validateBundle(bundle *configBundle, live *store.Store) error {
 	if pickSonos == nil {
 		pickSonos = live.Sonos
 	}
+	pickKEF := bundle.KEF
+	if pickKEF == nil {
+		pickKEF = live.KEF
+	}
 	scratch := &store.Store{
 		Sockets:     pickSockets,
 		Groups:      pickGroups,
 		Scenes:      pickScenes,
 		Sensors:     pickSensors,
 		Sonos:       pickSonos,
+		KEF:         pickKEF,
 		Schedules:   map[string]*store.Schedule{},
 		Automations: map[string]*store.Automation{},
 		Rooms:       live.Rooms, // rooms aren't part of the bundle
@@ -233,6 +243,18 @@ func validateBundle(bundle *configBundle, live *store.Store) error {
 		}
 		if err := scratch.ValidateSonosSpeaker(v); err != nil {
 			return fmt.Errorf("sonos speaker %q: %w", k, err)
+		}
+	}
+	for k, v := range bundle.KEF {
+		var id *string
+		if v != nil {
+			id = &v.ID
+		}
+		if err := normalizeID("kef speaker", k, id); err != nil {
+			return err
+		}
+		if err := scratch.ValidateKEFSpeaker(v); err != nil {
+			return fmt.Errorf("kef speaker %q: %w", k, err)
 		}
 	}
 	// Schedules and automations reference the collections above, so they

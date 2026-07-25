@@ -458,7 +458,7 @@ When adding a brand-new view, place it in `views/`, register the route in
 
 ---
 
-## 15. Music module (Sonos + Spotify)
+## 15. Music module (Sonos + KEF + Spotify)
 
 The Music view (`views/Music.svelte`) is the one place with a live-audio
 character. It reuses the shared primitives but layers a few module-specific
@@ -739,6 +739,59 @@ patterns on top. Keep these consistent if you extend it.
     Only *state* — what is playing, how loud, grouped with what — belongs in
     the status poll. Adding a setting to that poll would cost every open tab
     eleven extra calls per speaker every five seconds to watch nothing happen.
+- **KEF is a second bridge, not a second Sonos.** `internal/kef` speaks the
+  local HTTP API on KEF's wireless speakers (LS50 Wireless II, LSX II, LS60).
+  It sits *beside* the Sonos bridge rather than under a shared abstraction,
+  and that is a design decision, not a shortcut: a Sonos household is zones
+  that group and share a queue, while a KEF speaker is one standalone stereo
+  pair with an input selector. One abstraction over both would mean either
+  inventing groups KEF doesn't have or dropping the ones Sonos does.
+  Consequences for the UI, all of them the "stay honest about the backend"
+  rule applied:
+  - **KEF has no Rooms presence and no player sheet.** Rooms answers *what
+    plays together*; a KEF speaker never plays together with anything, so it
+    is not a puck and there is nothing to group. And with no queue, no
+    favorites and no group state, a full player would be an art-led sheet
+    with a volume slider in it — so there isn't one.
+  - **Its transport lives on its Speakers screen.** `views/KEFSpeakerDetail.svelte`
+    is the one place with playback in the settings pane, which the Sonos pane
+    deliberately refuses. The reason is the same one: no duplication. The
+    Sonos pane omits transport *because the player already has it*; the KEF
+    pane carries it because nothing else does. Do not read this as licence to
+    put volume back on the Sonos pane.
+  - **The input selector is the "play this" control.** There is no queue to
+    point somewhere, so switching to the optical input *is* the "play the TV"
+    action. It renders as chips (§2), and every model shows the same list —
+    there is no "what inputs do you have" call, so a model without USB simply
+    refuses it rather than the UI hiding it.
+  - **Everything else follows the pointer rule.** The settings snapshot has a
+    field per DSP path and `undefined` means "this model didn't answer for
+    it" — an LSX II has no subwoofer output, so the whole Subwoofer card is
+    absent for one. Same discipline as Sonos' `capabilities`, different
+    mechanism.
+  - **It shares Home, the Home glance card and the Speakers screen.** A
+    playing KEF speaker gets a card in "Playing now" (in both the Music view
+    and `components/NowPlaying.svelte`) and a chip in the Rooms row, on the
+    same `.tile.on` surface with the same §6.8 waveform — a peer, not a
+    lesser citizen. Its cards carry play/pause only, because skip has nothing
+    to step through on most of its sources. On Speakers it is its own list
+    under a `KEF` heading, not interleaved with the Sonos one: the rows'
+    sub-lines mean different things and the screens they open answer
+    different questions.
+  - **The `Live` chip stays Sonos-only.** It reports whether GENA
+    subscriptions are working. KEF has no change notifications to subscribe
+    to — the KEF Connect app polls too — so a chip saying "Polling" about
+    them would be reporting a fault that doesn't exist. The backend polls the
+    speakers once for the whole process, caches, and publishes on the same
+    `music` SSE topic when something actually changes; five open tabs cost
+    the speaker what one does.
+  - **Adding a speaker is one sheet for both bridges**
+    (`modals/SpeakerModal.svelte`), with a chip row for the brand. A separate
+    "Add Sonos" / "Add KEF" button would put the least interesting decision
+    first. Discovery differs underneath — Sonos expands its own topology, KEF
+    narrows an SSDP sweep and then asks each responder whether it speaks the
+    KEF API — but both end at the same picker, and typing an address is an
+    equal path in both, not a fallback for a failed scan.
 - **State is pushed, and the poll is only a backstop.** The backend
   subscribes to each speaker's UPnP change notifications (GENA — see
   `internal/sonos/monitor.go`) and caches what they report, so pressing play

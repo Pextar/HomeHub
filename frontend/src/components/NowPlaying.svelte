@@ -7,7 +7,11 @@
     import { dur, stagger } from "../lib/motion";
     import { fly } from "svelte/transition";
     import { cubicOut } from "svelte/easing";
-    import type { SonosStatus, SonosGroupView, SonosSpeakerView } from "../lib/types";
+    import { kefSourceLabel } from "../lib/kef";
+    import type {
+        SonosStatus, SonosGroupView, SonosSpeakerView,
+        KEFStatus, KEFSpeakerView,
+    } from "../lib/types";
 
     // Home's window on the Music module. It carries its own refresh because
     // speaker state doesn't live in the shared data store — it's read off the
@@ -20,6 +24,10 @@
     const LIVE_POLL_MS = 45_000;
 
     let status = $state<SonosStatus | null>(null);
+    // KEF is a second bridge with its own poll, not a second shape inside the
+    // Sonos one — see lib/types.ts. A home with only KEF speakers still gets
+    // this section; a home with neither still gets nothing.
+    let kef = $state<KEFStatus | null>(null);
     let loaded = $state(false);
     // Sonos being unconfigured, unreachable, or refused must never make the
     // home page complain: the section simply doesn't render. Only an action
@@ -32,10 +40,16 @@
     // A home with Sonos gets a skeleton in the right place instead of a
     // section that pops in; a home without one gets no flash of a section it
     // will never have.
-    const SEEN_KEY = "sonos-seen";
+    const SEEN_KEY = "speakers-seen";
+    // The key was "sonos-seen" before this card learned about KEF. Falling
+    // back to it means an existing install doesn't lose the memory and flash
+    // a skeleton once on the next visit.
+    const LEGACY_SEEN_KEY = "sonos-seen";
     function seenSpeakers(): boolean {
-        try { return localStorage.getItem(SEEN_KEY) === "true"; }
-        catch { return false; } // private browsing
+        try {
+            return localStorage.getItem(SEEN_KEY) === "true"
+                || localStorage.getItem(LEGACY_SEEN_KEY) === "true";
+        } catch { return false; } // private browsing
     }
     function rememberSpeakers(any: boolean) {
         try { localStorage.setItem(SEEN_KEY, String(any)); }
@@ -44,18 +58,22 @@
 
     async function refresh() {
         const mine = ++seq;
-        try {
-            const st = await api.sonosStatus();
-            if (mine !== seq) return;
-            status = st;
-            failed = false;
-            rememberSpeakers(st.speakers.length > 0);
-        } catch {
-            if (mine !== seq) return;
-            failed = true;
-        } finally {
-            if (mine === seq) loaded = true;
+        // Both bridges in one pass: a failure of one must not blank the
+        // other, so they are settled rather than awaited in sequence.
+        const [sonosRes, kefRes] = await Promise.allSettled([
+            api.sonosStatus(),
+            api.kefStatus(),
+        ]);
+        if (mine !== seq) return;
+        if (sonosRes.status === "fulfilled") status = sonosRes.value;
+        if (kefRes.status === "fulfilled") kef = kefRes.value;
+        // Only a house where *neither* bridge answered is a failure worth
+        // hiding the section for — one speaker brand being absent is normal.
+        failed = sonosRes.status === "rejected" && kefRes.status === "rejected";
+        if (!failed) {
+            rememberSpeakers((status?.speakers.length ?? 0) + (kef?.speakers.length ?? 0) > 0);
         }
+        loaded = true;
     }
 
     // The Sonos endpoints are admin-only, and a backgrounded PWA shouldn't
@@ -97,12 +115,29 @@
 
     const playing = $derived(groups.filter((g) => coordinatorOf(g)?.state?.playing));
 
+    const kefSpeakers = $derived(kef?.speakers ?? []);
+    const kefReachable = $derived(kefSpeakers.filter((s) => s.reachable));
+    const kefPlaying = $derived(kefSpeakers.filter((s) => s.state?.playing));
+    const readyCount = $derived(reachable.length + kefReachable.length);
+    const anyPlaying = $derived(playing.length > 0 || kefPlaying.length > 0);
+    const totalSpeakers = $derived(speakers.length + kefSpeakers.length);
+
+    function kefLine(sp: KEFSpeakerView): string {
+        const t = sp.state?.track;
+        if (t?.title) return t.title;
+        return sp.state?.source ? `${kefSourceLabel(sp.state.source)} input` : "Playing";
+    }
+
+    function kefTogglePlay(sp: KEFSpeakerView) {
+        void run("kefplay:" + sp.id, () => api.kefPause(sp.id), "Pause failed");
+    }
+
     // Nothing registered, no permission, or the bridge is down — stay out of
     // the way entirely rather than showing a dead section.
     const hidden = $derived(
         !session.isAdmin ||
         failed ||
-        (loaded ? speakers.length === 0 : !seenSpeakers()),
+        (loaded ? totalSpeakers === 0 : !seenSpeakers()),
     );
 
     async function run(key: string, fn: () => Promise<unknown>, errTitle: string) {
@@ -154,6 +189,9 @@
                      the same thing and goes to the same place from either
                      surface. Held back until the first poll lands: before
                      that "Polling" would be a guess, not a report. -->
+                <!-- The chip describes the Sonos bridge's push status, so
+                     it only shows when there are Sonos speakers to describe.
+                     KEF has no notifications to subscribe to. -->
                 {#if loaded && speakers.length > 0}
                     <LiveStatusChip live={livePush} onClosed={() => void refresh()} />
                 {/if}
@@ -163,14 +201,14 @@
 
         {#if !loaded}
             <div class="skeleton np-skel" aria-hidden="true"></div>
-        {:else if playing.length === 0}
+        {:else if !anyPlaying}
             <button class="np idle" onclick={() => route.go("music")}>
                 <span class="np-ico"><Icon name="speaker" size={20} /></span>
                 <span class="np-meta">
                     <span class="np-title">Nothing playing</span>
                     <span class="np-sub">
-                        <span class="mono">{reachable.length}</span>
-                        speaker{reachable.length === 1 ? "" : "s"} ready
+                        <span class="mono">{readyCount}</span>
+                        speaker{readyCount === 1 ? "" : "s"} ready
                     </span>
                 </span>
                 <span class="np-go" aria-hidden="true"><Icon name="chevronLeft" size={16} /></span>
@@ -216,6 +254,43 @@
                                 disabled={!c || busy["next:" + c?.id]}
                                 onclick={() => skip(g, "next")}>
                                 <Icon name="skipNext" size={18} />
+                            </button>
+                        </div>
+                    </article>
+                {/each}
+
+                <!-- KEF speakers that are playing. Pause is the only
+                     transport here: KEF has no queue, so on most of its
+                     sources there is nothing for skip to step through, and
+                     the speaker's own screen in Music carries the skips
+                     where they do apply. -->
+                {#each kefPlaying as sp, i (sp.id)}
+                    {@const track = sp.state?.track}
+                    <article class="np playing"
+                        in:fly={{ y: 8, duration: dur(220), delay: stagger(playing.length + i), easing: cubicOut }}>
+                        <button class="np-open" onclick={() => route.go("music")}
+                            aria-label="Open {track?.title ?? 'playback'} in Music">
+                            {#if track?.art_uri}
+                                <img class="np-art" src={track.art_uri} alt="" loading="lazy" />
+                            {:else}
+                                <span class="np-art placeholder">[ art ]</span>
+                            {/if}
+                            <span class="np-meta">
+                                <span class="np-where">
+                                    {@render wave()}
+                                    <span class="np-room">{sp.name}</span>
+                                </span>
+                                <span class="np-title">{kefLine(sp)}</span>
+                                <span class="np-sub">
+                                    {[track?.artist, track?.album].filter(Boolean).join(" · ") || "Live audio"}
+                                </span>
+                            </span>
+                        </button>
+                        <div class="np-transport">
+                            <button class="np-btn on" aria-label="Pause"
+                                disabled={busy["kefplay:" + sp.id]}
+                                onclick={() => kefTogglePlay(sp)}>
+                                <Icon name="pause" size={18} />
                             </button>
                         </div>
                     </article>

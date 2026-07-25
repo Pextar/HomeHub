@@ -4,8 +4,9 @@
     import EmptyState from "../components/EmptyState.svelte";
     import Icon from "../components/Icon.svelte";
     import ConfirmModal from "../components/ConfirmModal.svelte";
-    import SonosSpeakerModal from "../modals/SonosSpeakerModal.svelte";
+    import SpeakerModal from "../modals/SpeakerModal.svelte";
     import SonosSpeakerDetail from "./SonosSpeakerDetail.svelte";
+    import KEFSpeakerDetail from "./KEFSpeakerDetail.svelte";
     import SonosEventsModal from "../modals/SonosEventsModal.svelte";
     import LiveStatusChip from "../components/LiveStatusChip.svelte";
     import Segmented from "../components/Segmented.svelte";
@@ -18,9 +19,11 @@
     import { cubicOut } from "svelte/easing";
     import { dur, sheet } from "../lib/motion";
     import { lockBodyScroll, unlockBodyScroll } from "../lib/scroll-lock";
+    import { kefSourceLabel } from "../lib/kef";
     import type {
         SonosStatus, SonosSpeakerView, SonosGroupView, SonosFavorite,
         SonosQueueItem, SonosRepeat,
+        KEFStatus, KEFSpeakerView,
         SpotifyStatus, SpotifyItem, SpotifyResults,
     } from "../lib/types";
 
@@ -197,12 +200,94 @@
         }
     }
 
+    // ── KEF ──────────────────────────────────────────────────────────────
+    // The second bridge, alongside Sonos rather than folded into it: a KEF
+    // speaker is one standalone stereo pair with an input selector, where a
+    // Sonos household is zones that group and share a queue. Nothing above
+    // this line applies to it — no groups, no queue, no favorites — so it
+    // gets its own poll and its own surfaces instead of being bent into the
+    // group model. See internal/kef.
+    let kef = $state<KEFStatus | null>(null);
+    let kefSeq = 0;
+
+    async function refreshKEF() {
+        const seq = ++kefSeq;
+        try {
+            const st = await api.kefStatus();
+            if (seq !== kefSeq) return;
+            kef = st;
+        } catch {
+            // A home with no KEF speakers must not see an error every poll;
+            // an empty list is indistinguishable from a failed one here, and
+            // the Speakers screen is where a broken registration shows up.
+            if (seq === kefSeq && !kef) kef = { speakers: [] };
+        }
+    }
+
+    /** Registered KEF speakers, reachable ones first, then by name. */
+    const kefSpeakers = $derived.by(() => {
+        const list = [...(kef?.speakers ?? [])];
+        list.sort((a, b) => {
+            if (a.reachable !== b.reachable) return a.reachable ? -1 : 1;
+            return a.name.localeCompare(b.name);
+        });
+        return list;
+    });
+    const kefReachable = $derived(kefSpeakers.filter((s) => s.reachable));
+    const kefPlaying = $derived(kefSpeakers.filter((s) => s.state?.playing));
+    /** Speakers that answered, across both bridges — "ready" on the Home head. */
+    const readyCount = $derived(reachable.length + kefReachable.length);
+    /** Every registered speaker across both bridges — what "is this view empty" means. */
+    const totalSpeakers = $derived((status?.speakers.length ?? 0) + kefSpeakers.length);
+
+    function kefNowLine(sp: KEFSpeakerView): string {
+        if (!sp.state?.powered_on) return "In standby";
+        const t = sp.state.track;
+        if (t?.title) return t.title;
+        return sp.state.source ? `${kefSourceLabel(sp.state.source)} input` : "Idle";
+    }
+    function kefSubLine(sp: KEFSpeakerView): string {
+        const t = sp.state?.track;
+        return [t?.artist, t?.album].filter(Boolean).join(" · ");
+    }
+    /** How far through the track, 0–1. Sources with no duration get no line. */
+    function kefProgress(sp: KEFSpeakerView): number {
+        const total = sp.state?.duration_ms ?? 0;
+        if (total <= 0) return 0;
+        // Extrapolated from when the reading was taken, like the Sonos
+        // scrubber, so the line advances between polls instead of stepping.
+        const base = sp.state?.position_ms ?? 0;
+        const since = sp.read_at ? Date.now() - sp.read_at : 0;
+        return Math.max(0, Math.min(1, (base + since) / total));
+    }
+
+    async function kefTogglePlay(sp: KEFSpeakerView) {
+        const key = "kefplay:" + sp.id;
+        if (busy[key]) return;
+        busy[key] = true;
+        const next = !sp.state?.playing;
+        try {
+            await (next ? api.kefPlay(sp.id) : api.kefPause(sp.id));
+            await refreshKEF();
+        } catch (e) {
+            toasts.error(next ? "Couldn't start playback" : "Couldn't pause", (e as Error).message);
+        } finally {
+            busy[key] = false;
+        }
+    }
+
     onMount(() => {
         void refresh();
+        void refreshKEF();
         // Speaker changes arrive pushed — someone pressing play on the
         // speaker itself lands here in well under a second instead of
         // whenever the next poll happens to run.
-        stopLive = onLive("music", () => void refresh());
+        stopLive = onLive("music", () => {
+            void refresh();
+            // The KEF poller publishes on the same topic when a speaker
+            // actually changes, so this catches both bridges.
+            void refreshKEF();
+        });
     });
     onDestroy(() => {
         clearInterval(pollTimer);
@@ -222,7 +307,14 @@
     const livePush = $derived(!!status?.live);
     $effect(() => {
         clearInterval(pollTimer);
-        pollTimer = setInterval(refresh, livePush ? 20_000 : 5_000);
+        pollTimer = setInterval(() => {
+            void refresh();
+            // KEF has no push to subscribe to, but the backend polls the
+            // speakers once for the whole process and pushes `music` on a
+            // real change — so this is a backstop for both, not the
+            // mechanism, and rides the same interval.
+            void refreshKEF();
+        }, livePush ? 20_000 : 5_000);
         return () => clearInterval(pollTimer);
     });
 
@@ -372,8 +464,9 @@
     function goto(s: Screen) {
         screen = s;
         if (s !== "rooms") selectedIds = []; // selection is a Rooms-screen mode
-        // Leaving Speakers leaves whichever speaker was open inside it.
-        if (s !== "speakers") detailId = null;
+        // Leaving Speakers leaves whichever speaker was open inside it —
+        // either bridge's pane.
+        if (s !== "speakers") { detailId = null; kefDetailId = null; }
         // Arriving on Search means you came to type.
         if (s === "search" && spotify?.connected) focusSearch();
     }
@@ -711,6 +804,7 @@
             // Escape backs out of a speaker's settings the same way its back
             // chip does — a drill-down owes the user the key that leaves it.
             else if (detailId) detailId = null;
+            else if (kefDetailId) kefDetailId = null;
             return;
         }
         if (e.metaKey || e.ctrlKey || e.altKey) return;
@@ -1222,9 +1316,30 @@
         );
     }
 
+    // One sheet for both bridges — it carries the brand picker when adding
+    // and is locked to the owning bridge when editing.
     async function openSpeakerModal(sp?: SonosSpeakerView) {
-        const changed = await openModal<boolean>(SonosSpeakerModal, sp ? { existing: sp } : {});
-        if (changed) void refresh();
+        const changed = await openModal<boolean>(
+            SpeakerModal,
+            sp ? { existing: sp, brand: "sonos" as const } : {},
+        );
+        if (changed) {
+            void refresh();
+            void refreshKEF();
+        }
+    }
+
+    async function openKEFModal(sp: KEFSpeakerView) {
+        const changed = await openModal<boolean>(SpeakerModal, {
+            existing: sp,
+            brand: "kef" as const,
+        });
+        if (changed) {
+            // A removed speaker must not leave the pane open on a row that
+            // no longer exists.
+            if (kefDetailId === sp.id) kefDetailId = null;
+            void refreshKEF();
+        }
     }
 
     // The push-status sheet. Retrying inside it can turn subscriptions on, and
@@ -1258,6 +1373,23 @@
         detailId ? (status?.speakers.find((s) => s.id === detailId) ?? null) : null,
     );
 
+    // The KEF pane is a separate selection rather than a shared one keyed by
+    // id: the two bridges' detail views take different props and answer
+    // different questions, and one selection would mean deciding which
+    // component to render from the shape of an id.
+    let kefDetailId = $state<string | null>(null);
+    const kefDetailSpeaker = $derived(
+        kefDetailId ? (kefSpeakers.find((s) => s.id === kefDetailId) ?? null) : null,
+    );
+    const kefDetailSiblings = $derived(kefSpeakers.filter((s) => s.id !== kefDetailId));
+    /** Whichever pane is open — the split layout folds the list away for both. */
+    const anyDetail = $derived(!!detailSpeaker || !!kefDetailSpeaker);
+
+    function openKEFSpeaker(sp: KEFSpeakerView) {
+        detailId = null; // one pane at a time
+        kefDetailId = sp.id;
+    }
+
     // From 1024px up the list and the selected speaker's settings sit side by
     // side, because the width is there and the common job — the same change
     // across several rooms — is otherwise back-and-forward for every one of
@@ -1275,9 +1407,15 @@
     // first speaker that can answer. On a phone nothing is selected until the
     // user picks a row — there, selecting means leaving the list.
     $effect(() => {
-        if (!paned || screen !== "speakers" || detailId) return;
+        if (!paned || screen !== "speakers" || detailId || kefDetailId) return;
         const first = allSpeakers.find((s) => s.reachable);
-        if (first) detailId = first.id;
+        if (first) {
+            detailId = first.id;
+            return;
+        }
+        // A house with only KEF speakers still deserves an open pane.
+        const firstKEF = kefSpeakers.find((s) => s.reachable);
+        if (firstKEF) kefDetailId = firstKEF.id;
     });
     // Speakers other than the open one, for the phone switcher.
     const detailSiblings = $derived(allSpeakers.filter((s) => s.id !== detailId));
@@ -1301,6 +1439,7 @@
             void openSpeakerModal(sp);
             return;
         }
+        kefDetailId = null; // one pane at a time
         detailId = sp.id;
     }
 
@@ -1320,14 +1459,19 @@
 <Topbar
     title="Music"
     subtitle={status
-        ? `${status.speakers.length} speaker${status.speakers.length === 1 ? "" : "s"} · ${playingCount} playing`
-        : "Sonos"}
+        ? `${totalSpeakers} speaker${totalSpeakers === 1 ? "" : "s"} · ${playingCount + kefPlaying.length} playing`
+        : "Sonos & KEF"}
 >
     {#snippet actions()}
         <!-- Whether speaker state is being pushed or polled. It rides in the
              topbar because it qualifies everything below it — how quickly any
              of this reflects reality — and it is the tap that explains the
              difference and offers the fix. -->
+        <!-- The chip reports the *Sonos* bridge's push status, so it only
+             appears when there are Sonos speakers for it to describe. KEF has
+             no notifications to subscribe to (its own API has none), and a
+             chip that said "Polling" about them would be reporting a fault
+             that doesn't exist. -->
         {#if loaded && (status?.speakers.length ?? 0) > 0}
             <LiveStatusChip live={livePush} onClosed={() => void refresh()} />
         {/if}
@@ -1339,11 +1483,11 @@
 
 {#if !loaded}
     <section class="card"><div class="skeleton sk"></div></section>
-{:else if (status?.speakers.length ?? 0) === 0}
+{:else if totalSpeakers === 0}
     <EmptyState
         icon="speaker"
         title="No speakers yet"
-        message="Add your Sonos speakers to control playback, volume and grouping right here — no Sonos app needed."
+        message="Add your Sonos or KEF speakers to control playback, volume and — on Sonos — grouping right here, with neither app needed."
     >
         <button class="btn btn-primary" onclick={() => openSpeakerModal()}>Add speaker</button>
     </EmptyState>
@@ -1362,7 +1506,7 @@
     </div>
 {/if}
 
-{#if loaded && (status?.speakers.length ?? 0) > 0}
+{#if loaded && totalSpeakers > 0}
     {#if screen === "home"}
     <!-- ── Playing now ─────────────────────────────────────────────────
          Only what is actually playing. Idle zones are one tap away in the
@@ -1370,14 +1514,14 @@
          lie and bury the thing the user came for. -->
     <section class="block">
         <div class="eyrow">Playing now</div>
-        {#if playingGroups.length === 0}
+        {#if playingGroups.length === 0 && kefPlaying.length === 0}
             <div class="quiet-card">
                 <span class="quiet-ico"><Icon name="speaker" size={20} /></span>
                 <span class="quiet-meta">
                     <span class="quiet-title">Nothing playing</span>
                     <span class="quiet-sub">
-                        <span class="mono">{reachable.length}</span>
-                        speaker{reachable.length === 1 ? "" : "s"} ready —
+                        <span class="mono">{readyCount}</span>
+                        speaker{readyCount === 1 ? "" : "s"} ready —
                         {favorites.length > 0 ? "start a favorite below" : "pick a room to open it"}
                     </span>
                 </span>
@@ -1453,6 +1597,60 @@
                         {/if}
                     </div>
                 {/each}
+
+                <!-- KEF speakers that are playing, in the same grid. They
+                     carry a smaller card by necessity, not by choice: there
+                     is no player sheet behind them to open, so the card is
+                     the control rather than a way in to one. Tapping the body
+                     goes to that speaker's screen, where its volume, source
+                     and settings are. -->
+                {#each kefPlaying as sp (sp.id)}
+                    {@const p = kefProgress(sp)}
+                    <div
+                        class="now-card playing"
+                        in:fly={{ y: 8, duration: dur(220), easing: cubicOut }}
+                        out:fade={{ duration: dur(120) }}
+                    >
+                        <button
+                            class="now-open"
+                            onclick={() => { goto("speakers"); openKEFSpeaker(sp); }}
+                        >
+                            {#if sp.state?.track?.art_uri}
+                                <img class="now-art" src={sp.state.track.art_uri} alt="" loading="lazy" />
+                            {:else}
+                                <div class="now-art placeholder">[ art ]</div>
+                            {/if}
+                            <span class="now-meta">
+                                <span class="now-name" title={sp.name}>{sp.name}</span>
+                                <span class="now-line">
+                                    {@render wave()}
+                                    <span class="now-track">
+                                        {[kefNowLine(sp), kefSubLine(sp)].filter(Boolean).join(" · ")}
+                                    </span>
+                                </span>
+                            </span>
+                        </button>
+                        <!-- Play/pause only: KEF has no queue, so there is
+                             nothing for prev/next to step through on most
+                             sources, and the speaker's screen carries the
+                             skips where they do apply. -->
+                        <div class="card-transport">
+                            <button
+                                class="mini-btn on"
+                                aria-label={sp.state?.playing ? "Pause" : "Play"}
+                                disabled={busy["kefplay:" + sp.id]}
+                                onclick={() => kefTogglePlay(sp)}
+                            >
+                                <Icon name={sp.state?.playing ? "pause" : "play"} size={16} />
+                            </button>
+                        </div>
+                        {#if p > 0}
+                            <span class="prog" aria-hidden="true">
+                                <i style:width="{p * 100}%"></i>
+                            </span>
+                        {/if}
+                    </div>
+                {/each}
             </div>
         {/if}
     </section>
@@ -1488,6 +1686,23 @@
                     onclick={() => g && openPlayer(g)}
                 >
                     {#if speakerPlaying(sp.id)}
+                        {@render wave()}
+                    {:else}
+                        <Icon name="speaker" size={14} />
+                    {/if}
+                    <span>{sp.name}</span>
+                </button>
+            {/each}
+            <!-- KEF speakers are rooms that play too, so they belong in this
+                 row — they just open their own screen instead of the player
+                 sheet, which is where all their controls live. -->
+            {#each kefReachable as sp (sp.id)}
+                <button
+                    class="room-chip"
+                    class:on={sp.state?.playing}
+                    onclick={() => { goto("speakers"); openKEFSpeaker(sp); }}
+                >
+                    {#if sp.state?.playing}
                         {@render wave()}
                     {:else}
                         <Icon name="speaker" size={14} />
@@ -1531,6 +1746,28 @@
                     {/each}
                 </div>
             {/if}
+            <!-- Grouping is a Sonos capability. A house with only KEF
+                 speakers would otherwise land on a blank screen with no
+                 explanation, which reads as broken rather than as
+                 "this doesn't apply to your speakers". -->
+            {#if multiGroups.length === 0 && soloSpeakers.length === 0}
+                <div class="quiet-card">
+                    <span class="quiet-ico"><Icon name="speaker" size={20} /></span>
+                    <span class="quiet-meta">
+                        <span class="quiet-title">Nothing to group</span>
+                        <span class="quiet-sub">
+                            {#if kefSpeakers.length > 0}
+                                KEF speakers stand alone — they have no zones to
+                                group. Their controls are on Speakers.
+                            {:else}
+                                No Sonos speaker is answering right now — check
+                                them under Speakers.
+                            {/if}
+                        </span>
+                    </span>
+                    <button class="chip quiet-go" onclick={() => goto("speakers")}>Speakers</button>
+                </div>
+            {/if}
         </div>
     </section>
 
@@ -1561,11 +1798,15 @@
          phone the settings take over the screen and `has-detail` folds the
          list away. Not a sheet — none of Music's other screens are one, and
          this content is too long to spend its life at 92vh. -->
-    <div class="sp-split" class:has-detail={!!detailSpeaker}>
+    <div class="sp-split" class:has-detail={anyDetail}>
     <div class="sp-col">
+    {#if allSpeakers.length > 0}
     <section class="block">
         <div class="block-head">
-            <div class="eyrow">Speakers</div>
+            <!-- Named by bridge once there are two: "what is this thing and
+                 how is it configured" has a different answer per protocol,
+                 and the two lists don't interleave into anything meaningful. -->
+            <div class="eyrow">{kefSpeakers.length > 0 ? "Sonos" : "Speakers"}</div>
             <span class="hint">
                 <span class="mono">{reachable.length}</span>
                 of <span class="mono">{allSpeakers.length}</span> reachable
@@ -1623,12 +1864,68 @@
             speaker's own settings — they stay set whatever is playing.
         </p>
     </section>
+    {/if}
+
+    <!-- ── KEF ─────────────────────────────────────────────────────────
+         Its own list, not interleaved with the Sonos one: the row's sub-line
+         means different things (a Sonos row leads with its zone, a KEF row
+         with its input), and the screen each one opens answers a different
+         set of questions. -->
+    {#if kefSpeakers.length > 0}
+    <section class="block">
+        <div class="block-head">
+            <div class="eyrow">KEF</div>
+            <span class="hint">
+                <span class="mono">{kefReachable.length}</span>
+                of <span class="mono">{kefSpeakers.length}</span> reachable
+            </span>
+        </div>
+        <div class="sp-list">
+            {#each kefSpeakers as sp (sp.id)}
+                <button
+                    class="sp-row"
+                    class:off={!sp.reachable}
+                    class:sel={kefDetailId === sp.id}
+                    aria-current={kefDetailId === sp.id ? "true" : undefined}
+                    onclick={() => (sp.reachable ? openKEFSpeaker(sp) : openKEFModal(sp))}
+                >
+                    <!-- KEF publishes no picture of itself the way Sonos
+                         does, so this is the §6.7 striped fill rather than a
+                         stock photo that might show the wrong model (§2). -->
+                    <span class="shot placeholder" aria-hidden="true"></span>
+                    <span class="sp-meta">
+                        <span class="sp-name">{sp.name}</span>
+                        <span class="sp-sub">
+                            {#if !sp.reachable}
+                                Unreachable · <span class="mono">{sp.ip}</span>
+                            {:else if !sp.state?.powered_on}
+                                Standby · {[sp.model, sp.room].filter(Boolean).join(" · ") || sp.ip}
+                            {:else}
+                                {[kefSourceLabel(sp.state?.source), sp.model, sp.room]
+                                    .filter(Boolean).join(" · ") || sp.ip}
+                            {/if}
+                        </span>
+                    </span>
+                    {#if sp.state?.playing}
+                        {@render wave()}
+                    {/if}
+                    <span class="sp-chev" aria-hidden="true"><Icon name="chevronDown" size={18} /></span>
+                </button>
+            {/each}
+        </div>
+        <p class="hint">
+            KEF speakers stand alone — no grouping, no shared queue — so their
+            input, volume and EQ all live on the speaker's own screen.
+        </p>
+    </section>
+    {/if}
 
     <!-- ── Live updates ────────────────────────────────────────────────
          Speakers is where the devices are managed, so it is where the
          plumbing behind them belongs. The topbar chip says which state we're
          in; this row is the discoverable way in for someone who never
          noticed it. -->
+    {#if allSpeakers.length > 0}
     <button class="lu-row" onclick={openEventsModal}>
         <span class="lu-ico" class:on={livePush}>
             <Icon name={livePush ? "bolt" : "radio"} size={18} />
@@ -1645,6 +1942,7 @@
         </span>
         <span class="lu-chev" aria-hidden="true"><Icon name="chevronDown" size={18} /></span>
     </button>
+    {/if}
     </div><!-- /.sp-col -->
 
     {#if detailSpeaker}
@@ -1657,6 +1955,18 @@
                 onPick={(id) => (detailId = id)}
                 onBack={() => (detailId = null)}
                 onEdit={() => void openSpeakerModal(detailSpeaker)}
+            />
+        </div>
+    {:else if kefDetailSpeaker}
+        <div class="sp-pane">
+            <KEFSpeakerDetail
+                speaker={kefDetailSpeaker}
+                {paned}
+                siblings={kefDetailSiblings}
+                onPick={(id) => (kefDetailId = id)}
+                onBack={() => (kefDetailId = null)}
+                onEdit={() => void openKEFModal(kefDetailSpeaker)}
+                onChanged={() => void refreshKEF()}
             />
         </div>
     {/if}
