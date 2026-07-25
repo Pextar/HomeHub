@@ -220,7 +220,9 @@ A four-bar animated equaliser that marks anything **actually playing** in the
 Music module. It replaces the plain status dot (§6.6) *only there* — a dot
 says "on", a waveform says "audio is moving". Bars use `--on`, animate on a
 staggered 950ms loop, and collapse to a static 8px height under reduced
-motion. Nowhere outside Music.
+motion. Nowhere outside Music **and its one satellite, the Home "Playing now"
+card** (§15) — that card is Music's surface on Home, so it carries the
+module's motifs rather than inventing quieter ones.
 
 ```css
 .wave { display: flex; align-items: flex-end; gap: 2.5px; height: 13px; }
@@ -523,6 +525,19 @@ patterns on top. Keep these consistent if you extend it.
   tap-to-select puck (amber ring + filled check when selected). Selecting 2+
   raises a floating "Group" bar. Existing multi-speaker zones sit inside a
   dashed enclosure (`--tile-on-border`) with an "Ungroup" affordance.
+- **Home shows what's playing, and only that.** The dashboard's "Playing now"
+  section (`components/NowPlaying.svelte`) is the only piece of Music that
+  lives outside the Music view. It is a *glance* surface, so it is
+  deliberately smaller than the module it points at: one card per playing
+  group — art, the §6.8 waveform over the zone name, track, artist/album,
+  play/pause (skips appear from 430px up) — on the `.tile.on` playing
+  surface. Everything else about a group (scrubber, volume, queue, play
+  modes) stays in the full player; tapping the card goes there. It owns its
+  own slower poll because Sonos state doesn't live in the shared data store,
+  and it renders **nothing at all** when there are no speakers, when the
+  bridge is unreachable, or for a non-admin profile — a home without Sonos
+  must not see a dead section, and a failed poll never raises a toast. Only
+  a transport action the user actually took does.
 - **Stay honest about the backend.** The local Sonos bridge exposes
   transport, volume, mute, join/leave, favorites, seek, play modes
   (shuffle × repeat × crossfade) and the group queue (browse, jump, add,
