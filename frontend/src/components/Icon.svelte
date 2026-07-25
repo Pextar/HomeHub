@@ -61,7 +61,12 @@
         monitor:     "M20 3H4a2 2 0 00-2 2v11a2 2 0 002 2h7v2H7v2h10v-2h-4v-2h7a2 2 0 002-2V5a2 2 0 00-2-2zm0 13H4V5h16v11z",
         assistant:   "M11 2l1.9 5.6 5.6 1.9-5.6 1.9L11 17l-1.9-5.6L3.5 9.5l5.6-1.9L11 2zm8 11l.95 2.55L22.5 16.5l-2.55.95L19 20l-.95-2.55L15.5 16.5l2.55-.95L19 13z",
         speaker:     "M7 2a2 2 0 00-2 2v16a2 2 0 002 2h10a2 2 0 002-2V4a2 2 0 00-2-2H7zm5 2a2 2 0 110 4 2 2 0 010-4zm0 6a5 5 0 110 10 5 5 0 010-10zm0 2a3 3 0 100 6 3 3 0 000-6z",
-        music:       "M12 3v10.55A4 4 0 1014 17V7h4V3h-6z",
+        // Beamed pair of eighth notes — the Music module's mark, in the nav
+        // and on Home's "Playing now" head. (Replaced a single-note glyph;
+        // nothing renders that one any more.) Compound path:
+        // beam, two stems, two heads, every subpath wound clockwise so the
+        // nonzero fill unions them instead of punching holes where they meet.
+        musicNotes:  "M9.5 5.4l10-2v3l-10 2z M9.5 5.4h2v11.8h-2z M17.5 3.4h2v11.8h-2z M4.9 17.2a2.6 2.6 0 1 1 5.2 0 2.6 2.6 0 1 1-5.2 0z M12.9 15.2a2.6 2.6 0 1 1 5.2 0 2.6 2.6 0 1 1-5.2 0z",
         play:        "M8 5v14l11-7z",
         pause:       "M6 5h4v14H6zm8 0h4v14h-4z",
         skipNext:    "M6 6l8.5 6L6 18V6zm10-1h2v14h-2z",

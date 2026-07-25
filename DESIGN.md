@@ -470,15 +470,40 @@ patterns on top. Keep these consistent if you extend it.
     above the fold — never stacked on the tab bar.
   - **Subnav is navigation, not filtering.** Kind filters inside Search
     (Songs / Albums / Playlists) remain chip filters, per §2.
+  - **It sticks as a band, not as a floating pill.** `top: 0`, bled over the
+    shell's page padding (36px desktop, `--space-4` mobile) so nothing
+    scrolls through a gap above it or past its sides, on the same glass as
+    the player sheet's top bar: `--bg-bar`, `backdrop-filter`, and a fading
+    bottom edge. A pill that stuck 8px down over an unbled `--bg` strip left
+    cards visibly sliding through the gutters around it.
 
   Screen contents: **Home** = Playing now + Favorites + room chips
   (each opens that room's player; "Manage" jumps to Rooms). **Rooms** =
   the grouping puck grid + unreachable speakers. **Search** = Spotify.
   The mini-player and the full-player sheet persist across all three.
+- **"Playing now" means playing.** The Home screen's section lists only
+  groups that are actually playing; when none are, it collapses to a single
+  quiet row (speaker icon, "Nothing playing", the reachable count, and a way
+  onward) instead of one dead card per zone. Idle zones stay one tap away in
+  the room chips below, which is where "open a room" belongs.
+- **One visible destination.** Favorites and Search share a single "Play on"
+  row — chips when there is more than one group, the group's name when there
+  is only one, never nothing. Opening a room's player sets it too: the room
+  you are looking at is the room the next favorite should land in. It
+  defaults to whatever is already playing. Starting playback also **confirms
+  in words** (`Playing · <track> · <room>`), because a tap has no visible
+  effect until the next 5s poll lands.
 - **Docked mini-player.** When something is playing, a compact bar sticks to
   the bottom of the view (`position: sticky`, cleared above the mobile tab
   bar and safe area): art, track, waveform, play/pause. Tapping it — or any
   "Playing now" card — expands the **full player**.
+- **The dock is a fallback, never a duplicate.** It carries the same track
+  and the same play/pause as the Home screen's "Playing now" card, so it
+  stands down while that card is on screen and appears the moment the card
+  scrolls away (`IntersectionObserver`, bottom inset discounting the band the
+  dock and tab bar occupy). On Rooms and Search no such card exists, so the
+  dock is simply always there. Reaching for the transport must never mean
+  choosing between two identical controls stacked on one screen.
 - **Full player = bottom sheet, art-led.** A bottom sheet on mobile (`--r-xl`
   top radius, `transition:sheet`, scrim, body-scroll-lock), a centered dialog
   ≥ 601px. Rendered inline (not the modal stack) so it stays live against the
@@ -487,12 +512,24 @@ patterns on top. Keep these consistent if you extend it.
   (`box-shadow` in `--on-glow`) — the same light a lit device gives off.
   Below it, in order: title/artist, scrubber, transport, extras, volume.
   It carries the full §5 dismiss kit — **grabber, collapse chevron, close X,
-  Escape, and backdrop click** — because it is the only surface in the app
-  that covers the nav; a user must never feel stuck in it. Covering the nav
-  is literal: the scrim/sheet sit at `z-index: 125/126`, above the mobile bar
-  (100) and the nav drawer (120), below the modal stack (150) so a confirm
-  still lands on top. Its header is `position: sticky` — a long queue must
-  never scroll the way out off the screen.
+  Escape, backdrop click, and drag-down** — because it is the only surface in
+  the app that covers the nav; a user must never feel stuck in it. Covering
+  the nav is literal: the scrim/sheet sit at `z-index: 125/126`, above the
+  mobile bar (100) and the nav drawer (120), below the modal stack (150) so a
+  confirm still lands on top.
+- **The player drags down like every other sheet.** Same gesture as
+  `components/Modal.svelte`, and it must stay that way: the top bar always
+  drags (`touch-action: none`), the scroll body drags only from
+  `scrollTop === 0` and only after a clear downward pull, so the queue still
+  scrolls; past 90px the sheet rides the throw out instead of snapping back
+  and replaying its own exit. Phones only — from 601px the dialog's transform
+  carries its centering, so a drag offset would knock it off-centre.
+- **The sticky top bar is glass, not a slab.** The grabber and header travel
+  together as one `position: sticky` unit — a long queue must never scroll
+  the way out off the screen — over a translucent, `backdrop-filter`-blurred
+  band whose bottom ~22px fades out (`mask-image`). Art and rows dissolve as
+  they pass underneath. An opaque bar was tried first and read as a floating
+  block cutting the content in half.
 - **The scrubber is a real control where the source allows it.** It is an
   `<input type="range">`, not a decorative bar, so it drags, takes arrow
   keys, and inherits the volume sliders' coarse-pointer sizing. Between
@@ -522,9 +559,14 @@ patterns on top. Keep these consistent if you extend it.
   group playing radio is legal but silent, so the feedback has to be
   explicit.
 - **Rooms grouping is a puck grid, not a list.** Each reachable speaker is a
-  tap-to-select puck (amber ring + filled check when selected). Selecting 2+
-  raises a floating "Group" bar. Existing multi-speaker zones sit inside a
-  dashed enclosure (`--tile-on-border`) with an "Ungroup" affordance.
+  puck carrying **two intents on two targets**: the body opens that room's
+  player, the corner circle selects it for grouping (amber ring + filled
+  check when selected, 44px hit area on touch). The body used to select,
+  which left the Rooms screen with no way through to playback at all —
+  opening a room is the common intent, grouping is the deliberate one.
+  Selecting 2+ raises a floating "Group" bar. Existing multi-speaker zones
+  sit inside a dashed enclosure (`--tile-on-border`) with an "Ungroup"
+  affordance.
 - **Home shows what's playing, and only that.** The dashboard's "Playing now"
   section (`components/NowPlaying.svelte`) is the only piece of Music that
   lives outside the Music view. It is a *glance* surface, so it is

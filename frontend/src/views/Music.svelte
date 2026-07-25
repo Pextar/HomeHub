@@ -122,7 +122,12 @@
                 }
             }
             if (!favTarget || !st.groups.some((g) => g.coordinator_id === favTarget)) {
-                favTarget = st.groups[0]?.coordinator_id ?? null;
+                // Prefer a zone that's already playing: "play this too" almost
+                // always means the room the music is coming out of.
+                const live = st.groups.find((g) =>
+                    st.speakers.some((s) => s.id === g.coordinator_id && s.state?.playing),
+                );
+                favTarget = (live ?? st.groups[0])?.coordinator_id ?? null;
             }
             if (!favsLoaded && st.speakers.some((s) => s.reachable)) {
                 void loadFavorites(st.speakers.find((s) => s.reachable)!.id);
@@ -210,11 +215,34 @@
         void run("leave:" + speakerId, () => api.sonosLeave(speakerId), "Ungrouping failed");
     }
 
+    // Starting playback is invisible until the next poll lands, so every
+    // "play this" path confirms in words — including which room it went to,
+    // which is the one thing a tap can't show.
+    async function startPlayback(
+        key: string,
+        fn: () => Promise<unknown>,
+        what: string,
+        target: string,
+    ) {
+        if (busy[key]) return;
+        busy[key] = true;
+        try {
+            await fn();
+            await refresh();
+            const g = groups.find((x) => x.coordinator_id === target);
+            toasts.success("Playing", [what, g && groupTitle(g)].filter(Boolean).join(" · "));
+        } catch (e) {
+            toasts.error("Couldn't play", (e as Error).message);
+        } finally {
+            busy[key] = false;
+        }
+    }
+
     // Favorites play on the chip-selected target, except inside the player
     // sheet, where the group being viewed is the obvious destination.
     function playFavorite(f: SonosFavorite, target: string | null = favTarget) {
         if (!target) return;
-        void run("fav:" + f.id, () => api.sonosPlayFavorite(target, f), "Couldn't play favorite");
+        void startPlayback("fav:" + f.id, () => api.sonosPlayFavorite(target, f), f.title, target);
     }
 
     // ── Screens ──────────────────────────────────────────────────────────
@@ -292,10 +320,51 @@
     // The group the docked mini-player represents: first thing playing.
     const dockGroup = $derived(playingGroups[0]);
 
+    // ── Dock visibility ──────────────────────────────────────────────────
+    // The dock and the Home screen's "Playing now" card carry the same track
+    // and the same play/pause, so showing both stacks one control on top of
+    // its own duplicate. The dock is the *fallback*: it appears only once the
+    // card it repeats has left the screen — which is always, on the Rooms and
+    // Search screens, where no such card exists.
+    let dockCardOnScreen = $state(false);
+    const showDock = $derived(!!dockGroup && !dockCardOnScreen);
+
+    // Attached to every "Playing now" card, live only on the dock group's.
+    // The bottom inset discounts the band the dock and the tab bar occupy, so
+    // a card sitting behind them counts as gone rather than as visible.
+    function dockAnchor(node: HTMLElement, isDock: boolean) {
+        let obs: IntersectionObserver | undefined;
+        let active = false;
+        function attach(on: boolean) {
+            obs?.disconnect();
+            obs = undefined;
+            if (active && !on) dockCardOnScreen = false;
+            active = on;
+            if (!on) return;
+            obs = new IntersectionObserver(
+                ([entry]) => (dockCardOnScreen = entry.isIntersecting),
+                { threshold: 0.5, rootMargin: "0px 0px -96px 0px" },
+            );
+            obs.observe(node);
+        }
+        attach(isDock);
+        return {
+            update: (next: boolean) => attach(next),
+            destroy: () => attach(false),
+        };
+    }
+
     let playerEl = $state<HTMLElement | null>(null);
 
     function openPlayer(g: SonosGroupView) {
         playerGroupId = g.coordinator_id;
+        // The room you just opened is also where you'd expect the next
+        // favorite or search result to land, so opening the player sets the
+        // destination too — one choice instead of two.
+        favTarget = g.coordinator_id;
+        dragY = 0;
+        dragging = false;
+        dismissing = false;
         lockBodyScroll();
     }
     function closePlayer() {
@@ -303,7 +372,117 @@
         playerGroupId = null;
         queuePane = false;
         scrubSec = null;
+        pendingBody = false;
+        // A drag-out close keeps its offset until the sheet is gone —
+        // zeroing it here would snap the sheet back up for one frame.
+        // openPlayer resets the gesture state instead.
+        if (!dismissing) { dragY = 0; dragging = false; }
         unlockBodyScroll();
+    }
+
+    // ── Drag-to-dismiss ──────────────────────────────────────────────────
+    // The same gesture the shared Modal sheet carries: the top bar always
+    // drags, and the scroll body drags only from the top and only on a clear
+    // downward pull, so a long queue still scrolls normally.
+    let dragY = $state(0);
+    let dragging = $state(false);
+    let dismissing = $state(false);
+    let pendingBody = false;
+    let dragStartY = 0;
+    let dragStartX = 0;
+
+    // Mobile only: from 601px the sheet is a centered dialog whose transform
+    // carries its centering, so a drag offset would knock it off-centre.
+    function sheetDraggable(): boolean {
+        return window.matchMedia("(max-width: 600px)").matches;
+    }
+    // Pointer events from the top bar bubble into the scroll container (and,
+    // once captured, keep reporting it as their target) — the body handlers
+    // ignore them so only one drag path is ever live.
+    function fromTop(e: PointerEvent): boolean {
+        return !!(e.target as HTMLElement | null)?.closest?.(".player-top");
+    }
+
+    function startDrag(e: PointerEvent, target: HTMLElement) {
+        dragging = true;
+        dragStartY = e.clientY;
+        dragStartX = e.clientX;
+        dragY = 0;
+        try { target.setPointerCapture(e.pointerId); } catch { /* not capturable */ }
+    }
+    function cancelDrag() {
+        if (!dragging) return;
+        dragging = false;
+        requestAnimationFrame(() => { dragY = 0; });
+    }
+    function finishDrag() {
+        dragging = false;
+        if (dragY > 90) {
+            // Ride the throw out instead of snapping back and then playing
+            // the sheet's own exit — the finger already did that animation.
+            dismissing = true;
+            dragY = 600;
+            setTimeout(closePlayer, 220);
+        } else {
+            requestAnimationFrame(() => { dragY = 0; });
+        }
+    }
+
+    // Top bar — always drags.
+    function onTopPointerDown(e: PointerEvent) {
+        if (dismissing || !sheetDraggable()) return;
+        if ((e.target as HTMLElement).closest("button")) return; // close / back
+        startDrag(e, e.currentTarget as HTMLElement);
+        e.preventDefault();
+    }
+    function onTopPointerMove(e: PointerEvent) {
+        if (!dragging) return;
+        dragY = Math.max(0, e.clientY - dragStartY);
+    }
+    function onTopPointerUp() {
+        if (dragging) finishDrag();
+    }
+
+    // Body — drags when the scroll is at the top, otherwise scrolls.
+    function onBodyPointerDown(e: PointerEvent) {
+        if (dismissing || !sheetDraggable() || fromTop(e)) return;
+        if (e.pointerType === "mouse") return; // pointer devices use the bar
+        if (!scrollEl || scrollEl.scrollTop > 0) return;
+        if ((e.target as HTMLElement).closest("input, button, a, [role='slider']")) return;
+        pendingBody = true;
+        dragStartY = e.clientY;
+        dragStartX = e.clientX;
+    }
+    function onBodyPointerMove(e: PointerEvent) {
+        if (fromTop(e)) return;
+        if (dragging) {
+            dragY = Math.max(0, e.clientY - dragStartY);
+            e.preventDefault(); // claimed: don't scroll as well
+            return;
+        }
+        if (!pendingBody) return;
+        const dy = e.clientY - dragStartY;
+        const dx = e.clientX - dragStartX;
+        if (dy > 8 && dy > Math.abs(dx)) {
+            pendingBody = false;
+            const from = dragStartY;
+            startDrag(e, scrollEl!);
+            dragStartY = from; // keep the origin so the sheet doesn't jump back
+            dragY = dy;
+            e.preventDefault();
+        } else if (dy < -4 || Math.abs(dx) > 12) {
+            pendingBody = false; // scrolling up or swiping sideways
+        }
+    }
+    function onBodyPointerUp(e: PointerEvent) {
+        if (fromTop(e)) return;
+        pendingBody = false;
+        if (dragging) finishDrag();
+    }
+    function onBodyPointerCancel(e: PointerEvent) {
+        if (fromTop(e)) return;
+        pendingBody = false;
+        cancelDrag();
     }
     function onWindowKey(e: KeyboardEvent) {
         if (e.key !== "Escape") return;
@@ -710,11 +889,13 @@
     );
 
     function playItem(item: SpotifyItem) {
-        if (!favTarget) return;
-        void run(
+        const target = favTarget;
+        if (!target) return;
+        void startPlayback(
             "item:" + item.uri,
-            () => api.sonosPlayItem(favTarget!, { service: "Spotify", uri: item.uri, title: item.name }),
-            "Couldn't play",
+            () => api.sonosPlayItem(target, { service: "Spotify", uri: item.uri, title: item.name }),
+            item.name,
+            target,
         );
     }
 
@@ -772,50 +953,66 @@
 
 {#if loaded && (status?.speakers.length ?? 0) > 0}
     {#if screen === "home"}
-    <!-- ── Playing now ─────────────────────────────────────────────── -->
+    <!-- ── Playing now ─────────────────────────────────────────────────
+         Only what is actually playing. Idle zones are one tap away in the
+         room chips below, so listing them here would just make the heading
+         lie and bury the thing the user came for. -->
     <section class="block">
         <div class="eyrow">Playing now</div>
-        <div class="now-grid">
-            {#each groups as g (g.coordinator_id)}
-                {@const c = coordinatorOf(g)}
-                {@const st = c?.state}
-                <div
-                    class="now-card"
-                    class:playing={st?.playing}
-                    in:fly={{ y: 8, duration: dur(220), easing: cubicOut }}
-                >
-                    <button class="now-open" onclick={() => openPlayer(g)}>
-                        {#if st?.track?.art_uri}
-                            <img class="now-art" src={st.track.art_uri} alt="" loading="lazy" />
-                        {:else}
-                            <div class="now-art placeholder">[ art ]</div>
-                        {/if}
-                        <span class="now-meta">
-                            <span class="now-name" title={groupTitle(g)}>{groupTitle(g)}</span>
-                            <span class="now-line">
-                                {#if st?.playing && st.track?.title}
+        {#if playingGroups.length === 0}
+            <div class="quiet-card">
+                <span class="quiet-ico"><Icon name="speaker" size={20} /></span>
+                <span class="quiet-meta">
+                    <span class="quiet-title">Nothing playing</span>
+                    <span class="quiet-sub">
+                        <span class="mono">{reachable.length}</span>
+                        speaker{reachable.length === 1 ? "" : "s"} ready —
+                        {favorites.length > 0 ? "start a favorite below" : "pick a room to open it"}
+                    </span>
+                </span>
+                {#if spotify?.connected}
+                    <button class="chip quiet-go" onclick={() => goto("search")}>Search</button>
+                {/if}
+            </div>
+        {:else}
+            <div class="now-grid">
+                {#each playingGroups as g (g.coordinator_id)}
+                    {@const c = coordinatorOf(g)}
+                    {@const st = c?.state}
+                    <div
+                        class="now-card playing"
+                        use:dockAnchor={g.coordinator_id === dockGroup?.coordinator_id}
+                        in:fly={{ y: 8, duration: dur(220), easing: cubicOut }}
+                    >
+                        <button class="now-open" onclick={() => openPlayer(g)}>
+                            {#if st?.track?.art_uri}
+                                <img class="now-art" src={st.track.art_uri} alt="" loading="lazy" />
+                            {:else}
+                                <div class="now-art placeholder">[ art ]</div>
+                            {/if}
+                            <span class="now-meta">
+                                <span class="now-name" title={groupTitle(g)}>{groupTitle(g)}</span>
+                                <span class="now-line">
                                     {@render wave()}
                                     <span class="now-track">
-                                        {[st.track.title, st.track.artist].filter(Boolean).join(" · ")}
+                                        {[st?.track?.title, st?.track?.artist].filter(Boolean).join(" · ")
+                                            || "Live audio"}
                                     </span>
-                                {:else}
-                                    <span class="now-track idle">Nothing playing</span>
-                                {/if}
+                                </span>
                             </span>
-                        </span>
-                    </button>
-                    <button
-                        class="mini-btn"
-                        class:on={st?.playing}
-                        aria-label={st?.playing ? "Pause" : "Play"}
-                        disabled={!c || busy["play:" + c?.id]}
-                        onclick={() => togglePlay(g)}
-                    >
-                        <Icon name={st?.playing ? "pause" : "play"} size={16} />
-                    </button>
-                </div>
-            {/each}
-        </div>
+                        </button>
+                        <button
+                            class="mini-btn on"
+                            aria-label="Pause"
+                            disabled={!c || busy["play:" + c?.id]}
+                            onclick={() => togglePlay(g)}
+                        >
+                            <Icon name="pause" size={16} />
+                        </button>
+                    </div>
+                {/each}
+            </div>
+        {/if}
     </section>
 
     <!-- ── Favorites ───────────────────────────────────────────────── -->
@@ -823,16 +1020,7 @@
         <section class="block">
             <div class="block-head">
                 <div class="eyrow">Favorites</div>
-                {#if groups.length > 1}
-                    <div class="fav-targets" role="radiogroup" aria-label="Play favorites on">
-                        {#each groups as g (g.coordinator_id)}
-                            <button class="chip" class:on={favTarget === g.coordinator_id}
-                                onclick={() => (favTarget = g.coordinator_id)}>
-                                {groupTitle(g)}
-                            </button>
-                        {/each}
-                    </div>
-                {/if}
+                {@render targetRow()}
             </div>
             <div class="favs h-scroll">
                 {#each favorites as f (f.id)}
@@ -873,7 +1061,7 @@
     <section class="block">
         <div class="block-head">
             <div class="eyrow">Rooms</div>
-            <span class="hint">Tap rooms to select, then group them</span>
+            <span class="hint">Tap a room to open it — use the circles to group rooms</span>
         </div>
         <div class="rooms">
             {#each multiGroups as g (g.coordinator_id)}
@@ -1025,21 +1213,20 @@
                     {:else if myPlaylists.length > 0}
                         <span class="sp-browse-label">Your playlists</span>
                     {/if}
-                    {#if groups.length > 1}
-                        <div class="fav-targets sp-targets" role="radiogroup" aria-label="Play on">
-                            {#each groups as g (g.coordinator_id)}
-                                <button class="chip" class:on={favTarget === g.coordinator_id}
-                                    onclick={() => (favTarget = g.coordinator_id)}>
-                                    {groupTitle(g)}
-                                </button>
-                            {/each}
-                        </div>
-                    {/if}
+                    <div class="sp-targets" class:pushed={!!results}>{@render targetRow()}</div>
                 </div>
                 {#if searching}
                     <div class="skeleton sp-skeleton"></div>
                 {:else if results && shownItems.length === 0}
                     <div class="sp-none">No {kindFilter} matched "{query.trim()}".</div>
+                {:else if !results && shownItems.length === 0}
+                    <!-- No query and no playlists to browse — say what this
+                         box does rather than leaving a blank panel. -->
+                    <div class="sp-none">
+                        Search Spotify for a song, album or playlist. Tapping a result
+                        plays it on the room shown above; the row's overflow menu
+                        queues it without interrupting.
+                    </div>
                 {:else}
                     <div class="sp-results">
                         {#each shownItems as item (item.uri)}
@@ -1088,8 +1275,10 @@
     {/if}
     {/if}
 
-    <!-- ── Docked mini-player (persists across all three screens) ───── -->
-    {#if dockGroup}
+    <!-- ── Docked mini-player ──────────────────────────────────────────
+         Present on every screen, but stands down while the Home card it
+         would duplicate is on screen. -->
+    {#if showDock && dockGroup}
         {@const c = coordinatorOf(dockGroup)}
         {@const st = c?.state}
         <div class="mini" transition:fly={{ y: 20, duration: dur(220), easing: cubicOut }}>
@@ -1115,26 +1304,57 @@
     {/if}
 {/if}
 
-<!-- ── Room puck ───────────────────────────────────────────────────── -->
+<!-- ── Room puck ─────────────────────────────────────────────────────
+     Two intents, two targets: the body opens that room's player (the thing
+     you want nine times out of ten), the corner circle selects it for
+     grouping. Tapping the body used to select, which left the Rooms screen
+     with no way through to playback at all. -->
 {#snippet puck(sp: SonosSpeakerView)}
     {@const playing = speakerPlaying(sp.id)}
     {@const selected = selectedIds.includes(sp.id)}
-    <button
-        class="puck"
-        class:playing
-        class:selected
-        aria-pressed={selected}
-        onclick={() => toggleSelect(sp.id)}
-    >
-        <span class="check" aria-hidden="true"><Icon name="check" size={12} /></span>
-        <span class="puck-icon">
-            {#if playing}{@render wave()}{:else}<Icon name="speaker" size={16} />{/if}
-        </span>
-        <span class="puck-body">
-            <span class="puck-name">{sp.name}</span>
-            <span class="puck-sub">{speakerNowLine(sp.id)}</span>
-        </span>
-    </button>
+    {@const g = groupOfSpeaker(sp.id)}
+    <div class="puck" class:playing class:selected>
+        <button class="puck-open" disabled={!g} onclick={() => g && openPlayer(g)}>
+            <span class="puck-icon">
+                {#if playing}{@render wave()}{:else}<Icon name="speaker" size={16} />{/if}
+            </span>
+            <span class="puck-body">
+                <span class="puck-name">{sp.name}</span>
+                <span class="puck-sub">{speakerNowLine(sp.id)}</span>
+            </span>
+        </button>
+        <button
+            class="check"
+            aria-pressed={selected}
+            aria-label={selected ? `Deselect ${sp.name}` : `Select ${sp.name} for grouping`}
+            onclick={() => toggleSelect(sp.id)}
+        >
+            <span class="check-dot" aria-hidden="true"><Icon name="check" size={12} /></span>
+        </button>
+    </div>
+{/snippet}
+
+<!-- ── Where playback lands ──────────────────────────────────────────
+     One destination shared by favorites and search, always visible — a
+     single group shows its name rather than hiding the answer entirely. -->
+{#snippet targetRow()}
+    {#if groups.length > 1}
+        <div class="fav-targets" role="radiogroup" aria-label="Play on">
+            <span class="t-label">Play on</span>
+            {#each groups as g (g.coordinator_id)}
+                {@const on = favTarget === g.coordinator_id}
+                <button class="chip" class:on role="radio" aria-checked={on}
+                    onclick={() => (favTarget = g.coordinator_id)}>
+                    {groupTitle(g)}
+                </button>
+            {/each}
+        </div>
+    {:else if groups.length === 1}
+        <div class="fav-targets">
+            <span class="t-label">Play on</span>
+            <span class="t-one">{groupTitle(groups[0])}</span>
+        </div>
+    {/if}
 {/snippet}
 
 <!-- ── Selection bar (grouping) ────────────────────────────────────── -->
@@ -1156,33 +1376,61 @@
     <div class="scrim" transition:fade={{ duration: dur(200) }} onclick={closePlayer} aria-hidden="true"></div>
     <div
         class="player"
+        class:dragging
         role="dialog"
         aria-modal="true"
         aria-label="Now playing"
         tabindex="-1"
         bind:this={playerEl}
-        transition:sheet={{}}
+        style:transform={dragY > 0 ? `translateY(${dragY}px)` : ""}
+        style:opacity={dragY > 0 ? Math.max(0.4, 1 - dragY / 300) : undefined}
+        style:transition={dragging
+            ? "none"
+            : dragY > 0
+              ? "transform 0.22s ease-in, opacity 0.22s ease-in"
+              : "transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)"}
+        in:sheet={{}}
+        out:sheet={{ instant: dismissing }}
     >
-        <!-- Grabber + close X, per DESIGN.md §5 — the sheet must read as
-             dismissible at a glance, not only via the collapse chevron. -->
-        <div class="grabber" aria-hidden="true"></div>
-        <div class="player-scroll" bind:this={scrollEl}>
-            <header class="player-head">
-                <button
-                    class="icon-btn p-icon"
-                    aria-label={queuePane ? "Back to now playing" : "Collapse player"}
-                    onclick={() => (queuePane ? (queuePane = false) : closePlayer())}
-                >
-                    <Icon name={queuePane ? "chevronLeft" : "chevronDown"} size={18} />
-                </button>
-                <div class="p-onair">
-                    <div class="eyrow">{queuePane ? "Queue" : "Playing on"}</div>
-                    <div class="p-onair-name">{groupTitle(g)}</div>
-                </div>
-                <button class="icon-btn p-icon" aria-label="Close player" onclick={closePlayer}>
-                    <Icon name="close" size={18} />
-                </button>
-            </header>
+        <div
+            class="player-scroll"
+            role="none"
+            bind:this={scrollEl}
+            onpointerdown={onBodyPointerDown}
+            onpointermove={onBodyPointerMove}
+            onpointerup={onBodyPointerUp}
+            onpointercancel={onBodyPointerCancel}
+        >
+            <!-- Grabber + close X, per DESIGN.md §5 — the sheet must read as
+                 dismissible at a glance, not only via the collapse chevron.
+                 The bar is also the drag handle, and it sticks as one unit so
+                 content dissolves under it rather than meeting a hard edge. -->
+            <div
+                class="player-top"
+                role="none"
+                onpointerdown={onTopPointerDown}
+                onpointermove={onTopPointerMove}
+                onpointerup={onTopPointerUp}
+                onpointercancel={cancelDrag}
+            >
+                <div class="grabber" aria-hidden="true"></div>
+                <header class="player-head">
+                    <button
+                        class="icon-btn p-icon"
+                        aria-label={queuePane ? "Back to now playing" : "Collapse player"}
+                        onclick={() => (queuePane ? (queuePane = false) : closePlayer())}
+                    >
+                        <Icon name={queuePane ? "chevronLeft" : "chevronDown"} size={18} />
+                    </button>
+                    <div class="p-onair">
+                        <div class="eyrow">{queuePane ? "Queue" : "Playing on"}</div>
+                        <div class="p-onair-name">{groupTitle(g)}</div>
+                    </div>
+                    <button class="icon-btn p-icon" aria-label="Close player" onclick={closePlayer}>
+                        <Icon name="close" size={18} />
+                    </button>
+                </header>
+            </div>
 
             {#if queuePane}
                 <!-- ── Queue pane ──────────────────────────────────────── -->
@@ -1457,13 +1705,30 @@
     }
     .link-btn:hover { color: var(--text); }
 
-    /* ── Subnav — Music's own three screens ── */
+    /* ── Subnav — Music's own three screens ──
+       Sticks flush to the top and bleeds over the shell's page padding, so
+       nothing scrolls through a gap above it or past its sides — the pill
+       used to detach with cards sliding visibly through the gutters around
+       it. The band is the same glass as the player sheet's top bar:
+       translucent, blurred, with a fading bottom edge that content dissolves
+       under rather than being sliced against. */
     .subnav {
-        position: sticky; top: var(--space-2); z-index: 15;
-        /* Bleeds slightly wider than the content so the sticky pill reads as
-           a bar rather than a floating control when it detaches. */
-        padding: var(--space-1) 0;
-        background: var(--bg);
+        --fade: 18px;
+        position: sticky; top: 0; z-index: 15;
+        margin: 0 -36px calc(var(--fade) * -1);
+        padding: var(--space-3) 36px var(--fade);
+        background: var(--bg-bar);
+        backdrop-filter: blur(18px) saturate(1.3);
+        -webkit-backdrop-filter: blur(18px) saturate(1.3);
+        -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - var(--fade)), transparent);
+        mask-image: linear-gradient(to bottom, #000 calc(100% - var(--fade)), transparent);
+    }
+    /* Match the shell's mobile page padding (App.svelte `.main`). */
+    @media (max-width: 900px) {
+        .subnav {
+            margin: 0 calc(var(--space-4) * -1) calc(var(--fade) * -1);
+            padding: var(--space-2) var(--space-4) var(--fade);
+        }
     }
 
     /* ── Rooms at a glance (Home) ── */
@@ -1517,6 +1782,23 @@
         transition: border-color var(--t-fast);
     }
     .now-card.playing { background: var(--tile-on-gradient); border-color: var(--tile-on-border); }
+
+    /* Nothing playing — a single honest row, not one dead card per zone. */
+    .quiet-card {
+        display: flex; align-items: center; gap: var(--space-3);
+        padding: 14px;
+        background: var(--card); border: 1px solid var(--hairline);
+        border-radius: var(--r-lg);
+    }
+    .quiet-ico {
+        width: 44px; height: 44px; border-radius: var(--r-md);
+        display: grid; place-items: center; flex-shrink: 0;
+        background: var(--card-3); color: var(--text-mute);
+    }
+    .quiet-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+    .quiet-title { font-size: 14px; font-weight: 600; }
+    .quiet-sub { font-size: 12.5px; color: var(--text-mute); }
+    .quiet-go { flex-shrink: 0; }
     @media (hover: hover) { .now-card:hover { border-color: var(--border-strong); } }
     .now-open {
         flex: 1; min-width: 0;
@@ -1542,7 +1824,6 @@
         font-size: 12.5px; color: var(--text-mute);
         overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
-    .now-track.idle { color: var(--text-dim); }
 
     .mini-btn {
         width: 38px; height: 38px; border-radius: 50%;
@@ -1553,8 +1834,16 @@
     .mini-btn.on { background: var(--on); color: var(--primary-fg); border-color: transparent; }
     .mini-btn:disabled { opacity: 0.5; }
 
+    /* ── Where playback lands ── */
+    .fav-targets { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+    .t-label {
+        font-family: var(--font-mono);
+        font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase;
+        color: var(--text-dim);
+    }
+    .t-one { font-size: 12.5px; color: var(--text-mute); }
+
     /* ── Favorites ── */
-    .fav-targets { display: flex; gap: var(--space-2); flex-wrap: wrap; }
     .favs { display: flex; gap: var(--space-3); padding-bottom: var(--space-1); }
     .fav { position: relative; width: 112px; }
     .fav-play {
@@ -1619,30 +1908,46 @@
 
     .puck {
         position: relative;
-        display: flex; flex-direction: column; gap: 10px;
-        padding: 14px;
         background: var(--card); border: 1px solid var(--hairline);
         border-radius: var(--r-lg);
-        color: var(--text); text-align: left; cursor: pointer;
-        transition: border-color var(--t-fast), box-shadow var(--t-fast), transform var(--t-fast);
+        transition: border-color var(--t-fast), box-shadow var(--t-fast);
     }
     .puck.playing { background: var(--tile-on-gradient); border-color: var(--tile-on-border); }
     .puck.selected { border-color: var(--on); box-shadow: 0 0 0 1px var(--on); }
-    .puck:active { transform: scale(0.98); }
+    .puck-open {
+        width: 100%;
+        display: flex; flex-direction: column; gap: 10px;
+        /* Room for the select circle in the corner. */
+        padding: 14px 46px 14px 14px;
+        background: none; border: 0; border-radius: var(--r-lg);
+        color: var(--text); text-align: left; cursor: pointer; font: inherit;
+        transition: transform var(--t-fast);
+    }
+    .puck-open:active { transform: scale(0.98); }
+    .puck-open:disabled { opacity: 0.6; cursor: default; }
     .check {
-        position: absolute; top: 12px; right: 12px;
+        position: absolute; top: 6px; right: 6px;
+        width: 38px; height: 38px;
+        display: grid; place-items: center;
+        background: none; border: 0; padding: 0; cursor: pointer;
+    }
+    .check-dot {
         width: 20px; height: 20px; border-radius: 50%;
         display: grid; place-items: center;
         background: var(--card-3); border: 1.5px solid var(--border-strong);
         color: transparent;
+        transition: background var(--t-fast), border-color var(--t-fast);
     }
-    .puck.selected .check { background: var(--on); border-color: var(--on); color: var(--primary-fg); }
+    .puck.selected .check-dot { background: var(--on); border-color: var(--on); color: var(--primary-fg); }
     .puck-icon {
         width: 34px; height: 34px; border-radius: var(--r-md);
         display: grid; place-items: center;
         background: var(--card-3); color: var(--text-mute);
     }
     .puck.playing .puck-icon { background: var(--on); color: var(--primary-fg); }
+    /* The waveform's bars are amber like every other one — on the filled
+       amber icon tile they'd be invisible, so they take the tile's ink. */
+    .puck.playing .puck-icon .wave i { background: var(--primary-fg); }
     .puck-body { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
     .puck-name { font-size: 14px; font-weight: 600; }
     .puck-sub {
@@ -1814,7 +2119,9 @@
         font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase;
         color: var(--text-dim);
     }
-    .sp-targets { margin-left: auto; }
+    /* Sits opposite the kind filters when there are results to filter, and
+       leads the row when there aren't. */
+    .sp-targets.pushed { margin-left: auto; }
     .sp-skeleton { height: 120px; border-radius: var(--r-md); }
     .sp-none { font-size: 12.5px; color: var(--text-mute); }
 
@@ -1899,14 +2206,21 @@
         border: 1px solid var(--hairline); border-bottom: 0;
         box-shadow: var(--shadow-lg);
         outline: none;
+        /* Keep scrolled content inside the top radius, and GPU-promote the
+           sheet so the drag transform stays smooth. */
+        overflow: hidden;
+        will-change: transform;
     }
     .grabber {
         width: 38px; height: 4px; border-radius: 2px;
         background: var(--border-strong);
         margin: 8px auto 0;
+        pointer-events: none;
     }
     .player-scroll {
-        max-height: calc(92vh - 12px); overflow-y: auto;
+        max-height: 92vh; overflow-y: auto;
+        overscroll-behavior: contain;
+        -webkit-overflow-scrolling: touch;
         padding: 0 var(--space-5)
             calc(var(--space-8) + env(safe-area-inset-bottom));
         display: flex; flex-direction: column; gap: var(--space-5);
@@ -1920,19 +2234,35 @@
             max-height: 88vh;
             border-radius: var(--r-xl); border-bottom: 1px solid var(--hairline);
         }
-        .player-scroll { max-height: calc(88vh - 12px); }
+        .player-scroll { max-height: 88vh; }
+    }
+    /* The bar is the drag handle on phones, so the browser must not claim
+       the gesture for scrolling first. */
+    @media (max-width: 600px) {
+        .player-top { touch-action: none; cursor: grab; }
+        .player.dragging .player-top { cursor: grabbing; }
+        .player-scroll { touch-action: pan-y; }
     }
 
-    /* Sticky so a long queue never scrolls the way out of the sheet away.
-       The negative margin bleeds it over the scroll container's horizontal
-       padding, so rows pass fully underneath it. */
+    /* Grabber + header travel together and stick, so a long queue never
+       scrolls the way out off the screen. The band is translucent and
+       blurred, and its bottom edge fades out — art and rows dissolve as they
+       pass underneath instead of being cut off against an opaque slab. */
+    .player-top {
+        --fade: 22px;
+        position: sticky; top: 0; z-index: 3;
+        margin: 0 calc(var(--space-5) * -1) calc(var(--fade) * -1);
+        padding: 0 var(--space-5) var(--fade);
+        background: var(--bg-bar);
+        backdrop-filter: blur(18px) saturate(1.3);
+        -webkit-backdrop-filter: blur(18px) saturate(1.3);
+        -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - var(--fade)), transparent);
+        mask-image: linear-gradient(to bottom, #000 calc(100% - var(--fade)), transparent);
+    }
     .player-head {
-        position: sticky; top: 0; z-index: 2;
         display: flex; align-items: center; justify-content: space-between;
         gap: var(--space-3);
-        margin: 0 calc(var(--space-5) * -1);
-        padding: var(--space-3) var(--space-5);
-        background: var(--bg);
+        padding: var(--space-2) 0 var(--space-3);
     }
     .p-icon { width: 38px; height: 38px; border-radius: 50%; background: var(--card-2); border: 1px solid var(--hairline); }
     .p-onair { text-align: center; min-width: 0; }
@@ -2085,12 +2415,17 @@
         .member .m-name { width: 90px; }
         .sp-play { width: 44px; height: 44px; }
         .sp-more, .q-rm, .fav-add { width: 44px; height: 44px; }
+        .check { width: 44px; height: 44px; top: 3px; right: 3px; }
+        .puck-open { padding-right: 50px; }
         .sp-input, .sp-config input { font-size: 16px; } /* prevents iOS auto-zoom */
     }
 
     @media (prefers-reduced-motion: reduce) {
         .wave i { animation: none; height: 8px; }
-        .fav-art, .now-card, .puck, .p-play,
+        .fav-art, .now-card, .puck, .puck-open, .check-dot, .p-play,
         .p-upnext, .q-row, .sp-row { transition-duration: 0.001ms; }
+        /* The sheet's drag snap-back is an inline style, so it needs its own
+           override here rather than a transition-duration on the class. */
+        .player { transition: none !important; }
     }
 </style>
