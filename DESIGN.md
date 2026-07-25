@@ -274,14 +274,22 @@ the float gap, which grows with the safe area — is published as
 the assistant FAB, the Music mini-player and selection bar) offsets by that
 token instead of a hardcoded bar height. It is `0` on desktop.
 
-The **assistant FAB** shares that band, bottom-right. A bar that runs the
-full width there (the Music dock, the grouping bar) keeps its trailing
-control clear of it by reserving **`--fab-clear`**, never a literal 64px —
-because the FAB is optional: Settings › Interface switches it off per device,
-which zeroes the token and gives those bars their edge back. It is also `0`
-on desktop, where the rail entry and ⌘K are the launchers. A hidden FAB must
-never cost the feature, so **the assistant also lives in the mobile More
-sheet**, permanently — it has no route, so that sheet is its only fixed home.
+The **assistant FAB** shares that band, bottom-right — but it yields it.
+**A view that docks a full-width bar there claims the corner** (`bottomBar`
+store, claimed from an `$effect` and released by its cleanup) and the FAB
+stands down for as long as the bar is up, the same way Music's dock stands
+down behind the card it would duplicate. Two controls must never stack in
+one corner, and of the two the transport is the one you reached for.
+
+A bar in that band still keeps its trailing control clear of the button by
+reserving **`--fab-clear`**, never a literal 64px, because the FAB has three
+ways to be absent: the claim above, the Settings › Interface switch that
+hides it per device, and desktop, where the rail entry and ⌘K are the
+launchers. All three zero the token, so the bar gets its own edge back
+instead of dodging a button that isn't there; animate the padding so it
+glides in as the FAB scales away. A missing FAB must never cost the feature,
+so **the assistant also lives in the mobile More sheet**, permanently — it
+has no route, so that sheet is its only fixed home.
 
 In this app the six slots are the four primary nav entries plus **More**,
 which opens the overflow sheet; the lens sits on More whenever the active
@@ -510,7 +518,10 @@ patterns on top. Keep these consistent if you extend it.
   "Playing now" means playing and lets go of the zone, so the dock is where
   a paused zone stays one tap from playing again. Paused, it drops the
   `.tile.on` surface for a plain card and swaps the waveform for the idle
-  speaker icon — nothing is moving, so nothing should say it is.
+  speaker icon — nothing is moving, so nothing should say it is. While it is
+  up — and while the grouping bar is — Music claims the bottom-right corner
+  and the assistant FAB stands down (§7), so the dock runs the full width
+  with its transport on the edge.
 - **Transport is optimistic.** A play/pause tap flips every icon, waveform
   and card in the view immediately and holds that state until the poll
   agrees (or 6s passes, or the call fails and it rolls back). A five-second

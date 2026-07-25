@@ -7,7 +7,7 @@
     import SonosSpeakerModal from "../modals/SonosSpeakerModal.svelte";
     import Segmented from "../components/Segmented.svelte";
     import { api } from "../lib/api";
-    import { toasts, route } from "../lib/stores.svelte";
+    import { toasts, route, bottomBar } from "../lib/stores.svelte";
     import { openModal } from "../lib/modal.svelte";
     import { copyText } from "../lib/clipboard";
     import { fly, fade, scale } from "svelte/transition";
@@ -433,6 +433,16 @@
     // Search screens, where no such card exists.
     let dockCardOnScreen = $state(false);
     const showDock = $derived(!!dockGroup && !dockCardOnScreen);
+
+    // The dock and the grouping bar both run the full width of the band the
+    // assistant FAB floats in. While either is up the FAB stands down, so the
+    // transport gets the whole bar instead of a 64px gutter round a button
+    // sitting on top of it (DESIGN.md §7).
+    const selectionBarUp = $derived(screen === "rooms" && selectedIds.length >= 2);
+    $effect(() => {
+        if (!showDock && !selectionBarUp) return;
+        return bottomBar.claim();
+    });
 
     // Attached to every "Playing now" card, live only on the dock group's.
     // The bottom inset discounts the band the dock and the tab bar occupy, so
@@ -1703,7 +1713,7 @@
 {/snippet}
 
 <!-- ── Selection bar (grouping) ────────────────────────────────────── -->
-{#if screen === "rooms" && selectedIds.length >= 2}
+{#if selectionBarUp}
     <div class="selbar" transition:fly={{ y: 16, duration: dur(200), easing: cubicOut }}>
         <!-- Getting out of selection mode used to mean un-tapping every
              circle one by one. -->
@@ -2364,10 +2374,15 @@
         z-index: 45;
         display: flex; align-items: center; gap: var(--space-3);
         padding: 10px 10px 10px 16px;
+        /* Sized to its contents, not to the space left of `left: 50%` —
+           shrink-to-fit measures from there and left the Group button
+           hanging a few pixels past the bar's own edge. */
+        width: max-content;
         max-width: min(440px, calc(100vw - 32px));
         background: var(--card); border: 1px solid var(--on);
         border-radius: var(--r-lg);
         box-shadow: var(--shadow-lg);
+        transition: padding-right var(--t-med);
     }
     .sel-clear { width: 32px; height: 32px; flex-shrink: 0; color: var(--text-mute); }
     .sel-count { font-size: 13px; font-weight: 600; flex-shrink: 0; }
@@ -2404,7 +2419,10 @@
         border: 1px solid var(--tile-on-border);
         border-radius: var(--r-lg);
         box-shadow: var(--shadow-md);
-        transition: background var(--t-med), border-color var(--t-med);
+        /* Padding animates so the bar glides into the gutter as the FAB it
+           was dodging scales away, instead of snapping the moment it goes. */
+        transition: background var(--t-med), border-color var(--t-med),
+            padding-right var(--t-med);
     }
     /* Held open after a pause: nothing is playing, so it drops the "ON"
        surface a lit device gets and reads as a plain card. */
@@ -2864,7 +2882,7 @@
     @media (prefers-reduced-motion: reduce) {
         .wave i { animation: none; height: 8px; }
         .fav-art, .now-card, .puck, .puck-open, .check-dot, .p-play,
-        .p-upnext, .q-row, .sp-row, .mini, .mini-btn, .p-art, .prog i {
+        .p-upnext, .q-row, .sp-row, .mini, .mini-btn, .p-art, .prog i, .selbar {
             transition-duration: 0.001ms;
         }
         /* The sheet's drag snap-back is an inline style, so it needs its own
