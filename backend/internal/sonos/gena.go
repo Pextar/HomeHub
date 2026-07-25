@@ -1,3 +1,5 @@
+package sonos
+
 // GENA — General Event Notification Architecture — is the publish/subscribe
 // half of UPnP, the counterpart to the SOAP calls in sonos.go. Instead of
 // asking a speaker what it is doing, we register a callback URL once and the
@@ -19,7 +21,6 @@
 //
 // This file is protocol only — no lifecycle, no state. The subscription
 // manager that uses it lives in monitor.go.
-package sonos
 
 import (
 	"context"

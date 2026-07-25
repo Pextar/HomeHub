@@ -1,3 +1,5 @@
+package sonos
+
 // Monitor keeps a live picture of every registered speaker, fed by GENA
 // subscriptions (gena.go) instead of by polling every few seconds.
 //
@@ -17,7 +19,6 @@
 // disagrees — Snapshot falls back to reading every speaker synchronously,
 // which is exactly what the Music view did before any of this existed.
 // Callers can tell the two apart from Snapshot.Live.
-package sonos
 
 import (
 	"context"

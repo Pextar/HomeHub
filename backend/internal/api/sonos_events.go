@@ -1,7 +1,8 @@
+package api
+
 // Wiring for the Sonos event monitor (internal/sonos/monitor.go): the
 // callback endpoint speakers post their notifications to, the address they
 // should post it to, and the monitor's lifecycle.
-package api
 
 import (
 	"context"
@@ -105,7 +106,7 @@ func localAddrFor(ip string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	addr, ok := conn.LocalAddr().(*net.UDPAddr)
 	if !ok || addr.IP == nil || addr.IP.IsUnspecified() {
 		return "", fmt.Errorf("no route to %s", ip)
