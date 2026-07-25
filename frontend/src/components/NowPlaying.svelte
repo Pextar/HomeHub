@@ -135,7 +135,7 @@
 {#if !hidden}
     <section class="home-section">
         <div class="section-head">
-            <h2><span class="section-ico"><Icon name="music" size={15} /></span>Playing now</h2>
+            <h2><span class="section-ico"><Icon name="musicNotes" size={15} /></span>Playing now</h2>
             <button class="chip" onclick={() => route.go("music")}>Music</button>
         </div>
 
