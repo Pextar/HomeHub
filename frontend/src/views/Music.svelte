@@ -320,6 +320,40 @@
     // The group the docked mini-player represents: first thing playing.
     const dockGroup = $derived(playingGroups[0]);
 
+    // ── Dock visibility ──────────────────────────────────────────────────
+    // The dock and the Home screen's "Playing now" card carry the same track
+    // and the same play/pause, so showing both stacks one control on top of
+    // its own duplicate. The dock is the *fallback*: it appears only once the
+    // card it repeats has left the screen — which is always, on the Rooms and
+    // Search screens, where no such card exists.
+    let dockCardOnScreen = $state(false);
+    const showDock = $derived(!!dockGroup && !dockCardOnScreen);
+
+    // Attached to every "Playing now" card, live only on the dock group's.
+    // The bottom inset discounts the band the dock and the tab bar occupy, so
+    // a card sitting behind them counts as gone rather than as visible.
+    function dockAnchor(node: HTMLElement, isDock: boolean) {
+        let obs: IntersectionObserver | undefined;
+        let active = false;
+        function attach(on: boolean) {
+            obs?.disconnect();
+            obs = undefined;
+            if (active && !on) dockCardOnScreen = false;
+            active = on;
+            if (!on) return;
+            obs = new IntersectionObserver(
+                ([entry]) => (dockCardOnScreen = entry.isIntersecting),
+                { threshold: 0.5, rootMargin: "0px 0px -96px 0px" },
+            );
+            obs.observe(node);
+        }
+        attach(isDock);
+        return {
+            update: (next: boolean) => attach(next),
+            destroy: () => attach(false),
+        };
+    }
+
     let playerEl = $state<HTMLElement | null>(null);
 
     function openPlayer(g: SonosGroupView) {
@@ -947,6 +981,7 @@
                     {@const st = c?.state}
                     <div
                         class="now-card playing"
+                        use:dockAnchor={g.coordinator_id === dockGroup?.coordinator_id}
                         in:fly={{ y: 8, duration: dur(220), easing: cubicOut }}
                     >
                         <button class="now-open" onclick={() => openPlayer(g)}>
@@ -1240,8 +1275,10 @@
     {/if}
     {/if}
 
-    <!-- ── Docked mini-player (persists across all three screens) ───── -->
-    {#if dockGroup}
+    <!-- ── Docked mini-player ──────────────────────────────────────────
+         Present on every screen, but stands down while the Home card it
+         would duplicate is on screen. -->
+    {#if showDock && dockGroup}
         {@const c = coordinatorOf(dockGroup)}
         {@const st = c?.state}
         <div class="mini" transition:fly={{ y: 20, duration: dur(220), easing: cubicOut }}>

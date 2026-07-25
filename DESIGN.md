@@ -491,6 +491,13 @@ patterns on top. Keep these consistent if you extend it.
   the bottom of the view (`position: sticky`, cleared above the mobile tab
   bar and safe area): art, track, waveform, play/pause. Tapping it — or any
   "Playing now" card — expands the **full player**.
+- **The dock is a fallback, never a duplicate.** It carries the same track
+  and the same play/pause as the Home screen's "Playing now" card, so it
+  stands down while that card is on screen and appears the moment the card
+  scrolls away (`IntersectionObserver`, bottom inset discounting the band the
+  dock and tab bar occupy). On Rooms and Search no such card exists, so the
+  dock is simply always there. Reaching for the transport must never mean
+  choosing between two identical controls stacked on one screen.
 - **Full player = bottom sheet, art-led.** A bottom sheet on mobile (`--r-xl`
   top radius, `transition:sheet`, scrim, body-scroll-lock), a centered dialog
   ≥ 601px. Rendered inline (not the modal stack) so it stays live against the
