@@ -63,6 +63,15 @@
     --tabdock-inset: max(26px, calc(env(safe-area-inset-bottom) + 8px));
     --nav-clear: 0px;
 
+    /* ── Assistant FAB gutter ────────────────────────────────────
+       The assistant button floats in the bottom-right corner on
+       phones (56px @ right:16px). A bar that shares that band — the
+       Music dock, the grouping bar — reserves this much on its right
+       instead of a literal, so the Settings switch that hides the
+       button gives them their edge back. 0 on desktop, where the FAB
+       doesn't exist. */
+    --fab-clear: 64px;
+
     /* ── Kid module palette ──────────────────────────────────────
        The Kid surface (KidHome / KidLampPanel / KidScheduleSheet)
        deliberately steps outside the warm-dark system with a big,
@@ -228,6 +237,13 @@
         --nav-clear: calc(var(--tabdock-h) + var(--tabdock-inset));
     }
 }
+
+/* The FAB is a phone affordance (the rail entry and ⌘K replace it above
+   900px), and the Settings switch can turn it off entirely. */
+@media (min-width: 901px) {
+    :root { --fab-clear: 0px; }
+}
+:root[data-fab="off"] { --fab-clear: 0px; }
 
 /* ---------- Base ---------- */
 *, *::before, *::after { box-sizing: border-box; }

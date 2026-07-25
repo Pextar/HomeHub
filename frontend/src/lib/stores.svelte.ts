@@ -187,6 +187,55 @@ function createThemeStore() {
   };
 }
 
+// Device-local interface preferences. These describe this screen, not the
+// home, so they live in localStorage next to the theme rather than in the
+// controller's settings — one person hiding a button on their phone must not
+// change what everyone else sees.
+function createUIPrefsStore() {
+  const s = $state<{ assistantButton: boolean }>({ assistantButton: initial() });
+
+  function initial(): boolean {
+    try { return localStorage.getItem("assistant-fab") !== "off"; }
+    catch { return true; } // private browsing
+  }
+  return {
+    get assistantButton() { return s.assistantButton; },
+    setAssistantButton(on: boolean) {
+      s.assistantButton = on;
+      try { localStorage.setItem("assistant-fab", on ? "on" : "off"); }
+      catch { /* private browsing */ }
+    },
+  };
+}
+
+// A claim on the bottom-right corner, where the assistant FAB floats. A view
+// that docks a full-width bar in that band (Music's mini-player, its grouping
+// bar) holds a claim while the bar is up; the FAB stands down for as long as
+// it lasts, rather than floating over someone else's transport. Counted, so
+// two overlapping bars can't cancel each other's claim by releasing first.
+function createBottomBarStore() {
+  // The count is a plain variable, never `$state`: claim() runs inside the
+  // claiming effect, and reading a reactive counter there would make that
+  // effect depend on the value it is about to write — an update loop.
+  let claims = 0;
+  const s = $state<{ busy: boolean }>({ busy: false });
+  return {
+    get busy() { return s.busy; },
+    /** Call from an `$effect` and return the releaser as its cleanup. */
+    claim(): () => void {
+      claims++;
+      s.busy = true;
+      let released = false;
+      return () => {
+        if (released) return;
+        released = true;
+        claims--;
+        s.busy = claims > 0;
+      };
+    },
+  };
+}
+
 // Current login profile. Loaded once after auth; drives which sockets are
 // visible and whether admin-only UI (Groups, Scenes, Settings, …) shows.
 function createSessionStore() {
@@ -352,4 +401,6 @@ export const toasts = createToastStore();
 export const route = createRouteStore();
 export const theme = createThemeStore();
 export const sidebar = createSidebarStore();
+export const uiPrefs = createUIPrefsStore();
+export const bottomBar = createBottomBarStore();
 export const assistant = createAssistantStore();

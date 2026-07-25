@@ -2,9 +2,10 @@
     import Topbar from "../components/Topbar.svelte";
     import { untrack } from "svelte";
     import { api } from "../lib/api";
-    import { data, toasts, session, theme, route } from "../lib/stores.svelte";
+    import { data, toasts, session, theme, route, uiPrefs } from "../lib/stores.svelte";
     import { openModal } from "../lib/modal.svelte";
     import Icon from "../components/Icon.svelte";
+    import Switch from "../components/Switch.svelte";
     import ShortcutsModal from "../modals/ShortcutsModal.svelte";
     import ConfirmModal from "../components/ConfirmModal.svelte";
     import { pushClient, pushSupported } from "../lib/push.svelte";
@@ -228,6 +229,29 @@
         </button>
     </div>
 </div>
+
+{#if session.isAdmin}
+    <section class="card">
+        <header>
+            <h2>Interface</h2>
+            <p>How the app looks on this device. Stored here, not on the controller.</p>
+        </header>
+        <div class="notif-row">
+            <span class="notif-label">
+                Assistant button
+                <span class="field-help">
+                    The floating shortcut above the tab bar on phones. With it off,
+                    the assistant is still in the More menu and on <span class="mono">⌘K</span>.
+                </span>
+            </span>
+            <Switch
+                checked={uiPrefs.assistantButton}
+                onChange={(v) => uiPrefs.setAssistantButton(v)}
+                ariaLabel="Show the assistant button"
+            />
+        </div>
+    </section>
+{/if}
 
 <section class="card">
     <header>
@@ -524,7 +548,10 @@
         justify-content: space-between;
         gap: var(--space-3);
     }
-    .notif-label { font-size: 14px; }
+    /* A label plus, where the row needs it, one line saying what turning the
+       switch off actually costs. */
+    .notif-label { font-size: 14px; display: flex; flex-direction: column; gap: 3px; }
+    .notif-label .field-help { max-width: 52ch; }
     .notif-prefs {
         display: flex;
         flex-direction: column;

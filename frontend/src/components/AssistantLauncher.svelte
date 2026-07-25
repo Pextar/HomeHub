@@ -1,9 +1,10 @@
 <script lang="ts">
     import Icon from "./Icon.svelte";
     import AssistantChat from "./AssistantChat.svelte";
-    import { assistant, session } from "../lib/stores.svelte";
+    import { assistant, session, uiPrefs, bottomBar } from "../lib/stores.svelte";
     import { onMount } from "svelte";
-    import { fade } from "svelte/transition";
+    import { fade, scale } from "svelte/transition";
+    import { cubicOut } from "svelte/easing";
     import { dur, sheet } from "../lib/motion";
     import { lockBodyScroll, unlockBodyScroll } from "../lib/scroll-lock";
 
@@ -19,6 +20,20 @@
     // The whole feature is admin-only (matches the backend gating), so non-admin
     // profiles never see the FAB or overlay.
     const visible = $derived(session.isAdmin);
+
+    // Whether the corner belongs to the FAB at all: the profile has it, the
+    // Settings switch is on, and no view has docked a bar in that band. It
+    // deliberately ignores `open` — the button is still "there" while the
+    // panel it opened covers it, so opening the assistant doesn't reflow the
+    // bars behind it.
+    const fabEnabled = $derived(visible && uiPrefs.assistantButton && !bottomBar.busy);
+
+    // Publish the gutter those bars reserve (--fab-clear, app.css). It tracks
+    // the button's real presence, not just the preference — a bar that made
+    // the FAB stand down must not keep dodging it.
+    $effect(() => {
+        document.documentElement.dataset.fab = fabEnabled ? "on" : "off";
+    });
 
     onMount(() => {
         assistant.loadStatus();
@@ -59,9 +74,17 @@
 
 {#if visible}
     <!-- Mobile FAB: lifted clear of the bottom tab bar. Hidden on desktop,
-         where the rail entry + Cmd-K are the launchers. -->
-    {#if !open}
-        <button class="fab" aria-label="Open assistant" onclick={() => assistant.show()}>
+         where the rail entry + Cmd-K are the launchers; switchable off in
+         Settings; and stood down while a view has docked its own bar in this
+         corner. The More drawer keeps the assistant reachable through all of
+         it, so the button going away never costs the feature. -->
+    {#if !open && fabEnabled}
+        <button
+            class="fab"
+            aria-label="Open assistant"
+            onclick={() => assistant.show()}
+            transition:scale={{ start: 0.7, duration: dur(180), easing: cubicOut, opacity: 0 }}
+        >
             <Icon name="assistant" size={24} />
         </button>
     {/if}
