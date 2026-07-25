@@ -180,32 +180,44 @@ type Device struct {
 // Describe fetches a speaker's device description document and returns its
 // identity. Also serves as the reachability probe for "Test connection".
 func Describe(ctx context.Context, ip string) (*Device, error) {
-	if err := ValidateHost(ip); err != nil {
-		return nil, fmt.Errorf("sonos: %w", err)
-	}
-	u := fmt.Sprintf("http://%s:%d/xml/device_description.xml", ip, Port)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	raw, err := fetchDescription(ctx, ip)
 	if err != nil {
-		return nil, fmt.Errorf("sonos: build request: %w", err)
+		return nil, err
 	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("no Sonos speaker found at %s: %w", ip, err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("sonos at %s returned HTTP %d", ip, resp.StatusCode)
-	}
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if err != nil {
-		return nil, fmt.Errorf("sonos: read description: %w", err)
-	}
-	d := ParseDescription(string(raw))
+	d := ParseDescription(raw)
 	if d.UUID == "" {
 		return nil, fmt.Errorf("device at %s does not look like a Sonos speaker", ip)
 	}
 	d.IP = ip
 	return d, nil
+}
+
+// fetchDescription GETs a speaker's device description document. Shared by
+// Describe (identity only) and DescribeFull (identity plus the model/icon
+// fields the settings surface needs), so both report the same errors for an
+// address that isn't a speaker.
+func fetchDescription(ctx context.Context, ip string) (string, error) {
+	if err := ValidateHost(ip); err != nil {
+		return "", fmt.Errorf("sonos: %w", err)
+	}
+	u := fmt.Sprintf("http://%s:%d/xml/device_description.xml", ip, Port)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return "", fmt.Errorf("sonos: build request: %w", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("no Sonos speaker found at %s: %w", ip, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return "", fmt.Errorf("sonos at %s returned HTTP %d", ip, resp.StatusCode)
+	}
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return "", fmt.Errorf("sonos: read description: %w", err)
+	}
+	return string(raw), nil
 }
 
 // ParseDescription pulls identity fields out of a device description

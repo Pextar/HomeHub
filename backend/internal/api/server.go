@@ -68,6 +68,13 @@ type Server struct {
 	sonosAcctMu sync.Mutex
 	sonosAccts  map[string]sonosAcctEntry
 
+	// sonosIcons caches where each speaker publishes a picture of itself,
+	// keyed by address. Resolving it means reading the device description, so
+	// without this every avatar in the speaker list would cost two round
+	// trips to the speaker instead of one. Guarded by sonosIconMu.
+	sonosIconMu sync.Mutex
+	sonosIcons  map[string]sonosIconEntry
+
 	// sonosMon watches speakers over GENA (see internal/sonos/monitor.go)
 	// and caches what they report. Created lazily by sonosEvents().
 	sonosMonMu sync.Mutex
@@ -77,6 +84,14 @@ type Server struct {
 // sonosAcctEntry is one cached service-account resolution.
 type sonosAcctEntry struct {
 	acct *sonos.ServiceAccount
+	at   time.Time
+}
+
+// sonosIconEntry is one cached device-icon lookup. An empty path is cached
+// too — a speaker that publishes no picture shouldn't be asked again on every
+// render of the list.
+type sonosIconEntry struct {
+	path string
 	at   time.Time
 }
 
@@ -264,6 +279,9 @@ func (s *Server) Handler() http.Handler {
 	api.HandleFunc("/sonos/{id}/favorites", s.requireAdmin(s.sonosFavorites)).Methods("GET")
 	api.HandleFunc("/sonos/{id}/favorites/play", s.requireAdmin(s.sonosPlayFavorite)).Methods("POST")
 	api.HandleFunc("/sonos/{id}/art", s.requireAdmin(s.sonosArt)).Methods("GET")
+	api.HandleFunc("/sonos/{id}/image", s.requireAdmin(s.sonosImage)).Methods("GET")
+	api.HandleFunc("/sonos/{id}/settings", s.requireAdmin(s.sonosSettings)).Methods("GET")
+	api.HandleFunc("/sonos/{id}/settings", s.requireAdmin(s.sonosUpdateSettings)).Methods("PUT")
 	api.HandleFunc("/sonos/{id}/play-item", s.requireAdmin(s.sonosPlayItem)).Methods("POST")
 	api.HandleFunc("/sonos/{id}/seek", s.requireAdmin(s.sonosSeek)).Methods("PUT")
 	api.HandleFunc("/sonos/{id}/playmode", s.requireAdmin(s.sonosSetPlayMode)).Methods("PUT")

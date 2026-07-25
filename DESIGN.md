@@ -478,10 +478,10 @@ patterns on top. Keep these consistent if you extend it.
   status dot would otherwise sit — in group cards, room pucks, and the
   mini-player. Idle uses the `speaker` icon. This animated motif, not
   colour, is what marks Music as its own module.
-- **Three screens behind a subnav.** Music has its own Home / Rooms /
-  Search screens, switched by a sticky pill segmented control at the top of
-  the view (`<Segmented full accent>`, `position: sticky`). This is the §2
-  exception. Two rules make it work:
+- **Four screens behind a subnav.** Music has its own Home / Rooms /
+  Speakers / Search screens, switched by a sticky pill segmented control at
+  the top of the view (`<Segmented full accent>`, `position: sticky`). This is
+  the §2 exception. Two rules make it work:
   - **The global tab bar never changes shape.** Music is one destination
     among the app's nav entries; entering it must not swap the app-level
     bar for module-specific tabs. The subnav lives *inside* the view,
@@ -497,8 +497,81 @@ patterns on top. Keep these consistent if you extend it.
 
   Screen contents: **Home** = Playing now + Favorites + room chips
   (each opens that room's player; "Manage" jumps to Rooms). **Rooms** =
-  the grouping puck grid + unreachable speakers. **Search** = Spotify.
-  The mini-player and the full-player sheet persist across all three.
+  the grouping puck grid. **Speakers** = the device inventory and its
+  settings. **Search** = Spotify. The mini-player and the full-player sheet
+  persist across all four.
+
+  Four labels is the ceiling: with `full`, the labels get an equal share and
+  clip rather than push the control past its container, so a fifth screen
+  needs a different shape, not a shorter word.
+- **Rooms is zones; Speakers is devices.** They read as adjacent and are not.
+  Rooms answers *what plays together* — the puck grid, grouping, ungrouping,
+  and nothing that isn't a playback zone. Speakers answers *what each of these
+  things is and how it is configured* — one §11 list row per registered
+  speaker, reachable or not, opening that speaker's settings. One target per
+  row (chevron right); editing the registration (name, room, address, remove)
+  rides on the settings head's action chip rather than as a second control in
+  the row — reachable speakers previously had no path to it at all.
+  Consequences worth keeping: **unreachable speakers live on Speakers**, since
+  the useful action for one is fixing its address, and Rooms carries only a
+  one-line pointer at them (they can't be pucks and can't be grouped). And
+  the **`Live updates` row moved to Speakers** with them — see the push
+  section below; the row belongs wherever the devices are managed, and that is
+  no longer Rooms.
+- **The speaker's picture comes from the speaker.** Each row and the settings
+  pane show the product image the device publishes in its own description's
+  `iconList`, proxied through `/api/sonos/{id}/image` for the same reason
+  album art is (mixed content over HTTPS). Nothing fetches Sonos' website and
+  nothing ships bundled artwork: a model that publishes no picture gets the
+  §6.7 striped placeholder, because a stand-in that might be the wrong model
+  is worse than an honest blank. It is the one place a photograph beats a
+  glyph — telling a One from a Five is the whole point of the screen — and the
+  images are small (typically 48px), so they are sized as a 40px avatar rather
+  than blown up into a hero.
+- **Speaker settings are two panes, not a sheet.** `views/SonosSpeakerDetail.svelte`,
+  in cards: Sound, Home theatre, Controls, Sleep timer, Device. It is **not**
+  the §11 form branch — there is nothing to save, every control applies on
+  touch — so it takes the §11 *detail* shape instead: back chip, centered
+  title block, action chip, hero card, secondary cards below. A sheet was
+  built first and rejected for three reasons: Music already owns a sheet (the
+  full player), so a second one made the module two stacked sheets deep; the
+  content scrolls twice, which is more than 92vh wants to hold; and the
+  screens it is reached from — Home, Rooms, Search — are not sheets either.
+
+  How it lays out is the point:
+  - **From 1024px the list and the settings sit side by side** (`.sp-split`
+    grid, list column `position: sticky`). The dominant job here is the same
+    change across several rooms — turn every status light off, night mode on
+    for the two soundbars — and drilling in and out for each one is what makes
+    that tedious. The pane also spends desktop width that a lone column of
+    cards wastes. The open row takes an amber border (**not** the `.tile.on`
+    gradient: that means "this device is on", and selection is a statement
+    about the screen, not the speaker), and its chevron goes away because
+    there is nowhere further to go.
+  - **Below 1024px the settings replace the list** (`.has-detail` folds the
+    column away) and carry a **switcher chip row** of the other speakers, so
+    hopping between rooms on a phone doesn't mean back-and-forward either.
+    Unreachable speakers appear in it disabled rather than missing.
+  - The head adapts: beside the list it is a pane header (title left, no back
+    chip, nothing to go back to); on a phone it is the full §11 detail head.
+    Escape backs out of it like the back chip does, and switching subnav
+    screens leaves it.
+
+  Volume, mute and transport are deliberately absent — they already live in
+  the full player, and a second identical set of controls is the duplication
+  this section keeps warning about. Every control is optimistic per field,
+  rolling back only the field the speaker refused; sliders hold their own drag
+  value so a refusal restores what you started from rather than what was
+  rejected. The fetch is keyed on the speaker id, not on mount, so the pane
+  reloads when the switcher changes speakers — and a slow answer for a speaker
+  the user has already left is dropped rather than shown against the new one.
+- **Render only what the speaker answered for.** Sonos has no "what can you
+  do" action, so the bridge probes: a Get that faults means the model doesn't
+  have that control. Night mode, speech enhancement, sub and surround exist on
+  home-theatre models and nowhere else, so the whole Home theatre section only
+  appears when at least one of them answered. A control that would be refused
+  is worse than a control that isn't there — the same rule the scrubber
+  follows on a live stream.
 - **"Playing now" means playing.** The Home screen's section lists only
   groups that are actually playing; when none are, it collapses to a single
   quiet row (speaker icon, "Nothing playing", the reachable count, and a way
@@ -641,18 +714,31 @@ patterns on top. Keep these consistent if you extend it.
   a transport action the user actually took does.
 - **Stay honest about the backend.** The local Sonos bridge exposes
   transport, volume, mute, join/leave, favorites, seek, play modes
-  (shuffle × repeat × crossfade) and the group queue (browse, jump, add,
-  play-next, remove, clear). It does **not** expose sleep timers, EQ /
-  bass / treble, line-in or TV sources, or music-library browsing beyond
-  favorites — so there is no UI for any of those. Don't add UI for
-  capabilities the bridge can't back; wire the endpoint first. Two shapes
-  worth copying when you do:
+  (shuffle × repeat × crossfade), the group queue (browse, jump, add,
+  play-next, remove, clear), and — per speaker — bass, treble, loudness, the
+  home-theatre EQ block (night mode, speech enhancement, sub on/off + level,
+  surround), the status LED, the touch-control lock, the group sleep timer,
+  the serial/firmware/MAC block and the device's own product image.
+  It does **not** expose line-in or TV sources, music-library browsing beyond
+  favorites, stereo balance, renaming a speaker's Sonos-side zone name, or
+  creating and breaking stereo pairs — so there is no UI for any of those.
+  Don't add UI for capabilities the bridge can't back; wire the endpoint
+  first. Three shapes worth copying when you do:
   - Settings that belong to a *group* rather than a speaker ride on the
     coordinator's `group_state` in the status poll, fetched in a second
     pass once the topology is known. Asking every follower would multiply
-    the poll for no new information.
+    the poll for no new information. The sleep timer is group-scoped the same
+    way, and a follower's pane names the zone that owns it instead of
+    offering the control.
   - A control whose speaker-side call can be refused (seek on a stream)
     renders as a label explaining why, never as a dead control.
+  - **Configuration is read on demand, never polled.** A speaker's bass does
+    not change on its own, so the settings snapshot (eleven SOAP calls, run in
+    four parallel branches) is fetched when the settings pane opens and
+    nowhere else.
+    Only *state* — what is playing, how loud, grouped with what — belongs in
+    the status poll. Adding a setting to that poll would cost every open tab
+    eleven extra calls per speaker every five seconds to watch nothing happen.
 - **State is pushed, and the poll is only a backstop.** The backend
   subscribes to each speaker's UPnP change notifications (GENA — see
   `internal/sonos/monitor.go`) and caches what they report, so pressing play
@@ -677,8 +763,8 @@ patterns on top. Keep these consistent if you extend it.
     was simply slower with nothing on screen admitting why. Three surfaces fix
     that, and the split between them is deliberate — a **status chip** (`Live`
     / `Polling`, amber `.chip.on` only when live) because the answer qualifies
-    everything under it; a **`Live updates` row on Rooms**, the §11 list-row
-    shape, because Rooms is where speakers are managed and a chip nobody
+    everything under it; a **`Live updates` row on Speakers**, the §11 list-row
+    shape, because Speakers is where the devices are managed and a chip nobody
     notices is not discoverable; and the **sheet they all open**
     (`modals/SonosEventsModal.svelte`), which is the only place with room to
     explain.
