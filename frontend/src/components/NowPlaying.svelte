@@ -1,5 +1,6 @@
 <script lang="ts">
     import Icon from "./Icon.svelte";
+    import LiveStatusChip from "./LiveStatusChip.svelte";
     import { api } from "../lib/api";
     import { route, session, toasts } from "../lib/stores.svelte";
     import { onLive } from "../lib/live";
@@ -148,7 +149,16 @@
     <section class="home-section">
         <div class="section-head">
             <h2><span class="section-ico"><Icon name="musicNotes" size={15} /></span>Playing now</h2>
-            <button class="chip" onclick={() => route.go("music")}>Music</button>
+            <div class="head-acts">
+                <!-- The same chip the Music topbar carries, so "Live" means
+                     the same thing and goes to the same place from either
+                     surface. Held back until the first poll lands: before
+                     that "Polling" would be a guess, not a report. -->
+                {#if loaded && speakers.length > 0}
+                    <LiveStatusChip live={livePush} onClosed={() => void refresh()} />
+                {/if}
+                <button class="chip" onclick={() => route.go("music")}>Music</button>
+            </div>
         </div>
 
         {#if !loaded}
@@ -224,6 +234,12 @@
         align-items: center;
         justify-content: space-between;
         gap: var(--space-3);
+    }
+    .head-acts {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        flex-shrink: 0;
     }
     .section-head h2 {
         display: inline-flex;

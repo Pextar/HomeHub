@@ -6,6 +6,7 @@
     import ConfirmModal from "../components/ConfirmModal.svelte";
     import SonosSpeakerModal from "../modals/SonosSpeakerModal.svelte";
     import SonosEventsModal from "../modals/SonosEventsModal.svelte";
+    import LiveStatusChip from "../components/LiveStatusChip.svelte";
     import Segmented from "../components/Segmented.svelte";
     import { api } from "../lib/api";
     import { toasts, route, bottomBar } from "../lib/stores.svelte";
@@ -1244,24 +1245,7 @@
              of this reflects reality — and it is the tap that explains the
              difference and offers the fix. -->
         {#if loaded && (status?.speakers.length ?? 0) > 0}
-            <button
-                class="chip live-chip"
-                class:on={livePush}
-                onclick={openEventsModal}
-                aria-label={livePush
-                    ? "Live updates on — speakers push their changes. Open details"
-                    : "Live updates off — speakers are being polled. Open details"}
-                title={livePush
-                    ? "Speakers push their changes — updates land in under a second"
-                    : "Speakers are being polled — updates take a few seconds"}
-            >
-                {#if livePush}
-                    <Icon name="bolt" size={14} />
-                {:else}
-                    <Icon name="radio" size={14} />
-                {/if}
-                <span>{livePush ? "Live" : "Polling"}</span>
-            </button>
+            <LiveStatusChip live={livePush} onClosed={() => void refresh()} />
         {/if}
         <button class="chip" onclick={() => openSpeakerModal()}>
             <Icon name="plus" size={14} /> Add speaker
@@ -2169,23 +2153,6 @@
        it. The band is the same glass as the player sheet's top bar:
        translucent, blurred, with a fading bottom edge that content dissolves
        under rather than being sliced against. */
-    /* Topbar push-status chip. Quieter than "Add speaker" — it reports,
-       it doesn't ask to be pressed — so it stays a plain chip and only
-       picks up the amber .on treatment when push is actually live. */
-    .live-chip :global(svg) { flex-shrink: 0; }
-    .live-chip span { font-variant-numeric: tabular-nums; }
-    @media (max-width: 380px) {
-        /* On the narrowest phones the label yields to "Add speaker". The
-           button keeps its aria-label, and squares up to the icon-only chip
-           shape (§6.3) rather than staying a pill with nothing in it. */
-        .live-chip span { display: none; }
-        .live-chip { width: 36px; padding: 0; justify-content: center; }
-    }
-    @media (max-width: 380px) and (pointer: coarse) {
-        /* §2: an icon-only control never drops under 44×44 on touch. */
-        .live-chip { width: 44px; min-height: 44px; }
-    }
-
     .subnav {
         --fade: 18px;
         position: sticky; top: 0; z-index: 15;
