@@ -5,6 +5,7 @@
     import Icon from "../components/Icon.svelte";
     import ConfirmModal from "../components/ConfirmModal.svelte";
     import SonosSpeakerModal from "../modals/SonosSpeakerModal.svelte";
+    import SonosSpeakerSettings from "../modals/SonosSpeakerSettings.svelte";
     import SonosEventsModal from "../modals/SonosEventsModal.svelte";
     import LiveStatusChip from "../components/LiveStatusChip.svelte";
     import Segmented from "../components/Segmented.svelte";
@@ -353,14 +354,19 @@
     }
 
     // ── Screens ──────────────────────────────────────────────────────────
-    // Music has three screens of its own. They ride a subnav inside the view
+    // Music has four screens of its own. They ride a subnav inside the view
     // rather than reshaping the global tab bar — Music is one destination
     // among six, so the app-level nav never changes shape here.
-    type Screen = "home" | "rooms" | "search";
+    //
+    // Rooms and Speakers look adjacent but answer different questions: Rooms
+    // is about zones (what plays together), Speakers is about the devices
+    // (what each one is and how it is configured).
+    type Screen = "home" | "rooms" | "speakers" | "search";
     let screen = $state<Screen>("home");
     const SCREENS = [
         { value: "home", label: "Home" },
         { value: "rooms", label: "Rooms" },
+        { value: "speakers", label: "Speakers" },
         { value: "search", label: "Search" },
     ];
     function goto(s: Screen) {
@@ -1223,6 +1229,43 @@
         await openModal(SonosEventsModal, {});
         void refresh();
     }
+
+    // ── Speakers screen ──────────────────────────────────────────────────
+    // The device inventory: one row per registered speaker, reachable or not,
+    // each opening that speaker's own settings. Ordered so the ones you can
+    // actually do something with come first.
+    const allSpeakers = $derived.by(() => {
+        const list = [...(status?.speakers ?? [])];
+        list.sort((a, b) => {
+            if (a.reachable !== b.reachable) return a.reachable ? -1 : 1;
+            return a.name.localeCompare(b.name);
+        });
+        return list;
+    });
+
+    // Device settings live behind the row. An unreachable speaker has none to
+    // read, so its row goes where the only useful action is instead: the
+    // registration form, which is where a wrong address gets fixed.
+    async function openSpeakerSettings(sp: SonosSpeakerView) {
+        if (!sp.reachable) {
+            await openSpeakerModal(sp);
+            return;
+        }
+        // The sleep timer belongs to the zone, not the speaker (DESIGN.md
+        // §15), so a follower is told which room owns it rather than being
+        // given a control the coordinator would answer for.
+        const g = groupOfSpeaker(sp.id);
+        const owner =
+            g && g.coordinator_id !== sp.id
+                ? (speakerById.get(g.coordinator_id)?.name ?? null)
+                : null;
+        await openModal(SonosSpeakerSettings, { speaker: sp, sleepTimerOwner: owner });
+        void refresh();
+    }
+
+    // Speakers that turned out to have no picture of their own. Remembered per
+    // id so a 404 isn't re-requested every time the list re-renders.
+    let noImage = $state<Record<string, boolean>>({});
 </script>
 
 <svelte:window onkeydown={onWindowKey} />
@@ -1450,10 +1493,96 @@
         </div>
     </section>
 
+    <!-- Speakers that the live topology never mentioned can't be pucks and
+         can't be grouped, so Rooms only points at them. The Speakers screen
+         is where they are listed and fixed. -->
+    {#if offline.length > 0}
+        <button class="lu-row" onclick={() => goto("speakers")}>
+            <span class="lu-ico"><Icon name="speaker" size={18} /></span>
+            <span class="lu-meta">
+                <span class="lu-title">
+                    <span class="mono">{offline.length}</span>
+                    speaker{offline.length === 1 ? "" : "s"} unreachable
+                </span>
+                <span class="lu-sub">Not in the current Sonos topology — check them under Speakers</span>
+            </span>
+            <span class="lu-chev" aria-hidden="true"><Icon name="chevronDown" size={18} /></span>
+        </button>
+    {/if}
+
+    {:else if screen === "speakers"}
+    <!-- ── Speakers — the device inventory ─────────────────────────────
+         Rooms answers "what plays together"; this answers "what is each of
+         these, and how is it set up". One row per registered speaker: its own
+         picture, what it is doing, and a way into its settings. -->
+    <section class="block">
+        <div class="block-head">
+            <div class="eyrow">Speakers</div>
+            <span class="hint">
+                <span class="mono">{reachable.length}</span>
+                of <span class="mono">{allSpeakers.length}</span> reachable
+            </span>
+        </div>
+        <div class="sp-list">
+            <!-- Two intents on two targets, the same split the room pucks
+                 use: the body opens the speaker's settings, the trailing chip
+                 opens its registration (name, room, address, remove). -->
+            {#each allSpeakers as sp (sp.id)}
+                {@const playing = speakerPlaying(sp.id)}
+                <div class="sp-row" class:off={!sp.reachable}>
+                    <button class="sp-open" onclick={() => openSpeakerSettings(sp)}>
+                        <!-- The speaker's own portrait, served by the device.
+                             No picture published means the striped placeholder
+                             — never a guess at which model this is (§2). -->
+                        {#if noImage[sp.id]}
+                            <!-- §6.7's striped fill, without its caption: no
+                                 wording fits a 40px box, and the row's name
+                                 and model already say what this is. -->
+                            <span class="shot placeholder" aria-hidden="true"></span>
+                        {:else}
+                            <img
+                                class="shot"
+                                src={api.sonosImageURL(sp.id)}
+                                alt=""
+                                loading="lazy"
+                                onerror={() => (noImage[sp.id] = true)}
+                            />
+                        {/if}
+                        <span class="sp-meta">
+                            <span class="sp-name">{sp.name}</span>
+                            <span class="sp-sub">
+                                {#if !sp.reachable}
+                                    Unreachable · <span class="mono">{sp.ip}</span>
+                                {:else}
+                                    {[sp.model, sp.room].filter(Boolean).join(" · ") || sp.ip}
+                                {/if}
+                            </span>
+                        </span>
+                        {#if playing}
+                            {@render wave()}
+                        {/if}
+                    </button>
+                    <button
+                        class="icon-btn sp-edit"
+                        aria-label="Edit {sp.name} in HomeHub"
+                        onclick={() => openSpeakerModal(sp)}
+                    >
+                        <Icon name="edit" size={15} />
+                    </button>
+                </div>
+            {/each}
+        </div>
+        <p class="hint">
+            Tone, night mode, the status light and the touch controls are the
+            speaker's own settings — they stay set whatever is playing.
+        </p>
+    </section>
+
     <!-- ── Live updates ────────────────────────────────────────────────
-         Rooms is where speakers are managed, so it is where the plumbing
-         behind them belongs. The topbar chip says which state we're in; this
-         row is the discoverable way in for someone who never noticed it. -->
+         Speakers is where the devices are managed, so it is where the
+         plumbing behind them belongs. The topbar chip says which state we're
+         in; this row is the discoverable way in for someone who never
+         noticed it. -->
     <button class="lu-row" onclick={openEventsModal}>
         <span class="lu-ico" class:on={livePush}>
             <Icon name={livePush ? "bolt" : "radio"} size={18} />
@@ -1470,26 +1599,6 @@
         </span>
         <span class="lu-chev" aria-hidden="true"><Icon name="chevronDown" size={18} /></span>
     </button>
-
-    <!-- ── Unreachable ─────────────────────────────────────────────── -->
-    {#if offline.length > 0}
-        <section class="card">
-            <div class="card-header"><h2>Unreachable</h2></div>
-            <div class="members">
-                {#each offline as sp (sp.id)}
-                    <div class="member off">
-                        <Icon name="speaker" size={16} />
-                        <span class="m-name">{sp.name}</span>
-                        <span class="off-ip mono">{sp.ip}</span>
-                        <button class="icon-btn m-act" aria-label="Edit {sp.name}"
-                            onclick={() => openSpeakerModal(sp)}>
-                            <Icon name="edit" size={14} />
-                        </button>
-                    </div>
-                {/each}
-            </div>
-        </section>
-    {/if}
 
     {:else}
     <!-- ── Spotify search ──────────────────────────────────────────── -->
@@ -2516,10 +2625,73 @@
         overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
 
-    /* ── Live-updates row (Rooms) ─────────────────────────────────────
+    /* ── Speaker list (Speakers) ──────────────────────────────────────
+       The §11 list-row shape, with the device's own portrait standing in for
+       the 36px icon — it is the one place in the app where a real photograph
+       beats a glyph, because telling a Sonos One from a Five is exactly what
+       the user is doing here. */
+    .sp-list { display: flex; flex-direction: column; gap: 6px; }
+    .sp-row {
+        display: flex;
+        align-items: center;
+        background: var(--bg-elevated);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-lg);
+        overflow: hidden;
+        transition: background var(--t-fast), border-color var(--t-fast);
+    }
+    .sp-open {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        align-items: center;
+        gap: var(--space-3);
+        min-height: 60px;
+        padding: var(--space-3) 0 var(--space-3) var(--space-3);
+        background: none;
+        border: 0;
+        text-align: left;
+        color: inherit;
+        font: inherit;
+        cursor: pointer;
+    }
+    .shot {
+        width: 40px;
+        height: 40px;
+        flex-shrink: 0;
+        border-radius: var(--radius-md);
+        object-fit: contain;
+        background: var(--surface);
+    }
+    /* Caption dropped (see markup); the striped fill carries the meaning. */
+    .sp-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+    .sp-name {
+        font-size: 14px; font-weight: 600; letter-spacing: -0.01em;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .sp-sub {
+        font-size: 12px; color: var(--text-mute);
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .sp-row.off .shot { opacity: 0.45; }
+    .sp-row.off .sp-name { color: var(--text-mute); }
+    .sp-edit {
+        width: 36px; height: 36px;
+        flex-shrink: 0;
+        margin-right: var(--space-2);
+    }
+    @media (hover: hover) {
+        .sp-row:hover { background: var(--bg-raised); border-color: var(--border-strong); }
+    }
+    @media (pointer: coarse) {
+        .sp-edit { width: 44px; height: 44px; }
+    }
+
+    /* ── Live-updates row (Speakers) ──────────────────────────────────
        The §11 list-row shape: icon left, content middle, chevron right.
        Live takes the sanctioned "ON" treatment rather than a status colour
-       of its own — push being on is the same kind of fact as a lit lamp. */
+       of its own — push being on is the same kind of fact as a lit lamp.
+       Also used on Rooms as the pointer to unreachable speakers. */
     .lu-row {
         width: 100%;
         margin-top: var(--space-4);
@@ -2559,8 +2731,7 @@
         .lu-row:hover { background: var(--bg-raised); border-color: var(--border-strong); }
     }
 
-    /* ── Members / volume rows (shared: mini list + player sheet) ── */
-    .members { display: flex; flex-direction: column; gap: 2px; }
+    /* ── Volume rows (player sheet) ── */
     .member { display: flex; align-items: center; gap: var(--space-3); min-height: 44px; }
     .member .m-name {
         font-size: 13.5px; font-weight: 500; width: 110px; flex-shrink: 0;
@@ -2568,9 +2739,6 @@
     }
     .member .m-name.muted { color: var(--text-dim); }
     .m-mute, .m-act { width: 36px; height: 36px; flex-shrink: 0; }
-    .member.off { color: var(--text-mute); }
-    .member.off .m-name { width: auto; }
-    .off-ip { margin-left: auto; font-size: 11px; color: var(--text-dim); }
     .vol-num {
         font-size: 12px; font-feature-settings: "tnum" 1;
         color: var(--text-mute); width: 3ch; text-align: right; flex-shrink: 0;

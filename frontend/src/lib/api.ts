@@ -33,6 +33,8 @@ import type {
   SonosSpeaker,
   SonosCandidate,
   SonosEventHealth,
+  SonosSettings,
+  SonosSettingsPatch,
   SonosFavorite,
   SonosQueueItem,
   SonosRepeat,
@@ -285,6 +287,24 @@ export const api = {
   },
   sonosDeleteSpeaker(id: string) {
     return req<void>(`/sonos/speakers/${encodeURIComponent(id)}`, { method: "DELETE" });
+  },
+  // Device settings — read on demand, not part of the status poll. The
+  // response says which of the model-dependent controls this speaker has.
+  sonosSettings(id: string) {
+    return req<SonosSettings>(`/sonos/${encodeURIComponent(id)}/settings`);
+  },
+  // Send one field per interaction: the backend applies a patch in order and
+  // stops at the first refusal, so a single field keeps the error unambiguous.
+  sonosUpdateSettings(id: string, patch: SonosSettingsPatch) {
+    return req<void>(`/sonos/${encodeURIComponent(id)}/settings`, { method: "PUT", body: json(patch) });
+  },
+  /**
+   * A picture of this speaker model, proxied from the speaker's own device
+   * description. 404s when the speaker publishes none — render the striped
+   * placeholder then, never a stand-in for another model.
+   */
+  sonosImageURL(id: string) {
+    return `${BASE}/sonos/${encodeURIComponent(id)}/image`;
   },
   // Transport actions go to the group coordinator.
   sonosPlay(id: string) { return req<void>(`/sonos/${encodeURIComponent(id)}/play`, { method: "POST" }); },

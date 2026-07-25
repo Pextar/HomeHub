@@ -91,7 +91,15 @@
 
     /* Variants */
     .segmented.full { display: flex; width: 100%; }
-    .segmented.full label { flex: 1; }
+    /* min-width: 0 lets an equal share actually be equal — without it a long
+       label sets its own floor and pushes the control past its container. */
+    .segmented.full label {
+        flex: 1;
+        min-width: 0;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
     .segmented.accent input:checked + label {
         background: var(--on);
         color: var(--primary-fg);
@@ -102,5 +110,12 @@
     @media (pointer: coarse) {
         .segmented { padding: 4px; }
         .segmented label { padding: 9px 16px; font-size: 14px; min-height: 40px; }
+    }
+    /* A four-way full-width control (Music's subnav) has ~65px per label on a
+       360px screen, and 16px of padding either side doesn't leave room for a
+       word. Give the side padding back rather than clipping the labels — the
+       row keeps its height, so the touch target is untouched. */
+    @media (max-width: 420px) {
+        .segmented.full label { padding-left: 6px; padding-right: 6px; font-size: 13px; }
     }
 </style>

@@ -436,6 +436,81 @@ export interface SonosEventHealth {
   speakers: SonosEventSpeaker[];
 }
 
+/**
+ * Which of the model-dependent controls a speaker actually answered for.
+ * There is no "what can you do" action on Sonos, so the backend works this
+ * out by asking and seeing what faults — render only what is true here,
+ * because a control that would be refused is worse than one that isn't there.
+ */
+export interface SonosCapabilities {
+  bass: boolean;
+  treble: boolean;
+  loudness: boolean;
+  night_mode: boolean;
+  /** Sonos' name for what its app calls speech enhancement. */
+  dialog_level: boolean;
+  sub: boolean;
+  surround: boolean;
+}
+
+/** Read-only identity block — serial, firmware, MAC. Support detail only. */
+export interface SonosZoneInfo {
+  serial_number?: string;
+  software_version?: string;
+  hardware_version?: string;
+  mac_address?: string;
+  /** The speaker's own room name, which can differ from HomeHub's label for it. */
+  zone_name?: string;
+}
+
+/**
+ * One speaker's settings snapshot. Every adjustable field is optional:
+ * absent means "this model doesn't have it", which is a different statement
+ * from a zero value — check `capabilities` rather than truthiness.
+ */
+export interface SonosSettings {
+  capabilities: SonosCapabilities;
+  bass?: number;      // -10…10
+  treble?: number;    // -10…10
+  loudness?: boolean;
+  night_mode?: boolean;
+  dialog_level?: boolean;
+  sub_enabled?: boolean;
+  sub_gain?: number;  // -15…15
+  surround?: boolean;
+  /** The status light on the speaker's face. */
+  led?: boolean;
+  /** True when the speaker's touch controls are locked. */
+  button_lock?: boolean;
+  /** Whole minutes left on the group sleep timer; 0 when none is set. */
+  sleep_minutes: number;
+  info: SonosZoneInfo;
+  model_number?: string;
+  display_name?: string;
+  /** The speaker publishes a picture of itself — otherwise use the placeholder. */
+  has_image: boolean;
+}
+
+/**
+ * The writable half of a settings snapshot. Send one field per interaction:
+ * the backend applies a patch in a fixed order and stops at the first
+ * refusal, so a single field keeps "what did the speaker refuse" unambiguous.
+ */
+export interface SonosSettingsPatch {
+  bass?: number;
+  treble?: number;
+  loudness?: boolean;
+  night_mode?: boolean;
+  dialog_level?: boolean;
+  sub_enabled?: boolean;
+  sub_gain?: number;
+  surround?: boolean;
+  led?: boolean;
+  button_lock?: boolean;
+  /** Group-scoped — send to a coordinator. 0 cancels a running timer. */
+  sleep_minutes?: number;
+}
+
 /** A discovered (not necessarily registered) speaker on the LAN. */
 export interface SonosCandidate {
   ip: string;
