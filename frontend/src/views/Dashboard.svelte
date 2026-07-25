@@ -1,9 +1,10 @@
 <script lang="ts">
     import Icon from "../components/Icon.svelte";
+    import NowPlaying from "../components/NowPlaying.svelte";
     import RoomCard from "../components/RoomCard.svelte";
-    import SceneTile from "../components/SceneTile.svelte";
     import SensorCard from "../components/SensorCard.svelte";
     import SocketCard from "../components/SocketCard.svelte";
+    import Switch from "../components/Switch.svelte";
     import TimerRow from "../components/TimerRow.svelte";
     import { route, data, toasts, session } from "../lib/stores.svelte";
     import { api } from "../lib/api";
@@ -86,6 +87,14 @@
         return upcoming[0] ?? items.sort((a, b) => a.min - b.min)[0];
     });
 
+    // The desktop top row is hero + however many stat tiles have real data.
+    // Deriving the track list from that count keeps the row filled at every
+    // width instead of leaving a hole where a missing tile would have sat.
+    const statCount = $derived(
+        (hasTemp ? 1 : 0) + (nextEvent ? 1 : 0) + (enabledAutomations > 0 ? 1 : 0),
+    );
+    const topCols = $derived(statCount > 0 ? `1.6fr ${"1fr ".repeat(statCount).trim()}` : "1fr");
+
     // Desktop device grid — filterable by room on the dashboard.
     let deviceRoom = $state('');
     const allDeviceRooms = $derived([...new Set(v.sockets.map(s => s.room || 'Unassigned'))].sort());
@@ -146,6 +155,10 @@
     function toggleAllMaster() {
         if (heroOn) allOff(); else allOn();
     }
+    // A group's switch means "everything in it", matching the Groups view.
+    function toggleGroup(g: { id: string; name: string }, on: boolean) {
+        runAction(() => api.groupAction(g.id, on ? "on" : "off"), `${g.name} ${on ? "on" : "off"}`);
+    }
 </script>
 
 <!-- ── Greeting header ────────────────────────────────────────────── -->
@@ -196,7 +209,7 @@
         {/if}
     </EmptyState>
 {:else}
-<div class="top-grid">
+<div class="top-grid" style="--top-cols: {topCols}">
     <div class="hero tile" class:on={heroOn}
         in:fly={{ y: 14, duration: dur(280), easing: cubicOut }}>
         <div class="hero-top">
@@ -251,27 +264,18 @@
 </div>
 {/if}
 
-<!-- ── Scenes scroller ────────────────────────────────────────────── -->
-{#if v.scenes.length > 0}
-    <section class="home-section">
-        <div class="section-head">
-            <h2>Scenes</h2>
-            <button class="chip" onclick={() => route.go("scenes")}>All</button>
-        </div>
-        <div class="scene-scroll h-scroll">
-            {#each v.scenes as scene (scene.id)}
-                <div class="scene-cell"><SceneTile {scene} /></div>
-            {/each}
-        </div>
-    </section>
+<!-- ── Playing now (owns its own Sonos poll; hides itself when there are
+     no speakers, so it costs nothing on a home without them) ───────── -->
+{#if v.loaded}
+    <NowPlaying />
 {/if}
 
 <!-- ── Favorites ──────────────────────────────────────────────────── -->
 {#if favoriteSockets.length > 0}
     <section class="home-section">
         <div class="section-head">
-            <h2><Icon name="star" size={16} /> Favorites</h2>
-            <span class="header-meta">{favoriteSockets.length}</span>
+            <h2><span class="section-ico"><Icon name="star" size={15} /></span>Favorites</h2>
+            <span class="header-meta mono">{favoriteSockets.length}</span>
         </div>
         <div class="favorites">
             {#each favoriteSockets as socket, i (socket.id)}
@@ -285,32 +289,53 @@
     </section>
 {/if}
 
+<!-- ── Rooms ──────────────────────────────────────────────────────── -->
+{#if v.loaded}
+<section class="home-section mobile-rooms">
+    <div class="section-head">
+        <h2><span class="section-ico"><Icon name="home" size={15} /></span>Rooms</h2>
+        {#if liveRooms.length > 0}<span class="header-meta mono">{liveRooms.length}</span>{/if}
+    </div>
+    {#if liveRooms.length === 0}
+        <p class="field-help">No rooms yet. Create devices and assign rooms to them.</p>
+    {:else}
+        <div class="rooms">
+            {#each liveRooms as room, i (room.name)}
+                <div class="room-item"
+                    animate:flip={{ duration: dur(280), easing: cubicOut }}
+                    in:scale={{ start: 0.95, opacity: 0, duration: dur(220), delay: stagger(i), easing: cubicOut }}>
+                    <RoomCard {room} />
+                </div>
+            {/each}
+        </div>
+    {/if}
+</section>
+{/if}
+
 <!-- ── Groups ─────────────────────────────────────────────────────── -->
 {#if groupsWithState.length > 0}
     <section class="home-section">
-        <div class="section-head"><h2><span class="section-ico"><Icon name="groups" size={15} /></span>Groups</h2></div>
-        <div class="group-list">
+        <div class="section-head">
+            <h2><span class="section-ico"><Icon name="groups" size={15} /></span>Groups</h2>
+            <button class="chip" onclick={() => route.go("groups")}>All</button>
+        </div>
+        <div class="groups">
             {#each groupsWithState as g, i (g.id)}
-                <div class="group-row"
+                {@const anyOn = g.on > 0}
+                <div class="tile group-tile" class:on={anyOn}
                     animate:flip={{ duration: dur(280), easing: cubicOut }}
-                    in:fly={{ y: 8, duration: dur(220), delay: stagger(i), easing: cubicOut }}>
-                    <div class="group-info">
-                        <span class="group-name">{g.name}</span>
-                        <span class="group-meta">
-                            <span class="mono">{g.socket_ids.length}</span> socket{g.socket_ids.length === 1 ? '' : 's'}
-                            {#if g.on > 0}<span class="group-on">· <span class="mono">{g.on}</span> on</span>{/if}
+                    in:scale={{ start: 0.95, opacity: 0, duration: dur(220), delay: stagger(i), easing: cubicOut }}>
+                    <div class="gt-top">
+                        <span class="gt-ico" class:on={anyOn}><Icon name="groups" size={17} /></span>
+                        <Switch checked={anyOn} onChange={(c) => toggleGroup(g, c)}
+                            ariaLabel="Toggle {g.name}" />
+                    </div>
+                    <button class="gt-body" onclick={() => route.go("groups")} aria-label="Open {g.name}">
+                        <span class="gt-name">{g.name}</span>
+                        <span class="gt-meta">
+                            <span class="count" class:lit={anyOn}>{g.on}</span><span class="slash"> / {g.socket_ids.length}</span> on
                         </span>
-                    </div>
-                    <div class="group-actions">
-                        <button class="btn btn-success"
-                            disabled={g.on === g.socket_ids.length}
-                            title={g.on === g.socket_ids.length ? "All already on" : undefined}
-                            onclick={() => runAction(() => api.groupAction(g.id, 'on'), `${g.name} on`)}>On</button>
-                        <button class="btn btn-danger"
-                            disabled={g.on === 0}
-                            title={g.on === 0 ? "All already off" : undefined}
-                            onclick={() => runAction(() => api.groupAction(g.id, 'off'), `${g.name} off`)}>Off</button>
-                    </div>
+                    </button>
                 </div>
             {/each}
         </div>
@@ -321,7 +346,7 @@
 {#if v.sensors.length > 0}
     <section class="home-section">
         <div class="section-head">
-            <h2>Sensors</h2>
+            <h2><span class="section-ico"><Icon name="sensor" size={15} /></span>Sensors</h2>
             <button class="chip" onclick={() => route.go("sensors")}>All</button>
         </div>
         <div class="sensors">
@@ -339,7 +364,10 @@
 <!-- ── Pending timers ─────────────────────────────────────────────── -->
 {#if v.timers.length > 0}
     <section class="home-section">
-        <div class="section-head"><h2>Pending timers</h2></div>
+        <div class="section-head">
+            <h2><span class="section-ico"><Icon name="timer" size={15} /></span>Pending timers</h2>
+            <span class="header-meta mono">{v.timers.length}</span>
+        </div>
         <div class="timers">
             {#each v.timers as timer, i (timer.id)}
                 <div
@@ -353,31 +381,11 @@
     </section>
 {/if}
 
-<!-- ── Rooms ──────────────────────────────────────────────────────── -->
-{#if v.loaded}
-<section class="home-section mobile-rooms">
-    <div class="section-head"><h2><span class="section-ico"><Icon name="home" size={15} /></span>Rooms</h2></div>
-    {#if liveRooms.length === 0}
-        <p class="field-help">No rooms yet. Create devices and assign rooms to them.</p>
-    {:else}
-        <div class="rooms">
-            {#each liveRooms as room, i (room.name)}
-                <div class="room-item"
-                    animate:flip={{ duration: dur(280), easing: cubicOut }}
-                    in:scale={{ start: 0.95, opacity: 0, duration: dur(220), delay: stagger(i), easing: cubicOut }}>
-                    <RoomCard {room} />
-                </div>
-            {/each}
-        </div>
-    {/if}
-</section>
-{/if}
-
 <!-- ── Desktop: all devices with room filter ─────────────────────── -->
 {#if v.sockets.length > 0}
     <section class="home-section desktop-devices">
         <div class="section-head">
-            <h2>Devices</h2>
+            <h2><span class="section-ico"><Icon name="devices" size={15} /></span>Devices</h2>
             <div class="device-chips">
                 <button class="chip" class:active={deviceRoom === ''} onclick={() => deviceRoom = ''}>All</button>
                 <button class="chip" class:active={deviceRoom === 'on'} onclick={() => deviceRoom = 'on'}>On</button>
@@ -460,13 +468,10 @@
     .top-grid { display: grid; grid-template-columns: 1fr; gap: var(--space-4); }
     .stat { display: none; }
     @media (min-width: 1024px) {
-        /* 2 stat tiles → 3 columns */
-        .top-grid { grid-template-columns: 1.6fr 1fr 1fr; align-items: stretch; }
+        /* One track per tile that actually rendered (--top-cols), so the row
+           always spans the full width whatever the home has to report. */
+        .top-grid { grid-template-columns: var(--top-cols); align-items: stretch; }
         .stat { display: flex; }
-    }
-    @media (min-width: 1280px) {
-        /* 3 stat tiles → 4 columns */
-        .top-grid { grid-template-columns: 1.6fr 1fr 1fr 1fr; }
     }
     .stat {
         padding: 18px;
@@ -539,7 +544,7 @@
     .section-head h2 {
         display: inline-flex;
         align-items: center;
-        gap: 6px;
+        gap: 8px;
         font-size: 17px;
         font-weight: 600;
     }
@@ -553,25 +558,11 @@
     }
     .header-meta {
         font-size: 12px;
-        color: var(--text-muted);
-        background: var(--surface);
-        padding: 2px 8px;
-        border-radius: 999px;
-        font-variant-numeric: tabular-nums;
-    }
-
-    /* ── Scenes: horizontal scroller on phones, grid on wide screens ── */
-    .scene-scroll { padding-bottom: 2px; }
-    .scene-cell { width: 160px; display: flex; }
-    .scene-cell > :global(*) { flex: 1; min-width: 0; }
-    @media (min-width: 700px) {
-        .scene-scroll {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-            gap: var(--space-3);
-            overflow: visible;
-        }
-        .scene-cell { width: auto; }
+        color: var(--text-mute);
+        background: var(--card-2);
+        border: 1px solid var(--hairline);
+        padding: 2px 9px;
+        border-radius: var(--r-pill);
     }
 
     /* ── Favorites grid ─────────────────────────────── */
@@ -587,24 +578,50 @@
     .favorite-item > :global(.tile) { flex: 1; min-width: 0; }
 
     /* ── Groups ─────────────────────────────────────── */
-    .group-list { display: flex; flex-direction: column; gap: var(--space-2); }
-    .group-row {
+    /* Tiles, not flat rows: a group is an on/off surface like everything else
+       on this page, so it gets the sanctioned .tile.on treatment and the same
+       switch the Groups view uses. */
+    .groups {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+    }
+    @media (min-width: 600px) {
+        .groups { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: var(--space-3); }
+    }
+    .group-tile { min-width: 0; }
+    .gt-top { display: flex; justify-content: space-between; align-items: flex-start; }
+    .gt-ico {
+        width: 36px; height: 36px;
+        border-radius: 10px;
+        background: var(--card-3);
+        color: var(--text-mute);
+        display: grid; place-items: center;
+        flex-shrink: 0;
+        transition: background var(--t-med), color var(--t-med);
+    }
+    .gt-ico.on { background: var(--on); color: var(--primary-fg); }
+    .gt-body {
+        all: unset;
+        cursor: pointer;
+        touch-action: manipulation;
         display: flex;
-        align-items: center;
-        gap: var(--space-3);
-        padding: var(--space-2) var(--space-3);
-        background: var(--surface);
-        border-radius: var(--radius-md);
-        min-height: 48px;
+        flex-direction: column;
+        gap: 3px;
+        min-width: 0;
     }
-    @media (pointer: coarse) {
-        .group-row { padding: var(--space-3); min-height: 60px; }
+    .gt-body:focus-visible { box-shadow: var(--focus-ring); border-radius: var(--r-sm); }
+    .gt-name {
+        font-weight: 600; font-size: 15px;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
-    .group-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-    .group-name { font-weight: 500; }
-    .group-meta { color: var(--text-muted); font-size: 12px; }
-    .group-on { color: var(--on); font-weight: 600; }
-    .group-actions { display: flex; gap: var(--space-2); flex-shrink: 0; }
+    .gt-meta {
+        color: var(--text-mute); font-size: 12.5px;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .count { font-family: var(--font-mono); font-feature-settings: "tnum" 1; color: var(--text-mute); }
+    .count.lit { color: var(--on); }
+    .slash { color: var(--text-dim); }
 
     /* ── Sensors ────────────────────────────────────── */
     .sensors {
