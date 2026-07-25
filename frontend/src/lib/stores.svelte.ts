@@ -187,6 +187,35 @@ function createThemeStore() {
   };
 }
 
+// Device-local interface preferences. These describe this screen, not the
+// home, so they live in localStorage next to the theme rather than in the
+// controller's settings — one person hiding a button on their phone must not
+// change what everyone else sees.
+function createUIPrefsStore() {
+  const s = $state<{ assistantButton: boolean }>({ assistantButton: initial() });
+
+  function initial(): boolean {
+    try { return localStorage.getItem("assistant-fab") !== "off"; }
+    catch { return true; } // private browsing
+  }
+  // Published as an attribute so the bars that share the FAB's corner can
+  // reclaim the gutter they reserve for it (--fab-clear, app.css).
+  function apply() {
+    document.documentElement.dataset.fab = s.assistantButton ? "on" : "off";
+  }
+  apply();
+
+  return {
+    get assistantButton() { return s.assistantButton; },
+    setAssistantButton(on: boolean) {
+      s.assistantButton = on;
+      try { localStorage.setItem("assistant-fab", on ? "on" : "off"); }
+      catch { /* private browsing */ }
+      apply();
+    },
+  };
+}
+
 // Current login profile. Loaded once after auth; drives which sockets are
 // visible and whether admin-only UI (Groups, Scenes, Settings, …) shows.
 function createSessionStore() {
@@ -352,4 +381,5 @@ export const toasts = createToastStore();
 export const route = createRouteStore();
 export const theme = createThemeStore();
 export const sidebar = createSidebarStore();
+export const uiPrefs = createUIPrefsStore();
 export const assistant = createAssistantStore();

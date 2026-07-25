@@ -373,6 +373,19 @@
       </div>
 
       <div class="drawer-section" aria-label="Sections">
+        <!-- The assistant isn't a route, so it has no tab-bar slot. It lives
+             here as well as on the FAB — that button is optional (Settings),
+             and the feature must not go with it. -->
+        {#if session.isAdmin}
+          <button
+            class="drawer-item"
+            role="menuitem"
+            onclick={() => { closeDrawerInstant(); assistant.show(); }}
+          >
+            <span class="drawer-icon"><Icon name="assistant" size={20} /></span>
+            <span class="drawer-label">Assistant</span>
+          </button>
+        {/if}
         {#each overflow as item (item.route)}
           <a
             href="#/{item.route}"

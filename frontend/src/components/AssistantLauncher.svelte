@@ -1,7 +1,7 @@
 <script lang="ts">
     import Icon from "./Icon.svelte";
     import AssistantChat from "./AssistantChat.svelte";
-    import { assistant, session } from "../lib/stores.svelte";
+    import { assistant, session, uiPrefs } from "../lib/stores.svelte";
     import { onMount } from "svelte";
     import { fade } from "svelte/transition";
     import { dur, sheet } from "../lib/motion";
@@ -59,8 +59,11 @@
 
 {#if visible}
     <!-- Mobile FAB: lifted clear of the bottom tab bar. Hidden on desktop,
-         where the rail entry + Cmd-K are the launchers. -->
-    {#if !open}
+         where the rail entry + Cmd-K are the launchers — and switchable off
+         in Settings, since it floats over whatever is in that corner. The
+         More drawer keeps the assistant reachable either way, so turning it
+         off costs a tap, never the feature. -->
+    {#if !open && uiPrefs.assistantButton}
         <button class="fab" aria-label="Open assistant" onclick={() => assistant.show()}>
             <Icon name="assistant" size={24} />
         </button>

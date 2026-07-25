@@ -274,6 +274,15 @@ the float gap, which grows with the safe area — is published as
 the assistant FAB, the Music mini-player and selection bar) offsets by that
 token instead of a hardcoded bar height. It is `0` on desktop.
 
+The **assistant FAB** shares that band, bottom-right. A bar that runs the
+full width there (the Music dock, the grouping bar) keeps its trailing
+control clear of it by reserving **`--fab-clear`**, never a literal 64px —
+because the FAB is optional: Settings › Interface switches it off per device,
+which zeroes the token and gives those bars their edge back. It is also `0`
+on desktop, where the rail entry and ⌘K are the launchers. A hidden FAB must
+never cost the feature, so **the assistant also lives in the mobile More
+sheet**, permanently — it has no route, so that sheet is its only fixed home.
+
 In this app the six slots are the four primary nav entries plus **More**,
 which opens the overflow sheet; the lens sits on More whenever the active
 route lives in that sheet. The rail and the dock are the same component
@@ -404,7 +413,8 @@ Is it a list of things?
 - [ ] Tab bar is the floating glass pill; active state is the sliding
       `.tab-lens`, never an amber icon colour
 - [ ] Anything sitting above the tab dock offsets by `--nav-clear`, not a
-      literal bar height
+      literal bar height; anything reserving room for the assistant FAB uses
+      `--fab-clear`
 - [ ] Notification indicator is exactly 7×7 amber (`--on`)
 - [ ] No emoji outside the Kid module (KidHome / KidLampPanel / KidScheduleSheet)
 - [ ] No new colors invented — only tokens from §3

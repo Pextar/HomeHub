@@ -2379,9 +2379,10 @@
     @media (max-width: 900px) {
         .selbar {
             bottom: calc(var(--nav-clear) + var(--space-3));
-            /* Clear the floating assistant button (56px @ right:16px), which
-               shares this band — otherwise it covers the primary action. */
-            padding-right: 64px;
+            /* Keep the primary action out from under the assistant button,
+               which shares this band. The token is 0 when that button is
+               switched off, and the bar gets its edge back. */
+            padding-right: max(10px, var(--fab-clear));
         }
     }
     /* On a narrow phone the count, the clear button and Group already fill
@@ -2412,9 +2413,9 @@
     @media (max-width: 900px) {
         .mini {
             bottom: calc(var(--nav-clear) + var(--space-3));
-            /* Same reserved gutter as .selbar — keep the play/pause control
-               out from under the floating assistant button. */
-            padding-right: 64px;
+            /* Same reserved gutter as .selbar — and the same reprieve when
+               the assistant button is switched off. */
+            padding-right: max(10px, var(--fab-clear));
         }
     }
     .mini-open {
