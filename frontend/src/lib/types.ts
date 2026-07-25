@@ -385,6 +385,13 @@ export interface SonosGroupView {
 export interface SonosStatus {
   speakers: SonosSpeakerView[];
   groups: SonosGroupView[];
+  /**
+   * True when the backend is subscribed to the speakers' own change
+   * notifications, so this state arrived without anyone asking for it.
+   * False means it was read on demand — the bridge couldn't subscribe —
+   * and the caller should keep polling at the old rate.
+   */
+  live?: boolean;
 }
 
 /** A discovered (not necessarily registered) speaker on the LAN. */

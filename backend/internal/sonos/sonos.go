@@ -59,18 +59,39 @@ func ValidateHost(host string) error {
 
 // ── SOAP plumbing ────────────────────────────────────────────────────────
 
-// service describes one UPnP service endpoint on the speaker.
+// service describes one UPnP service endpoint on the speaker. Services that
+// can be subscribed to for change notifications also carry an event path —
+// the GENA half of UPnP, see gena.go.
 type service struct {
-	path string // control URL path
-	urn  string // service type URN
+	path  string // control URL path
+	urn   string // service type URN
+	event string // event subscription URL path; empty when not evented
 }
 
 var (
-	avTransport      = service{"/MediaRenderer/AVTransport/Control", "urn:schemas-upnp-org:service:AVTransport:1"}
-	renderingControl = service{"/MediaRenderer/RenderingControl/Control", "urn:schemas-upnp-org:service:RenderingControl:1"}
-	groupRendering   = service{"/MediaRenderer/GroupRenderingControl/Control", "urn:schemas-upnp-org:service:GroupRenderingControl:1"}
-	zoneGroupTopo    = service{"/ZoneGroupTopology/Control", "urn:schemas-upnp-org:service:ZoneGroupTopology:1"}
-	contentDirectory = service{"/MediaServer/ContentDirectory/Control", "urn:schemas-upnp-org:service:ContentDirectory:1"}
+	avTransport = service{
+		path:  "/MediaRenderer/AVTransport/Control",
+		urn:   "urn:schemas-upnp-org:service:AVTransport:1",
+		event: "/MediaRenderer/AVTransport/Event",
+	}
+	renderingControl = service{
+		path:  "/MediaRenderer/RenderingControl/Control",
+		urn:   "urn:schemas-upnp-org:service:RenderingControl:1",
+		event: "/MediaRenderer/RenderingControl/Event",
+	}
+	groupRendering = service{
+		path: "/MediaRenderer/GroupRenderingControl/Control",
+		urn:  "urn:schemas-upnp-org:service:GroupRenderingControl:1",
+	}
+	zoneGroupTopo = service{
+		path:  "/ZoneGroupTopology/Control",
+		urn:   "urn:schemas-upnp-org:service:ZoneGroupTopology:1",
+		event: "/ZoneGroupTopology/Event",
+	}
+	contentDirectory = service{
+		path: "/MediaServer/ContentDirectory/Control",
+		urn:  "urn:schemas-upnp-org:service:ContentDirectory:1",
+	}
 )
 
 // arg is one named SOAP argument. Order matters to UPnP, so arguments are a

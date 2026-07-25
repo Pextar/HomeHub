@@ -21,7 +21,10 @@ import (
 	"strings"
 )
 
-var musicServices = service{"/MusicServices/Control", "urn:schemas-upnp-org:service:MusicServices:1"}
+var musicServices = service{
+	path: "/MusicServices/Control",
+	urn:  "urn:schemas-upnp-org:service:MusicServices:1",
+}
 
 // ServiceAccount identifies one streaming service linked to the household,
 // as needed to build playable URIs.

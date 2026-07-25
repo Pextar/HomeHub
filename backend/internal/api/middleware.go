@@ -123,6 +123,12 @@ func loggingMiddleware(next http.Handler) http.Handler {
 		start := time.Now()
 		sw := &statusWriter{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(sw, r)
+		// Sonos change notifications arrive several per track and one per
+		// volume step; logging each would bury everything else. Failures
+		// still get logged — those are worth seeing.
+		if r.Method == "NOTIFY" && sw.status < 300 && strings.HasPrefix(r.URL.Path, sonosEventPath+"/") {
+			return
+		}
 		log.Printf("%s %s %d %s", r.Method, r.URL.Path, sw.status, time.Since(start))
 	})
 }
