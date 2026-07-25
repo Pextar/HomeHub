@@ -5,7 +5,7 @@
     import Icon from "../components/Icon.svelte";
     import ConfirmModal from "../components/ConfirmModal.svelte";
     import SonosSpeakerModal from "../modals/SonosSpeakerModal.svelte";
-    import SonosSpeakerSettings from "../modals/SonosSpeakerSettings.svelte";
+    import SonosSpeakerDetail from "./SonosSpeakerDetail.svelte";
     import SonosEventsModal from "../modals/SonosEventsModal.svelte";
     import LiveStatusChip from "../components/LiveStatusChip.svelte";
     import Segmented from "../components/Segmented.svelte";
@@ -372,6 +372,8 @@
     function goto(s: Screen) {
         screen = s;
         if (s !== "rooms") selectedIds = []; // selection is a Rooms-screen mode
+        // Leaving Speakers leaves whichever speaker was open inside it.
+        if (s !== "speakers") detailId = null;
         // Arriving on Search means you came to type.
         if (s === "search" && spotify?.connected) focusSearch();
     }
@@ -706,6 +708,9 @@
             if (playerOpen) closePlayer();
             else if (menuFor) menuFor = null;
             else if (selectedIds.length) selectedIds = [];
+            // Escape backs out of a speaker's settings the same way its back
+            // chip does — a drill-down owes the user the key that leaves it.
+            else if (detailId) detailId = null;
             return;
         }
         if (e.metaKey || e.ctrlKey || e.altKey) return;
@@ -1243,24 +1248,60 @@
         return list;
     });
 
-    // Device settings live behind the row. An unreachable speaker has none to
-    // read, so its row goes where the only useful action is instead: the
-    // registration form, which is where a wrong address gets fixed.
-    async function openSpeakerSettings(sp: SonosSpeakerView) {
+    // Device settings are a *sub-screen* of Speakers, not a sheet: they are
+    // reached from the subnav like Home, Rooms and Search, and none of those
+    // are sheets. Selecting a speaker swaps the list for its detail; the
+    // subnav above stays put, so tapping another screen leaves the detail the
+    // same way its back chip does.
+    let detailId = $state<string | null>(null);
+    const detailSpeaker = $derived(
+        detailId ? (status?.speakers.find((s) => s.id === detailId) ?? null) : null,
+    );
+
+    // From 1024px up the list and the selected speaker's settings sit side by
+    // side, because the width is there and the common job — the same change
+    // across several rooms — is otherwise back-and-forward for every one of
+    // them. Below that the settings replace the list and the detail carries
+    // switcher chips instead.
+    let paned = $state(false);
+    $effect(() => {
+        const mq = window.matchMedia("(min-width: 1024px)");
+        const sync = () => (paned = mq.matches);
+        sync();
+        mq.addEventListener("change", sync);
+        return () => mq.removeEventListener("change", sync);
+    });
+    // A blank right-hand pane is dead space, so the wide layout opens on the
+    // first speaker that can answer. On a phone nothing is selected until the
+    // user picks a row — there, selecting means leaving the list.
+    $effect(() => {
+        if (!paned || screen !== "speakers" || detailId) return;
+        const first = allSpeakers.find((s) => s.reachable);
+        if (first) detailId = first.id;
+    });
+    // Speakers other than the open one, for the phone switcher.
+    const detailSiblings = $derived(allSpeakers.filter((s) => s.id !== detailId));
+    // The sleep timer belongs to the zone, not the speaker (DESIGN.md §15), so
+    // a follower is told which room owns it rather than being given a control
+    // the coordinator would answer for.
+    const detailSleepOwner = $derived.by(() => {
+        const sp = detailSpeaker;
+        if (!sp) return null;
+        const g = groupOfSpeaker(sp.id);
+        return g && g.coordinator_id !== sp.id
+            ? (speakerById.get(g.coordinator_id)?.name ?? null)
+            : null;
+    });
+
+    // An unreachable speaker has no settings to read, so its row goes where
+    // the only useful action is instead: the registration form, which is
+    // where a wrong address gets fixed. A form is a sheet, per §11.
+    function openSpeaker(sp: SonosSpeakerView) {
         if (!sp.reachable) {
-            await openSpeakerModal(sp);
+            void openSpeakerModal(sp);
             return;
         }
-        // The sleep timer belongs to the zone, not the speaker (DESIGN.md
-        // §15), so a follower is told which room owns it rather than being
-        // given a control the coordinator would answer for.
-        const g = groupOfSpeaker(sp.id);
-        const owner =
-            g && g.coordinator_id !== sp.id
-                ? (speakerById.get(g.coordinator_id)?.name ?? null)
-                : null;
-        await openModal(SonosSpeakerSettings, { speaker: sp, sleepTimerOwner: owner });
-        void refresh();
+        detailId = sp.id;
     }
 
     // Speakers that turned out to have no picture of their own. Remembered per
@@ -1511,10 +1552,17 @@
     {/if}
 
     {:else if screen === "speakers"}
-    <!-- ── Speakers — the device inventory ─────────────────────────────
+    <!-- ── Speakers — the device inventory and its settings ────────────
          Rooms answers "what plays together"; this answers "what is each of
-         these, and how is it set up". One row per registered speaker: its own
-         picture, what it is doing, and a way into its settings. -->
+         these, and how is it set up".
+
+         Two panes where the width allows, one where it doesn't: the list
+         column stays put on desktop and the settings open beside it; on a
+         phone the settings take over the screen and `has-detail` folds the
+         list away. Not a sheet — none of Music's other screens are one, and
+         this content is too long to spend its life at 92vh. -->
+    <div class="sp-split" class:has-detail={!!detailSpeaker}>
+    <div class="sp-col">
     <section class="block">
         <div class="block-head">
             <div class="eyrow">Speakers</div>
@@ -1524,52 +1572,50 @@
             </span>
         </div>
         <div class="sp-list">
-            <!-- Two intents on two targets, the same split the room pucks
-                 use: the body opens the speaker's settings, the trailing chip
-                 opens its registration (name, room, address, remove). -->
+            <!-- One target per row, the §11 shape: chevron right, into that
+                 speaker's settings. Editing its registration lives on the
+                 detail's action chip rather than as a second control here. -->
             {#each allSpeakers as sp (sp.id)}
                 {@const playing = speakerPlaying(sp.id)}
-                <div class="sp-row" class:off={!sp.reachable}>
-                    <button class="sp-open" onclick={() => openSpeakerSettings(sp)}>
-                        <!-- The speaker's own portrait, served by the device.
-                             No picture published means the striped placeholder
-                             — never a guess at which model this is (§2). -->
-                        {#if noImage[sp.id]}
-                            <!-- §6.7's striped fill, without its caption: no
-                                 wording fits a 40px box, and the row's name
-                                 and model already say what this is. -->
-                            <span class="shot placeholder" aria-hidden="true"></span>
-                        {:else}
-                            <img
-                                class="shot"
-                                src={api.sonosImageURL(sp.id)}
-                                alt=""
-                                loading="lazy"
-                                onerror={() => (noImage[sp.id] = true)}
-                            />
-                        {/if}
-                        <span class="sp-meta">
-                            <span class="sp-name">{sp.name}</span>
-                            <span class="sp-sub">
-                                {#if !sp.reachable}
-                                    Unreachable · <span class="mono">{sp.ip}</span>
-                                {:else}
-                                    {[sp.model, sp.room].filter(Boolean).join(" · ") || sp.ip}
-                                {/if}
-                            </span>
+                <button
+                    class="sp-row"
+                    class:off={!sp.reachable}
+                    class:sel={detailId === sp.id}
+                    aria-current={detailId === sp.id ? "true" : undefined}
+                    onclick={() => openSpeaker(sp)}
+                >
+                    <!-- The speaker's own portrait, served by the device.
+                         No picture published means the striped placeholder
+                         — never a guess at which model this is (§2). -->
+                    {#if noImage[sp.id]}
+                        <!-- §6.7's striped fill, without its caption: no
+                             wording fits a 40px box, and the row's name
+                             and model already say what this is. -->
+                        <span class="shot placeholder" aria-hidden="true"></span>
+                    {:else}
+                        <img
+                            class="shot"
+                            src={api.sonosImageURL(sp.id)}
+                            alt=""
+                            loading="lazy"
+                            onerror={() => (noImage[sp.id] = true)}
+                        />
+                    {/if}
+                    <span class="sp-meta">
+                        <span class="sp-name">{sp.name}</span>
+                        <span class="sp-sub">
+                            {#if !sp.reachable}
+                                Unreachable · <span class="mono">{sp.ip}</span>
+                            {:else}
+                                {[sp.model, sp.room].filter(Boolean).join(" · ") || sp.ip}
+                            {/if}
                         </span>
-                        {#if playing}
-                            {@render wave()}
-                        {/if}
-                    </button>
-                    <button
-                        class="icon-btn sp-edit"
-                        aria-label="Edit {sp.name} in HomeHub"
-                        onclick={() => openSpeakerModal(sp)}
-                    >
-                        <Icon name="edit" size={15} />
-                    </button>
-                </div>
+                    </span>
+                    {#if playing}
+                        {@render wave()}
+                    {/if}
+                    <span class="sp-chev" aria-hidden="true"><Icon name="chevronDown" size={18} /></span>
+                </button>
             {/each}
         </div>
         <p class="hint">
@@ -1599,6 +1645,22 @@
         </span>
         <span class="lu-chev" aria-hidden="true"><Icon name="chevronDown" size={18} /></span>
     </button>
+    </div><!-- /.sp-col -->
+
+    {#if detailSpeaker}
+        <div class="sp-pane">
+            <SonosSpeakerDetail
+                speaker={detailSpeaker}
+                sleepTimerOwner={detailSleepOwner}
+                {paned}
+                siblings={detailSiblings}
+                onPick={(id) => (detailId = id)}
+                onBack={() => (detailId = null)}
+                onEdit={() => void openSpeakerModal(detailSpeaker)}
+            />
+        </div>
+    {/if}
+    </div><!-- /.sp-split -->
 
     {:else}
     <!-- ── Spotify search ──────────────────────────────────────────── -->
@@ -2630,30 +2692,43 @@
        the 36px icon — it is the one place in the app where a real photograph
        beats a glyph, because telling a Sonos One from a Five is exactly what
        the user is doing here. */
+    /* Two panes from 1024px, one below it. The list column folds away on a
+       phone once a speaker is open, which is what turns the same markup into
+       a drill-down without a second copy of it. */
+    .sp-split { display: flex; flex-direction: column; gap: var(--space-4); }
+    .sp-col { display: flex; flex-direction: column; gap: var(--space-4); min-width: 0; }
+    .sp-pane { min-width: 0; }
+    @media (max-width: 1023px) {
+        .sp-split.has-detail > .sp-col { display: none; }
+    }
+    @media (min-width: 1024px) {
+        .sp-split {
+            display: grid;
+            grid-template-columns: minmax(260px, 330px) minmax(0, 1fr);
+            gap: var(--space-5);
+            align-items: start;
+        }
+        /* The list is the shorter column; let the settings scroll past it
+           rather than stretching the rows to match. */
+        .sp-col { position: sticky; top: 76px; }
+    }
+
     .sp-list { display: flex; flex-direction: column; gap: 6px; }
     .sp-row {
-        display: flex;
-        align-items: center;
-        background: var(--bg-elevated);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-lg);
-        overflow: hidden;
-        transition: background var(--t-fast), border-color var(--t-fast);
-    }
-    .sp-open {
-        flex: 1;
-        min-width: 0;
+        width: 100%;
         display: flex;
         align-items: center;
         gap: var(--space-3);
         min-height: 60px;
-        padding: var(--space-3) 0 var(--space-3) var(--space-3);
-        background: none;
-        border: 0;
+        padding: var(--space-3) var(--space-4);
         text-align: left;
+        background: var(--bg-elevated);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-lg);
         color: inherit;
         font: inherit;
         cursor: pointer;
+        transition: background var(--t-fast), border-color var(--t-fast);
     }
     .shot {
         width: 40px;
@@ -2675,16 +2750,18 @@
     }
     .sp-row.off .shot { opacity: 0.45; }
     .sp-row.off .sp-name { color: var(--text-mute); }
-    .sp-edit {
-        width: 36px; height: 36px;
-        flex-shrink: 0;
-        margin-right: var(--space-2);
+    /* Which row the pane is showing. An amber edge, not the .tile.on
+       gradient — that treatment means "this device is on", and a selected
+       row is a statement about the screen, not about the speaker. */
+    .sp-row.sel { border-color: var(--on); background: var(--card-2); }
+    .sp-chev { flex-shrink: 0; display: flex; color: var(--text-dim); transform: rotate(-90deg); }
+    /* Beside the pane the chevron is redundant — the row's amber edge already
+       says which one is open, and there is nowhere further to go. */
+    @media (min-width: 1024px) {
+        .sp-chev { display: none; }
     }
     @media (hover: hover) {
         .sp-row:hover { background: var(--bg-raised); border-color: var(--border-strong); }
-    }
-    @media (pointer: coarse) {
-        .sp-edit { width: 44px; height: 44px; }
     }
 
     /* ── Live-updates row (Speakers) ──────────────────────────────────
