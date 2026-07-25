@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { onMount, onDestroy } from "svelte";
+    import { onMount, onDestroy, tick as flushDOM } from "svelte";
     import Topbar from "../components/Topbar.svelte";
     import EmptyState from "../components/EmptyState.svelte";
     import Icon from "../components/Icon.svelte";
@@ -38,6 +38,12 @@
     // Actions in flight (play/pause/join/…) keyed by "<action>:<id>".
     let busy = $state<Record<string, boolean>>({});
 
+    // A play/pause round-trip plus the refresh behind it takes long enough
+    // that an un-flipped button reads as a dropped tap. The new state is
+    // applied locally and wins until the poll reports it — the same trick
+    // volOverride plays for the sliders. Rolled back if the call fails.
+    let playOverride = $state<Record<string, { playing: boolean; at: number }>>({});
+
     // Wall-clock of the last successful poll. The player advances the track
     // position from here so the scrubber moves every second instead of
     // jumping every five.
@@ -51,7 +57,7 @@
         (status?.speakers ?? []).filter((s) => !groups.some((g) => g.member_ids.includes(s.id))),
     );
     const reachable = $derived((status?.speakers ?? []).filter((s) => s.reachable));
-    const playingGroups = $derived(groups.filter((g) => coordinatorOf(g)?.state?.playing));
+    const playingGroups = $derived(groups.filter((g) => isPlaying(g)));
     const playingCount = $derived(playingGroups.length);
     // Multi-speaker zones render inside a dashed enclosure in the room grid;
     // everything reachable that isn't in one shows as a loose puck.
@@ -81,14 +87,42 @@
     function groupOfSpeaker(id: string): SonosGroupView | undefined {
         return groups.find((g) => g.member_ids.includes(id));
     }
+    // The one place "is this playing?" is answered, so a tapped play/pause
+    // flips every waveform, card and icon at once instead of waiting out the
+    // poll on each surface separately.
+    function isPlaying(g: SonosGroupView | undefined): boolean {
+        if (!g) return false;
+        const ov = playOverride[g.coordinator_id];
+        return ov ? ov.playing : !!coordinatorOf(g)?.state?.playing;
+    }
     function speakerPlaying(id: string): boolean {
-        const g = groupOfSpeaker(id);
-        return g ? !!coordinatorOf(g)?.state?.playing : false;
+        return isPlaying(groupOfSpeaker(id));
     }
     function speakerNowLine(id: string): string {
         const g = groupOfSpeaker(id);
         const st = g && coordinatorOf(g)?.state;
-        return st?.playing && st.track?.title ? st.track.title : "Idle";
+        if (!st?.track?.title) return "Idle";
+        return isPlaying(g) ? st.track.title : `Paused · ${st.track.title}`;
+    }
+
+    // ── Track position, for any group ────────────────────────────────────
+    // Positions are polled every 5s; every surface that shows progress
+    // extrapolates from the last reading so the bar creeps forward once a
+    // second instead of stepping five at a time.
+    function posOf(g: SonosGroupView): number {
+        void tick; // re-derive once a second
+        const st = coordinatorOf(g)?.state;
+        const base = secs(st?.position);
+        if (!isPlaying(g) || !polledAt) return base;
+        const total = secs(st?.duration);
+        const advanced = base + (Date.now() - polledAt) / 1000;
+        return total ? Math.min(total, advanced) : advanced;
+    }
+    // 0–1, or 0 when the source reports no duration (radio, line-in, TV) —
+    // those get no progress line rather than a fake one.
+    function progressOf(g: SonosGroupView): number {
+        const total = secs(coordinatorOf(g)?.state?.duration);
+        return total > 0 ? Math.min(1, posOf(g) / total) : 0;
     }
 
     // ── Data loading ─────────────────────────────────────────────────────
@@ -103,6 +137,15 @@
             status = st;
             polledAt = Date.now();
             const now = polledAt;
+            // Retire an optimistic play/pause as soon as the speaker agrees
+            // with it — or after 6s, so a command the speaker quietly ignored
+            // can't leave a button lying about its state forever.
+            for (const [id, ov] of Object.entries(playOverride)) {
+                const sp = st.speakers.find((s) => s.id === id);
+                if (!sp || sp.state?.playing === ov.playing || now - ov.at > 6000) {
+                    delete playOverride[id];
+                }
+            }
             for (const sp of st.speakers) {
                 const ov = volOverride[sp.id];
                 if (ov && now - ov.at < 3000) continue; // user just moved it
@@ -172,15 +215,23 @@
         }
     }
 
-    function togglePlay(g: SonosGroupView) {
+    async function togglePlay(g: SonosGroupView) {
         const c = coordinatorOf(g);
         if (!c) return;
-        const playing = c.state?.playing;
-        void run(
-            "play:" + c.id,
-            () => (playing ? api.sonosPause(c.id) : api.sonosPlay(c.id)),
-            playing ? "Pause failed" : "Play failed",
-        );
+        const key = "play:" + c.id;
+        if (busy[key]) return;
+        const next = !isPlaying(g);
+        busy[key] = true;
+        playOverride[c.id] = { playing: next, at: Date.now() };
+        try {
+            await (next ? api.sonosPlay(c.id) : api.sonosPause(c.id));
+            await refresh();
+        } catch (e) {
+            delete playOverride[c.id]; // the speaker never took it — roll back
+            toasts.error(next ? "Play failed" : "Pause failed", (e as Error).message);
+        } finally {
+            busy[key] = false;
+        }
     }
 
     function skip(g: SonosGroupView, dir: "next" | "previous") {
@@ -206,6 +257,38 @@
     function toggleMute(sp: SonosSpeakerView) {
         void run("mute:" + sp.id, () => api.sonosSetMute(sp.id, !sp.state?.muted), "Mute failed");
     }
+
+    // Keyboard mute in the player acts on the whole zone: muting only the
+    // coordinator of a three-room group would look like the key did nothing.
+    function toggleMuteGroup(g: SonosGroupView) {
+        const members = g.member_ids
+            .map((id) => speakerById.get(id))
+            .filter((s): s is SonosSpeakerView => !!s);
+        if (!members.length) return;
+        const next = !members.some((s) => s.state?.muted);
+        void run(
+            "mute:" + g.coordinator_id,
+            () => Promise.all(members.map((s) => api.sonosSetMute(s.id, next))),
+            "Mute failed",
+        );
+    }
+
+    // Volume steps, used by the player's arrow-key shortcuts. Grouped zones
+    // move together (the same "All rooms" fader the sheet shows); a lone
+    // speaker moves on its own.
+    function nudgeVolume(g: SonosGroupView, delta: number) {
+        const grouped = g.member_ids.length > 1;
+        if (grouped) {
+            const cur = groupVol[g.coordinator_id] ?? coordinatorOf(g)?.state?.volume ?? 0;
+            setGroupVolume(g.coordinator_id, clampVol(cur + delta));
+            return;
+        }
+        const sp = coordinatorOf(g);
+        if (!sp) return;
+        const cur = localVol[sp.id] ?? sp.state?.volume ?? 0;
+        setVolume(sp.id, clampVol(cur + delta));
+    }
+    const clampVol = (v: number) => Math.max(0, Math.min(100, Math.round(v)));
 
     function join(speakerId: string, g: SonosGroupView) {
         void run("join:" + speakerId, () => api.sonosJoin(speakerId, g.coordinator_id), "Grouping failed");
@@ -259,6 +342,8 @@
     function goto(s: Screen) {
         screen = s;
         if (s !== "rooms") selectedIds = []; // selection is a Rooms-screen mode
+        // Arriving on Search means you came to type.
+        if (s === "search" && spotify?.connected) focusSearch();
     }
 
     // ── Room grid: tap-to-select grouping ────────────────────────────────
@@ -271,13 +356,17 @@
             ? selectedIds.filter((x) => x !== id)
             : [...selectedIds, id];
     }
+    // The first tapped speaker anchors the group; if it already leads a zone
+    // the others join that zone, otherwise it becomes the new coordinator.
+    const groupTargetId = $derived(
+        selectedIds.length
+            ? (groupOfSpeaker(selectedIds[0])?.coordinator_id ?? selectedIds[0])
+            : "",
+    );
     async function groupSelected() {
         if (selectedIds.length < 2) return;
-        // The first tapped speaker anchors the group; if it already leads a
-        // zone the others join that zone, otherwise it becomes the new
-        // coordinator. Joining sequentially keeps Sonos' topology consistent.
-        const first = selectedIds[0];
-        const target = groupOfSpeaker(first)?.coordinator_id ?? first;
+        // Joining sequentially keeps Sonos' topology consistent.
+        const target = groupTargetId;
         const key = "group:" + target;
         if (busy[key]) return;
         busy[key] = true;
@@ -317,8 +406,24 @@
     const activeGroup = $derived(
         groups.find((g) => g.coordinator_id === playerGroupId),
     );
-    // The group the docked mini-player represents: first thing playing.
-    const dockGroup = $derived(playingGroups[0]);
+    // The group the docked mini-player represents. Normally the first thing
+    // playing — but a pause must not carry the transport off the screen with
+    // it, so the dock holds on to the last live zone while it still has a
+    // track to resume. "Playing now" stays literal (DESIGN.md §15); the dock
+    // is where a paused zone remains one tap from playing again.
+    let lastLiveId = $state<string | null>(null);
+    $effect(() => {
+        const g = playingGroups[0];
+        if (g) lastLiveId = g.coordinator_id;
+    });
+    const pausedGroup = $derived(
+        groups.find((g) => {
+            if (g.coordinator_id !== lastLiveId) return false;
+            const st = coordinatorOf(g)?.state;
+            return !!st?.track?.title && st.transport_state !== "STOPPED";
+        }),
+    );
+    const dockGroup = $derived(playingGroups[0] ?? pausedGroup);
 
     // ── Dock visibility ──────────────────────────────────────────────────
     // The dock and the Home screen's "Playing now" card carry the same track
@@ -484,13 +589,138 @@
         pendingBody = false;
         cancelDrag();
     }
+    // ── Swipe the art to change track ────────────────────────────────────
+    // The album art is the largest target in the sheet, so it carries the
+    // gesture every phone player has: drag sideways, let go past a clear
+    // threshold, and the track changes. A vertical pull is handed straight
+    // back to the sheet's own drag-to-dismiss.
+    let artDX = $state(0);
+    let artSwiping = $state(false);
+    let artStart: { x: number; y: number } | null = null;
+
+    function onArtPointerDown(e: PointerEvent) {
+        if (e.pointerType === "mouse" || dismissing) return;
+        artStart = { x: e.clientX, y: e.clientY };
+        artDX = 0;
+    }
+    function onArtPointerMove(e: PointerEvent) {
+        if (!artStart) return;
+        const dx = e.clientX - artStart.x;
+        const dy = e.clientY - artStart.y;
+        if (!artSwiping) {
+            // Vertical wins early: that gesture belongs to the sheet.
+            if (Math.abs(dy) > 10 && Math.abs(dy) >= Math.abs(dx)) {
+                artStart = null;
+                return;
+            }
+            if (Math.abs(dx) < 12) return;
+            artSwiping = true;
+            try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); }
+            catch { /* not capturable */ }
+        }
+        // Half speed: the art nudges along with the finger rather than being
+        // thrown off the screen.
+        artDX = dx * 0.5;
+        e.preventDefault();
+    }
+    function onArtPointerUp() {
+        if (!artStart) return;
+        const moved = artDX;
+        artStart = null;
+        artSwiping = false;
+        artDX = 0;
+        if (Math.abs(moved) < 30 || !activeGroup) return; // ~60px of travel
+        skip(activeGroup, moved < 0 ? "next" : "previous");
+    }
+    function onArtPointerCancel() {
+        artStart = null;
+        artSwiping = false;
+        artDX = 0;
+    }
+
+    // ── Keyboard ─────────────────────────────────────────────────────────
+    // The player covers the whole screen, so while it is open it answers the
+    // transport keys a music app is expected to answer to. Everything else
+    // stays scoped: only Escape and "/" work from the view at large, so the
+    // module never swallows keys the rest of the app might want.
+    function editableTarget(e: KeyboardEvent): HTMLElement | null {
+        return (
+            (e.target as HTMLElement | null)?.closest?.(
+                "input, textarea, select, [contenteditable='true']",
+            ) ?? null
+        ) as HTMLElement | null;
+    }
+
     function onWindowKey(e: KeyboardEvent) {
-        if (e.key !== "Escape") return;
-        // Escape always leaves the player outright rather than stepping back
-        // through the queue pane — the sheet covers the nav, so one press
-        // must always be enough to get out (DESIGN.md §15).
-        if (playerOpen) closePlayer();
-        else if (menuFor) menuFor = null;
+        const field = editableTarget(e);
+        // A range input (scrubber, volume) owns the arrow keys while the
+        // caret is on it — we only borrow the ones it ignores.
+        const slider = field instanceof HTMLInputElement && field.type === "range";
+        const onControl = !!(e.target as HTMLElement | null)?.closest?.("button, a");
+        const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+
+        if (key === "Escape") {
+            // Escape always leaves the player outright rather than stepping
+            // back through the queue pane — the sheet covers the nav, so one
+            // press must always be enough to get out (DESIGN.md §15).
+            if (playerOpen) closePlayer();
+            else if (menuFor) menuFor = null;
+            else if (selectedIds.length) selectedIds = [];
+            return;
+        }
+        if (e.metaKey || e.ctrlKey || e.altKey) return;
+
+        if (!playerOpen) {
+            // "/" is the one shortcut that works from anywhere in the view:
+            // jump to Search and put the caret in the box.
+            if (key === "/" && !field) {
+                e.preventDefault();
+                goto("search"); // which puts the caret in the box
+            }
+            return;
+        }
+
+        const g = activeGroup;
+        if (!g) return;
+        if (field && !slider) return; // typing, not controlling
+
+        // Space on a focused button belongs to that button, not to us.
+        if ((key === " " || key === "k") && !(key === " " && onControl)) {
+            e.preventDefault();
+            void togglePlay(g);
+            return;
+        }
+        if (slider) return;
+
+        const gs = groupStateOf(g);
+        switch (key) {
+            case "ArrowRight":
+                e.preventDefault();
+                if (e.shiftKey || durationSec === 0) skip(g, "next");
+                else commitSeek(g, Math.min(durationSec, livePos + 10));
+                break;
+            case "ArrowLeft":
+                e.preventDefault();
+                if (e.shiftKey || durationSec === 0) skip(g, "previous");
+                else commitSeek(g, Math.max(0, livePos - 10));
+                break;
+            case "ArrowUp":
+                e.preventDefault();
+                nudgeVolume(g, 5);
+                break;
+            case "ArrowDown":
+                e.preventDefault();
+                nudgeVolume(g, -5);
+                break;
+            case "n": skip(g, "next"); break;
+            case "p": skip(g, "previous"); break;
+            case "m": toggleMuteGroup(g); break;
+            case "s": if (gs) setPlayMode(g, { shuffle: !gs.shuffle }); break;
+            case "r": if (gs) setPlayMode(g, { repeat: NEXT_REPEAT[gs.repeat] }); break;
+            case "q":
+                if (queuePane || (gs?.queue_length ?? 0) > 0) queuePane = !queuePane;
+                break;
+        }
     }
     // A regroup between polls can retire the coordinator the sheet is bound
     // to. Close instead of leaving an empty sheet — and, more importantly,
@@ -540,12 +770,13 @@
     }
 
     // ── Scrubbing ────────────────────────────────────────────────────────
-    // The position is only polled every 5s, so between polls the player
-    // extrapolates from the last reading. `tick` exists purely to re-run that
-    // derivation once a second, and only while the sheet is open.
+    // The position is only polled every 5s, so between polls every surface
+    // showing progress extrapolates from the last reading. `tick` exists
+    // purely to re-run those derivations once a second, and only while
+    // something is actually moving.
     let tick = $state(0);
     $effect(() => {
-        if (!playerOpen) return;
+        if (!playerOpen && playingCount === 0) return;
         const t = setInterval(() => tick++, 1000);
         return () => clearInterval(t);
     });
@@ -567,7 +798,7 @@
         const ov = seekOverride;
         const base = ov && now - ov.at < 4000 ? ov.sec : secs(activeState?.position);
         const since = ov && now - ov.at < 4000 ? ov.at : polledAt;
-        if (!activeState?.playing || !since) return base;
+        if (!isPlaying(activeGroup) || !since) return base;
         const advanced = base + (now - since) / 1000;
         return durationSec ? Math.min(durationSec, advanced) : advanced;
     });
@@ -737,6 +968,23 @@
         e.stopPropagation();
         menuFor = menuFor === uri ? null : uri;
     }
+    // An open menu takes focus and answers the arrow keys, so queueing a
+    // result never means tabbing back through the whole results list.
+    function menuNav(node: HTMLElement) {
+        const items = () =>
+            Array.from(node.querySelectorAll<HTMLButtonElement>("[role='menuitem']"));
+        items()[0]?.focus();
+        function onKey(e: KeyboardEvent) {
+            if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+            e.preventDefault();
+            const list = items();
+            const i = list.indexOf(document.activeElement as HTMLButtonElement);
+            const next = e.key === "ArrowDown" ? i + 1 : i - 1;
+            list[(next + list.length) % list.length]?.focus();
+        }
+        node.addEventListener("keydown", onKey);
+        return { destroy: () => node.removeEventListener("keydown", onKey) };
+    }
 
     // ── Spotify search ───────────────────────────────────────────────────
     let spotify = $state<SpotifyStatus | null>(null);
@@ -863,9 +1111,39 @@
 
     let searchTimer: ReturnType<typeof setTimeout> | undefined;
     let searchSeq = 0;
+    let searchEl = $state<HTMLInputElement | null>(null);
+
+    // Focus the box on the way into Search — but only where a keyboard is
+    // already there. On a phone an auto-focus throws up the software keyboard
+    // over the results the user came to look at.
+    function focusSearch() {
+        if (!window.matchMedia("(pointer: fine)").matches) return;
+        // The box may not be in the DOM yet — this can run on the way in.
+        void flushDOM().then(() => searchEl?.focus());
+    }
     function onQueryInput() {
         clearTimeout(searchTimer);
         searchTimer = setTimeout(doSearch, 400);
+    }
+    // Enter runs the search now instead of waiting out the debounce; Escape
+    // clears the box rather than closing something behind it.
+    function onQueryKey(e: KeyboardEvent) {
+        if (e.key === "Enter") {
+            e.preventDefault();
+            clearTimeout(searchTimer);
+            void doSearch();
+        } else if (e.key === "Escape" && query) {
+            e.stopPropagation();
+            clearQuery();
+        }
+    }
+    function clearQuery() {
+        clearTimeout(searchTimer);
+        searchSeq++; // drop an in-flight search
+        query = "";
+        results = null;
+        searching = false;
+        searchEl?.focus();
     }
     async function doSearch() {
         const q = query.trim();
@@ -979,10 +1257,12 @@
                 {#each playingGroups as g (g.coordinator_id)}
                     {@const c = coordinatorOf(g)}
                     {@const st = c?.state}
+                    {@const p = progressOf(g)}
                     <div
                         class="now-card playing"
                         use:dockAnchor={g.coordinator_id === dockGroup?.coordinator_id}
                         in:fly={{ y: 8, duration: dur(220), easing: cubicOut }}
+                        out:fade={{ duration: dur(120) }}
                     >
                         <button class="now-open" onclick={() => openPlayer(g)}>
                             {#if st?.track?.art_uri}
@@ -1001,14 +1281,43 @@
                                 </span>
                             </span>
                         </button>
-                        <button
-                            class="mini-btn on"
-                            aria-label="Pause"
-                            disabled={!c || busy["play:" + c?.id]}
-                            onclick={() => togglePlay(g)}
-                        >
-                            <Icon name="pause" size={16} />
-                        </button>
+                        <!-- Skips ride along from 430px up, the same width
+                             Home's card uses — a phone keeps play/pause and
+                             gives the track title the room instead. -->
+                        <div class="card-transport">
+                            <button
+                                class="mini-btn skip"
+                                aria-label="Previous track"
+                                disabled={!c || busy["previous:" + c?.id]}
+                                onclick={() => skip(g, "previous")}
+                            >
+                                <Icon name="skipPrev" size={16} />
+                            </button>
+                            <button
+                                class="mini-btn on"
+                                aria-label={isPlaying(g) ? "Pause" : "Play"}
+                                disabled={!c || busy["play:" + c?.id]}
+                                onclick={() => togglePlay(g)}
+                            >
+                                <Icon name={isPlaying(g) ? "pause" : "play"} size={16} />
+                            </button>
+                            <button
+                                class="mini-btn skip"
+                                aria-label="Next track"
+                                disabled={!c || busy["next:" + c?.id]}
+                                onclick={() => skip(g, "next")}
+                            >
+                                <Icon name="skipNext" size={16} />
+                            </button>
+                        </div>
+                        <!-- Where the track has got to, without opening
+                             anything. Live streams report no duration and get
+                             no line rather than a made-up one. -->
+                        {#if p > 0}
+                            <span class="prog" aria-hidden="true">
+                                <i style:width="{p * 100}%"></i>
+                            </span>
+                        {/if}
                     </div>
                 {/each}
             </div>
@@ -1197,13 +1506,22 @@
                 <div class="sp-search">
                     <Icon name="search" size={16} />
                     <input
-                        type="search"
+                        type="text"
                         class="sp-input"
                         placeholder="Songs, albums, playlists…"
                         aria-label="Search Spotify"
+                        autocomplete="off"
+                        enterkeyhint="search"
+                        bind:this={searchEl}
                         bind:value={query}
                         oninput={onQueryInput}
+                        onkeydown={onQueryKey}
                     />
+                    {#if query}
+                        <button class="icon-btn sp-clear" aria-label="Clear search" onclick={clearQuery}>
+                            <Icon name="close" size={14} />
+                        </button>
+                    {/if}
                 </div>
                 <div class="sp-filters">
                     {#if results}
@@ -1253,7 +1571,7 @@
                                     <Icon name="more" size={16} />
                                 </button>
                                 {#if menuFor === item.uri}
-                                    <div class="overflow-menu" role="menu"
+                                    <div class="overflow-menu" role="menu" use:menuNav
                                         in:scale={{ start: 0.95, duration: dur(140), easing: cubicOut, opacity: 0 }}
                                         out:scale={{ start: 0.95, duration: dur(100), easing: cubicOut, opacity: 0 }}>
                                         <button class="overflow-item" role="menuitem"
@@ -1277,11 +1595,16 @@
 
     <!-- ── Docked mini-player ──────────────────────────────────────────
          Present on every screen, but stands down while the Home card it
-         would duplicate is on screen. -->
+         would duplicate is on screen. It also survives a pause — that is
+         where a paused zone stays reachable once "Playing now" (which means
+         playing, literally) has let go of it. -->
     {#if showDock && dockGroup}
         {@const c = coordinatorOf(dockGroup)}
         {@const st = c?.state}
-        <div class="mini" transition:fly={{ y: 20, duration: dur(220), easing: cubicOut }}>
+        {@const dockPlaying = isPlaying(dockGroup)}
+        {@const p = progressOf(dockGroup)}
+        <div class="mini" class:paused={!dockPlaying}
+            transition:fly={{ y: 20, duration: dur(220), easing: cubicOut }}>
             <button class="mini-open" onclick={() => openPlayer(dockGroup)}>
                 {#if st?.track?.art_uri}
                     <img class="mini-art" src={st.track.art_uri} alt="" loading="lazy" />
@@ -1294,12 +1617,34 @@
                         {[st?.track?.artist, groupTitle(dockGroup)].filter(Boolean).join(" · ")}
                     </div>
                 </div>
-                {@render wave()}
+                <!-- Playing is a waveform; a zone the dock is holding open
+                     after a pause gets the idle speaker icon instead. -->
+                {#if dockPlaying}
+                    {@render wave()}
+                {:else}
+                    <span class="mini-idle" aria-hidden="true"><Icon name="speaker" size={14} /></span>
+                {/if}
             </button>
-            <button class="mini-btn on" aria-label="Pause" disabled={!c || busy["play:" + c?.id]}
-                onclick={() => togglePlay(dockGroup)}>
-                <Icon name="pause" size={16} />
-            </button>
+            <div class="card-transport">
+                <button class="mini-btn skip" aria-label="Previous track"
+                    disabled={!c || busy["previous:" + c?.id]}
+                    onclick={() => skip(dockGroup, "previous")}>
+                    <Icon name="skipPrev" size={16} />
+                </button>
+                <button class="mini-btn on" aria-label={dockPlaying ? "Pause" : "Play"}
+                    disabled={!c || busy["play:" + c?.id]}
+                    onclick={() => togglePlay(dockGroup)}>
+                    <Icon name={dockPlaying ? "pause" : "play"} size={16} />
+                </button>
+                <button class="mini-btn skip" aria-label="Next track"
+                    disabled={!c || busy["next:" + c?.id]}
+                    onclick={() => skip(dockGroup, "next")}>
+                    <Icon name="skipNext" size={16} />
+                </button>
+            </div>
+            {#if p > 0}
+                <span class="prog" aria-hidden="true"><i style:width="{p * 100}%"></i></span>
+            {/if}
         </div>
     {/if}
 {/if}
@@ -1360,9 +1705,16 @@
 <!-- ── Selection bar (grouping) ────────────────────────────────────── -->
 {#if screen === "rooms" && selectedIds.length >= 2}
     <div class="selbar" transition:fly={{ y: 16, duration: dur(200), easing: cubicOut }}>
+        <!-- Getting out of selection mode used to mean un-tapping every
+             circle one by one. -->
+        <button class="icon-btn sel-clear" aria-label="Clear selection"
+            onclick={() => (selectedIds = [])}>
+            <Icon name="close" size={15} />
+        </button>
         <span class="sel-count mono">{selectedIds.length} selected</span>
         <span class="sel-names">{selectedNames}</span>
-        <button class="btn btn-primary sel-go" onclick={groupSelected}>Group</button>
+        <button class="btn btn-primary sel-go" disabled={busy["group:" + groupTargetId]}
+            onclick={groupSelected}>Group</button>
     </div>
 {/if}
 
@@ -1488,9 +1840,20 @@
                 {/if}
             {:else}
                 <!-- ── Now playing ─────────────────────────────────────── -->
-                <div class="p-art">
+                <!-- Drag the art sideways to change track. -->
+                <div
+                    class="p-art"
+                    class:swiping={artSwiping}
+                    role="none"
+                    onpointerdown={onArtPointerDown}
+                    onpointermove={onArtPointerMove}
+                    onpointerup={onArtPointerUp}
+                    onpointercancel={onArtPointerCancel}
+                    style:transform={artDX ? `translateX(${artDX}px)` : ""}
+                    style:opacity={artSwiping ? Math.max(0.55, 1 - Math.abs(artDX) / 200) : undefined}
+                >
                     {#if st?.track?.art_uri}
-                        <img src={st.track.art_uri} alt="" />
+                        <img src={st.track.art_uri} alt="" draggable="false" />
                     {:else}
                         <div class="p-art-ph">[ album art ]</div>
                     {/if}
@@ -1540,21 +1903,22 @@
                         class:on={gs?.shuffle}
                         aria-label={gs?.shuffle ? "Shuffle on" : "Shuffle off"}
                         aria-pressed={gs?.shuffle ?? false}
+                        title="Shuffle (s)"
                         disabled={!gs || !c || busy["mode:" + c?.id]}
                         onclick={() => setPlayMode(g, { shuffle: !gs?.shuffle })}
                     >
                         <Icon name="shuffle" size={18} />
                     </button>
-                    <button class="icon-btn t-btn" aria-label="Previous track"
+                    <button class="icon-btn t-btn" aria-label="Previous track" title="Previous (shift ←)"
                         disabled={!c || busy["previous:" + c?.id]} onclick={() => skip(g, "previous")}>
                         <Icon name="skipPrev" size={22} />
                     </button>
-                    <button class="p-play" class:playing={st?.playing}
-                        aria-label={st?.playing ? "Pause" : "Play"}
+                    <button class="p-play" class:playing={isPlaying(g)}
+                        aria-label={isPlaying(g) ? "Pause" : "Play"} title="Play / pause (space)"
                         disabled={!c || busy["play:" + c?.id]} onclick={() => togglePlay(g)}>
-                        <Icon name={st?.playing ? "pause" : "play"} size={26} />
+                        <Icon name={isPlaying(g) ? "pause" : "play"} size={26} />
                     </button>
-                    <button class="icon-btn t-btn" aria-label="Next track"
+                    <button class="icon-btn t-btn" aria-label="Next track" title="Next (shift →)"
                         disabled={!c || busy["next:" + c?.id]} onclick={() => skip(g, "next")}>
                         <Icon name="skipNext" size={22} />
                     </button>
@@ -1562,12 +1926,19 @@
                         class="icon-btn t-mode"
                         class:on={gs && gs.repeat !== "off"}
                         aria-label={repeatLabel(gs?.repeat)}
+                        title="Repeat (r)"
                         disabled={!gs || !c || busy["mode:" + c?.id]}
                         onclick={() => setPlayMode(g, { repeat: NEXT_REPEAT[gs?.repeat ?? "off"] })}
                     >
                         <Icon name={gs?.repeat === "one" ? "repeatOne" : "repeat"} size={18} />
                     </button>
                 </div>
+
+                <!-- The keys are only worth advertising where there is a
+                     keyboard; phones get the swipe gesture instead. -->
+                <p class="p-keys mono" aria-hidden="true">
+                    space play · ← → seek · ↑ ↓ volume · q queue
+                </p>
 
                 {#if gs}
                     <div class="p-extras">
@@ -1771,10 +2142,14 @@
     /* ── Playing-now cards ── */
     .now-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+        /* Wide enough that the track title still has room next to the
+           three-button transport — narrower columns crushed it to an
+           ellipsis on desktop. */
+        grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
         gap: var(--space-3);
     }
     .now-card {
+        position: relative; overflow: hidden;
         display: flex; align-items: center; gap: var(--space-3);
         padding: 14px;
         background: var(--card); border: 1px solid var(--hairline);
@@ -1782,6 +2157,23 @@
         transition: border-color var(--t-fast);
     }
     .now-card.playing { background: var(--tile-on-gradient); border-color: var(--tile-on-border); }
+
+    /* ── Progress hairline ──
+       How far the track has got, on the cards themselves — the one thing
+       they couldn't say without opening the player. Sources that report no
+       duration (radio, line-in, TV) get no line rather than a made-up one. */
+    .prog {
+        position: absolute; left: 0; right: 0; bottom: 0;
+        height: 2px; background: var(--hairline);
+        pointer-events: none;
+    }
+    .prog i {
+        display: block; height: 100%;
+        background: var(--on);
+        /* Matches the 1s position tick, so the fill creeps instead of
+           stepping. */
+        transition: width 1s linear;
+    }
 
     /* Nothing playing — a single honest row, not one dead card per zone. */
     .quiet-card {
@@ -1825,14 +2217,24 @@
         overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
 
+    /* Card-level transport (Playing-now cards + the dock). Skips ride along
+       from 430px up; a phone keeps play/pause and gives the title the room,
+       the same trade Home's card makes. */
+    .card-transport { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
     .mini-btn {
         width: 38px; height: 38px; border-radius: 50%;
         display: grid; place-items: center; flex-shrink: 0;
         background: var(--card-3); border: 1px solid var(--hairline);
         color: var(--text); cursor: pointer;
+        transition: transform var(--t-fast), background var(--t-fast);
     }
     .mini-btn.on { background: var(--on); color: var(--primary-fg); border-color: transparent; }
+    .mini-btn:active:not(:disabled) { transform: scale(0.94); }
+    .mini-btn:focus-visible { box-shadow: var(--focus-ring); }
     .mini-btn:disabled { opacity: 0.5; }
+    @media (max-width: 430px) {
+        .mini-btn.skip { display: none; }
+    }
 
     /* ── Where playback lands ── */
     .fav-targets { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
@@ -1967,6 +2369,7 @@
         border-radius: var(--r-lg);
         box-shadow: var(--shadow-lg);
     }
+    .sel-clear { width: 32px; height: 32px; flex-shrink: 0; color: var(--text-mute); }
     .sel-count { font-size: 13px; font-weight: 600; flex-shrink: 0; }
     .sel-names {
         font-size: 12px; color: var(--text-mute);
@@ -1981,12 +2384,18 @@
             padding-right: 64px;
         }
     }
+    /* On a narrow phone the count, the clear button and Group already fill
+       the bar; a two-character stub of the first room name says nothing. */
+    @media (max-width: 420px) {
+        .sel-names { display: none; }
+    }
 
     /* ── Docked mini-player ── */
     .mini {
         position: sticky;
         bottom: calc(var(--space-4) + env(safe-area-inset-bottom));
         z-index: 30;
+        overflow: hidden;
         display: flex; align-items: center; gap: var(--space-3);
         padding: 9px 10px;
         margin-top: var(--space-2);
@@ -1994,7 +2403,12 @@
         border: 1px solid var(--tile-on-border);
         border-radius: var(--r-lg);
         box-shadow: var(--shadow-md);
+        transition: background var(--t-med), border-color var(--t-med);
     }
+    /* Held open after a pause: nothing is playing, so it drops the "ON"
+       surface a lit device gets and reads as a plain card. */
+    .mini.paused { background: var(--card); border-color: var(--hairline); }
+    .mini-idle { display: flex; color: var(--text-mute); flex-shrink: 0; }
     @media (max-width: 900px) {
         .mini {
             bottom: calc(var(--nav-clear) + var(--space-3));
@@ -2113,6 +2527,11 @@
         flex: 1; min-width: 0; background: none; border: 0; outline: none;
         color: var(--text); font-size: 14px;
     }
+    .sp-clear { width: 30px; height: 30px; flex-shrink: 0; color: var(--text-mute); }
+    /* The box already frames the field, so the ring goes on the container —
+       a second rounded shape drawn inside it read as a box in a box. */
+    .sp-search:focus-within { border-color: var(--border-strong); box-shadow: var(--focus-ring); }
+    .sp-input:focus, .sp-input:focus-visible { box-shadow: none; }
     .sp-filters { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
     .sp-browse-label {
         font-family: var(--font-mono);
@@ -2270,7 +2689,16 @@
 
     /* Art leads the sheet — it is the largest thing on screen, and the
        glow underneath is the same bulb glow a lit device gets. */
-    .p-art { display: flex; justify-content: center; padding: var(--space-2) 0 0; }
+    .p-art {
+        display: flex; justify-content: center; padding: var(--space-2) 0 0;
+        /* Horizontal is the swipe-to-skip gesture's; vertical stays the
+           sheet's (scroll, drag-to-dismiss). */
+        touch-action: pan-y;
+        transition: transform 260ms var(--spring), opacity var(--t-fast);
+        will-change: transform;
+    }
+    .p-art.swiping { transition: none; }
+    .p-art img { user-select: none; -webkit-user-drag: none; }
     .p-art img, .p-art-ph {
         width: min(340px, 78vw); aspect-ratio: 1;
         border-radius: var(--r-lg); object-fit: cover;
@@ -2321,6 +2749,17 @@
     }
     .p-play:active { transform: scale(0.96); }
     .p-play:disabled { opacity: 0.5; }
+
+    /* Keyboard hints, advertised only where there is a keyboard to press —
+       phones get the swipe gesture on the art instead. */
+    .p-keys { display: none; }
+    @media (hover: hover) and (pointer: fine) {
+        .p-keys {
+            display: block; text-align: center;
+            font-size: 10px; letter-spacing: 0.06em;
+            color: var(--text-dim);
+        }
+    }
 
     .p-extras { display: flex; flex-direction: column; gap: var(--space-3); }
     .p-extras .chip { align-self: flex-start; }
@@ -2414,7 +2853,8 @@
         input[type="range"]::-moz-range-thumb { width: 26px; height: 26px; }
         .member .m-name { width: 90px; }
         .sp-play { width: 44px; height: 44px; }
-        .sp-more, .q-rm, .fav-add { width: 44px; height: 44px; }
+        .sp-more, .q-rm, .fav-add, .sp-clear, .sel-clear { width: 44px; height: 44px; }
+        .mini-btn { width: 44px; height: 44px; }
         .check { width: 44px; height: 44px; top: 3px; right: 3px; }
         .puck-open { padding-right: 50px; }
         .sp-input, .sp-config input { font-size: 16px; } /* prevents iOS auto-zoom */
@@ -2423,7 +2863,9 @@
     @media (prefers-reduced-motion: reduce) {
         .wave i { animation: none; height: 8px; }
         .fav-art, .now-card, .puck, .puck-open, .check-dot, .p-play,
-        .p-upnext, .q-row, .sp-row { transition-duration: 0.001ms; }
+        .p-upnext, .q-row, .sp-row, .mini, .mini-btn, .p-art, .prog i {
+            transition-duration: 0.001ms;
+        }
         /* The sheet's drag snap-back is an inline style, so it needs its own
            override here rather than a transition-duration on the class. */
         .player { transition: none !important; }

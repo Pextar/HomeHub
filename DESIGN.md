@@ -495,12 +495,26 @@ patterns on top. Keep these consistent if you extend it.
   effect until the next 5s poll lands.
 - **Docked mini-player.** When something is playing, a compact bar sticks to
   the bottom of the view (`position: sticky`, cleared above the mobile tab
-  bar and safe area): art, track, waveform, play/pause. Tapping it — or any
-  "Playing now" card — expands the **full player**.
+  bar and safe area): art, track, waveform, transport. Tapping it — or any
+  "Playing now" card — expands the **full player**. It **survives a pause**:
+  "Playing now" means playing and lets go of the zone, so the dock is where
+  a paused zone stays one tap from playing again. Paused, it drops the
+  `.tile.on` surface for a plain card and swaps the waveform for the idle
+  speaker icon — nothing is moving, so nothing should say it is.
+- **Transport is optimistic.** A play/pause tap flips every icon, waveform
+  and card in the view immediately and holds that state until the poll
+  agrees (or 6s passes, or the call fails and it rolls back). A five-second
+  wait for a button to answer reads as a dropped tap.
+- **Progress rides on the playing surface.** Cards that carry a transport —
+  the "Playing now" cards and the dock — show a 2px hairline of progress
+  along their bottom edge, extrapolated between polls like the player's
+  scrubber. Sources that report no duration get no line rather than a
+  made-up one, the same honesty the scrubber owes them.
 - **The dock is a fallback, never a duplicate.** It carries the same track
-  and the same play/pause as the Home screen's "Playing now" card, so it
-  stands down while that card is on screen and appears the moment the card
-  scrolls away (`IntersectionObserver`, bottom inset discounting the band the
+  and the same transport as the Home screen's "Playing now" card — both
+  gain prev/next from 430px up and drop them below it, so neither is ever
+  the richer control — and so it stands down while that card is on screen
+  and appears the moment the card scrolls away (`IntersectionObserver`, bottom inset discounting the band the
   dock and tab bar occupy). On Rooms and Search no such card exists, so the
   dock is simply always there. Reaching for the transport must never mean
   choosing between two identical controls stacked on one screen.
@@ -517,6 +531,17 @@ patterns on top. Keep these consistent if you extend it.
   the nav is literal: the scrim/sheet sit at `z-index: 125/126`, above the
   mobile bar (100) and the nav drawer (120), below the modal stack (150) so a
   confirm still lands on top.
+- **The player answers the input the device actually has.** On a phone the
+  art — the biggest target on the screen — **swipes sideways to change
+  track**: it follows the finger at half speed, and past ~60px of travel it
+  fires prev/next. Vertical always loses to the sheet's own drag/scroll, so
+  the two gestures never fight. On a machine with a keyboard the sheet takes
+  the transport keys instead (space play, ←/→ seek, shift ←/→ track, ↑/↓
+  volume, m mute, q queue, s/r play modes, Escape out), advertised in one
+  mono line under the transport that only renders on `(hover: hover) and
+  (pointer: fine)`. A range input under the caret keeps its own arrow keys.
+  Outside the player only Escape and "/" (jump to Search) are claimed — a
+  module must not swallow keys the rest of the app might want.
 - **The player drags down like every other sheet.** Same gesture as
   `components/Modal.svelte`, and it must stay that way: the top bar always
   drags (`touch-action: none`), the scroll body drags only from
@@ -557,15 +582,24 @@ patterns on top. Keep these consistent if you extend it.
   (`role="menu"`), and favorites carry a corner `+` on the art. Each
   confirms with a toast naming the position it landed in — queueing onto a
   group playing radio is legal but silent, so the feedback has to be
-  explicit.
+  explicit. An open row menu takes focus and walks with the arrow keys, so
+  queueing from the keyboard doesn't mean tabbing through every result.
+- **The search box behaves like a search box.** Typing debounces (400ms) but
+  Enter runs the query immediately, a clear X appears once there is
+  something to clear (Escape does the same from inside the field), and
+  arriving on the Search screen puts the caret in the box — on `(pointer:
+  fine)` only, since auto-focus on a phone throws the software keyboard over
+  the results.
 - **Rooms grouping is a puck grid, not a list.** Each reachable speaker is a
   puck carrying **two intents on two targets**: the body opens that room's
   player, the corner circle selects it for grouping (amber ring + filled
   check when selected, 44px hit area on touch). The body used to select,
   which left the Rooms screen with no way through to playback at all —
   opening a room is the common intent, grouping is the deliberate one.
-  Selecting 2+ raises a floating "Group" bar. Existing multi-speaker zones
-  sit inside a dashed enclosure (`--tile-on-border`) with an "Ungroup"
+  Selecting 2+ raises a floating "Group" bar, which carries its own way out
+  (a clear X, and Escape) — leaving selection mode must never mean
+  un-tapping every circle one at a time. Existing multi-speaker zones sit
+  inside a dashed enclosure (`--tile-on-border`) with an "Ungroup"
   affordance.
 - **Home shows what's playing, and only that.** The dashboard's "Playing now"
   section (`components/NowPlaying.svelte`) is the only piece of Music that
