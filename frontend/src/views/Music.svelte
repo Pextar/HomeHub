@@ -8,6 +8,7 @@
     import Segmented from "../components/Segmented.svelte";
     import { api } from "../lib/api";
     import { toasts, route, bottomBar } from "../lib/stores.svelte";
+    import { onLive } from "../lib/live";
     import { openModal } from "../lib/modal.svelte";
     import { copyText } from "../lib/clipboard";
     import { fly, fade, scale } from "svelte/transition";
@@ -127,6 +128,7 @@
 
     // ── Data loading ─────────────────────────────────────────────────────
     let pollTimer: ReturnType<typeof setInterval> | undefined;
+    let stopLive: (() => void) | undefined;
     let statusSeq = 0;
 
     async function refresh() {
@@ -194,11 +196,31 @@
 
     onMount(() => {
         void refresh();
-        pollTimer = setInterval(refresh, 5000);
+        // Speaker changes arrive pushed — someone pressing play on the
+        // speaker itself lands here in well under a second instead of
+        // whenever the next poll happens to run.
+        stopLive = onLive("music", () => void refresh());
     });
     onDestroy(() => {
         clearInterval(pollTimer);
+        stopLive?.();
         unlockBodyScroll();
+    });
+
+    // The poll is the backstop, not the mechanism. When the backend has the
+    // speakers' notifications it only has to catch what those don't carry —
+    // the track position, which the player extrapolates between reads
+    // anyway — so it can run four times slower. When it doesn't, this is
+    // the only thing keeping the view current, and stays at the old rate.
+    //
+    // Derived rather than read straight off `status`, which every refresh
+    // reassigns: the interval must be rebuilt when the answer changes, not
+    // every time a poll lands.
+    const livePush = $derived(!!status?.live);
+    $effect(() => {
+        clearInterval(pollTimer);
+        pollTimer = setInterval(refresh, livePush ? 20_000 : 5_000);
+        return () => clearInterval(pollTimer);
     });
 
     // ── Actions ──────────────────────────────────────────────────────────

@@ -10,7 +10,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -47,6 +46,13 @@ type sonosGroupView struct {
 
 // sonosStatus handles GET /api/sonos/status — the Music view's single poll:
 // every registered speaker's live state plus the current group topology.
+//
+// The reading itself belongs to the event monitor, which normally has this
+// already cached from the speakers' own change notifications and answers
+// without touching the network. When subscriptions aren't running it falls
+// back to reading every speaker synchronously, which is what this handler
+// used to do on every single request. "live" tells the frontend which of the
+// two it got, so it can pick a polling interval to match.
 func (s *Server) sonosStatus(w http.ResponseWriter, r *http.Request) {
 	s.Store.Mu.RLock()
 	speakers := make([]store.SonosSpeaker, 0, len(s.Store.Sonos))
@@ -56,73 +62,30 @@ func (s *Server) sonosStatus(w http.ResponseWriter, r *http.Request) {
 	s.Store.Mu.RUnlock()
 	sort.Slice(speakers, func(i, j int) bool { return speakers[i].Name < speakers[j].Name })
 
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	snap := s.sonosEvents().Snapshot(ctx)
+
 	views := make([]sonosSpeakerView, len(speakers))
-	var mu sync.Mutex
-	var topology []sonos.Group
-
-	// Fan the state fetches out concurrently — with several speakers a
-	// serial poll would multiply the per-device latency.
-	var wg sync.WaitGroup
 	for i, sp := range speakers {
-		wg.Add(1)
-		go func(i int, sp store.SonosSpeaker) {
-			defer wg.Done()
-			ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
-			defer cancel()
-			st, err := sonos.GetState(ctx, sp.IP)
-			v := sonosSpeakerView{SonosSpeaker: sp, Reachable: err == nil, State: st}
-			if st != nil && st.Track != nil {
-				st.Track.ArtURI = s.sonosArtURL(sp.ID, st.Track.ArtURI)
-			}
-			mu.Lock()
-			views[i] = v
-			// Topology comes from the first speaker that answers; any
-			// speaker can describe the whole household.
-			if err == nil && topology == nil {
-				tctx, tcancel := context.WithTimeout(r.Context(), 3*time.Second)
-				if groups, terr := sonos.GetTopology(tctx, sp.IP); terr == nil {
-					topology = groups
-				}
-				tcancel()
-			}
-			mu.Unlock()
-		}(i, sp)
-	}
-	wg.Wait()
-
-	groups := s.sonosMapGroups(topology, speakers)
-
-	// Second pass: the group-level settings, for coordinators only. This
-	// needs the topology, which only exists once the first pass is done.
-	index := make(map[string]int, len(speakers))
-	for i, sp := range speakers {
-		index[sp.ID] = i
-	}
-	var wg2 sync.WaitGroup
-	for _, g := range groups {
-		i, ok := index[g.CoordinatorID]
-		if !ok || !views[i].Reachable {
-			continue
+		cached := snap.Speakers[sp.ID]
+		// Snapshot hands out copies, so rewriting the art URI to proxy
+		// through us can't corrupt what the next reader sees.
+		if cached.State != nil && cached.State.Track != nil {
+			cached.State.Track.ArtURI = s.sonosArtURL(sp.ID, cached.State.Track.ArtURI)
 		}
-		wg2.Add(1)
-		go func(i int, ip string) {
-			defer wg2.Done()
-			ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
-			defer cancel()
-			gs, err := sonos.GetGroupState(ctx, ip)
-			if err != nil {
-				return // leave it absent; the UI hides the controls
-			}
-			mu.Lock()
-			views[i].GroupState = gs
-			mu.Unlock()
-		}(i, speakers[i].IP)
+		views[i] = sonosSpeakerView{
+			SonosSpeaker: sp,
+			Reachable:    cached.Reachable,
+			State:        cached.State,
+			GroupState:   cached.GroupState,
+		}
 	}
-	wg2.Wait()
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"speakers": views,
-		"groups":   groups,
+		"groups":   s.sonosMapGroups(snap.Groups, speakers),
+		"live":     snap.Live,
 	})
 }
 
@@ -227,6 +190,7 @@ func (s *Server) sonosCreateSpeaker(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
 		return
 	}
+	s.sonosEvents().Nudge() // start watching it now, not at the next reconcile
 	writeJSON(w, http.StatusCreated, sp)
 }
 
@@ -264,6 +228,9 @@ func (s *Server) sonosUpdateSpeaker(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
 		return
 	}
+	// A re-addressed speaker needs its subscriptions rebuilt against the
+	// new IP; the old ones point somewhere that is no longer it.
+	s.sonosEvents().Nudge()
 	writeJSON(w, http.StatusOK, existing)
 }
 
@@ -283,6 +250,7 @@ func (s *Server) sonosDeleteSpeaker(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.Store.Mu.Unlock()
+	s.sonosEvents().Nudge() // release its subscriptions
 	w.WriteHeader(http.StatusNoContent)
 }
 

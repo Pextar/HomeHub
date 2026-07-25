@@ -44,6 +44,10 @@ type Server struct {
 	AuthPass      string
 	SessionSecret []byte // HMAC key for cookie sessions; see LoadOrCreateSessionSecret
 	SPADir        string // path to the built Svelte app (e.g. "./frontend/dist")
+	// HTTPPort is the plain-HTTP listener's port. Sonos speakers post their
+	// change notifications back to it — they will not use TLS — so it is
+	// needed to build the event callback URL even when HTTPS is also up.
+	HTTPPort string
 
 	// In-flight Matter commission jobs. Created lazily in Handler() so
 	// callers don't need to initialise it. Background commission runs
@@ -63,6 +67,11 @@ type Server struct {
 	// lazily on first use.
 	sonosAcctMu sync.Mutex
 	sonosAccts  map[string]sonosAcctEntry
+
+	// sonosMon watches speakers over GENA (see internal/sonos/monitor.go)
+	// and caches what they report. Created lazily by sonosEvents().
+	sonosMonMu sync.Mutex
+	sonosMon   *sonos.Monitor
 }
 
 // sonosAcctEntry is one cached service-account resolution.
@@ -296,6 +305,13 @@ func (s *Server) Handler() http.Handler {
 	api.HandleFunc("/push/unsubscribe", s.unsubscribePush).Methods("DELETE")
 	api.HandleFunc("/push/prefs", s.updatePushPrefs).Methods("PUT")
 	api.HandleFunc("/push/test", s.testPush).Methods("POST")
+
+	// Sonos change notifications. Outside /api and unauthenticated by
+	// necessity — speakers have no credentials. Guarded instead by the
+	// unguessable token, the SID and a source-address check; see
+	// handleSonosEvent. Bound to NOTIFY only, so a browser hitting the same
+	// path still falls through to the SPA.
+	r.HandleFunc(sonosEventPath+"/{token}", s.handleSonosEvent).Methods("NOTIFY")
 
 	r.PathPrefix("/").Handler(spaHandler(s.SPADir))
 

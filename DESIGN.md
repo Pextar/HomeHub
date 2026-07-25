@@ -510,7 +510,7 @@ patterns on top. Keep these consistent if you extend it.
   you are looking at is the room the next favorite should land in. It
   defaults to whatever is already playing. Starting playback also **confirms
   in words** (`Playing · <track> · <room>`), because a tap has no visible
-  effect until the next 5s poll lands.
+  effect until the speaker reports back.
 - **Docked mini-player.** When something is playing, a compact bar sticks to
   the bottom of the view (`position: sticky`, cleared above the mobile tab
   bar and safe area): art, track, waveform, transport. Tapping it — or any
@@ -541,8 +541,8 @@ patterns on top. Keep these consistent if you extend it.
   choosing between two identical controls stacked on one screen.
 - **Full player = bottom sheet, art-led.** A bottom sheet on mobile (`--r-xl`
   top radius, `transition:sheet`, scrim, body-scroll-lock), a centered dialog
-  ≥ 601px. Rendered inline (not the modal stack) so it stays live against the
-  5s poll. Album art is the largest element on the screen
+  ≥ 601px. Rendered inline (not the modal stack) so it stays live against
+  incoming speaker updates. Album art is the largest element on the screen
   (`min(340px, 78vw)`) and carries the bulb glow underneath
   (`box-shadow` in `--on-glow`) — the same light a lit device gives off.
   Below it, in order: title/artist, scrubber, transport, extras, volume.
@@ -630,7 +630,8 @@ patterns on top. Keep these consistent if you extend it.
   play/pause (skips appear from 430px up) — on the `.tile.on` playing
   surface. Everything else about a group (scrubber, volume, queue, play
   modes) stays in the full player; tapping the card goes there. It owns its
-  own slower poll because Sonos state doesn't live in the shared data store,
+  own refresh — on the `music` SSE topic, with a slower backstop poll behind
+  it — because Sonos state doesn't live in the shared data store,
   and it renders **nothing at all** when there are no speakers, when the
   bridge is unreachable, or for a non-admin profile — a home without Sonos
   must not see a dead section, and a failed poll never raises a toast. Only
@@ -649,6 +650,25 @@ patterns on top. Keep these consistent if you extend it.
     the poll for no new information.
   - A control whose speaker-side call can be refused (seek on a stream)
     renders as a label explaining why, never as a dead control.
+- **State is pushed, and the poll is only a backstop.** The backend
+  subscribes to each speaker's UPnP change notifications (GENA — see
+  `internal/sonos/monitor.go`) and caches what they report, so pressing play
+  on the speaker itself reaches the screen in well under a second. Two
+  consequences for anything built on top:
+  - **Never assume the push is there.** Subscriptions need a speaker that
+    can reach HomeHub back over plain HTTP, which not every network allows.
+    When they can't be established the same status endpoint reads every
+    speaker synchronously instead — exactly what it did before any of this
+    existed — and reports `live: false`. Both music surfaces pick their
+    polling interval from that flag (20s/45s pushed, 5s/10s not), and a new
+    surface must do the same rather than hardcoding a fast poll or trusting
+    the events blindly.
+  - **Music changes are their own SSE topic.** Speaker state is far
+    chattier than the store — a volume drag is a dozen notifications — so it
+    is published as `music`, not `changed`. Subscribing a view to the wrong
+    one makes every open tab refetch every socket and sensor in the house
+    each time somebody turns the kitchen up. Use `onLive(topic, fn)` from
+    `lib/live.ts`, which shares one connection across the whole app.
 
 ---
 

@@ -2,16 +2,21 @@
     import Icon from "./Icon.svelte";
     import { api } from "../lib/api";
     import { route, session, toasts } from "../lib/stores.svelte";
+    import { onLive } from "../lib/live";
     import { dur, stagger } from "../lib/motion";
     import { fly } from "svelte/transition";
     import { cubicOut } from "svelte/easing";
     import type { SonosStatus, SonosGroupView, SonosSpeakerView } from "../lib/types";
 
-    // Home's window on the Music module. It carries its own poll because
+    // Home's window on the Music module. It carries its own refresh because
     // speaker state doesn't live in the shared data store — it's read off the
-    // speakers themselves. Slower than the Music view's 5s: home shows no
-    // position, so a stale second costs nothing.
+    // speakers themselves. Changes arrive pushed on the "music" SSE topic;
+    // the interval below is only the backstop, and slower than the Music
+    // view's because home shows no position, so a stale second costs
+    // nothing. Slower again once the backend has the speakers' own
+    // notifications and the poll has almost nothing left to catch.
     const POLL_MS = 10_000;
+    const LIVE_POLL_MS = 45_000;
 
     let status = $state<SonosStatus | null>(null);
     let loaded = $state(false);
@@ -54,14 +59,21 @@
 
     // The Sonos endpoints are admin-only, and a backgrounded PWA shouldn't
     // keep waking the speakers — so the poll runs only while both hold.
+    // Derived, not read straight off `status`: this effect calls refresh(),
+    // and refresh() reassigns `status` — reading it here directly would
+    // make the effect retrigger itself forever.
+    const livePush = $derived(!!status?.live);
+
     $effect(() => {
         if (!session.isAdmin) return;
         void refresh();
         const onVisible = () => { if (!document.hidden) void refresh(); };
-        const t = setInterval(onVisible, POLL_MS);
+        const t = setInterval(onVisible, livePush ? LIVE_POLL_MS : POLL_MS);
+        const stopLive = onLive("music", () => { if (!document.hidden) void refresh(); });
         document.addEventListener("visibilitychange", onVisible);
         return () => {
             clearInterval(t);
+            stopLive();
             document.removeEventListener("visibilitychange", onVisible);
         };
     });

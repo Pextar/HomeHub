@@ -21,6 +21,7 @@
     import KidHome from "./views/KidHome.svelte";
     import AssistantLauncher from "./components/AssistantLauncher.svelte";
     import { data, route, toasts, session } from "./lib/stores.svelte";
+    import { onLive } from "./lib/live";
     import { fly, fade } from "svelte/transition";
     import { cubicOut } from "svelte/easing";
     import { dur } from "./lib/motion";
@@ -76,20 +77,16 @@
         connectEvents();
     }
 
-    // Live updates via Server-Sent Events. The browser auto-reconnects on
-    // error, so we just (re)attach handlers. Refreshes are debounced so a
-    // burst of changes (e.g. "all off") collapses into a single fetch.
+    // Live updates via Server-Sent Events (lib/live.ts owns the connection).
+    // Refreshes are debounced so a burst of changes (e.g. "all off")
+    // collapses into a single fetch. Music has its own topic and its own
+    // subscribers, so speaker chatter never lands here.
     let refreshTimer: ReturnType<typeof setTimeout> | undefined;
     function connectEvents() {
-        try {
-            const es = new EventSource("/api/events");
-            es.addEventListener("changed", () => {
-                clearTimeout(refreshTimer);
-                refreshTimer = setTimeout(() => data.refresh(), 250);
-            });
-        } catch {
-            // EventSource unavailable — the polling interval still covers us.
-        }
+        onLive("changed", () => {
+            clearTimeout(refreshTimer);
+            refreshTimer = setTimeout(() => data.refresh(), 250);
+        });
     }
 
     const views: Record<Route, any> = {

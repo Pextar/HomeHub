@@ -206,6 +206,11 @@ func main() {
 		log.Fatalf("failed to load spotify state: %v", err)
 	}
 
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+
 	server := &api.Server{
 		Store:         st,
 		Matter:        matterClient,
@@ -217,17 +222,13 @@ func main() {
 		AuthPass:      os.Getenv("AUTH_PASS"),
 		SessionSecret: secret,
 		SPADir:        "./frontend/dist",
+		HTTPPort:      port,
 	}
 
 	// Seed an admin from AUTH_USER/AUTH_PASS on first run (no-op once any
 	// user exists). Keeps legacy single-credential setups working.
 	if err := server.Bootstrap(); err != nil {
 		log.Fatalf("failed to bootstrap admin user: %v", err)
-	}
-
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8080"
 	}
 
 	handler := server.Handler()
@@ -281,6 +282,17 @@ func main() {
 	go mqtt.SensorListener{Client: mqttClient}.Run(schedCtx, st)
 	go reachability.Run(schedCtx, st, matterClient, pushSvc)
 
+	// Sonos change notifications. Its own context, shut down before the
+	// HTTP server: the subscriptions have to be released while the speakers
+	// can still reach us, or they keep posting to a dead callback until
+	// their grants expire.
+	sonosCtx, stopSonosEvents := context.WithCancel(context.Background())
+	sonosDone := make(chan struct{})
+	go func() {
+		defer close(sonosDone)
+		server.RunSonosEvents(sonosCtx)
+	}()
+
 	go func() {
 		log.Printf("HomeHub listening on http://:%s", port)
 		if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -304,6 +316,12 @@ func main() {
 	log.Println("shutting down...")
 
 	stopScheduler()
+	stopSonosEvents()
+	select {
+	case <-sonosDone:
+	case <-time.After(5 * time.Second):
+		log.Println("sonos: timed out releasing event subscriptions")
+	}
 	mqttClient.Close()
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
