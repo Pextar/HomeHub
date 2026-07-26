@@ -12,6 +12,9 @@
     import NowCard from "../components/music/NowCard.svelte";
     import FavoriteCard from "../components/music/FavoriteCard.svelte";
     import DestinationRow from "../components/music/DestinationRow.svelte";
+    import StartSomething from "../components/music/StartSomething.svelte";
+    import SonosPlayer from "../components/music/SonosPlayer.svelte";
+    import KEFPlayer from "../components/music/KEFPlayer.svelte";
     import ConfirmModal from "../components/ConfirmModal.svelte";
     import SpeakerModal from "../modals/SpeakerModal.svelte";
     import SonosSpeakerDetail from "./SonosSpeakerDetail.svelte";
@@ -28,12 +31,11 @@
     import { lockBodyScroll, unlockBodyScroll } from "../lib/scroll-lock";
     import * as sheetRun from "../lib/sheet-run";
     import type { SheetRun } from "../lib/sheet-run";
-    import { kefSourceLabel, KEF_SOURCES } from "../lib/kef";
-    import { secs, trimClock, fmtSecs } from "../lib/music/time";
+    import { kefSourceLabel } from "../lib/kef";
     import { settleScroll, restoreScroll, toTop } from "../lib/music/scroll";
     import { clock } from "../lib/music/clock.svelte";
     import { createBusy } from "../lib/music/busy.svelte";
-    import { createSonosBridge, NEXT_REPEAT, repeatLabel } from "../lib/music/sonos.svelte";
+    import { createSonosBridge } from "../lib/music/sonos.svelte";
     import { createKEFBridge } from "../lib/music/kef.svelte";
     import { createDestination } from "../lib/music/destination.svelte";
     import { createSearchHistory } from "../lib/music/history.svelte";
@@ -300,8 +302,6 @@
         sheets = back;
         if (back.open) restoreSheetScroll(back.open);
         if (back.open !== "player") { playerGroupId = null; playerKefId = null; }
-        queuePane = false;
-        scrubSec = null;
         endPuckDrag();
         grabId = null;
     }
@@ -311,15 +311,13 @@
         sheets = sheetRun.closeAll(sheets);
         playerGroupId = null;
         playerKefId = null;
-        queuePane = false;
-        scrubSec = null;
         endPuckDrag();
         grabId = null;
     }
 
     function openSearch() {
         showSheet("search");
-        if (spotify?.connected) focusSearch(); // you came here to type
+        if (spotify.connected) focusSearch(); // you came here to type
     }
     function openZones() {
         showSheet("zones");
@@ -676,6 +674,10 @@
     });
 
     let playerEl = $state<HTMLElement | null>(null);
+    // Whichever player is mounted — only ever one — so the keyboard router can
+    // hand the transport keys to it.
+    let sonosPlayer = $state<SonosPlayer | null>(null);
+    let kefPlayer = $state<KEFPlayer | null>(null);
     // Set by the open sheet while a drag-down rides out. The art swipe stands
     // down for those 220ms; raising a sheet clears it, since the flag belongs
     // to the sheet that is leaving, not to the one arriving.
@@ -736,56 +738,7 @@
             runHistoryQuery(q);
             return;
         }
-        if (spotify?.connected) focusSearch();
-    }
-
-    // ── Swipe the art to change track ────────────────────────────────────
-    // The album art is the largest target in the sheet, so it carries the
-    // gesture every phone player has: drag sideways, let go past a clear
-    // threshold, and the track changes. A vertical pull is handed straight
-    // back to the sheet's own drag-to-dismiss.
-    let artDX = $state(0);
-    let artSwiping = $state(false);
-    let artStart: { x: number; y: number } | null = null;
-
-    function onArtPointerDown(e: PointerEvent) {
-        if (e.pointerType === "mouse" || sheetDismissing) return;
-        artStart = { x: e.clientX, y: e.clientY };
-        artDX = 0;
-    }
-    function onArtPointerMove(e: PointerEvent) {
-        if (!artStart) return;
-        const dx = e.clientX - artStart.x;
-        const dy = e.clientY - artStart.y;
-        if (!artSwiping) {
-            // Vertical wins early: that gesture belongs to the sheet.
-            if (Math.abs(dy) > 10 && Math.abs(dy) >= Math.abs(dx)) {
-                artStart = null;
-                return;
-            }
-            if (Math.abs(dx) < 12) return;
-            artSwiping = true;
-            try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); }
-            catch { /* not capturable */ }
-        }
-        // Half speed: the art nudges along with the finger rather than being
-        // thrown off the screen.
-        artDX = dx * 0.5;
-        e.preventDefault();
-    }
-    function onArtPointerUp() {
-        if (!artStart) return;
-        const moved = artDX;
-        artStart = null;
-        artSwiping = false;
-        artDX = 0;
-        if (Math.abs(moved) < 30 || !activeGroup) return; // ~60px of travel
-        sonos.skip(activeGroup, moved < 0 ? "next" : "previous");
-    }
-    function onArtPointerCancel() {
-        artStart = null;
-        artSwiping = false;
-        artDX = 0;
+        if (spotify.connected) focusSearch();
     }
 
     // ── Keyboard ─────────────────────────────────────────────────────────
@@ -811,7 +764,7 @@
 
         if (key === "Escape") {
             // Escape always leaves the player outright rather than stepping
-            // back through the sonos.queue pane — the sheet covers the nav, so one
+            // back through the queue pane — the sheet covers the nav, so one
             // press must always be enough to get out (DESIGN.md §15).
             if (menuFor) menuFor = null;
             else if (puckDrag || grabId) {
@@ -851,69 +804,11 @@
             return;
         }
 
-        // A KEF player answers the keys it can: play/pause, skip, volume. It
-        // has no seek, no sonos.queue and no play modes, so those keys stay unbound
-        // here rather than doing something almost-right.
-        const kf = activeKef;
-        if (kf) {
-            if ((key === " " || key === "k") && !(key === " " && onControl)) {
-                e.preventDefault();
-                void kef.togglePlay(kf);
-                return;
-            }
-            if (slider) return;
-            switch (key) {
-                case "ArrowRight": e.preventDefault(); kef.skip(kf, "next"); break;
-                case "ArrowLeft": e.preventDefault(); kef.skip(kf, "previous"); break;
-                case "ArrowUp": e.preventDefault(); kef.setVolume(kf, kef.shownVolume(kf) + 5); break;
-                case "ArrowDown": e.preventDefault(); kef.setVolume(kf, kef.shownVolume(kf) - 5); break;
-                case "n": kef.skip(kf, "next"); break;
-                case "p": kef.skip(kf, "previous"); break;
-                case "m": kef.toggleMute(kf); break;
-            }
-            return;
-        }
-
-        const g = activeGroup;
-        if (!g) return;
-
-        // Space on a focused button belongs to that button, not to us.
-        if ((key === " " || key === "k") && !(key === " " && onControl)) {
-            e.preventDefault();
-            void sonos.togglePlay(g);
-            return;
-        }
-        if (slider) return;
-
-        const gs = sonos.groupStateOf(g);
-        switch (key) {
-            case "ArrowRight":
-                e.preventDefault();
-                if (e.shiftKey || durationSec === 0) sonos.skip(g, "next");
-                else commitSeek(g, Math.min(durationSec, livePos + 10));
-                break;
-            case "ArrowLeft":
-                e.preventDefault();
-                if (e.shiftKey || durationSec === 0) sonos.skip(g, "previous");
-                else commitSeek(g, Math.max(0, livePos - 10));
-                break;
-            case "ArrowUp":
-                e.preventDefault();
-                sonos.nudgeVolume(g, 5);
-                break;
-            case "ArrowDown":
-                e.preventDefault();
-                sonos.nudgeVolume(g, -5);
-                break;
-            case "n": sonos.skip(g, "next"); break;
-            case "p": sonos.skip(g, "previous"); break;
-            case "m": sonos.toggleMuteGroup(g); break;
-            case "s": if (gs) sonos.setPlayMode(g, { shuffle: !gs.shuffle }); break;
-            case "r": if (gs) sonos.setPlayMode(g, { repeat: NEXT_REPEAT[gs.repeat] }); break;
-            case "q":
-                if (queuePane || (gs?.queue_length ?? 0) > 0) queuePane = !queuePane;
-                break;
-        }
+        // Past this point the keys belong to whichever player is up. Each one
+        // binds what its hardware can answer — a KEF has no seek, no queue and
+        // no play modes — so the shell routes rather than deciding.
+        kefPlayer?.handleKey(e, { slider, onControl });
+        sonosPlayer?.handleKey(e, { slider, onControl });
     }
     // A regroup between polls can retire the coordinator the sheet is bound
     // to. Close instead of leaving an empty sheet — and, more importantly,
@@ -948,46 +843,10 @@
         return clock.start();
     });
 
-    // Non-null while a finger/pointer is on the scrubber. The only part of a
-    // position that is genuinely this view's: everything else — the poll, the
-    // extrapolation, the just-issued seek that outranks both — is the bridge's.
-    let scrubSec = $state<number | null>(null);
-
-    const activeState = $derived(activeGroup ? sonos.coordinatorOf(activeGroup)?.state : undefined);
-    // Sources without a duration (radio, line-in, TV) can't be seeked.
-    const durationSec = $derived(secs(activeState?.duration));
-    const livePos = $derived(scrubSec ?? sonos.livePosition(activeGroup));
-
-    function commitSeek(g: SonosGroupView, sec: number) {
-        scrubSec = null;
-        sonos.seek(g, sec);
-    }
-
-    // Drop the scrub/seek overrides when the track or the target changes, so
-    // a new song never inherits the previous one's position. The guard
-    // matters: every poll replaces the status objects, so this effect re-runs
-    // on the 5s tick — without it, a drag in progress would be cancelled and
-    // a fresh seek discarded each time a poll landed.
-    let lastTrackKey = "";
-    $effect(() => {
-        const key = `${playerGroupId ?? ""}|${activeState?.track?.title ?? ""}`;
-        if (key === lastTrackKey) return;
-        lastTrackKey = key;
-        scrubSec = null;
-        sonos.clearSeek();
-    });
-
-    // ── Queue ────────────────────────────────────────────────────────────
-    let queuePane = $state(false);
-    // The two panes share one scroll container, so switching has to rewind
-    // it — otherwise the sonos.queue opens halfway down at the player's offset.
+    /** The open sheet's scroll container, for scroll restore and edge-scroll. */
     let scrollEl = $state<HTMLElement | null>(null);
-    $effect(() => {
-        void queuePane;
-        if (scrollEl) scrollEl.scrollTop = 0;
-    });
 
-    // Load the sonos.queue whenever the player binds to a group: the "Up next" row
+    // Load the queue whenever the player binds to a group: the "Up next" row
     // needs a real track name, not just a count.
     $effect(() => {
         const id = playerGroupId;
@@ -997,8 +856,6 @@
         }
         void sonos.loadQueue(id, true);
     });
-
-    const nextInQueue = $derived(sonos.nextInQueue(activeState?.queue_track));
 
     /**
      * Clearing stops playback, so it gets the same confirm treatment as any
@@ -1870,7 +1727,7 @@
 
 {#snippet searchBody()}
     <!-- ── Spotify search ──────────────────────────────────────────── -->
-    {#if spotify}
+    {#if spotify.status}
         <section class="card">
             {#if !spotify.status?.configured || spotify.setupOpen}
                 <div class="card-header"><h2>Spotify search</h2></div>
@@ -2010,7 +1867,7 @@
                      which needs a permission this login may predate. Saying so
                      before the tap beats a 409 after it, and reconnecting is
                      the only thing that fixes it. -->
-                {#if destination.kefSpeaker && spotify && !spotify.status?.playback}
+                {#if destination.kefSpeaker && spotify.status && !spotify.status.playback}
                     <div class="sp-note">
                         <Icon name="info" size={14} />
                         <span>
@@ -2215,453 +2072,67 @@
     </MusicSheet>
 {/if}
 
-<!-- ── KEF player sheet ─────────────────────────────────────────────
-     The same object as the Sonos player, minus the two things KEF hasn't
-     got: a sonos.queue and a group. What it has instead is the input selector,
-     which is the question a KEF speaker actually raises. Every room chip on
-     Home now opens a player — the chips sit side by side and looked
-     identical, so sending one of them to a settings screen two levels away
-     was the module's worst seam (DESIGN.md §15). -->
+<!-- ── The players ──────────────────────────────────────────────────
+     Two sheets, not one: a Sonos zone has a queue, a group and play modes,
+     and a KEF speaker has an input selector instead. They share every section
+     that is genuinely the same object (art, meta, transport, volume rows,
+     "Start something"), and differ where the hardware does. -->
 {#if playerOpen && activeKef}
-    {@const sp = activeKef}
-    {@const st = sp.state}
-    {@const p = kef.progress(sp)}
-    {@const durMs = st?.duration_ms ?? 0}
-    <MusicSheet
-        label="Now playing"
-        eyebrow="Playing on"
-        title={sp.name}
-        backLabel="Collapse player"
-        onBack={closePlayer}
-        onDismiss={closePlayer}
-        action={{
-            // Tone, EQ and the rest are the speaker's own settings, and they
-            // live on its screen. This is the way there, and the sheet stands
-            // down first so a screen can push without a sheet opening one.
-            icon: "sliders",
-            label: `${sp.name} settings`,
-            onClick: () => {
-                hideSheet();
-                openSpeakers();
-                openKEFSpeaker(sp);
-            },
+    <KEFPlayer
+        speaker={activeKef}
+        {kef}
+        {busy}
+        onClose={closePlayer}
+        onSettings={() => {
+            const sp = activeKef;
+            hideSheet();
+            openSpeakers();
+            if (sp) openKEFSpeaker(sp);
         }}
+        bind:this={kefPlayer}
         bind:scrollEl
         bind:sheetEl={playerEl}
         bind:dismissing={sheetDismissing}
     >
-            <div class="p-art">
-                {#if st?.track?.art_uri}
-                    <img src={st.track.art_uri} alt="" draggable="false" />
-                {:else}
-                    <div class="p-art-ph">[ album art ]</div>
-                {/if}
-            </div>
-
-            <div class="p-meta">
-                {#if st?.track?.title}
-                    <div class="p-title">{st.track.title}</div>
-                    <div class="p-sub">
-                        {[st.track.artist, st.track.album].filter(Boolean).join(" · ")
-                            || kefSourceLabel(st.source)}
-                    </div>
-                {:else if !st?.powered_on}
-                    <div class="p-title idle">Standby</div>
-                    <div class="p-sub">Press play to wake it.</div>
-                {:else}
-                    <div class="p-title idle">{kef.nowLine(sp)}</div>
-                    <div class="p-sub">Pick an input below, or search Spotify.</div>
-                {/if}
-            </div>
-
-            <!-- A read-only line, not a scrubber: KEF's API has no seek. The
-                 physical inputs and live streams report no duration at all
-                 and get no line rather than a made-up one — the same rule
-                 Sonos radio follows one sheet over. -->
-            {#if durMs > 0}
-                <div class="p-scrub">
-                    <span class="kef-rail" aria-hidden="true"><i style:width="{p * 100}%"></i></span>
-                    <div class="p-times mono">
-                        <span>{fmtSecs(kef.positionMs(sp) / 1000)}</span><span>{fmtSecs(durMs / 1000)}</span>
-                    </div>
-                </div>
-            {:else if st?.track?.title}
-                <div class="p-live mono">no track position on this input</div>
-            {/if}
-
-            <div class="p-transport">
-                <button class="icon-btn t-btn" aria-label="Previous track"
-                    disabled={busy.is("kefprevious:" + sp.id)} onclick={() => kef.skip(sp, "previous")}>
-                    <Icon name="skipPrev" size={22} />
-                </button>
-                <button class="p-play" class:playing={kef.isPlaying(sp)}
-                    aria-label={kef.isPlaying(sp) ? "Pause" : "Play"} title="Play / pause (space)"
-                    disabled={busy.is("kefplay:" + sp.id)} onclick={() => kef.togglePlay(sp)}>
-                    <Icon name={kef.isPlaying(sp) ? "pause" : "play"} size={26} />
-                </button>
-                <button class="icon-btn t-btn" aria-label="Next track"
-                    disabled={busy.is("kefnext:" + sp.id)} onclick={() => kef.skip(sp, "next")}>
-                    <Icon name="skipNext" size={22} />
-                </button>
-            </div>
-
-            <!-- Spotify Connect is the only road content takes to a KEF
-                 speaker, so this row is the whole of "play something else"
-                 here — and it sits above the input selector, which answers
-                 the same question for the physical inputs. -->
-            {@render startSomething(null)}
-
-            <div class="p-speakers">
-                <div class="eyrow">Volume</div>
-                <div class="member">
-                    <button class="icon-btn m-mute" aria-label={st?.muted ? "Unmute" : "Mute"}
-                        aria-pressed={st?.muted ?? false}
-                        disabled={busy.is("kefmute:" + sp.id)} onclick={() => kef.toggleMute(sp)}>
-                        <Icon name={st?.muted ? "volumeOff" : "volume"} size={17} />
-                    </button>
-                    <span class="m-name" class:muted={st?.muted}>{sp.name}</span>
-                    <input type="range" min="0" max="100" step="1"
-                        aria-label="Volume for {sp.name}"
-                        value={kef.shownVolume(sp)}
-                        oninput={(e) => kef.dragVolume(sp, e.currentTarget.valueAsNumber)}
-                        onchange={(e) => kef.setVolume(sp, e.currentTarget.valueAsNumber)} />
-                    <span class="vol-num mono">{kef.shownVolume(sp)}</span>
-                </div>
-            </div>
-
-            <!-- The question a KEF speaker raises that a Sonos zone doesn't:
-                 which input. It sits where the group's member volumes sit on
-                 the other sheet, because it answers the same "where is this
-                 coming out" question. -->
-            <div class="p-speakers">
-                <div class="eyrow">Input</div>
-                <div class="src-row">
-                    {#each KEF_SOURCES as src (src.value)}
-                        <button class="chip" class:on={st?.source === src.value}
-                            aria-pressed={st?.source === src.value}
-                            disabled={busy.is("kefsrc:" + sp.id)}
-                            onclick={() => kef.setSource(sp, src.value)}>{src.label}</button>
-                    {/each}
-                </div>
-                <p class="hint">
-                    No queue and no grouping — a KEF speaker plays alone, so
-                    there is nothing to line up behind this or to play it with.
-                </p>
-            </div>
-    </MusicSheet>
+        {#snippet startSomething()}
+            {@render startRow(null)}
+        {/snippet}
+    </KEFPlayer>
 {/if}
 
-<!-- ── Full player sheet ───────────────────────────────────────────── -->
 {#if playerOpen && activeGroup}
-    {@const g = activeGroup}
-    {@const c = sonos.coordinatorOf(g)}
-    {@const st = c?.state}
-    {@const gs = c?.group_state}
-    {@const grouped = g.member_ids.length > 1}
-    <MusicSheet
-        label="Now playing"
-        eyebrow={queuePane ? "Queue" : "Playing on"}
-        title={sonos.groupTitle(g)}
-        backIcon={queuePane ? "chevronLeft" : "chevronDown"}
-        backLabel={queuePane ? "Back to now playing" : "Collapse player"}
-        onBack={() => (queuePane ? (queuePane = false) : closePlayer())}
-        onDismiss={closePlayer}
-        action={{ icon: "close", label: "Close player", onClick: closePlayer }}
+    <SonosPlayer
+        group={activeGroup}
+        {sonos}
+        {busy}
+        onClose={closePlayer}
+        onClearQueue={() => activeGroup && clearQueue(activeGroup)}
+        bind:this={sonosPlayer}
         bind:scrollEl
         bind:sheetEl={playerEl}
         bind:dismissing={sheetDismissing}
     >
-            {#if queuePane}
-                <!-- ── Queue pane ──────────────────────────────────────── -->
-                <div class="q-bar">
-                    <span class="q-total mono">
-                        {gs?.queue_length ?? sonos.queue.length}
-                        {(gs?.queue_length ?? sonos.queue.length) === 1 ? "track" : "tracks"}
-                    </span>
-                    <button class="chip" disabled={!c || busy.is("qclear:" + c?.id) || sonos.queue.length === 0}
-                        onclick={() => clearQueue(g)}>Clear</button>
-                </div>
-
-                {#if sonos.queueLoading}
-                    <div class="skeleton q-skeleton"></div>
-                {:else if sonos.queue.length === 0}
-                    <p class="q-none">
-                        Nothing queued. Play a favorite or a Spotify result and it lands here —
-                        radio and line-in play straight through without a sonos.queue.
-                    </p>
-                {:else}
-                    <div class="q-list">
-                        {#each sonos.queue as item (item.track)}
-                            {@const current = item.track === st?.queue_track}
-                            <div class="q-row" class:current>
-                                <button class="q-open" disabled={busy.is("jump:" + item.track)}
-                                    onclick={() => sonos.jumpTo(g, item.track)}>
-                                    <span class="q-num mono">
-                                        {#if current && st?.playing}
-                                            <Waveform />
-                                        {:else}
-                                            {item.track}
-                                        {/if}
-                                    </span>
-                                    <span class="q-meta">
-                                        <span class="q-title">{item.title || "Unknown track"}</span>
-                                        {#if item.artist}<span class="q-sub">{item.artist}</span>{/if}
-                                    </span>
-                                    {#if item.duration}
-                                        <span class="q-dur mono">{trimClock(item.duration)}</span>
-                                    {/if}
-                                </button>
-                                <button class="icon-btn q-rm"
-                                    aria-label="Remove {item.title || 'track ' + item.track} from the sonos.queue"
-                                    disabled={busy.is("qrm:" + item.track)} onclick={() => sonos.removeQueued(g, item.track)}>
-                                    <Icon name="close" size={14} />
-                                </button>
-                            </div>
-                        {/each}
-                    </div>
-                    {#if (gs?.queue_length ?? 0) > sonos.queue.length}
-                        <div class="q-more mono">
-                            showing the first {sonos.queue.length} of {gs?.queue_length}
-                        </div>
-                    {/if}
-                {/if}
-            {:else}
-                <!-- ── Now playing ─────────────────────────────────────── -->
-                <!-- Drag the art sideways to change track. -->
-                <div
-                    class="p-art"
-                    class:swiping={artSwiping}
-                    role="none"
-                    onpointerdown={onArtPointerDown}
-                    onpointermove={onArtPointerMove}
-                    onpointerup={onArtPointerUp}
-                    onpointercancel={onArtPointerCancel}
-                    style:transform={artDX ? `translateX(${artDX}px)` : ""}
-                    style:opacity={artSwiping ? Math.max(0.55, 1 - Math.abs(artDX) / 200) : undefined}
-                >
-                    {#if st?.track?.art_uri}
-                        <img src={st.track.art_uri} alt="" draggable="false" />
-                    {:else}
-                        <div class="p-art-ph">[ album art ]</div>
-                    {/if}
-                </div>
-
-                <div class="p-meta">
-                    {#if st?.track?.title}
-                        <div class="p-title">{st.track.title}</div>
-                        <div class="p-sub">
-                            {[st.track.artist, st.track.album].filter(Boolean).join(" · ")}
-                        </div>
-                    {:else}
-                        <div class="p-title idle">Nothing playing</div>
-                        <div class="p-sub">Start a favorite below, or search Spotify.</div>
-                    {/if}
-                </div>
-
-                <!-- The rail is a real control only where the source reports a
-                     duration. Radio and line-in don't, so they get an honest
-                     label instead of a scrubber that would be refused. -->
-                {#if durationSec > 0}
-                    <div class="p-scrub">
-                        <input
-                            class="scrub"
-                            type="range"
-                            min="0"
-                            max={durationSec}
-                            step="1"
-                            aria-label="Seek"
-                            aria-valuetext="{fmtSecs(livePos)} of {fmtSecs(durationSec)}"
-                            disabled={!c}
-                            value={livePos}
-                            oninput={(e) => (scrubSec = e.currentTarget.valueAsNumber)}
-                            onchange={(e) => commitSeek(g, e.currentTarget.valueAsNumber)}
-                        />
-                        <div class="p-times mono">
-                            <span>{fmtSecs(livePos)}</span><span>{fmtSecs(durationSec)}</span>
-                        </div>
-                    </div>
-                {:else if st?.track?.title}
-                    <div class="p-live mono">live stream — no track position</div>
-                {/if}
-
-                <div class="p-transport">
-                    <button
-                        class="icon-btn t-mode"
-                        class:on={gs?.shuffle}
-                        aria-label={gs?.shuffle ? "Shuffle on" : "Shuffle off"}
-                        aria-pressed={gs?.shuffle ?? false}
-                        title="Shuffle (s)"
-                        disabled={!gs || !c || busy.is("mode:" + c?.id)}
-                        onclick={() => sonos.setPlayMode(g, { shuffle: !gs?.shuffle })}
-                    >
-                        <Icon name="shuffle" size={18} />
-                    </button>
-                    <button class="icon-btn t-btn" aria-label="Previous track" title="Previous (shift ←)"
-                        disabled={!c || busy.is("previous:" + c?.id)} onclick={() => sonos.skip(g, "previous")}>
-                        <Icon name="skipPrev" size={22} />
-                    </button>
-                    <button class="p-play" class:playing={sonos.isPlaying(g)}
-                        aria-label={sonos.isPlaying(g) ? "Pause" : "Play"} title="Play / pause (space)"
-                        disabled={!c || busy.is("play:" + c?.id)} onclick={() => sonos.togglePlay(g)}>
-                        <Icon name={sonos.isPlaying(g) ? "pause" : "play"} size={26} />
-                    </button>
-                    <button class="icon-btn t-btn" aria-label="Next track" title="Next (shift →)"
-                        disabled={!c || busy.is("next:" + c?.id)} onclick={() => sonos.skip(g, "next")}>
-                        <Icon name="skipNext" size={22} />
-                    </button>
-                    <button
-                        class="icon-btn t-mode"
-                        class:on={gs && gs.repeat !== "off"}
-                        aria-label={repeatLabel(gs?.repeat)}
-                        title="Repeat (r)"
-                        disabled={!gs || !c || busy.is("mode:" + c?.id)}
-                        onclick={() => sonos.setPlayMode(g, { repeat: NEXT_REPEAT[gs?.repeat ?? "off"] })}
-                    >
-                        <Icon name={gs?.repeat === "one" ? "repeatOne" : "repeat"} size={18} />
-                    </button>
-                </div>
-
-                <!-- The keys are only worth advertising where there is a
-                     keyboard; phones get the swipe gesture instead. -->
-                <p class="p-keys mono" aria-hidden="true">
-                    space play · ← → seek · ↑ ↓ volume · q sonos.queue
-                </p>
-
-                {#if gs}
-                    <div class="p-extras">
-                        <button class="chip" class:on={gs.crossfade} aria-pressed={gs.crossfade}
-                            disabled={!c || busy.is("xfade:" + c?.id)} onclick={() => sonos.toggleCrossfade(g)}>
-                            Crossfade
-                        </button>
-                        {#if gs.queue_length > 0}
-                            <button class="p-upnext" onclick={() => (queuePane = true)}>
-                                <Icon name="queue" size={17} />
-                                <span class="up-body">
-                                    <span class="up-label">Up next</span>
-                                    <span class="up-track">
-                                        {nextInQueue?.title ?? "End of the sonos.queue"}
-                                    </span>
-                                </span>
-                                <span class="up-count mono">{gs.queue_length}</span>
-                                <span class="up-go" aria-hidden="true"><Icon name="chevronLeft" size={16} /></span>
-                            </button>
-                        {/if}
-                    </div>
-                {/if}
-
-                <!-- Somewhere to go, playing or not: swapping a song out is
-                     as ordinary a thing to want here as starting the first
-                     one. Favorites still only stand in for an empty player —
-                     with a track up, the row that matters is the search. -->
-                {@render startSomething(st?.track?.title ? null : g.coordinator_id)}
-
-                <div class="p-speakers">
-                    <div class="eyrow">Volume</div>
-                    {#if grouped}
-                        <div class="member">
-                            <span class="m-icon" aria-hidden="true"><Icon name="volume" size={16} /></span>
-                            <span class="m-name">All rooms</span>
-                            <input type="range" min="0" max="100" step="1" aria-label="Group volume"
-                                value={sonos.shownGroupVolume(g.coordinator_id)}
-                                oninput={(e) =>
-                                    sonos.dragGroupVolume(g.coordinator_id, e.currentTarget.valueAsNumber)}
-                                onchange={(e) =>
-                                    sonos.setGroupVolume(g.coordinator_id, e.currentTarget.valueAsNumber)} />
-                            <span class="vol-num mono">{sonos.shownGroupVolume(g.coordinator_id)}</span>
-                        </div>
-                        <div class="m-divider" aria-hidden="true"></div>
-                    {/if}
-                    {#each g.member_ids as id (id)}
-                        {@const sp = sonos.speakerById.get(id)}
-                        {#if sp}
-                            <div class="member">
-                                <button class="icon-btn m-mute"
-                                    aria-label={sp.state?.muted ? `Unmute ${sp.name}` : `Mute ${sp.name}`}
-                                    disabled={busy.is("mute:" + sp.id)} onclick={() => sonos.toggleMute(sp)}>
-                                    <Icon name={sp.state?.muted ? "volumeOff" : "volume"} size={16} />
-                                </button>
-                                <span class="m-name" class:muted={sp.state?.muted}>{sp.name}</span>
-                                <input type="range" min="0" max="100" step="1" aria-label="{sp.name} volume"
-                                    value={sonos.shownVolume(sp)}
-                                    oninput={(e) => sonos.dragVolume(sp.id, e.currentTarget.valueAsNumber)}
-                                    onchange={(e) => sonos.setVolume(sp.id, e.currentTarget.valueAsNumber)} />
-                                <span class="vol-num mono">{sonos.shownVolume(sp)}</span>
-                                {#if grouped}
-                                    <button class="icon-btn m-act" aria-label="Remove {sp.name} from group"
-                                        disabled={busy.is("leave:" + sp.id)} onclick={() => sonos.leave(sp.id)}>
-                                        <Icon name="close" size={14} />
-                                    </button>
-                                {/if}
-                            </div>
-                        {/if}
-                    {/each}
-                    {#if sonos.joinables(g).length > 0}
-                        <div class="joiners">
-                            {#each sonos.joinables(g) as sp (sp.id)}
-                                <button class="chip" disabled={busy.is("join:" + sp.id)} onclick={() => sonos.join(sp.id, g)}>
-                                    <Icon name="plus" size={13} /> {sp.name}
-                                </button>
-                            {/each}
-                        </div>
-                    {/if}
-                    {#if g.unregistered?.length}
-                        <div class="unreg mono">
-                            also in this group: {g.unregistered.join(", ")} — add them to control here
-                        </div>
-                    {/if}
-                </div>
-            {/if}
-    </MusicSheet>
+        {#snippet startSomething(favTarget: string | null)}
+            {@render startRow(favTarget)}
+        {/snippet}
+    </SonosPlayer>
 {/if}
 
-<!-- ── Start something ─────────────────────────────────────────────────
-     The way to start something new from inside the player, on both sheets.
-     One row: the search that feeds this room, then the searches already made
-     for it — the history is keyed by destination, so these are the kitchen's,
-     not the house's.
-
-     `favTarget` is the Sonos group whose sonos.favorites belong under it, and null
-     when there are none to show — a playing group (it already has something)
-     or a KEF speaker (sonos.favorites are a Sonos household list, DESIGN.md §15). -->
-{#snippet startSomething(favTarget: string | null)}
-    <!-- Nothing to offer is a reason to render nothing, not a heading over an
-         empty row: with the Spotify integration absent and no sonos.favorites,
-         there is no way to start something from here. -->
-    {#if spotify || (favTarget && sonos.favorites.length > 0)}
-        <div class="p-idle">
-            <div class="eyrow">Start something</div>
-            {#if spotify}
-                <div class="start-row h-scroll">
-                    <!-- Not gated on being connected, for the same reason
-                         Home's card isn't: the people who most need the
-                         pointer are the ones a gate would hide it from. -->
-                    <button class="chip start-go" onclick={() => searchFromPlayer()}>
-                        <Icon name="search" size={13} />
-                        <span>{spotify.connected ? "Search Spotify" : "Set up Spotify"}</span>
-                    </button>
-                    {#if spotify.connected}
-                        {#each recents.recent as h (h)}
-                            <button class="chip start-recent" onclick={() => searchFromPlayer(h)}>
-                                <span>{h}</span>
-                            </button>
-                        {/each}
-                    {/if}
-                </div>
-            {/if}
-            {#if favTarget && sonos.favorites.length > 0}
-                <div class="favs h-scroll">
-                    {#each sonos.favorites as f (f.id)}
-                        {@render favShelf(f, favTarget)}
-                    {/each}
-                </div>
-            {/if}
-        </div>
-    {/if}
+<!-- The player-side "Start something" row, shared by both sheets. -->
+{#snippet startRow(favTarget: string | null)}
+    <StartSomething
+        spotifyAvailable={!!spotify.status}
+        spotifyConnected={spotify.connected}
+        recents={recents.recent}
+        favorites={favTarget ? sonos.favorites : []}
+        onSearch={searchFromPlayer}
+    >
+        {#snippet favCard(f)}
+            {@render favShelf(f, favTarget)}
+        {/snippet}
+    </StartSomething>
 {/snippet}
 
-<!-- ── Favorite card ───────────────────────────────────────────────────
-     Shared by the Home shelf and the idle player: tap the art to play it
-     on `target`, or the corner button to sonos.queue it without interrupting. -->
 <style>
     .sk { height: 180px; border-radius: var(--r-md); }
 
@@ -3049,39 +2520,6 @@
         .sp-row:hover { background: var(--bg-raised); border-color: var(--border-strong); }
     }
 
-    /* ── Volume rows (player sheet) ── */
-    .member { display: flex; align-items: center; gap: var(--space-3); min-height: 44px; }
-    .member .m-name {
-        font-size: 13.5px; font-weight: 500; width: 110px; flex-shrink: 0;
-        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    }
-    .member .m-name.muted { color: var(--text-dim); }
-    .m-mute, .m-act { width: 36px; height: 36px; flex-shrink: 0; }
-    .vol-num {
-        font-size: 12px; font-feature-settings: "tnum" 1;
-        color: var(--text-mute); width: 3ch; text-align: right; flex-shrink: 0;
-    }
-
-    input[type="range"] {
-        flex: 1; min-width: 60px; appearance: none;
-        height: 6px; border-radius: 3px; outline: none;
-        background: var(--card-3); accent-color: var(--on);
-    }
-    input[type="range"]::-webkit-slider-thumb {
-        appearance: none; width: 18px; height: 18px; border-radius: 50%;
-        background: #fff; border: 2px solid rgba(0, 0, 0, 0.35);
-        cursor: pointer; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
-    }
-    input[type="range"]::-moz-range-thumb {
-        width: 18px; height: 18px; border-radius: 50%;
-        background: #fff; border: 2px solid rgba(0, 0, 0, 0.35);
-        cursor: pointer; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
-    }
-    input[type="range"]:focus-visible { box-shadow: 0 0 0 2px var(--on-soft); }
-
-    .joiners { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-2); }
-    .unreg { font-size: 11px; color: var(--text-dim); margin-top: var(--space-2); }
-
     /* ── Spotify search ── */
     .sp-help { font-size: 12.5px; color: var(--text-mute); line-height: 1.5; }
     .sp-steps {
@@ -3247,217 +2685,14 @@
     .sp-row:hover .sp-play { background: var(--on-soft); color: var(--on); }
 
 
-    /* Art leads the sheet — it is the largest thing on screen, and the
-       glow underneath is the same bulb glow a lit device gets. */
-    .p-art {
-        display: flex; justify-content: center; padding: var(--space-2) 0 0;
-        /* Horizontal is the swipe-to-skip gesture's; vertical stays the
-           sheet's (scroll, drag-to-dismiss). */
-        touch-action: pan-y;
-        transition: transform 260ms var(--spring), opacity var(--t-fast);
-        will-change: transform;
-    }
-    .p-art.swiping { transition: none; }
-    .p-art img { user-select: none; -webkit-user-drag: none; }
-    .p-art img, .p-art-ph {
-        width: min(340px, 78vw); aspect-ratio: 1;
-        border-radius: var(--r-lg); object-fit: cover;
-    }
-    .p-art img {
-        background: var(--card-3); border: 1px solid var(--tile-on-border);
-        box-shadow: 0 18px 40px -18px var(--on-glow);
-    }
-    .p-art-ph {
-        display: grid; place-items: center;
-        background: var(--tile-on-gradient); border: 1px solid var(--tile-on-border);
-        color: var(--text-dim); font-family: var(--font-mono); font-size: 11px;
-    }
-
-    .p-meta { text-align: center; display: flex; flex-direction: column; gap: 4px; }
-    .p-title {
-        font-size: 22px; font-weight: 600; letter-spacing: -0.02em;
-        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    }
-    .p-title.idle { color: var(--text-mute); }
-    .p-sub {
-        font-size: 14px; color: var(--text-mute);
-        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    }
-
-    .p-scrub { display: flex; flex-direction: column; gap: 6px; }
-    /* A range input, not a decorative bar: it drags, it takes arrow keys,
-       and it inherits the volume sliders' touch sizing below. The selector
-       has to out-specify the generic input[type="range"] rule, whose
-       `flex: 1` would otherwise collapse it in this column. */
-    input[type="range"].scrub { flex: none; width: 100%; }
-    .p-times { display: flex; justify-content: space-between; font-size: 11px; color: var(--text-dim); }
-    .p-live {
-        text-align: center; font-size: 10.5px; letter-spacing: 0.08em;
-        text-transform: uppercase; color: var(--text-dim);
-    }
-
-    .p-transport { display: flex; align-items: center; justify-content: center; gap: var(--space-4); }
-    .t-btn { width: 48px; height: 48px; }
-    .t-mode { width: 42px; height: 42px; border-radius: 50%; color: var(--text-mute); }
-    .t-mode.on { background: var(--on-soft); color: var(--on); }
-    .t-mode:disabled { opacity: 0.35; }
-    .p-play {
-        width: 66px; height: 66px; border-radius: 50%;
-        display: grid; place-items: center; flex-shrink: 0;
-        background: var(--on); color: var(--primary-fg); border: 0;
-        cursor: pointer; box-shadow: 0 0 24px -2px var(--on-glow);
-    }
-    .p-play:active { transform: scale(0.96); }
-    .p-play:disabled { opacity: 0.5; }
-
-    /* Keyboard hints, advertised only where there is a keyboard to press —
-       phones get the swipe gesture on the art instead. */
-    .p-keys { display: none; }
-    @media (hover: hover) and (pointer: fine) {
-        .p-keys {
-            display: block; text-align: center;
-            font-size: 10px; letter-spacing: 0.06em;
-            color: var(--text-dim);
-        }
-    }
-
-    .p-extras { display: flex; flex-direction: column; gap: var(--space-3); }
-    .p-extras .chip { align-self: flex-start; }
-    /* Up next doubles as the way into the sonos.queue pane. */
-    .p-upnext {
-        display: flex; align-items: center; gap: var(--space-3);
-        min-height: 56px; padding: 10px var(--space-3);
-        background: var(--card); border: 1px solid var(--hairline);
-        border-radius: var(--r-md);
-        color: var(--text-mute); cursor: pointer; text-align: left; font: inherit;
-        transition: border-color var(--t-fast);
-    }
-    @media (hover: hover) { .p-upnext:hover { border-color: var(--border-strong); } }
-    .up-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-    .up-label {
-        font-family: var(--font-mono);
-        font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase;
-        color: var(--text-dim);
-    }
-    .up-track {
-        font-size: 13px; color: var(--text);
-        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    }
-    .up-count { font-size: 12px; color: var(--text-dim); flex-shrink: 0; }
-    .up-go { display: flex; transform: rotate(180deg); flex-shrink: 0; }
-
-    .p-idle { display: flex; flex-direction: column; gap: var(--space-3); }
-
-    /* ── Start something ──
-       The search row inside the player. Chips rather than a search box: the
-       box lives on the Search sheet, and a second one here would be a second
-       thing to focus, keep and clear (DESIGN.md §15 — sheets swap, and the
-       player hands over rather than growing a copy of what it hands over to). */
-    .start-row { align-items: center; }
-    /* The row's primary action, marked the way every other lead chip in the
-       module is — a stronger edge and full-strength text, not a new colour. */
-    .start-go { color: var(--text); border-color: var(--border-strong); }
-    /* A recent search is whatever was typed, so it is capped rather than
-       trusted to be short. */
-    .start-recent > span { display: block; max-width: 52vw; overflow: hidden; text-overflow: ellipsis; }
-    @media (pointer: coarse) {
-        .start-row .chip { min-height: 44px; padding-inline: 14px; }
-    }
-
-    .p-speakers { display: flex; flex-direction: column; gap: 2px; }
-    .p-speakers .eyrow { margin-bottom: var(--space-1); }
-
-    /* ── KEF player ──
-       A read-only progress line, because KEF's API has no seek — the Sonos
-       sheet's scrubber is a range input in the same slot. */
-    .kef-rail {
-        display: block; height: 6px; border-radius: 3px;
-        background: var(--card-3);
-        overflow: hidden;
-    }
-    .kef-rail i {
-        display: block; height: 100%;
-        background: var(--on);
-        /* Matches the 1s position tick, so the fill creeps instead of
-           stepping. */
-        transition: width 1s linear;
-    }
-    /* The input selector, where the group's member rows sit on the other
-       sheet — it answers the same "where is this coming out" question. */
-    .src-row { display: flex; flex-wrap: wrap; gap: var(--space-2); }
-    .src-row .chip { flex-shrink: 0; }
-    .p-speakers .hint { margin-top: var(--space-2); }
-    .m-icon {
-        width: 36px; height: 36px; flex-shrink: 0;
-        display: grid; place-items: center; color: var(--text-mute);
-    }
-    .m-divider { height: 1px; background: var(--hairline); margin: var(--space-2) 0; }
-
-    /* ── Queue pane ── */
-    .q-bar { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
-    .q-total {
-        font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase;
-        color: var(--text-mute);
-    }
-    .q-skeleton { height: 220px; border-radius: var(--r-md); }
-    .q-none { font-size: 12.5px; color: var(--text-mute); line-height: 1.5; }
-    .q-list { display: flex; flex-direction: column; gap: 2px; }
-    .q-row {
-        display: flex; align-items: center; gap: var(--space-1);
-        border-radius: var(--r-md);
-        transition: background 150ms ease;
-    }
-    @media (hover: hover) { .q-row:hover { background: var(--card-2); } }
-    .q-row.current { background: var(--tile-on-gradient); }
-    .q-open {
-        flex: 1; min-width: 0;
-        display: flex; align-items: center; gap: var(--space-3);
-        min-height: 48px; padding: 6px var(--space-2);
-        background: transparent; border: 0; border-radius: var(--r-md);
-        color: var(--text); cursor: pointer; text-align: left; font: inherit;
-    }
-    .q-open:disabled { opacity: 0.5; cursor: default; }
-    .q-num {
-        width: 26px; flex-shrink: 0;
-        display: flex; align-items: center; justify-content: center;
-        font-size: 11.5px; color: var(--text-dim);
-    }
-    .q-row.current .q-num { color: var(--on); }
-    .q-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-    .q-title {
-        font-size: 13.5px; font-weight: 500;
-        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    }
-    .q-row.current .q-title { color: var(--on); }
-    .q-sub {
-        font-size: 11.5px; color: var(--text-mute);
-        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    }
-    .q-dur { font-size: 11px; color: var(--text-dim); flex-shrink: 0; }
-    .q-rm { width: 36px; height: 36px; flex-shrink: 0; margin-right: 4px; color: var(--text-mute); }
-    .q-rm:disabled { opacity: 0.4; }
-    .q-more { font-size: 10.5px; color: var(--text-dim); text-align: center; }
-
     /* ── Touch: hit areas grow to the 44px floor ── */
     @media (pointer: coarse) {
-        .t-btn { width: 52px; height: 52px; }
-        .t-mode { width: 48px; height: 48px; }
-        /* Five transport controls have to fit a 360px screen. */
-        .p-transport { gap: var(--space-3); }
-        .m-mute, .m-act, .m-icon { width: 44px; height: 44px; }
-        input[type="range"] { height: 10px; border-radius: 5px; }
-        input[type="range"]::-webkit-slider-thumb { width: 26px; height: 26px; }
-        input[type="range"]::-moz-range-thumb { width: 26px; height: 26px; }
-        .member .m-name { width: 90px; }
         .sp-play { width: 44px; height: 44px; }
-        .sp-more, .q-rm, .sp-clear { width: 44px; height: 44px; }
+        .sp-more, .sp-clear { width: 44px; height: 44px; }
         .sp-input, .sp-config input { font-size: 16px; } /* prevents iOS auto-zoom */
     }
 
     @media (prefers-reduced-motion: reduce) {
-        .puck, .p-play,
-        .p-upnext, .q-row, .sp-row, .mini, .p-art, .kef-rail i {
-            transition-duration: 0.001ms;
-        }
+        .puck, .sp-row, .mini { transition-duration: 0.001ms; }
     }
 </style>
