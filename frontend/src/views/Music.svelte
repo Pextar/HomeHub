@@ -1193,8 +1193,6 @@
         }
         if (spotify?.connected) focusSearch();
     }
-    /** Recent searches for this room, kept to a row rather than a list. */
-    const playerRecents = $derived(historyList.slice(0, 6));
 
     // ── Drag-to-dismiss ──────────────────────────────────────────────────
     // The same gesture the shared Modal sheet carries, shared by all three of
@@ -1949,6 +1947,8 @@
     // speakers loaded), so history still works before speakers are set up.
     const historyKey = $derived(destKey ?? "_all");
     const historyList = $derived(searchHistory[historyKey] ?? []);
+    /** The same list for the player's row, kept to a row rather than a list. */
+    const playerRecents = $derived(historyList.slice(0, 6));
 
     function addToHistory(q: string) {
         const key = historyKey;
