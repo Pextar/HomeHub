@@ -294,11 +294,12 @@ func (h *Host) serveListener(w http.ResponseWriter, r *http.Request, p *publishe
 		go h.pump(p)
 	}
 
+	// Deleting a listener that release() already removed is a no-op, which is
+	// the case this runs in whenever the stream ended before the speaker
+	// disconnected.
 	defer func() {
 		p.mu.Lock()
-		if _, ok := p.listeners[l]; ok {
-			delete(p.listeners, l)
-		}
+		delete(p.listeners, l)
 		p.mu.Unlock()
 	}()
 
