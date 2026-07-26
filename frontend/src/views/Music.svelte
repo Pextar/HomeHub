@@ -4,6 +4,14 @@
     import EmptyState from "../components/EmptyState.svelte";
     import Icon from "../components/Icon.svelte";
     import MusicSheet from "../components/music/MusicSheet.svelte";
+    import Waveform from "../components/music/Waveform.svelte";
+    import ProgressLine from "../components/music/ProgressLine.svelte";
+    import QuietCard from "../components/music/QuietCard.svelte";
+    import NavRow from "../components/music/NavRow.svelte";
+    import CardTransport from "../components/music/CardTransport.svelte";
+    import NowCard from "../components/music/NowCard.svelte";
+    import FavoriteCard from "../components/music/FavoriteCard.svelte";
+    import DestinationRow from "../components/music/DestinationRow.svelte";
     import ConfirmModal from "../components/ConfirmModal.svelte";
     import SpeakerModal from "../modals/SpeakerModal.svelte";
     import SonosSpeakerDetail from "./SonosSpeakerDetail.svelte";
@@ -14,7 +22,7 @@
     import { toasts, route, bottomBar } from "../lib/stores.svelte";
     import { onLive } from "../lib/live";
     import { openModal } from "../lib/modal.svelte";
-    import { fly, fade, scale } from "svelte/transition";
+    import { fly, scale } from "svelte/transition";
     import { cubicOut } from "svelte/easing";
     import { dur } from "../lib/motion";
     import { lockBodyScroll, unlockBodyScroll } from "../lib/scroll-lock";
@@ -667,31 +675,6 @@
         return bottomBar.claim();
     });
 
-    // Attached to every "Playing now" card, live only on the dock group's.
-    // The bottom inset discounts the band the dock and the tab bar occupy, so
-    // a card sitting behind them counts as gone rather than as visible.
-    function dockAnchor(node: HTMLElement, isDock: boolean) {
-        let obs: IntersectionObserver | undefined;
-        let active = false;
-        function attach(on: boolean) {
-            obs?.disconnect();
-            obs = undefined;
-            if (active && !on) dockCardOnScreen = false;
-            active = on;
-            if (!on) return;
-            obs = new IntersectionObserver(
-                ([entry]) => (dockCardOnScreen = entry.isIntersecting),
-                { threshold: 0.5, rootMargin: "0px 0px -96px 0px" },
-            );
-            obs.observe(node);
-        }
-        attach(isDock);
-        return {
-            update: (next: boolean) => attach(next),
-            destroy: () => attach(false),
-        };
-    }
-
     let playerEl = $state<HTMLElement | null>(null);
     // Set by the open sheet while a drag-down rides out. The art swipe stands
     // down for those 220ms; raising a sheet clears it, since the flag belongs
@@ -1304,12 +1287,6 @@
 
 <svelte:window onkeydown={onWindowKey} onpopstate={onPopState} />
 
-<!-- The live waveform — the music module's motif for "actually playing",
-     used everywhere a plain status dot would otherwise sit. -->
-{#snippet wave()}
-    <span class="wave" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
-{/snippet}
-
 <!-- Anything a grouping gesture does that has no visible running commentary
      — the keyboard path especially — is said here instead. -->
 <div class="sr-only" role="status" aria-live="polite">{liveMsg}</div>
@@ -1403,146 +1380,79 @@
     <section class="block">
         <div class="eyrow">Playing now</div>
         {#if sonos.playingGroups.length === 0 && kef.playing.length === 0}
-            <div class="quiet-card">
-                <span class="quiet-ico"><Icon name="speaker" size={20} /></span>
-                <span class="quiet-meta">
-                    <span class="quiet-title">Nothing playing</span>
-                    <span class="quiet-sub">
-                        <span class="mono">{readyCount}</span>
-                        speaker{readyCount === 1 ? "" : "s"} ready —
-                        {sonos.favorites.length > 0 && !destination.kefSpeaker
-                            ? "start a favorite below"
-                            : "pick a room to open it"}
-                    </span>
-                </span>
-                {#if spotify}
-                    <!-- Not gated on `connected`: the people who most need a
-                         pointer at Spotify are the ones who haven't set it up,
-                         and with the subnav gone this card and the header icon
-                         are the only things that say the module searches at
-                         all (DESIGN.md §15). -->
-                    <button class="chip quiet-go" onclick={openSearch}>
-                        {spotify.connected ? "Search" : "Set up Spotify"}
-                    </button>
-                {/if}
-            </div>
+            <QuietCard
+                title="Nothing playing"
+                action={spotify.status
+                    ? {
+                          // Not gated on `connected`: the people who most need
+                          // a pointer at Spotify are the ones who haven't set
+                          // it up, and with the subnav gone this card and the
+                          // header icon are the only things that say the
+                          // module searches at all (DESIGN.md §15).
+                          label: spotify.connected ? "Search" : "Set up Spotify",
+                          onClick: openSearch,
+                      }
+                    : undefined}
+            >
+                <span class="mono">{readyCount}</span>
+                speaker{readyCount === 1 ? "" : "s"} ready —
+                {sonos.favorites.length > 0 && !destination.kefSpeaker
+                    ? "start a favorite below"
+                    : "pick a room to open it"}
+            </QuietCard>
         {:else}
             <div class="now-grid">
                 {#each sonos.playingGroups as g (g.coordinator_id)}
                     {@const c = sonos.coordinatorOf(g)}
                     {@const st = c?.state}
-                    {@const p = sonos.progressOf(g)}
-                    <div
-                        class="now-card playing"
-                        use:dockAnchor={g.coordinator_id === dockGroup?.coordinator_id}
-                        in:fly={{ y: 8, duration: dur(220), easing: cubicOut }}
-                        out:fade={{ duration: dur(120) }}
+                    <NowCard
+                        name={sonos.groupTitle(g)}
+                        line={[st?.track?.title, st?.track?.artist].filter(Boolean).join(" · ") ||
+                            "Live audio"}
+                        artUri={st?.track?.art_uri}
+                        playing
+                        progress={sonos.progressOf(g)}
+                        onOpen={() => openPlayer(g)}
+                        isDock={g.coordinator_id === dockGroup?.coordinator_id}
+                        onDockVisible={(v) => (dockCardOnScreen = v)}
                     >
-                        <button class="now-open" onclick={() => openPlayer(g)}>
-                            {#if st?.track?.art_uri}
-                                <img class="now-art" src={st.track.art_uri} alt="" loading="lazy" />
-                            {:else}
-                                <div class="now-art placeholder">[ art ]</div>
-                            {/if}
-                            <span class="now-meta">
-                                <span class="now-name" title={sonos.groupTitle(g)}>{sonos.groupTitle(g)}</span>
-                                <span class="now-line">
-                                    {@render wave()}
-                                    <span class="now-track">
-                                        {[st?.track?.title, st?.track?.artist].filter(Boolean).join(" · ")
-                                            || "Live audio"}
-                                    </span>
-                                </span>
-                            </span>
-                        </button>
-                        <!-- Skips ride along from 430px up, the same width
-                             Home's card uses — a phone keeps play/pause and
-                             gives the track title the room instead. -->
-                        <div class="card-transport">
-                            <button
-                                class="mini-btn skip"
-                                aria-label="Previous track"
-                                disabled={!c || busy.is("previous:" + c?.id)}
-                                onclick={() => sonos.skip(g, "previous")}
-                            >
-                                <Icon name="skipPrev" size={16} />
-                            </button>
-                            <button
-                                class="mini-btn on"
-                                aria-label={sonos.isPlaying(g) ? "Pause" : "Play"}
-                                disabled={!c || busy.is("play:" + c?.id)}
-                                onclick={() => sonos.togglePlay(g)}
-                            >
-                                <Icon name={sonos.isPlaying(g) ? "pause" : "play"} size={16} />
-                            </button>
-                            <button
-                                class="mini-btn skip"
-                                aria-label="Next track"
-                                disabled={!c || busy.is("next:" + c?.id)}
-                                onclick={() => sonos.skip(g, "next")}
-                            >
-                                <Icon name="skipNext" size={16} />
-                            </button>
-                        </div>
-                        <!-- Where the track has got to, without opening
-                             anything. Live streams report no duration and get
-                             no line rather than a made-up one. -->
-                        {#if p > 0}
-                            <span class="prog" aria-hidden="true">
-                                <i style:width="{p * 100}%"></i>
-                            </span>
-                        {/if}
-                    </div>
+                        {#snippet transport()}
+                            <CardTransport
+                                playing={sonos.isPlaying(g)}
+                                onToggle={() => sonos.togglePlay(g)}
+                                toggleBusy={!c || busy.is("play:" + c?.id)}
+                                onPrev={() => sonos.skip(g, "previous")}
+                                prevBusy={!c || busy.is("previous:" + c?.id)}
+                                onNext={() => sonos.skip(g, "next")}
+                                nextBusy={!c || busy.is("next:" + c?.id)}
+                            />
+                        {/snippet}
+                    </NowCard>
                 {/each}
 
                 <!-- KEF speakers that are playing, in the same grid and with
                      the same card. It is a way in to a player like every
-                     other card here — the sheet it opens drops the sonos.queue and
+                     other card here — the sheet it opens drops the queue and
                      the group, which KEF hasn't got, and keeps the rest. -->
                 {#each kef.playing as sp (sp.id)}
-                    {@const p = kef.progress(sp)}
-                    <div
-                        class="now-card playing"
-                        in:fly={{ y: 8, duration: dur(220), easing: cubicOut }}
-                        out:fade={{ duration: dur(120) }}
+                    <NowCard
+                        name={sp.name}
+                        line={[kef.nowLine(sp), kef.subLine(sp)].filter(Boolean).join(" · ")}
+                        artUri={sp.state?.track?.art_uri}
+                        playing
+                        progress={kef.progress(sp)}
+                        onOpen={() => openKEFPlayer(sp)}
                     >
-                        <button
-                            class="now-open"
-                            onclick={() => openKEFPlayer(sp)}
-                        >
-                            {#if sp.state?.track?.art_uri}
-                                <img class="now-art" src={sp.state.track.art_uri} alt="" loading="lazy" />
-                            {:else}
-                                <div class="now-art placeholder">[ art ]</div>
-                            {/if}
-                            <span class="now-meta">
-                                <span class="now-name" title={sp.name}>{sp.name}</span>
-                                <span class="now-line">
-                                    {@render wave()}
-                                    <span class="now-track">
-                                        {[kef.nowLine(sp), kef.subLine(sp)].filter(Boolean).join(" · ")}
-                                    </span>
-                                </span>
-                            </span>
-                        </button>
-                        <!-- Play/pause only, like the Sonos card below 430px:
-                             the sheet is where the skips live. -->
-                        <div class="card-transport">
-                            <button
-                                class="mini-btn on"
-                                aria-label={kef.isPlaying(sp) ? "Pause" : "Play"}
-                                disabled={busy.is("kefplay:" + sp.id)}
-                                onclick={() => kef.togglePlay(sp)}
-                            >
-                                <Icon name={kef.isPlaying(sp) ? "pause" : "play"} size={16} />
-                            </button>
-                        </div>
-                        {#if p > 0}
-                            <span class="prog" aria-hidden="true">
-                                <i style:width="{p * 100}%"></i>
-                            </span>
-                        {/if}
-                    </div>
+                        {#snippet transport()}
+                            <!-- Play/pause only, like the Sonos card below
+                                 430px: the sheet is where the skips live. -->
+                            <CardTransport
+                                playing={kef.isPlaying(sp)}
+                                onToggle={() => kef.togglePlay(sp)}
+                                toggleBusy={busy.is("kefplay:" + sp.id)}
+                            />
+                        {/snippet}
+                    </NowCard>
                 {/each}
             </div>
         {/if}
@@ -1561,26 +1471,23 @@
                      would be a row of dead controls (§15), so the section
                      says what it needs instead — and the fix is one tap on
                      the destination row directly above. -->
-                <div class="quiet-card">
-                    <span class="quiet-ico"><Icon name="speaker" size={20} /></span>
-                    <span class="quiet-meta">
-                        <span class="quiet-title">Favorites need a Sonos room</span>
-                        <span class="quiet-sub">
-                            They come out of your Sonos household, so {destination.kefSpeaker.name} can't
-                            play one — pick a Sonos room above{#if spotify?.connected}, or search to
-                            play there{/if}.
-                        </span>
-                    </span>
-                    {#if spotify}
-                        <button class="chip quiet-go" onclick={openSearch}>
-                            {spotify.connected ? "Search" : "Set up Spotify"}
-                        </button>
-                    {/if}
-                </div>
+                <QuietCard
+                    title="Favorites need a Sonos room"
+                    action={spotify.status
+                        ? {
+                              label: spotify.connected ? "Search" : "Set up Spotify",
+                              onClick: openSearch,
+                          }
+                        : undefined}
+                >
+                    They come out of your Sonos household, so {destination.kefSpeaker.name} can't
+                    play one — pick a Sonos room above{#if spotify.connected}, or search to play
+                        there{/if}.
+                </QuietCard>
             {:else}
                 <div class="favs h-scroll">
                     {#each sonos.favorites as f (f.id)}
-                        {@render favCard(f, destination.sonosTarget)}
+                        {@render favShelf(f, destination.sonosTarget)}
                     {/each}
                 </div>
             {/if}
@@ -1606,7 +1513,7 @@
                     onclick={() => g && openPlayer(g)}
                 >
                     {#if sonos.speakerPlaying(sp.id)}
-                        {@render wave()}
+                        <Waveform />
                     {:else}
                         <Icon name="speaker" size={14} />
                     {/if}
@@ -1624,7 +1531,7 @@
                     onclick={() => openKEFPlayer(sp)}
                 >
                     {#if kef.isPlaying(sp)}
-                        {@render wave()}
+                        <Waveform />
                     {:else}
                         <Icon name="speaker" size={14} />
                     {/if}
@@ -1637,22 +1544,16 @@
     <!-- The way through to the device inventory. A plain row rather than a
          header icon, because what it opens is a screen — Speakers pushes,
          Search and Zones lift. -->
-    <button class="lu-row" onclick={openSpeakers}>
-        <span class="lu-ico"><Icon name="speaker" size={18} /></span>
-        <span class="lu-meta">
-            <span class="lu-title">Speakers</span>
-            <span class="lu-sub">
-                {#if sonos.offline.length > 0}
-                    <span class="mono">{sonos.offline.length}</span>
-                    unreachable — fix an address, or set one up
-                {:else}
-                    Names, addresses, tone and the status light
-                {/if}
-            </span>
-        </span>
-        <span class="lu-count mono">{totalSpeakers}</span>
-        <span class="lu-chev" aria-hidden="true"><Icon name="chevronDown" size={18} /></span>
-    </button>
+    <NavRow icon="speaker" title="Speakers" count={totalSpeakers} onClick={openSpeakers}>
+        {#snippet sub()}
+            {#if sonos.offline.length > 0}
+                <span class="mono">{sonos.offline.length}</span>
+                unreachable — fix an address, or set one up
+            {:else}
+                Names, addresses, tone and the status light
+            {/if}
+        {/snippet}
+    </NavRow>
 
     {:else}
     <!-- ── Speakers — the device inventory and its settings ────────────
@@ -1720,7 +1621,7 @@
                         </span>
                     </span>
                     {#if playing}
-                        {@render wave()}
+                        <Waveform />
                     {/if}
                     <span class="sp-chev" aria-hidden="true"><Icon name="chevronDown" size={18} /></span>
                 </button>
@@ -1774,7 +1675,7 @@
                         </span>
                     </span>
                     {#if kef.isPlaying(sp)}
-                        {@render wave()}
+                        <Waveform />
                     {/if}
                     <span class="sp-chev" aria-hidden="true"><Icon name="chevronDown" size={18} /></span>
                 </button>
@@ -1793,22 +1694,20 @@
          in; this row is the discoverable way in for someone who never
          noticed it. -->
     {#if sonos.allSpeakers.length > 0}
-    <button class="lu-row" onclick={openEventsModal}>
-        <span class="lu-ico" class:on={sonos.livePush}>
-            <Icon name={sonos.livePush ? "bolt" : "radio"} size={18} />
-        </span>
-        <span class="lu-meta">
-            <span class="lu-title">Live updates</span>
-            <span class="lu-sub">
-                {#if sonos.livePush}
-                    Speakers push their changes — this app keeps up in real time
-                {:else}
-                    Speakers are being polled — changes take a few seconds to show
-                {/if}
-            </span>
-        </span>
-        <span class="lu-chev" aria-hidden="true"><Icon name="chevronDown" size={18} /></span>
-    </button>
+    <NavRow
+        icon={sonos.livePush ? "bolt" : "radio"}
+        on={sonos.livePush}
+        title="Live updates"
+        onClick={openEventsModal}
+    >
+        {#snippet sub()}
+            {#if sonos.livePush}
+                Speakers push their changes — this app keeps up in real time
+            {:else}
+                Speakers are being polled — changes take a few seconds to show
+            {/if}
+        {/snippet}
+    </NavRow>
     {/if}
     </div><!-- /.sp-col -->
 
@@ -1869,31 +1768,21 @@
                 <!-- Playing is a waveform; a zone the dock is holding open
                      after a pause gets the idle speaker icon instead. -->
                 {#if dockPlaying}
-                    {@render wave()}
+                    <Waveform />
                 {:else}
                     <span class="mini-idle" aria-hidden="true"><Icon name="speaker" size={14} /></span>
                 {/if}
             </button>
-            <div class="card-transport">
-                <button class="mini-btn skip" aria-label="Previous track"
-                    disabled={!c || busy.is("previous:" + c?.id)}
-                    onclick={() => sonos.skip(dockGroup, "previous")}>
-                    <Icon name="skipPrev" size={16} />
-                </button>
-                <button class="mini-btn on" aria-label={dockPlaying ? "Pause" : "Play"}
-                    disabled={!c || busy.is("play:" + c?.id)}
-                    onclick={() => sonos.togglePlay(dockGroup)}>
-                    <Icon name={dockPlaying ? "pause" : "play"} size={16} />
-                </button>
-                <button class="mini-btn skip" aria-label="Next track"
-                    disabled={!c || busy.is("next:" + c?.id)}
-                    onclick={() => sonos.skip(dockGroup, "next")}>
-                    <Icon name="skipNext" size={16} />
-                </button>
-            </div>
-            {#if p > 0}
-                <span class="prog" aria-hidden="true"><i style:width="{p * 100}%"></i></span>
-            {/if}
+            <CardTransport
+                playing={dockPlaying}
+                onToggle={() => sonos.togglePlay(dockGroup)}
+                toggleBusy={!c || busy.is("play:" + c?.id)}
+                onPrev={() => sonos.skip(dockGroup, "previous")}
+                prevBusy={!c || busy.is("previous:" + c?.id)}
+                onNext={() => sonos.skip(dockGroup, "next")}
+                nextBusy={!c || busy.is("next:" + c?.id)}
+            />
+            <ProgressLine value={p} />
         </div>
     {/if}
 {/if}
@@ -1934,7 +1823,9 @@
         onclick={() => g && openPlayer(g)}
     >
         <span class="puck-icon">
-            {#if playing}{@render wave()}{:else}<Icon name="speaker" size={16} />{/if}
+            <!-- On the filled amber tile the bars take the tile's ink; amber
+                 on amber would be invisible. -->
+            {#if playing}<Waveform ink />{:else}<Icon name="speaker" size={16} />{/if}
         </span>
         <!-- Says "this object moves", on hover only and to a pointer only:
              touch has the press-and-hold to discover, and a mouse has
@@ -1957,35 +1848,24 @@
     </button>
 {/snippet}
 
-<!-- ── Where playback lands ──────────────────────────────────────────
-     One destination shared by sonos.favorites and search, always visible — a
-     single room shows its name rather than hiding the answer entirely. Both
-     bridges are in the same row because there is only ever one destination;
-     the KEF speakers come after the Sonos zones behind one marker, so a name
-     that exists on both sides is still tellable apart without giving every
-     chip a badge it doesn't need. -->
+<!-- Both surfaces that start something — the favorites shelf and the search
+     results — point at the same destination row, so it is rendered through one
+     snippet rather than placed twice. -->
 {#snippet targetRow()}
-    {#if destination.list.length > 1}
-        <div class="fav-targets" role="radiogroup" aria-label="Play on">
-            <span class="t-label">Play on</span>
-            {#each destination.list as d, i (d.kind + d.id)}
-                {#if i === sonos.groups.length && sonos.groups.length > 0}
-                    <span class="t-label">KEF</span>
-                {/if}
-                {@const on = destination.is(d)}
-                <button class="chip" class:on role="radio" aria-checked={on}
-                    aria-label={`Play on ${destination.name(d)}${d.kind === "kef" ? " (KEF)" : ""}`}
-                    onclick={() => (destination.current = d)}>
-                    {destination.name(d)}
-                </button>
-            {/each}
-        </div>
-    {:else if destination.list.length === 1}
-        <div class="fav-targets">
-            <span class="t-label">Play on</span>
-            <span class="t-one">{destination.name(destination.list[0])}</span>
-        </div>
-    {/if}
+    <DestinationRow {destination} kefStart={sonos.groups.length} />
+{/snippet}
+
+<!-- Tap the art to play it on `target`, the corner + to queue it. Shared by
+     the Home shelf and the idle player. -->
+{#snippet favShelf(f: SonosFavorite, target: string | null)}
+    <FavoriteCard
+        favorite={f}
+        {target}
+        playBusy={busy.is("fav:" + f.id)}
+        queueBusy={busy.is("q:" + f.uri)}
+        onPlay={() => playFavorite(f, target)}
+        onQueue={() => enqueue({ uri: f.uri, title: f.title, metadata: f.metadata }, false, target)}
+    />
 {/snippet}
 
 {#snippet searchBody()}
@@ -2206,6 +2086,12 @@
     {/if}
 {/snippet}
 
+<!-- The count is mono (§2), so the title is markup rather than a string. -->
+{#snippet offlineTitle()}
+    <span class="mono">{sonos.offline.length}</span>
+    speaker{sonos.offline.length === 1 ? "" : "s"} unreachable
+{/snippet}
+
 <!-- ── Zones sheet ──────────────────────────────────────────────────
      Grouping, and only grouping: what plays together. Opens over Home the
      same way the player does, and swaps to the player when a room is tapped
@@ -2257,40 +2143,28 @@
                      explanation, which reads as broken rather than as
                      "this doesn't apply to your speakers". -->
                 {#if sonos.multiGroups.length === 0 && sonos.soloSpeakers.length === 0}
-                    <div class="quiet-card">
-                        <span class="quiet-ico"><Icon name="speaker" size={20} /></span>
-                        <span class="quiet-meta">
-                            <span class="quiet-title">Nothing to group</span>
-                            <span class="quiet-sub">
-                                {#if kef.speakers.length > 0}
-                                    KEF speakers stand alone — they have no zones to
-                                    group. Their controls are on Speakers.
-                                {:else}
-                                    No Sonos speaker is answering right now — check
-                                    them under Speakers.
-                                {/if}
-                            </span>
-                        </span>
-                        <button class="chip quiet-go" onclick={openSpeakers}>Speakers</button>
-                    </div>
+                    <QuietCard
+                        title="Nothing to group"
+                        action={{ label: "Speakers", onClick: openSpeakers }}
+                    >
+                        {#if kef.speakers.length > 0}
+                            KEF speakers stand alone — they have no zones to group. Their
+                            controls are on Speakers.
+                        {:else}
+                            No Sonos speaker is answering right now — check them under
+                            Speakers.
+                        {/if}
+                    </QuietCard>
                 {/if}
 
                 <!-- Speakers the live topology never mentioned can't be pucks
                      and can't be grouped, so Zones only points at them. -->
                 {#if sonos.offline.length > 0}
-                    <button class="lu-row" onclick={openSpeakers}>
-                        <span class="lu-ico"><Icon name="speaker" size={18} /></span>
-                        <span class="lu-meta">
-                            <span class="lu-title">
-                                <span class="mono">{sonos.offline.length}</span>
-                                speaker{sonos.offline.length === 1 ? "" : "s"} unreachable
-                            </span>
-                            <span class="lu-sub">
-                                Not in the current Sonos topology — check them under Speakers
-                            </span>
-                        </span>
-                        <span class="lu-chev" aria-hidden="true"><Icon name="chevronDown" size={18} /></span>
-                    </button>
+                    <NavRow icon="speaker" onClick={openSpeakers} title={offlineTitle}>
+                        {#snippet sub()}
+                            Not in the current Sonos topology — check them under Speakers
+                        {/snippet}
+                    </NavRow>
                 {/if}
 
                 <p class="hint zones-keys">
@@ -2314,7 +2188,7 @@
         style:top="{puckDrag.y}px"
     >
         <span class="puck-icon">
-            {#if puckDrag.playing}{@render wave()}{:else}<Icon name="speaker" size={16} />{/if}
+            {#if puckDrag.playing}<Waveform ink />{:else}<Icon name="speaker" size={16} />{/if}
         </span>
         <span class="puck-body">
             <span class="puck-name">{puckDrag.name}</span>
@@ -2524,7 +2398,7 @@
                                     onclick={() => sonos.jumpTo(g, item.track)}>
                                     <span class="q-num mono">
                                         {#if current && st?.playing}
-                                            {@render wave()}
+                                            <Waveform />
                                         {:else}
                                             {item.track}
                                         {/if}
@@ -2777,7 +2651,7 @@
             {#if favTarget && sonos.favorites.length > 0}
                 <div class="favs h-scroll">
                     {#each sonos.favorites as f (f.id)}
-                        {@render favCard(f, favTarget)}
+                        {@render favShelf(f, favTarget)}
                     {/each}
                 </div>
             {/if}
@@ -2788,26 +2662,6 @@
 <!-- ── Favorite card ───────────────────────────────────────────────────
      Shared by the Home shelf and the idle player: tap the art to play it
      on `target`, or the corner button to sonos.queue it without interrupting. -->
-{#snippet favCard(f: SonosFavorite, target: string | null)}
-    <div class="fav">
-        <button class="fav-play" disabled={busy.is("fav:" + f.id) || !target}
-            onclick={() => playFavorite(f, target)}>
-            {#if f.art_uri}
-                <img class="fav-art" src={f.art_uri} alt="" loading="lazy" />
-            {:else}
-                <div class="fav-art placeholder">[ art ]</div>
-            {/if}
-            <span class="fav-title">{f.title}</span>
-            {#if f.service}<span class="fav-sub mono">{f.service}</span>{/if}
-        </button>
-        <button class="icon-btn fav-add" aria-label="Add {f.title} to the sonos.queue"
-            disabled={busy.is("q:" + f.uri) || !target}
-            onclick={() => enqueue({ uri: f.uri, title: f.title, metadata: f.metadata }, false, target)}>
-            <Icon name="plus" size={14} />
-        </button>
-    </div>
-{/snippet}
-
 <style>
     .sk { height: 180px; border-radius: var(--r-md); }
 
@@ -2921,19 +2775,6 @@
         .room-chip.on:not(:disabled):hover { color: var(--on); }
     }
 
-    /* ── Waveform motif ── */
-    .wave { display: flex; align-items: flex-end; gap: 2.5px; height: 13px; flex-shrink: 0; }
-    .wave i {
-        display: block; width: 2.5px; border-radius: 1px;
-        background: var(--on); height: 4px;
-        animation: wv 950ms ease-in-out infinite;
-    }
-    .wave i:nth-child(1) { animation-delay: 0s; }
-    .wave i:nth-child(2) { animation-delay: 0.15s; }
-    .wave i:nth-child(3) { animation-delay: 0.3s; }
-    .wave i:nth-child(4) { animation-delay: 0.1s; }
-    @keyframes wv { 0%, 100% { height: 3px; } 50% { height: 13px; } }
-
     /* ── Playing-now cards ── */
     .now-grid {
         display: grid;
@@ -2943,136 +2784,8 @@
         grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
         gap: var(--space-3);
     }
-    .now-card {
-        position: relative; overflow: hidden;
-        display: flex; align-items: center; gap: var(--space-3);
-        padding: 14px;
-        background: var(--card); border: 1px solid var(--hairline);
-        border-radius: var(--r-lg);
-        transition: border-color var(--t-fast);
-    }
-    .now-card.playing { background: var(--tile-on-gradient); border-color: var(--tile-on-border); }
-
-    /* ── Progress hairline ──
-       How far the track has got, on the cards themselves — the one thing
-       they couldn't say without opening the player. Sources that report no
-       duration (radio, line-in, TV) get no line rather than a made-up one. */
-    .prog {
-        position: absolute; left: 0; right: 0; bottom: 0;
-        height: 2px; background: var(--hairline);
-        pointer-events: none;
-    }
-    .prog i {
-        display: block; height: 100%;
-        background: var(--on);
-        /* Matches the 1s position tick, so the fill creeps instead of
-           stepping. */
-        transition: width 1s linear;
-    }
-
-    /* Nothing playing — a single honest row, not one dead card per zone. */
-    .quiet-card {
-        display: flex; align-items: center; gap: var(--space-3);
-        padding: 14px;
-        background: var(--card); border: 1px solid var(--hairline);
-        border-radius: var(--r-lg);
-    }
-    .quiet-ico {
-        width: 44px; height: 44px; border-radius: var(--r-md);
-        display: grid; place-items: center; flex-shrink: 0;
-        background: var(--card-3); color: var(--text-mute);
-    }
-    .quiet-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-    .quiet-title { font-size: 14px; font-weight: 600; }
-    .quiet-sub { font-size: 12.5px; color: var(--text-mute); }
-    .quiet-go { flex-shrink: 0; }
-    @media (hover: hover) { .now-card:hover { border-color: var(--border-strong); } }
-    .now-open {
-        flex: 1; min-width: 0;
-        display: flex; align-items: center; gap: var(--space-3);
-        background: none; border: 0; padding: 0;
-        color: var(--text); text-align: left; cursor: pointer;
-        transition: transform var(--t-fast);
-    }
-    .now-open:active { transform: scale(0.99); }
-    .now-art {
-        width: 52px; height: 52px; border-radius: var(--r-md);
-        object-fit: cover; background: var(--card-3);
-        border: 1px solid var(--hairline); flex-shrink: 0;
-    }
-    div.now-art { display: grid; place-items: center; font-size: 9px; color: var(--text-dim); }
-    .now-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
-    .now-name {
-        font-size: 14px; font-weight: 600; letter-spacing: -0.01em;
-        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    }
-    .now-line { display: flex; align-items: center; gap: 6px; min-width: 0; }
-    .now-track {
-        font-size: 12.5px; color: var(--text-mute);
-        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    }
-
-    /* Card-level transport (Playing-now cards + the dock). Skips ride along
-       from 430px up; a phone keeps play/pause and gives the title the room,
-       the same trade Home's card makes. */
-    .card-transport { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
-    .mini-btn {
-        width: 38px; height: 38px; border-radius: 50%;
-        display: grid; place-items: center; flex-shrink: 0;
-        background: var(--card-3); border: 1px solid var(--hairline);
-        color: var(--text); cursor: pointer;
-        transition: transform var(--t-fast), background var(--t-fast);
-    }
-    .mini-btn.on { background: var(--on); color: var(--primary-fg); border-color: transparent; }
-    .mini-btn:active:not(:disabled) { transform: scale(0.94); }
-    .mini-btn:focus-visible { box-shadow: var(--focus-ring); }
-    .mini-btn:disabled { opacity: 0.5; }
-    @media (max-width: 430px) {
-        .mini-btn.skip { display: none; }
-    }
-
-    /* ── Where playback lands ── */
-    .fav-targets { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
-    .t-label {
-        font-family: var(--font-mono);
-        font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase;
-        color: var(--text-dim);
-    }
-    .t-one { font-size: 12.5px; color: var(--text-mute); }
-
     /* ── Favorites ── */
     .favs { display: flex; gap: var(--space-3); padding-bottom: var(--space-1); }
-    .fav { position: relative; width: 112px; }
-    .fav-play {
-        display: flex; flex-direction: column; gap: 6px; width: 100%;
-        background: transparent; border: 0; padding: 0;
-        cursor: pointer; text-align: left; color: var(--text); font: inherit;
-    }
-    .fav-play:disabled { opacity: 0.5; cursor: default; }
-    .fav-art {
-        width: 112px; height: 112px; border-radius: var(--r-md);
-        object-fit: cover; background: var(--card-2);
-        border: 1px solid var(--hairline);
-        transition: transform 120ms ease;
-    }
-    div.fav-art { display: grid; place-items: center; font-size: 10px; color: var(--text-dim); }
-    @media (hover: hover) { .fav-play:hover .fav-art { transform: translateY(-1px); } }
-    .fav-play:active .fav-art { transform: scale(0.97); }
-    .fav-title {
-        font-size: 12.5px; font-weight: 500;
-        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    }
-    .fav-sub { font-size: 10px; color: var(--text-dim); letter-spacing: 0.04em; }
-    /* Queue-without-interrupting, parked on the art's corner. */
-    .fav-add {
-        position: absolute; top: 6px; right: 6px;
-        width: 30px; height: 30px; border-radius: 50%;
-        background: var(--bg-bar); border: 1px solid var(--hairline);
-        color: var(--text);
-        backdrop-filter: blur(6px);
-    }
-    .fav-add:disabled { opacity: 0.4; }
-
     /* ── Room grid ── */
     .rooms { display: flex; flex-direction: column; gap: var(--space-3); }
     .puck-grid {
@@ -3183,9 +2896,6 @@
         background: var(--card-3); color: var(--text-mute);
     }
     .puck.playing .puck-icon { background: var(--on); color: var(--primary-fg); }
-    /* The waveform's bars are amber like every other one — on the filled
-       amber icon tile they'd be invisible, so they take the tile's ink. */
-    .puck.playing .puck-icon .wave i { background: var(--primary-fg); }
     .puck-body { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
     /* Clear of the hover grip in the corner. */
     .puck-name { font-size: 14px; font-weight: 600; padding-right: 20px; }
@@ -3337,50 +3047,6 @@
     }
     @media (hover: hover) {
         .sp-row:hover { background: var(--bg-raised); border-color: var(--border-strong); }
-    }
-
-    /* ── Live-updates row (Speakers) ──────────────────────────────────
-       The §11 list-row shape: icon left, content middle, chevron right.
-       Live takes the sanctioned "ON" treatment rather than a status colour
-       of its own — push being on is the same kind of fact as a lit lamp.
-       Also used on Rooms as the pointer to unreachable speakers. */
-    .lu-row {
-        width: 100%;
-        margin-top: var(--space-4);
-        display: flex;
-        align-items: center;
-        gap: var(--space-3);
-        min-height: 60px;
-        padding: var(--space-3) var(--space-4);
-        text-align: left;
-        background: var(--bg-elevated);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-lg);
-        color: inherit;
-        font: inherit;
-        cursor: pointer;
-        transition: background var(--t-fast), border-color var(--t-fast);
-    }
-    .lu-ico {
-        flex-shrink: 0;
-        width: 36px;
-        height: 36px;
-        display: grid;
-        place-items: center;
-        border-radius: var(--radius-md);
-        background: var(--surface);
-        color: var(--text-mute);
-    }
-    .lu-ico.on {
-        background: var(--primary-soft);
-        color: var(--primary);
-    }
-    .lu-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-    .lu-title { font-size: 14px; font-weight: 600; letter-spacing: -0.01em; }
-    .lu-sub { font-size: 12px; color: var(--text-mute); line-height: 1.4; }
-    .lu-chev { flex-shrink: 0; display: flex; color: var(--text-dim); transform: rotate(-90deg); }
-    @media (hover: hover) {
-        .lu-row:hover { background: var(--bg-raised); border-color: var(--border-strong); }
     }
 
     /* ── Volume rows (player sheet) ── */
@@ -3784,15 +3450,13 @@
         input[type="range"]::-moz-range-thumb { width: 26px; height: 26px; }
         .member .m-name { width: 90px; }
         .sp-play { width: 44px; height: 44px; }
-        .sp-more, .q-rm, .fav-add, .sp-clear { width: 44px; height: 44px; }
-        .mini-btn { width: 44px; height: 44px; }
+        .sp-more, .q-rm, .sp-clear { width: 44px; height: 44px; }
         .sp-input, .sp-config input { font-size: 16px; } /* prevents iOS auto-zoom */
     }
 
     @media (prefers-reduced-motion: reduce) {
-        .wave i { animation: none; height: 8px; }
-        .fav-art, .now-card, .puck, .p-play,
-        .p-upnext, .q-row, .sp-row, .mini, .mini-btn, .p-art, .prog i, .kef-rail i {
+        .puck, .p-play,
+        .p-upnext, .q-row, .sp-row, .mini, .p-art, .kef-rail i {
             transition-duration: 0.001ms;
         }
     }

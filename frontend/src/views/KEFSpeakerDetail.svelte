@@ -20,6 +20,7 @@
     import { fly } from "svelte/transition";
     import { cubicOut } from "svelte/easing";
     import Icon from "../components/Icon.svelte";
+    import Waveform from "../components/music/Waveform.svelte";
     import Switch from "../components/Switch.svelte";
     import { api } from "../lib/api";
     import { toasts } from "../lib/stores.svelte";
@@ -415,7 +416,7 @@
             <div class="hero-top">
                 <span class="hero-ico" class:on={playing}>
                     {#if playing}
-                        <span class="wave" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+                        <Waveform />
                     {:else}
                         <Icon name="speaker" size={18} />
                     {/if}
@@ -1036,19 +1037,7 @@
     .standby { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; }
     .standby-msg { flex: 1; min-width: 160px; font-size: 12px; color: var(--text-mute); line-height: 1.5; }
 
-    /* ── Waveform (§6.8) — Music's "audio is moving" motif ── */
-    .wave { display: flex; align-items: flex-end; gap: 2.5px; height: 13px; }
-    .wave i {
-        width: 2.5px; border-radius: 1px; background: var(--on); height: 4px;
-        animation: wv 950ms ease-in-out infinite;
-    }
-    .wave i:nth-child(1) { animation-delay: 0s; }
-    .wave i:nth-child(2) { animation-delay: 0.15s; }
-    .wave i:nth-child(3) { animation-delay: 0.3s; }
-    .wave i:nth-child(4) { animation-delay: 0.1s; }
-    @keyframes wv { 0%, 100% { height: 3px; } 50% { height: 13px; } }
     @media (prefers-reduced-motion: reduce) {
-        .wave i { animation: none; height: 8px; }
         .t-btn, .t-play { transition-duration: 0.001ms; }
     }
 
