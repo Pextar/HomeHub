@@ -23,6 +23,8 @@
     import { kefSourceLabel, KEF_SOURCES } from "../lib/kef";
     import { secs, trimClock, fmtSecs, toClock } from "../lib/music/time";
     import { settleScroll, restoreScroll, toTop } from "../lib/music/scroll";
+    import { clock } from "../lib/music/clock.svelte";
+    import { createBusy } from "../lib/music/busy.svelte";
     import type {
         SonosStatus, SonosSpeakerView, SonosGroupView, SonosFavorite,
         SonosQueueItem, SonosRepeat,
@@ -42,8 +44,10 @@
     let localVol = $state<Record<string, number>>({});
     let groupVol = $state<Record<string, number>>({});
 
-    // Actions in flight (play/pause/join/…) keyed by "<action>:<id>".
-    let busy = $state<Record<string, boolean>>({});
+    // Actions in flight (play/pause/join/…) keyed by "<action>:<id>". One map
+    // for both bridges and the view's own calls; the key namespace is what
+    // keeps a dozen cards' transports from disabling each other.
+    const busy = createBusy();
 
     // A play/pause round-trip plus the refresh behind it takes long enough
     // that an un-flipped button reads as a dropped tap. The new state is
@@ -117,7 +121,7 @@
     // extrapolates from the last reading so the bar creeps forward once a
     // second instead of stepping five at a time.
     function posOf(g: SonosGroupView): number {
-        void tick; // re-derive once a second
+        void clock.beat; // re-derive once a second
         const st = coordinatorOf(g)?.state;
         const base = secs(st?.position);
         if (!isPlaying(g) || !polledAt) return base;
@@ -269,7 +273,7 @@
     }
     /** How far through the track, 0–1. Sources with no duration get no line. */
     function kefProgress(sp: KEFSpeakerView): number {
-        void tick; // re-derive once a second, exactly as posOf does for Sonos
+        void clock.beat; // re-derive once a second, exactly as posOf does for Sonos
         const total = sp.state?.duration_ms ?? 0;
         if (total <= 0) return 0;
         // Extrapolated from when the reading was taken, like the Sonos
@@ -284,7 +288,7 @@
 
     /** Where the track has got to, extrapolated the same way the bar is. */
     function kefPosMs(sp: KEFSpeakerView): number {
-        tick; // re-read every second so the clock counts rather than jumps
+        void clock.beat; // re-read every second so the clock counts rather than jumps
         const total = sp.state?.duration_ms ?? 0;
         const base = sp.state?.position_ms ?? 0;
         const since = kefIsPlaying(sp) && sp.read_at ? Date.now() - sp.read_at : 0;
@@ -292,23 +296,23 @@
     }
 
     async function kefTogglePlay(sp: KEFSpeakerView) {
-        const key = "kefplay:" + sp.id;
-        if (busy[key]) return;
-        busy[key] = true;
         const next = !kefIsPlaying(sp);
-        kefPlayOverride[sp.id] = { playing: next, at: Date.now() };
-        try {
-            await (next ? api.kefPlay(sp.id) : api.kefPause(sp.id));
-            await refreshKEF();
-        } catch (e) {
-            delete kefPlayOverride[sp.id];
-            toasts.error(next ? "Couldn't start playback" : "Couldn't pause", (e as Error).message);
-        } finally {
-            busy[key] = false;
-        }
+        await busy.claim("kefplay:" + sp.id, async () => {
+            kefPlayOverride[sp.id] = { playing: next, at: Date.now() };
+            try {
+                await (next ? api.kefPlay(sp.id) : api.kefPause(sp.id));
+                await refreshKEF();
+            } catch (e) {
+                delete kefPlayOverride[sp.id];
+                toasts.error(
+                    next ? "Couldn't start playback" : "Couldn't pause",
+                    (e as Error).message,
+                );
+            }
+        });
     }
     function kefSkip(sp: KEFSpeakerView, dir: "next" | "previous") {
-        void run(
+        void kefRun(
             `kef${dir}:` + sp.id,
             () => (dir === "next" ? api.kefNext(sp.id) : api.kefPrevious(sp.id)),
             "Skip failed",
@@ -326,15 +330,19 @@
         const level = clampVol(v);
         kefVol[sp.id] = level;
         kefVolAt[sp.id] = Date.now();
-        void run("kefvol:" + sp.id, () => api.kefSetVolume(sp.id, level), "Volume failed");
+        void kefRun("kefvol:" + sp.id, () => api.kefSetVolume(sp.id, level), "Volume failed");
     }
     function kefToggleMute(sp: KEFSpeakerView) {
         const next = !sp.state?.muted;
-        void run("kefmute:" + sp.id, () => api.kefSetMute(sp.id, next), "Mute failed");
+        void kefRun("kefmute:" + sp.id, () => api.kefSetMute(sp.id, next), "Mute failed");
     }
     function kefSetSource(sp: KEFSpeakerView, source: KEFSource) {
         if (sp.state?.source === source) return;
-        void run("kefsrc:" + sp.id, () => api.kefSetSource(sp.id, source), "Couldn't switch input");
+        void kefRun(
+            "kefsrc:" + sp.id,
+            () => api.kefSetSource(sp.id, source),
+            "Couldn't switch input",
+        );
     }
 
     // ── Where playback lands ─────────────────────────────────────────────
@@ -434,38 +442,29 @@
     });
 
     // ── Actions ──────────────────────────────────────────────────────────
-    async function run(key: string, fn: () => Promise<unknown>, errTitle: string) {
-        if (busy[key]) return;
-        busy[key] = true;
-        try {
-            await fn();
-            // A KEF call changes nothing on the Sonos side and vice versa, so
-            // each one re-reads only the bridge it touched.
-            await (key.startsWith("kef") ? refreshKEF() : refresh());
-        } catch (e) {
-            toasts.error(errTitle, (e as Error).message);
-        } finally {
-            busy[key] = false;
-        }
-    }
+    // A KEF call changes nothing on the Sonos side and vice versa, so each
+    // action re-reads only the bridge it touched. Which one that is used to be
+    // guessed from a "kef" prefix on the key; naming it here means a key that
+    // doesn't follow the convention can't quietly re-read the wrong speakers.
+    const run = (key: string, fn: () => Promise<unknown>, errTitle: string) =>
+        busy.run(key, fn, errTitle, refresh);
+    const kefRun = (key: string, fn: () => Promise<unknown>, errTitle: string) =>
+        busy.run(key, fn, errTitle, refreshKEF);
 
     async function togglePlay(g: SonosGroupView) {
         const c = coordinatorOf(g);
         if (!c) return;
-        const key = "play:" + c.id;
-        if (busy[key]) return;
         const next = !isPlaying(g);
-        busy[key] = true;
-        playOverride[c.id] = { playing: next, at: Date.now() };
-        try {
-            await (next ? api.sonosPlay(c.id) : api.sonosPause(c.id));
-            await refresh();
-        } catch (e) {
-            delete playOverride[c.id]; // the speaker never took it — roll back
-            toasts.error(next ? "Play failed" : "Pause failed", (e as Error).message);
-        } finally {
-            busy[key] = false;
-        }
+        await busy.claim("play:" + c.id, async () => {
+            playOverride[c.id] = { playing: next, at: Date.now() };
+            try {
+                await (next ? api.sonosPlay(c.id) : api.sonosPause(c.id));
+                await refresh();
+            } catch (e) {
+                delete playOverride[c.id]; // the speaker never took it — roll back
+                toasts.error(next ? "Play failed" : "Pause failed", (e as Error).message);
+            }
+        });
     }
 
     function skip(g: SonosGroupView, dir: "next" | "previous") {
@@ -543,26 +542,25 @@
         where: string,
         bridge: "sonos" | "kef" = "sonos",
     ) {
-        if (busy[key]) return;
-        busy[key] = true;
-        try {
-            await fn();
-            await (bridge === "kef" ? refreshKEF() : refresh());
-            // A KEF play answers as soon as *Spotify* accepted it — the audio
-            // then goes out to the cloud and comes back to the speaker, so the
-            // read above still says "stopped" and the toast promised music no
-            // card was showing yet. The backend re-reads at 0.6s and 3s and
-            // publishes `music` when it finds the change; these are the
-            // backstop for an install where that push isn't getting through.
-            if (bridge === "kef") {
-                for (const ms of [1200, 4000]) followUp(ms, refreshKEF);
+        await busy.claim(key, async () => {
+            try {
+                await fn();
+                await (bridge === "kef" ? refreshKEF() : refresh());
+                // A KEF play answers as soon as *Spotify* accepted it — the
+                // audio then goes out to the cloud and comes back to the
+                // speaker, so the read above still says "stopped" and the
+                // toast promised music no card was showing yet. The backend
+                // re-reads at 0.6s and 3s and publishes `music` when it finds
+                // the change; these are the backstop for an install where that
+                // push isn't getting through.
+                if (bridge === "kef") {
+                    for (const ms of [1200, 4000]) followUp(ms, refreshKEF);
+                }
+                toasts.success("Playing", [what, where].filter(Boolean).join(" · "));
+            } catch (e) {
+                toasts.error("Couldn't play", (e as Error).message);
             }
-            toasts.success("Playing", [what, where].filter(Boolean).join(" · "));
-        } catch (e) {
-            toasts.error("Couldn't play", (e as Error).message);
-        } finally {
-            busy[key] = false;
-        }
+        });
     }
 
     /** A delayed re-read that doesn't outlive the view. */
@@ -764,21 +762,18 @@
         const target = groupOfSpeaker(targetId)?.coordinator_id ?? targetId;
         if (sourceId === target) return;
         if (groupOfSpeaker(sourceId)?.coordinator_id === target) return; // already together
-        const key = "group:" + target;
-        if (busy[key]) return;
-        busy[key] = true;
-        try {
-            await api.sonosJoin(sourceId, target);
-            await refresh();
-            announce(
-                `${speakerById.get(sourceId)?.name ?? "Room"} now plays with ` +
-                    `${speakerById.get(targetId)?.name ?? "the other room"}.`,
-            );
-        } catch (e) {
-            toasts.error("Grouping failed", (e as Error).message);
-        } finally {
-            busy[key] = false;
-        }
+        await busy.claim("group:" + target, async () => {
+            try {
+                await api.sonosJoin(sourceId, target);
+                await refresh();
+                announce(
+                    `${speakerById.get(sourceId)?.name ?? "Room"} now plays with ` +
+                        `${speakerById.get(targetId)?.name ?? "the other room"}.`,
+                );
+            } catch (e) {
+                toasts.error("Grouping failed", (e as Error).message);
+            }
+        });
     }
 
     /**
@@ -1048,19 +1043,16 @@
     }
 
     async function ungroup(g: SonosGroupView) {
-        const key = "ungroup:" + g.coordinator_id;
-        if (busy[key]) return;
-        busy[key] = true;
-        try {
-            for (const id of g.member_ids) {
-                if (id !== g.coordinator_id) await api.sonosLeave(id);
+        await busy.claim("ungroup:" + g.coordinator_id, async () => {
+            try {
+                for (const id of g.member_ids) {
+                    if (id !== g.coordinator_id) await api.sonosLeave(id);
+                }
+                await refresh();
+            } catch (e) {
+                toasts.error("Ungrouping failed", (e as Error).message);
             }
-            await refresh();
-        } catch (e) {
-            toasts.error("Ungrouping failed", (e as Error).message);
-        } finally {
-            busy[key] = false;
-        }
+        });
     }
 
     // ── Player sheet ─────────────────────────────────────────────────────
@@ -1524,18 +1516,17 @@
 
     // ── Scrubbing ────────────────────────────────────────────────────────
     // The position is only polled every 5s, so between polls every surface
-    // showing progress extrapolates from the last reading. `tick` exists
-    // purely to re-run those derivations once a second, and only while
-    // something is actually moving.
-    let tick = $state(0);
+    // showing progress extrapolates from the last reading; `clock.beat`
+    // re-runs those derivations once a second. Held only while something is
+    // actually moving — which is this view's judgement to make, not the
+    // clock's.
     $effect(() => {
         // Both bridges, or a house with only KEF speakers never started the
         // clock at all: `playingCount` is the Sonos count, so a KEF card's
         // progress hairline stood still unless a Sonos zone happened to be
         // playing beside it.
         if (!playerOpen && playingCount === 0 && kefPlaying.length === 0) return;
-        const t = setInterval(() => tick++, 1000);
-        return () => clearInterval(t);
+        return clock.start();
     });
 
     // Non-null while a finger/pointer is on the scrubber.
@@ -1550,7 +1541,7 @@
 
     const livePos = $derived.by(() => {
         if (scrubSec !== null) return scrubSec;
-        void tick; // re-derive once a second
+        void clock.beat; // re-derive once a second
         const now = Date.now();
         const ov = seekOverride;
         const base = ov && now - ov.at < 4000 ? ov.sec : secs(activeState?.position);
@@ -1697,19 +1688,21 @@
         target: string | null = sonosTarget,
     ) {
         if (!target) return;
-        const key = "q:" + item.uri;
-        if (busy[key]) return;
-        busy[key] = true;
-        try {
-            const added = await api.sonosQueueAdd(target, { ...item, next });
-            const where = added.track ? `position ${added.track} of ${added.length}` : "the queue";
-            toasts.success(next ? "Playing next" : "Added to queue", `${item.title ?? "Track"} · ${where}`);
-            if (playerGroupId === target) void loadQueue(target);
-        } catch (e) {
-            toasts.error("Couldn't add to the queue", (e as Error).message);
-        } finally {
-            busy[key] = false;
-        }
+        await busy.claim("q:" + item.uri, async () => {
+            try {
+                const added = await api.sonosQueueAdd(target, { ...item, next });
+                const where = added.track
+                    ? `position ${added.track} of ${added.length}`
+                    : "the queue";
+                toasts.success(
+                    next ? "Playing next" : "Added to queue",
+                    `${item.title ?? "Track"} · ${where}`,
+                );
+                if (playerGroupId === target) void loadQueue(target);
+            } catch (e) {
+                toasts.error("Couldn't add to the queue", (e as Error).message);
+            }
+        });
     }
 
     // ── Row overflow menus (search results, favorites) ───────────────────
@@ -2294,7 +2287,7 @@
                             <button
                                 class="mini-btn skip"
                                 aria-label="Previous track"
-                                disabled={!c || busy["previous:" + c?.id]}
+                                disabled={!c || busy.is("previous:" + c?.id)}
                                 onclick={() => skip(g, "previous")}
                             >
                                 <Icon name="skipPrev" size={16} />
@@ -2302,7 +2295,7 @@
                             <button
                                 class="mini-btn on"
                                 aria-label={isPlaying(g) ? "Pause" : "Play"}
-                                disabled={!c || busy["play:" + c?.id]}
+                                disabled={!c || busy.is("play:" + c?.id)}
                                 onclick={() => togglePlay(g)}
                             >
                                 <Icon name={isPlaying(g) ? "pause" : "play"} size={16} />
@@ -2310,7 +2303,7 @@
                             <button
                                 class="mini-btn skip"
                                 aria-label="Next track"
-                                disabled={!c || busy["next:" + c?.id]}
+                                disabled={!c || busy.is("next:" + c?.id)}
                                 onclick={() => skip(g, "next")}
                             >
                                 <Icon name="skipNext" size={16} />
@@ -2363,7 +2356,7 @@
                             <button
                                 class="mini-btn on"
                                 aria-label={kefIsPlaying(sp) ? "Pause" : "Play"}
-                                disabled={busy["kefplay:" + sp.id]}
+                                disabled={busy.is("kefplay:" + sp.id)}
                                 onclick={() => kefTogglePlay(sp)}
                             >
                                 <Icon name={kefIsPlaying(sp) ? "pause" : "play"} size={16} />
@@ -2708,17 +2701,17 @@
             </button>
             <div class="card-transport">
                 <button class="mini-btn skip" aria-label="Previous track"
-                    disabled={!c || busy["previous:" + c?.id]}
+                    disabled={!c || busy.is("previous:" + c?.id)}
                     onclick={() => skip(dockGroup, "previous")}>
                     <Icon name="skipPrev" size={16} />
                 </button>
                 <button class="mini-btn on" aria-label={dockPlaying ? "Pause" : "Play"}
-                    disabled={!c || busy["play:" + c?.id]}
+                    disabled={!c || busy.is("play:" + c?.id)}
                     onclick={() => togglePlay(dockGroup)}>
                     <Icon name={dockPlaying ? "pause" : "play"} size={16} />
                 </button>
                 <button class="mini-btn skip" aria-label="Next track"
-                    disabled={!c || busy["next:" + c?.id]}
+                    disabled={!c || busy.is("next:" + c?.id)}
                     onclick={() => skip(dockGroup, "next")}>
                     <Icon name="skipNext" size={16} />
                 </button>
@@ -2988,7 +2981,7 @@
                     <div class="sp-results">
                         {#each shownItems as item (item.uri)}
                             <div class="sp-row">
-                                <button class="sp-open" disabled={busy["item:" + item.uri] || !dest}
+                                <button class="sp-open" disabled={busy.is("item:" + item.uri) || !dest}
                                     onclick={() => playItem(item)}>
                                     {#if item.art_url}
                                         <img class="sp-art" src={item.art_url} alt="" loading="lazy" />
@@ -3010,7 +3003,7 @@
                                 {#if sonosTarget}
                                     <button class="icon-btn sp-more" aria-label="More for {item.name}"
                                         aria-haspopup="menu" aria-expanded={menuFor === item.uri}
-                                        disabled={busy["q:" + item.uri]}
+                                        disabled={busy.is("q:" + item.uri)}
                                         onclick={(e) => toggleMenu(e, item.uri)}>
                                         <Icon name="more" size={16} />
                                     </button>
@@ -3112,7 +3105,7 @@
                         <div class="glabel">
                             <Icon name="check" size={11} />
                             <span>{groupTitle(g)}</span>
-                            <button class="ungroup" disabled={busy["ungroup:" + g.coordinator_id]}
+                            <button class="ungroup" disabled={busy.is("ungroup:" + g.coordinator_id)}
                                 onclick={() => ungroup(g)}>Ungroup</button>
                         </div>
                         <div class="puck-grid">
@@ -3353,16 +3346,16 @@
 
             <div class="p-transport">
                 <button class="icon-btn t-btn" aria-label="Previous track"
-                    disabled={busy["kefprevious:" + sp.id]} onclick={() => kefSkip(sp, "previous")}>
+                    disabled={busy.is("kefprevious:" + sp.id)} onclick={() => kefSkip(sp, "previous")}>
                     <Icon name="skipPrev" size={22} />
                 </button>
                 <button class="p-play" class:playing={kefIsPlaying(sp)}
                     aria-label={kefIsPlaying(sp) ? "Pause" : "Play"} title="Play / pause (space)"
-                    disabled={busy["kefplay:" + sp.id]} onclick={() => kefTogglePlay(sp)}>
+                    disabled={busy.is("kefplay:" + sp.id)} onclick={() => kefTogglePlay(sp)}>
                     <Icon name={kefIsPlaying(sp) ? "pause" : "play"} size={26} />
                 </button>
                 <button class="icon-btn t-btn" aria-label="Next track"
-                    disabled={busy["kefnext:" + sp.id]} onclick={() => kefSkip(sp, "next")}>
+                    disabled={busy.is("kefnext:" + sp.id)} onclick={() => kefSkip(sp, "next")}>
                     <Icon name="skipNext" size={22} />
                 </button>
             </div>
@@ -3378,7 +3371,7 @@
                 <div class="member">
                     <button class="icon-btn m-mute" aria-label={st?.muted ? "Unmute" : "Mute"}
                         aria-pressed={st?.muted ?? false}
-                        disabled={busy["kefmute:" + sp.id]} onclick={() => kefToggleMute(sp)}>
+                        disabled={busy.is("kefmute:" + sp.id)} onclick={() => kefToggleMute(sp)}>
                         <Icon name={st?.muted ? "volumeOff" : "volume"} size={17} />
                     </button>
                     <span class="m-name" class:muted={st?.muted}>{sp.name}</span>
@@ -3401,7 +3394,7 @@
                     {#each KEF_SOURCES as src (src.value)}
                         <button class="chip" class:on={st?.source === src.value}
                             aria-pressed={st?.source === src.value}
-                            disabled={busy["kefsrc:" + sp.id]}
+                            disabled={busy.is("kefsrc:" + sp.id)}
                             onclick={() => kefSetSource(sp, src.value)}>{src.label}</button>
                     {/each}
                 </div>
@@ -3487,7 +3480,7 @@
                         {gs?.queue_length ?? queue.length}
                         {(gs?.queue_length ?? queue.length) === 1 ? "track" : "tracks"}
                     </span>
-                    <button class="chip" disabled={!c || busy["qclear:" + c?.id] || queue.length === 0}
+                    <button class="chip" disabled={!c || busy.is("qclear:" + c?.id) || queue.length === 0}
                         onclick={() => clearQueue(g)}>Clear</button>
                 </div>
 
@@ -3503,7 +3496,7 @@
                         {#each queue as item (item.track)}
                             {@const current = item.track === st?.queue_track}
                             <div class="q-row" class:current>
-                                <button class="q-open" disabled={busy["jump:" + item.track]}
+                                <button class="q-open" disabled={busy.is("jump:" + item.track)}
                                     onclick={() => jumpTo(g, item.track)}>
                                     <span class="q-num mono">
                                         {#if current && st?.playing}
@@ -3522,7 +3515,7 @@
                                 </button>
                                 <button class="icon-btn q-rm"
                                     aria-label="Remove {item.title || 'track ' + item.track} from the queue"
-                                    disabled={busy["qrm:" + item.track]} onclick={() => removeQueued(g, item.track)}>
+                                    disabled={busy.is("qrm:" + item.track)} onclick={() => removeQueued(g, item.track)}>
                                     <Icon name="close" size={14} />
                                 </button>
                             </div>
@@ -3600,22 +3593,22 @@
                         aria-label={gs?.shuffle ? "Shuffle on" : "Shuffle off"}
                         aria-pressed={gs?.shuffle ?? false}
                         title="Shuffle (s)"
-                        disabled={!gs || !c || busy["mode:" + c?.id]}
+                        disabled={!gs || !c || busy.is("mode:" + c?.id)}
                         onclick={() => setPlayMode(g, { shuffle: !gs?.shuffle })}
                     >
                         <Icon name="shuffle" size={18} />
                     </button>
                     <button class="icon-btn t-btn" aria-label="Previous track" title="Previous (shift ←)"
-                        disabled={!c || busy["previous:" + c?.id]} onclick={() => skip(g, "previous")}>
+                        disabled={!c || busy.is("previous:" + c?.id)} onclick={() => skip(g, "previous")}>
                         <Icon name="skipPrev" size={22} />
                     </button>
                     <button class="p-play" class:playing={isPlaying(g)}
                         aria-label={isPlaying(g) ? "Pause" : "Play"} title="Play / pause (space)"
-                        disabled={!c || busy["play:" + c?.id]} onclick={() => togglePlay(g)}>
+                        disabled={!c || busy.is("play:" + c?.id)} onclick={() => togglePlay(g)}>
                         <Icon name={isPlaying(g) ? "pause" : "play"} size={26} />
                     </button>
                     <button class="icon-btn t-btn" aria-label="Next track" title="Next (shift →)"
-                        disabled={!c || busy["next:" + c?.id]} onclick={() => skip(g, "next")}>
+                        disabled={!c || busy.is("next:" + c?.id)} onclick={() => skip(g, "next")}>
                         <Icon name="skipNext" size={22} />
                     </button>
                     <button
@@ -3623,7 +3616,7 @@
                         class:on={gs && gs.repeat !== "off"}
                         aria-label={repeatLabel(gs?.repeat)}
                         title="Repeat (r)"
-                        disabled={!gs || !c || busy["mode:" + c?.id]}
+                        disabled={!gs || !c || busy.is("mode:" + c?.id)}
                         onclick={() => setPlayMode(g, { repeat: NEXT_REPEAT[gs?.repeat ?? "off"] })}
                     >
                         <Icon name={gs?.repeat === "one" ? "repeatOne" : "repeat"} size={18} />
@@ -3639,7 +3632,7 @@
                 {#if gs}
                     <div class="p-extras">
                         <button class="chip" class:on={gs.crossfade} aria-pressed={gs.crossfade}
-                            disabled={!c || busy["xfade:" + c?.id]} onclick={() => toggleCrossfade(g)}>
+                            disabled={!c || busy.is("xfade:" + c?.id)} onclick={() => toggleCrossfade(g)}>
                             Crossfade
                         </button>
                         {#if gs.queue_length > 0}
@@ -3684,7 +3677,7 @@
                             <div class="member">
                                 <button class="icon-btn m-mute"
                                     aria-label={sp.state?.muted ? `Unmute ${sp.name}` : `Mute ${sp.name}`}
-                                    disabled={busy["mute:" + sp.id]} onclick={() => toggleMute(sp)}>
+                                    disabled={busy.is("mute:" + sp.id)} onclick={() => toggleMute(sp)}>
                                     <Icon name={sp.state?.muted ? "volumeOff" : "volume"} size={16} />
                                 </button>
                                 <span class="m-name" class:muted={sp.state?.muted}>{sp.name}</span>
@@ -3695,7 +3688,7 @@
                                 <span class="vol-num mono">{localVol[sp.id] ?? sp.state?.volume ?? 0}</span>
                                 {#if grouped}
                                     <button class="icon-btn m-act" aria-label="Remove {sp.name} from group"
-                                        disabled={busy["leave:" + sp.id]} onclick={() => leave(sp.id)}>
+                                        disabled={busy.is("leave:" + sp.id)} onclick={() => leave(sp.id)}>
                                         <Icon name="close" size={14} />
                                     </button>
                                 {/if}
@@ -3705,7 +3698,7 @@
                     {#if joinables(g).length > 0}
                         <div class="joiners">
                             {#each joinables(g) as sp (sp.id)}
-                                <button class="chip" disabled={busy["join:" + sp.id]} onclick={() => join(sp.id, g)}>
+                                <button class="chip" disabled={busy.is("join:" + sp.id)} onclick={() => join(sp.id, g)}>
                                     <Icon name="plus" size={13} /> {sp.name}
                                 </button>
                             {/each}
@@ -3772,7 +3765,7 @@
      on `target`, or the corner button to queue it without interrupting. -->
 {#snippet favCard(f: SonosFavorite, target: string | null)}
     <div class="fav">
-        <button class="fav-play" disabled={busy["fav:" + f.id] || !target}
+        <button class="fav-play" disabled={busy.is("fav:" + f.id) || !target}
             onclick={() => playFavorite(f, target)}>
             {#if f.art_uri}
                 <img class="fav-art" src={f.art_uri} alt="" loading="lazy" />
@@ -3783,7 +3776,7 @@
             {#if f.service}<span class="fav-sub mono">{f.service}</span>{/if}
         </button>
         <button class="icon-btn fav-add" aria-label="Add {f.title} to the queue"
-            disabled={busy["q:" + f.uri] || !target}
+            disabled={busy.is("q:" + f.uri) || !target}
             onclick={() => enqueue({ uri: f.uri, title: f.title, metadata: f.metadata }, false, target)}>
             <Icon name="plus" size={14} />
         </button>
