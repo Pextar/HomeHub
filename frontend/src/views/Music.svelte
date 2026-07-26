@@ -9,7 +9,6 @@
     import KEFSpeakerDetail from "./KEFSpeakerDetail.svelte";
     import SonosEventsModal from "../modals/SonosEventsModal.svelte";
     import LiveStatusChip from "../components/LiveStatusChip.svelte";
-    import Segmented from "../components/Segmented.svelte";
     import { api } from "../lib/api";
     import { toasts, route, bottomBar } from "../lib/stores.svelte";
     import { onLive } from "../lib/live";
@@ -19,11 +18,13 @@
     import { cubicOut } from "svelte/easing";
     import { dur, sheet } from "../lib/motion";
     import { lockBodyScroll, unlockBodyScroll } from "../lib/scroll-lock";
-    import { kefSourceLabel } from "../lib/kef";
+    import * as sheetRun from "../lib/sheet-run";
+    import type { SheetRun } from "../lib/sheet-run";
+    import { kefSourceLabel, KEF_SOURCES } from "../lib/kef";
     import type {
         SonosStatus, SonosSpeakerView, SonosGroupView, SonosFavorite,
         SonosQueueItem, SonosRepeat,
-        KEFStatus, KEFSpeakerView,
+        KEFStatus, KEFSpeakerView, KEFSource,
         SpotifyStatus, SpotifyItem, SpotifyResults,
     } from "../lib/types";
 
@@ -252,6 +253,15 @@
         return Math.max(0, Math.min(1, (base + since) / total));
     }
 
+    /** Where the track has got to, extrapolated the same way the bar is. */
+    function kefPosMs(sp: KEFSpeakerView): number {
+        tick; // re-read every second so the clock counts rather than jumps
+        const total = sp.state?.duration_ms ?? 0;
+        const base = sp.state?.position_ms ?? 0;
+        const since = sp.state?.playing && sp.read_at ? Date.now() - sp.read_at : 0;
+        return total > 0 ? Math.min(total, base + since) : base + since;
+    }
+
     async function kefTogglePlay(sp: KEFSpeakerView) {
         const key = "kefplay:" + sp.id;
         if (busy[key]) return;
@@ -265,6 +275,35 @@
         } finally {
             busy[key] = false;
         }
+    }
+    function kefSkip(sp: KEFSpeakerView, dir: "next" | "previous") {
+        void run(
+            `kef${dir}:` + sp.id,
+            () => (dir === "next" ? api.kefNext(sp.id) : api.kefPrevious(sp.id)),
+            "Skip failed",
+        );
+    }
+    /** Volume the slider shows: the live drag if there is one, else the read. */
+    let kefVol = $state<Record<string, number>>({});
+    let kefVolAt: Record<string, number> = {};
+    function kefShownVol(sp: KEFSpeakerView): number {
+        const ov = kefVol[sp.id];
+        const fresh = ov !== undefined && Date.now() - (kefVolAt[sp.id] ?? 0) < 4000;
+        return fresh ? ov : (sp.state?.volume ?? 0);
+    }
+    function kefSetVolume(sp: KEFSpeakerView, v: number) {
+        const level = clampVol(v);
+        kefVol[sp.id] = level;
+        kefVolAt[sp.id] = Date.now();
+        void run("kefvol:" + sp.id, () => api.kefSetVolume(sp.id, level), "Volume failed");
+    }
+    function kefToggleMute(sp: KEFSpeakerView) {
+        const next = !sp.state?.muted;
+        void run("kefmute:" + sp.id, () => api.kefSetMute(sp.id, next), "Mute failed");
+    }
+    function kefSetSource(sp: KEFSpeakerView, source: KEFSource) {
+        if (sp.state?.source === source) return;
+        void run("kefsrc:" + sp.id, () => api.kefSetSource(sp.id, source), "Couldn't switch input");
     }
 
     // ── Where playback lands ─────────────────────────────────────────────
@@ -332,7 +371,10 @@
     onDestroy(() => {
         clearInterval(pollTimer);
         stopLive?.();
-        unlockBodyScroll();
+        clearTimeout(announceTimer);
+        endPuckDrag(); // takes the document-level touchmove block with it
+        // The body-scroll lock is the sheet effect's, and its teardown runs on
+        // unmount — releasing it here as well would decrement it twice.
     });
 
     // The poll is the backstop, not the mechanism. When the backend has the
@@ -364,7 +406,9 @@
         busy[key] = true;
         try {
             await fn();
-            await refresh();
+            // A KEF call changes nothing on the Sonos side and vice versa, so
+            // each one re-reads only the bridge it touched.
+            await (key.startsWith("kef") ? refreshKEF() : refresh());
         } catch (e) {
             toasts.error(errTitle, (e as Error).message);
         } finally {
@@ -489,68 +533,498 @@
             g ? groupTitle(g) : "");
     }
 
-    // ── Screens ──────────────────────────────────────────────────────────
-    // Music has four screens of its own. They ride a subnav inside the view
-    // rather than reshaping the global tab bar — Music is one destination
-    // among six, so the app-level nav never changes shape here.
+    // ── Screens and sheets ───────────────────────────────────────────────
+    // Home is the only fixed screen. The pill subnav is gone: Music's header
+    // now behaves like every other header in HomeHub, with nothing riding
+    // below it but content (DESIGN.md §15).
     //
-    // Rooms and Speakers look adjacent but answer different questions: Rooms
+    // Search and Zones open as sheets over Home, the same gesture as the
+    // player. Speakers can't — its rows open a speaker's settings one level
+    // further, and a sheet must never open another sheet — so it is a real
+    // screen with a back chip.
+    //
+    // Zones and Speakers look adjacent but answer different questions: Zones
     // is about zones (what plays together), Speakers is about the devices
     // (what each one is and how it is configured).
-    type Screen = "home" | "rooms" | "speakers" | "search";
+    type Screen = "home" | "speakers";
     let screen = $state<Screen>("home");
-    const SCREENS = [
-        { value: "home", label: "Home" },
-        { value: "rooms", label: "Rooms" },
-        { value: "speakers", label: "Speakers" },
-        { value: "search", label: "Search" },
-    ];
-    function goto(s: Screen) {
-        screen = s;
-        if (s !== "rooms") selectedIds = []; // selection is a Rooms-screen mode
-        // Leaving Speakers leaves whichever speaker was open inside it —
-        // either bridge's pane.
-        if (s !== "speakers") { detailId = null; kefDetailId = null; }
-        // Arriving on Search means you came to type.
-        if (s === "search" && spotify?.connected) focusSearch();
+
+    /**
+     * Where Home was left. Pushing to Speakers is a navigation, so it starts
+     * at the top — but coming *back* has to land where you were, or the row
+     * you tapped (which lives at the bottom of Home) is off screen the moment
+     * you return from it.
+     */
+    let homeScrollY = 0;
+
+    function openSpeakers() {
+        hideSheet(); // a screen replaces the sheet rather than stacking under it
+        if (screen === "home") homeScrollY = window.scrollY;
+        screen = "speakers";
+        toTop();
+    }
+    function leaveSpeakers() {
+        screen = "home";
+        detailId = null;
+        kefDetailId = null;
+        restoreScroll(homeScrollY);
+    }
+    /** A screen change is a navigation, so it starts at the top — the same
+     *  thing the shell does for a route change (App.svelte). */
+    function toTop() {
+        window.scrollTo({ top: 0, behavior: "instant" });
+    }
+    /**
+     * Put a scroller back where it was once the new content has *laid out*,
+     * not merely rendered. One tick isn't enough: art and rows are still
+     * sizing, so the container's scroll height is short and the offset gets
+     * clamped to whatever fits at that instant. Re-apply for a few frames
+     * until it sticks, then stop.
+     */
+    function settleScroll(target: () => Window | HTMLElement | null, top: number) {
+        if (top <= 0) return;
+        let tries = 0;
+        const at = (el: Window | HTMLElement) =>
+            el === window ? window.scrollY : (el as HTMLElement).scrollTop;
+        const step = () => {
+            const el = target();
+            if (!el) return;
+            el.scrollTo({ top, behavior: "instant" });
+            if (Math.abs(at(el) - top) > 1 && tries++ < 8) requestAnimationFrame(step);
+        };
+        void flushDOM().then(() => requestAnimationFrame(step));
+    }
+    /** Put the page back where it was, once the screen has re-rendered. */
+    function restoreScroll(top: number) {
+        settleScroll(() => window, top);
     }
 
-    // ── Room grid: tap-to-select grouping ────────────────────────────────
-    let selectedIds = $state<string[]>([]);
-    const selectedNames = $derived(
-        selectedIds.map((id) => speakerById.get(id)?.name).filter(Boolean).join(", "),
+    // Only ever one sheet at a time. Sheets *swap* — they never stack — so
+    // there is only ever one scrim, one Escape, one thing to swipe away. The
+    // rule and its invariants live in `lib/sheet-run.ts`, with tests, because
+    // the swap is subtle enough to break by accident from in here.
+    type Sheet = "player" | "search" | "zones";
+    let sheets = $state<SheetRun<Sheet>>(sheetRun.closed());
+
+    const openSheet = $derived(sheets.open);
+    const searchOpen = $derived(sheets.open === "search");
+    const zonesOpen = $derived(sheets.open === "zones");
+    const sheetUp = $derived(sheetRun.isUp(sheets));
+
+    // ── Back closes one level ────────────────────────────────────────────
+    // Music stacks up to two levels inside a single route — the Speakers
+    // screen, and a sheet (or a sheet swapped over a sheet). Without this,
+    // an Android back gesture or a browser back button skips all of it and
+    // leaves the module entirely, which on a phone reads as the app losing
+    // your place rather than as navigation.
+    //
+    // One history entry is held for the whole time Music is deeper than its
+    // home screen, and re-taken after each step back while depth remains. So
+    // back always means "up one", exactly like Escape and the back chip, and
+    // the entry is handed straight back when the last level closes by any
+    // other route.
+    const navDepth = $derived(
+        (screen === "speakers" ? 1 : 0) + (sheets.open ? (sheets.under ? 2 : 1) : 0),
     );
-    function toggleSelect(id: string) {
-        selectedIds = selectedIds.includes(id)
-            ? selectedIds.filter((x) => x !== id)
-            : [...selectedIds, id];
+    let holdsEntry = false;
+
+    $effect(() => {
+        if (navDepth > 0) {
+            if (!holdsEntry) {
+                history.pushState({ musicNav: true }, "");
+                holdsEntry = true;
+            }
+        } else if (holdsEntry) {
+            // Back at Home by some other means (Escape, a chip, a swipe) —
+            // give the entry back so the next press leaves Music for real.
+            holdsEntry = false;
+            history.back();
+        }
+    });
+
+    function onPopState() {
+        if (navDepth === 0) return; // not our entry — a real route change
+        holdsEntry = false; // the browser consumed it; the effect re-takes it
+        if (sheetUp) dropSheet();
+        else if (screen === "speakers") leaveSpeakers();
     }
-    // The first tapped speaker anchors the group; if it already leads a zone
-    // the others join that zone, otherwise it becomes the new coordinator.
-    const groupTargetId = $derived(
-        selectedIds.length
-            ? (groupOfSpeaker(selectedIds[0])?.coordinator_id ?? selectedIds[0])
-            : "",
-    );
-    async function groupSelected() {
-        if (selectedIds.length < 2) return;
-        // Joining sequentially keeps Sonos' topology consistent.
-        const target = groupTargetId;
+
+    // The body-scroll lock keys on *whether* a sheet is up, never on which —
+    // so a swap doesn't release and retake it, which on iOS would unpin and
+    // re-pin the body for a frame. The teardown also runs on unmount, so a
+    // navigation away with a sheet open can't strand the lock.
+    $effect(() => {
+        if (!sheetUp) return;
+        lockBodyScroll();
+        return unlockBodyScroll;
+    });
+
+    /** Gesture state a sheet must not inherit from the one before it. */
+    function resetSheetGesture() {
+        dragY = 0;
+        dragging = false;
+        dismissing = false;
+        pendingBody = false;
+    }
+    /**
+     * How far each sheet was scrolled when it handed over. A swap unmounts
+     * the sheet underneath, so without this, opening a room from halfway down
+     * Zones and dismissing the player would put Zones back at the top —
+     * "puts it back" has to mean where you left it, not merely which one.
+     */
+    const sheetScroll: Partial<Record<Sheet, number>> = {};
+
+    /** Note where the sheet on screen had got to, before it hands over. */
+    function rememberSheetScroll() {
+        if (sheets.open) sheetScroll[sheets.open] = scrollEl?.scrollTop ?? 0;
+    }
+    /** Put a returning sheet back where it was — `scrollEl` only points at
+     *  the incoming sheet after the flush, and only settles a frame later. */
+    function restoreSheetScroll(s: Sheet) {
+        settleScroll(() => scrollEl, sheetScroll[s] ?? 0);
+    }
+
+    /** Raise a sheet over the page. Anything up is replaced, not remembered. */
+    function showSheet(s: Sheet) {
+        rememberSheetScroll();
+        sheets = sheetRun.raise(sheets, s);
+        sheetScroll[s] = 0; // raised fresh, not returned to
+        resetSheetGesture();
+    }
+    /** Close the open sheet — back to the one it was raised over, if any. */
+    function dropSheet() {
+        if (!sheetUp) return;
+        const back = sheetRun.dismiss(sheets);
+        sheets = back;
+        if (back.open) restoreSheetScroll(back.open);
+        if (back.open !== "player") { playerGroupId = null; playerKefId = null; }
+        queuePane = false;
+        scrubSec = null;
+        endPuckDrag();
+        grabId = null;
+        // A drag-out close keeps its offset until the sheet is gone — zeroing
+        // it here would snap the sheet back up for one frame.
+        if (back.open !== null || !dismissing) resetSheetGesture();
+        else pendingBody = false;
+    }
+    /** Leave sheets entirely, whatever is up and whatever is under it. */
+    function hideSheet() {
+        if (!sheetUp) return;
+        sheets = sheetRun.closeAll(sheets);
+        playerGroupId = null;
+        playerKefId = null;
+        queuePane = false;
+        scrubSec = null;
+        endPuckDrag();
+        grabId = null;
+        if (!dismissing) resetSheetGesture();
+        else pendingBody = false;
+    }
+
+    function openSearch() {
+        showSheet("search");
+        if (spotify?.connected) focusSearch(); // you came here to type
+    }
+    function openZones() {
+        showSheet("zones");
+    }
+
+    // ── Zones: drag one room onto another to group ───────────────────────
+    // Dragging one thing onto another *is* the grouping gesture; the
+    // tap-to-select-then-"Group" flow this replaced needed a whole selection
+    // mode, with its own way out, to say the same thing (DESIGN.md §15).
+    //
+    // Only the dragged speaker moves. If it was leading a zone, Sonos
+    // re-elects behind us — "this room now plays with that one" is the whole
+    // promise, and moving its former partners along with it would be a second
+    // change the user never asked for.
+    async function groupOnto(sourceId: string, targetId: string) {
+        const target = groupOfSpeaker(targetId)?.coordinator_id ?? targetId;
+        if (sourceId === target) return;
+        if (groupOfSpeaker(sourceId)?.coordinator_id === target) return; // already together
         const key = "group:" + target;
         if (busy[key]) return;
         busy[key] = true;
         try {
-            for (const id of selectedIds) {
-                if (id !== target) await api.sonosJoin(id, target);
-            }
-            selectedIds = [];
+            await api.sonosJoin(sourceId, target);
             await refresh();
+            announce(
+                `${speakerById.get(sourceId)?.name ?? "Room"} now plays with ` +
+                    `${speakerById.get(targetId)?.name ?? "the other room"}.`,
+            );
         } catch (e) {
             toasts.error("Grouping failed", (e as Error).message);
         } finally {
             busy[key] = false;
         }
     }
+
+    /**
+     * What a screen reader is told about a grouping gesture it can't see.
+     * Drag has no visible running commentary; the keyboard path needs one.
+     */
+    let liveMsg = $state("");
+    let announceTimer: ReturnType<typeof setTimeout> | undefined;
+    function announce(msg: string) {
+        clearTimeout(announceTimer);
+        liveMsg = msg;
+        announceTimer = setTimeout(() => (liveMsg = ""), 4000);
+    }
+
+    // Keyboard grouping: focus a room, press G to pick it up, Tab to another
+    // and press Enter to drop it in. A pointer-only gesture would have left
+    // grouping with no keyboard path at all — the pucks carry no second
+    // control to fall back on any more.
+    let grabId = $state<string | null>(null);
+    const grabbedName = $derived(grabId ? (speakerById.get(grabId)?.name ?? "") : "");
+
+    function onPuckKey(e: KeyboardEvent, sp: SonosSpeakerView) {
+        if (e.metaKey || e.ctrlKey || e.altKey) return;
+        const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+        if (key === "g") {
+            e.preventDefault();
+            if (grabId === null) {
+                grabId = sp.id;
+                announce(
+                    `${sp.name} picked up. Move to another room and press Enter to group, ` +
+                        `Escape to put it back.`,
+                );
+            } else if (grabId === sp.id) {
+                grabId = null;
+                announce(`${sp.name} put back.`);
+            } else {
+                dropGrab(sp);
+            }
+            return;
+        }
+        // Enter on a puck normally opens that room's player. While something
+        // is held, it means "drop it here" instead — so the default activation
+        // has to be stopped before it fires a click.
+        if (key === "Enter" && grabId !== null && grabId !== sp.id) {
+            e.preventDefault();
+            dropGrab(sp);
+        }
+    }
+    function dropGrab(sp: SonosSpeakerView) {
+        const src = grabId;
+        grabId = null;
+        if (src) void groupOnto(src, sp.id);
+    }
+
+    // Pointer drag. A ghost follows the finger and the room under it takes an
+    // amber ring; below the move threshold nothing lifts at all, so opening a
+    // room never mis-fires as an attempted group.
+    type PuckDrag = {
+        id: string;
+        name: string;
+        playing: boolean;
+        sub: string;
+        w: number;
+        h: number;
+        offX: number;
+        offY: number;
+        x: number;
+        y: number;
+    };
+    let puckDrag = $state<PuckDrag | null>(null);
+    /** The room under the pointer, if it's a room. */
+    let dropId = $state<string | null>(null);
+    /** The zone under the pointer, when the pointer is on its enclosure. */
+    let dropZone = $state<string | null>(null);
+    /** True from the lift until the click it would otherwise fire is eaten. */
+    let dragConsumedClick = false;
+
+    type PuckPending = {
+        sp: SonosSpeakerView;
+        el: HTMLElement;
+        pid: number;
+        startX: number;
+        startY: number;
+        touch: boolean;
+    };
+    let pending: PuckPending | null = null;
+    let holdTimer: ReturnType<typeof setTimeout> | undefined;
+
+    const LIFT_PX = 8; // below this it's a tap, not a drag
+    const HOLD_MS = 260; // touch presses lift on a hold, so the sheet still scrolls
+
+    /**
+     * While a puck is lifted the page must not scroll under it. `touch-action`
+     * can't be changed mid-gesture, so the scroll is refused the only way it
+     * can be once a pointer is already down: a non-passive touchmove listener.
+     */
+    function blockTouchScroll(e: TouchEvent) {
+        e.preventDefault();
+    }
+
+    function onPuckPointerDown(e: PointerEvent, sp: SonosSpeakerView) {
+        if (e.button !== 0 || puckDrag) return;
+        const el = e.currentTarget as HTMLElement;
+        const touch = e.pointerType !== "mouse";
+        pending = { sp, el, pid: e.pointerId, startX: e.clientX, startY: e.clientY, touch };
+        if (touch) {
+            // A quick swipe is a scroll; a press that stays put is a lift.
+            clearTimeout(holdTimer);
+            holdTimer = setTimeout(() => lift(e.clientX, e.clientY), HOLD_MS);
+        }
+    }
+
+    function lift(x: number, y: number) {
+        if (!pending || puckDrag) return;
+        const { sp, el, pid } = pending;
+        const r = el.getBoundingClientRect();
+        try {
+            el.setPointerCapture(pid);
+        } catch {
+            // The pointer may already be gone — the drag still works without
+            // capture, it just ends on the first pointerup we see.
+        }
+        document.addEventListener("touchmove", blockTouchScroll, { passive: false });
+        puckDrag = {
+            id: sp.id,
+            name: sp.name,
+            playing: speakerPlaying(sp.id),
+            sub: speakerNowLine(sp.id),
+            w: r.width,
+            h: r.height,
+            offX: x - r.left,
+            offY: y - r.top,
+            x: r.left,
+            y: r.top,
+        };
+        announce(`${sp.name} lifted. Drop it on another room to group them.`);
+    }
+
+    function onPuckPointerMove(e: PointerEvent) {
+        if (!pending) return;
+        const dx = e.clientX - pending.startX;
+        const dy = e.clientY - pending.startY;
+        const moved = Math.hypot(dx, dy);
+        if (!puckDrag) {
+            if (pending.touch) {
+                // Moved before the hold landed — that was a scroll.
+                if (moved > LIFT_PX) cancelPending();
+            } else if (moved > LIFT_PX) {
+                lift(e.clientX, e.clientY);
+            }
+            if (!puckDrag) return;
+        }
+        e.preventDefault();
+        puckDrag.x = e.clientX - puckDrag.offX;
+        puckDrag.y = e.clientY - puckDrag.offY;
+        lastPoint = { x: e.clientX, y: e.clientY };
+        aimAt(e.clientX, e.clientY);
+        edgeScroll(e.clientY);
+    }
+
+    /**
+     * What the pointer is over: a room, or the enclosure around an existing
+     * zone. The enclosure counts because "drag a third onto an existing group
+     * adds it" reads as dropping on the *group* — landing in the gap between
+     * its pucks shouldn't be a miss.
+     */
+    function aimAt(x: number, y: number) {
+        if (!puckDrag) return;
+        const under = document.elementFromPoint(x, y);
+        const hit = under?.closest?.(".puck, .group-wrap") as HTMLElement | null;
+        const speaker = hit?.dataset.speaker ?? null;
+        if (speaker) {
+            dropId = speaker !== puckDrag.id ? speaker : null;
+            dropZone = null;
+            return;
+        }
+        const zone = hit?.dataset.zone ?? null;
+        // A room already in this zone can't be dropped into it again.
+        const mine = groupOfSpeaker(puckDrag.id)?.coordinator_id;
+        dropZone = zone && zone !== mine ? zone : null;
+        dropId = null;
+    }
+
+    // ── Edge auto-scroll ─────────────────────────────────────────────────
+    // The zone grid is taller than the sheet as soon as there are a few
+    // rooms, so a target can sit off-screen with the finger already down and
+    // nothing left to reach it with. Holding the puck near an edge scrolls
+    // the sheet under it, speed rising as it gets closer.
+    let lastPoint: { x: number; y: number } | null = null;
+    let scrollStep = 0;
+    let scrollFrame: number | undefined;
+    const EDGE_PX = 72;
+    const EDGE_MAX = 16; // px per frame at the very edge
+
+    function edgeScroll(y: number) {
+        const el = scrollEl;
+        if (!el || !puckDrag) return (scrollStep = 0);
+        const r = el.getBoundingClientRect();
+        const over = y - (r.bottom - EDGE_PX);
+        const under = r.top + EDGE_PX - y;
+        scrollStep =
+            over > 0 ? Math.min(1, over / EDGE_PX) * EDGE_MAX
+            : under > 0 ? -Math.min(1, under / EDGE_PX) * EDGE_MAX
+            : 0;
+        if (scrollStep !== 0 && scrollFrame === undefined) stepScroll();
+    }
+    function stepScroll() {
+        scrollFrame = requestAnimationFrame(() => {
+            scrollFrame = undefined;
+            const el = scrollEl;
+            if (!puckDrag || !el || scrollStep === 0) return;
+            const before = el.scrollTop;
+            el.scrollTop += scrollStep;
+            if (el.scrollTop === before) return; // hit the end — nothing to chase
+            // The ghost is pinned to the viewport, so scrolling moves a
+            // different room under a finger that hasn't budged.
+            if (lastPoint) aimAt(lastPoint.x, lastPoint.y);
+            stepScroll();
+        });
+    }
+    function stopEdgeScroll() {
+        if (scrollFrame !== undefined) cancelAnimationFrame(scrollFrame);
+        scrollFrame = undefined;
+        scrollStep = 0;
+        lastPoint = null;
+    }
+
+    function onPuckPointerUp() {
+        if (!pending) return;
+        const src = puckDrag?.id;
+        const target = dropId ?? dropZone;
+        if (puckDrag) dragConsumedClick = true;
+        endPuckDrag();
+        if (src && target) void groupOnto(src, target);
+    }
+
+    /** Swallow the click a finished drag would otherwise fire on the puck. */
+    function onPuckClickCapture(e: MouseEvent) {
+        if (!dragConsumedClick) return;
+        dragConsumedClick = false;
+        e.preventDefault();
+        e.stopPropagation();
+    }
+
+    function cancelPending() {
+        clearTimeout(holdTimer);
+        pending = null;
+    }
+
+    function endPuckDrag() {
+        clearTimeout(holdTimer);
+        if (pending && puckDrag) {
+            try {
+                pending.el.releasePointerCapture(pending.pid);
+            } catch {
+                // Already released with the pointer.
+            }
+        }
+        if (puckDrag) {
+            document.removeEventListener("touchmove", blockTouchScroll);
+        }
+        stopEdgeScroll();
+        pending = null;
+        puckDrag = null;
+        dropId = null;
+        dropZone = null;
+    }
+
     async function ungroup(g: SonosGroupView) {
         const key = "ungroup:" + g.coordinator_id;
         if (busy[key]) return;
@@ -570,10 +1044,25 @@
     // ── Player sheet ─────────────────────────────────────────────────────
     // The docked mini-player expands into a full sheet. Rendered inline (not
     // via the modal stack) so it stays live against the 5s status poll.
+    //
+    // Both bridges open one. A KEF speaker used to send you to its settings
+    // screen instead — two levels away, from a chip that sat beside Sonos
+    // chips and looked exactly like them. That was the module's worst seam,
+    // and the reasoning behind it ("a full player would be an art-led sheet
+    // with two controls in it") simply wasn't true: KEF reports art, title,
+    // artist, position, duration, volume, mute and an input, and answers
+    // play/pause/next/previous. What it hasn't got is a queue and a group,
+    // so its sheet drops those two sections and keeps the rest.
     let playerGroupId = $state<string | null>(null);
-    const playerOpen = $derived(playerGroupId !== null);
+    let playerKefId = $state<string | null>(null);
     const activeGroup = $derived(
         groups.find((g) => g.coordinator_id === playerGroupId),
+    );
+    const activeKef = $derived(
+        playerKefId ? (kefSpeakers.find((s) => s.id === playerKefId) ?? null) : null,
+    );
+    const playerOpen = $derived(
+        openSheet === "player" && (playerGroupId !== null || playerKefId !== null),
     );
     // The group the docked mini-player represents. Normally the first thing
     // playing — but a pause must not carry the transport off the screen with
@@ -598,18 +1087,25 @@
     // The dock and the Home screen's "Playing now" card carry the same track
     // and the same play/pause, so showing both stacks one control on top of
     // its own duplicate. The dock is the *fallback*: it appears only once the
-    // card it repeats has left the screen — which is always, on the Rooms and
-    // Search screens, where no such card exists.
+    // card it repeats has left the screen — which is always over the Zones and
+    // Search sheets, and on Speakers, where no such card exists.
+    //
+    // It rides *over* the Zones and Search sheets rather than under them: the
+    // transport persists across Home, Zones and Search (DESIGN.md §15), and
+    // Search's whole job is to feed it. Tapping it there swaps that sheet for
+    // the player rather than stacking one sheet on another.
     let dockCardOnScreen = $state(false);
-    const showDock = $derived(!!dockGroup && !dockCardOnScreen);
+    const overSheet = $derived(searchOpen || zonesOpen);
+    const showDock = $derived(
+        !!dockGroup && (overSheet || (!dockCardOnScreen && !playerOpen)),
+    );
 
-    // The dock and the grouping bar both run the full width of the band the
-    // assistant FAB floats in. While either is up the FAB stands down, so the
-    // transport gets the whole bar instead of a 64px gutter round a button
-    // sitting on top of it (DESIGN.md §7).
-    const selectionBarUp = $derived(screen === "rooms" && selectedIds.length >= 2);
+    // The dock runs the full width of the band the assistant FAB floats in.
+    // While it is up the FAB stands down, so the transport gets the whole bar
+    // instead of a 64px gutter round a button sitting on top of it
+    // (DESIGN.md §7).
     $effect(() => {
-        if (!showDock && !selectionBarUp) return;
+        if (!showDock) return;
         return bottomBar.claim();
     });
 
@@ -641,33 +1137,42 @@
     let playerEl = $state<HTMLElement | null>(null);
 
     function openPlayer(g: SonosGroupView) {
+        playerKefId = null; // one player at a time
         playerGroupId = g.coordinator_id;
+        raisePlayer();
         // The room you just opened is also where you'd expect the next
         // favorite or search result to land, so opening the player sets the
         // destination too — one choice instead of two.
         dest = { kind: "sonos", id: g.coordinator_id };
-        dragY = 0;
-        dragging = false;
-        dismissing = false;
-        lockBodyScroll();
+    }
+    /** The same gesture for a KEF room, so the chips beside it don't lie. */
+    function openKEFPlayer(sp: KEFSpeakerView) {
+        if (!sp.reachable) return void openKEFModal(sp); // fix the address instead
+        playerGroupId = null;
+        playerKefId = sp.id;
+        raisePlayer();
+        dest = { kind: "kef", id: sp.id };
+    }
+    function raisePlayer() {
+        // Opened from Zones or Search, the player *replaces* that sheet and
+        // puts it back on the way out — a swap, so there is never a sheet over
+        // a sheet, and never a lost place either. "Its place" includes how far
+        // it was scrolled, which is why the outgoing offset is kept.
+        rememberSheetScroll();
+        sheets = sheetRun.swapTo(sheets, "player");
+        sheetScroll.player = 0;
+        resetSheetGesture();
     }
     function closePlayer() {
-        if (playerGroupId === null) return;
-        playerGroupId = null;
-        queuePane = false;
-        scrubSec = null;
-        pendingBody = false;
-        // A drag-out close keeps its offset until the sheet is gone —
-        // zeroing it here would snap the sheet back up for one frame.
-        // openPlayer resets the gesture state instead.
-        if (!dismissing) { dragY = 0; dragging = false; }
-        unlockBodyScroll();
+        if (openSheet !== "player") return;
+        dropSheet();
     }
 
     // ── Drag-to-dismiss ──────────────────────────────────────────────────
-    // The same gesture the shared Modal sheet carries: the top bar always
-    // drags, and the scroll body drags only from the top and only on a clear
-    // downward pull, so a long queue still scrolls normally.
+    // The same gesture the shared Modal sheet carries, shared by all three of
+    // Music's sheets (only one is ever up): the top bar always drags, and the
+    // scroll body drags only from the top and only on a clear downward pull,
+    // so a long queue still scrolls normally.
     let dragY = $state(0);
     let dragging = $state(false);
     let dismissing = $state(false);
@@ -684,8 +1189,10 @@
     // once captured, keep reporting it as their target) — the body handlers
     // ignore them so only one drag path is ever live.
     function fromTop(e: PointerEvent): boolean {
-        return !!(e.target as HTMLElement | null)?.closest?.(".player-top");
+        return !!(e.target as HTMLElement | null)?.closest?.(".sheet-top");
     }
+    /** Swiping down closes the open sheet — back to the one under it, if any. */
+    const dismissSheet = () => dropSheet();
 
     function startDrag(e: PointerEvent, target: HTMLElement) {
         dragging = true;
@@ -706,7 +1213,7 @@
             // the sheet's own exit — the finger already did that animation.
             dismissing = true;
             dragY = 600;
-            setTimeout(closePlayer, 220);
+            setTimeout(dismissSheet, 220);
         } else {
             requestAnimationFrame(() => { dragY = 0; });
         }
@@ -842,30 +1349,61 @@
             // Escape always leaves the player outright rather than stepping
             // back through the queue pane — the sheet covers the nav, so one
             // press must always be enough to get out (DESIGN.md §15).
-            if (playerOpen) closePlayer();
-            else if (menuFor) menuFor = null;
-            else if (selectedIds.length) selectedIds = [];
+            if (menuFor) menuFor = null;
+            else if (puckDrag || grabId) {
+                // Put a held room back before leaving the sheet it was held in.
+                const name = grabbedName || puckDrag?.name || "Room";
+                endPuckDrag();
+                grabId = null;
+                announce(`${name} put back.`);
+            } else if (openSheet) dropSheet();
             // Escape backs out of a speaker's settings the same way its back
             // chip does — a drill-down owes the user the key that leaves it.
             else if (detailId) detailId = null;
             else if (kefDetailId) kefDetailId = null;
+            // …and out of Speakers itself, which is a screen, not a sheet.
+            else if (screen === "speakers") leaveSpeakers();
             return;
         }
         if (e.metaKey || e.ctrlKey || e.altKey) return;
 
         if (!playerOpen) {
             // "/" is the one shortcut that works from anywhere in the view:
-            // jump to Search and put the caret in the box.
+            // raise Search and put the caret in the box.
             if (key === "/" && !field) {
                 e.preventDefault();
-                goto("search"); // which puts the caret in the box
+                openSearch();
+            }
+            return;
+        }
+
+        if (field && !slider) return; // typing, not controlling
+
+        // A KEF player answers the keys it can: play/pause, skip, volume. It
+        // has no seek, no queue and no play modes, so those keys stay unbound
+        // here rather than doing something almost-right.
+        const kf = activeKef;
+        if (kf) {
+            if ((key === " " || key === "k") && !(key === " " && onControl)) {
+                e.preventDefault();
+                void kefTogglePlay(kf);
+                return;
+            }
+            if (slider) return;
+            switch (key) {
+                case "ArrowRight": e.preventDefault(); kefSkip(kf, "next"); break;
+                case "ArrowLeft": e.preventDefault(); kefSkip(kf, "previous"); break;
+                case "ArrowUp": e.preventDefault(); kefSetVolume(kf, kefShownVol(kf) + 5); break;
+                case "ArrowDown": e.preventDefault(); kefSetVolume(kf, kefShownVol(kf) - 5); break;
+                case "n": kefSkip(kf, "next"); break;
+                case "p": kefSkip(kf, "previous"); break;
+                case "m": kefToggleMute(kf); break;
             }
             return;
         }
 
         const g = activeGroup;
         if (!g) return;
-        if (field && !slider) return; // typing, not controlling
 
         // Space on a focused button belongs to that button, not to us.
         if ((key === " " || key === "k") && !(key === " " && onControl)) {
@@ -909,18 +1447,19 @@
     // to. Close instead of leaving an empty sheet — and, more importantly,
     // a permanently locked body scroll.
     $effect(() => {
-        if (playerGroupId !== null && !activeGroup) closePlayer();
+        if (playerOpen && playerGroupId !== null && !activeGroup) closePlayer();
+        if (playerOpen && playerKefId !== null && !activeKef) closePlayer();
     });
     // Move focus into the sheet when it opens so keyboard users land there.
     $effect(() => {
         if (playerOpen) playerEl?.focus();
     });
-    // Drop selections for speakers that dropped off the network.
+    // A room held for grouping that drops off the network can't be dropped
+    // anywhere — let go of it rather than leaving a puck lifted over nothing.
     $effect(() => {
         const live = new Set(reachable.map((s) => s.id));
-        if (selectedIds.some((id) => !live.has(id))) {
-            selectedIds = selectedIds.filter((id) => live.has(id));
-        }
+        if (grabId && !live.has(grabId)) grabId = null;
+        if (puckDrag && !live.has(puckDrag.id)) endPuckDrag();
     });
     // Speakers outside the active group that could join it.
     function joinables(g: SonosGroupView): SonosSpeakerView[] {
@@ -1205,6 +1744,10 @@
             toasts.error("Spotify login failed", q.spotify_error);
             route.go("music");
         }
+        // Search now lives behind an icon, and the round trip to Spotify ends
+        // here — land back on the sheet the user left, not on a Home screen
+        // with no sign of what just happened.
+        if (q.spotify || q.spotify_error) openSearch();
         void loadSpotify();
     });
 
@@ -1554,7 +2097,7 @@
     let noImage = $state<Record<string, boolean>>({});
 </script>
 
-<svelte:window onkeydown={onWindowKey} />
+<svelte:window onkeydown={onWindowKey} onpopstate={onPopState} />
 
 <!-- The live waveform — the music module's motif for "actually playing",
      used everywhere a plain status dot would otherwise sit. -->
@@ -1562,30 +2105,77 @@
     <span class="wave" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
 {/snippet}
 
-<Topbar
-    title="Music"
-    subtitle={status
-        ? `${totalSpeakers} speaker${totalSpeakers === 1 ? "" : "s"} · ${playingCount + kefPlaying.length} playing`
-        : "Sonos & KEF"}
->
-    {#snippet actions()}
-        <!-- Whether speaker state is being pushed or polled. It rides in the
-             topbar because it qualifies everything below it — how quickly any
-             of this reflects reality — and it is the tap that explains the
-             difference and offers the fix. -->
-        <!-- The chip reports the *Sonos* bridge's push status, so it only
-             appears when there are Sonos speakers for it to describe. KEF has
-             no notifications to subscribe to (its own API has none), and a
-             chip that said "Polling" about them would be reporting a fault
-             that doesn't exist. -->
-        {#if loaded && (status?.speakers.length ?? 0) > 0}
-            <LiveStatusChip live={livePush} onClosed={() => void refresh()} />
-        {/if}
-        <button class="chip" onclick={() => openSpeakerModal()}>
-            <Icon name="plus" size={14} /> Add speaker
-        </button>
-    {/snippet}
-</Topbar>
+<!-- Anything a grouping gesture does that has no visible running commentary
+     — the keyboard path especially — is said here instead. -->
+<div class="sr-only" role="status" aria-live="polite">{liveMsg}</div>
+
+{#if screen === "speakers"}
+    <!-- ── Speakers — a screen, not a sheet ────────────────────────────
+         Its rows open a speaker's settings one level further, and a sheet
+         must never open another sheet. So it pushes from Home properly, with
+         the §11 back chip that says so.
+
+         On a phone an open speaker replaces the list, and that pane carries
+         its own §11 head — two back chips on one screen would be one too
+         many, so this one stands down. -->
+    {#if !(anyDetail && !paned)}
+        <div class="screen-head">
+            <button class="icon-btn" aria-label="Back to Music" onclick={leaveSpeakers}>
+                <Icon name="chevronLeft" size={18} />
+            </button>
+            <div class="screen-title">
+                <h1>Speakers</h1>
+                <span class="screen-sub">
+                    <span class="mono">{totalSpeakers}</span>
+                    registered · <span class="mono">{readyCount}</span> reachable
+                </span>
+            </div>
+            <button class="icon-btn" aria-label="Add speaker" onclick={() => openSpeakerModal()}>
+                <Icon name="plus" size={16} />
+            </button>
+        </div>
+    {/if}
+{:else}
+    <Topbar
+        title="Music"
+        subtitle={status
+            ? `${totalSpeakers} speaker${totalSpeakers === 1 ? "" : "s"} · ${playingCount + kefPlaying.length} playing`
+            : "Sonos & KEF"}
+    >
+        {#snippet actions()}
+            <!-- Whether speaker state is being pushed or polled. It rides in the
+                 topbar because it qualifies everything below it — how quickly any
+                 of this reflects reality — and it is the tap that explains the
+                 difference and offers the fix. -->
+            <!-- The chip reports the *Sonos* bridge's push status, so it only
+                 appears when there are Sonos speakers for it to describe. KEF has
+                 no notifications to subscribe to (its own API has none), and a
+                 chip that said "Polling" about them would be reporting a fault
+                 that doesn't exist. -->
+            {#if loaded && (status?.speakers.length ?? 0) > 0}
+                <LiveStatusChip live={livePush} onClosed={() => void refresh()} />
+            {/if}
+            <!-- Search rides in the header rather than in a subnav pill:
+                 nothing sits below this header but content (DESIGN.md §15).
+                 It wears its label wherever there is width for one — losing
+                 the pill shouldn't cost desktop a *named* way in when the
+                 room to name it was never the problem. On a phone the label
+                 is what pushed the subtitle to a stub, so there it is the
+                 icon alone. Registering a speaker isn't here at all: it
+                 belongs on Speakers, with the rest of device management. -->
+            {#if loaded && totalSpeakers > 0}
+                <button class="chip act-search" onclick={openSearch}>
+                    <Icon name="search" size={14} />
+                    <span class="act-label">Search</span>
+                </button>
+            {:else}
+                <button class="chip" onclick={() => openSpeakerModal()}>
+                    <Icon name="plus" size={14} /> Add speaker
+                </button>
+            {/if}
+        {/snippet}
+    </Topbar>
+{/if}
 
 {#if !loaded}
     <section class="card"><div class="skeleton sk"></div></section>
@@ -1597,19 +2187,6 @@
     >
         <button class="btn btn-primary" onclick={() => openSpeakerModal()}>Add speaker</button>
     </EmptyState>
-{:else}
-    <!-- Music's own three screens. Rides inside the view — the global tab
-         bar keeps its shape (DESIGN.md §15). -->
-    <div class="subnav">
-        <Segmented
-            name="music-screen"
-            value={screen}
-            options={SCREENS}
-            onChange={(v) => goto(v as Screen)}
-            full
-            accent
-        />
-    </div>
 {/if}
 
 {#if loaded && totalSpeakers > 0}
@@ -1633,8 +2210,15 @@
                             : "pick a room to open it"}
                     </span>
                 </span>
-                {#if spotify?.connected}
-                    <button class="chip quiet-go" onclick={() => goto("search")}>Search</button>
+                {#if spotify}
+                    <!-- Not gated on `connected`: the people who most need a
+                         pointer at Spotify are the ones who haven't set it up,
+                         and with the subnav gone this card and the header icon
+                         are the only things that say the module searches at
+                         all (DESIGN.md §15). -->
+                    <button class="chip quiet-go" onclick={openSearch}>
+                        {spotify.connected ? "Search" : "Set up Spotify"}
+                    </button>
                 {/if}
             </div>
         {:else}
@@ -1706,12 +2290,10 @@
                     </div>
                 {/each}
 
-                <!-- KEF speakers that are playing, in the same grid. They
-                     carry a smaller card by necessity, not by choice: there
-                     is no player sheet behind them to open, so the card is
-                     the control rather than a way in to one. Tapping the body
-                     goes to that speaker's screen, where its volume, source
-                     and settings are. -->
+                <!-- KEF speakers that are playing, in the same grid and with
+                     the same card. It is a way in to a player like every
+                     other card here — the sheet it opens drops the queue and
+                     the group, which KEF hasn't got, and keeps the rest. -->
                 {#each kefPlaying as sp (sp.id)}
                     {@const p = kefProgress(sp)}
                     <div
@@ -1721,7 +2303,7 @@
                     >
                         <button
                             class="now-open"
-                            onclick={() => { goto("speakers"); openKEFSpeaker(sp); }}
+                            onclick={() => openKEFPlayer(sp)}
                         >
                             {#if sp.state?.track?.art_uri}
                                 <img class="now-art" src={sp.state.track.art_uri} alt="" loading="lazy" />
@@ -1738,10 +2320,8 @@
                                 </span>
                             </span>
                         </button>
-                        <!-- Play/pause only: KEF has no queue, so there is
-                             nothing for prev/next to step through on most
-                             sources, and the speaker's screen carries the
-                             skips where they do apply. -->
+                        <!-- Play/pause only, like the Sonos card below 430px:
+                             the sheet is where the skips live. -->
                         <div class="card-transport">
                             <button
                                 class="mini-btn on"
@@ -1782,11 +2362,14 @@
                         <span class="quiet-title">Favorites need a Sonos room</span>
                         <span class="quiet-sub">
                             They come out of your Sonos household, so {kefTargetSpeaker.name} can't
-                            play one — pick a Sonos room above, or search to play there.
+                            play one — pick a Sonos room above{#if spotify?.connected}, or search to
+                            play there{/if}.
                         </span>
                     </span>
-                    {#if spotify?.connected}
-                        <button class="chip quiet-go" onclick={() => goto("search")}>Search</button>
+                    {#if spotify}
+                        <button class="chip quiet-go" onclick={openSearch}>
+                            {spotify.connected ? "Search" : "Set up Spotify"}
+                        </button>
                     {/if}
                 </div>
             {:else}
@@ -1799,11 +2382,14 @@
         </section>
     {/if}
 
-    <!-- ── Rooms at a glance (Home) ────────────────────────────────── -->
+    <!-- ── Zones at a glance (Home) ─────────────────────────────────
+         "Zones", not "Rooms": the app-level nav already owns that word for
+         the whole house, and reusing it here for speaker grouping was the
+         confusing part (DESIGN.md §15). -->
     <section class="block">
         <div class="block-head">
-            <div class="eyrow">Rooms</div>
-            <button class="link-btn" onclick={() => goto("rooms")}>Manage</button>
+            <div class="eyrow">Zones</div>
+            <button class="link-btn" onclick={openZones}>Manage</button>
         </div>
         <div class="room-chips">
             {#each reachable as sp (sp.id)}
@@ -1823,13 +2409,14 @@
                 </button>
             {/each}
             <!-- KEF speakers are rooms that play too, so they belong in this
-                 row — they just open their own screen instead of the player
-                 sheet, which is where all their controls live. -->
+                 row — and they open a player, like every chip beside them.
+                 They are absent from Zones instead, which is honest: Zones
+                 answers what plays together, and a KEF speaker never does. -->
             {#each kefReachable as sp (sp.id)}
                 <button
                     class="room-chip"
                     class:on={sp.state?.playing}
-                    onclick={() => { goto("speakers"); openKEFSpeaker(sp); }}
+                    onclick={() => openKEFPlayer(sp)}
                 >
                     {#if sp.state?.playing}
                         {@render wave()}
@@ -1842,91 +2429,37 @@
         </div>
     </section>
 
-    {:else if screen === "rooms"}
-    <!-- ── Rooms — tap-to-group grid ───────────────────────────────── -->
-    <section class="block">
-        <div class="block-head">
-            <div class="eyrow">Rooms</div>
-            <span class="hint">Tap a room to open it — use the circles to group rooms</span>
-        </div>
-        <div class="rooms">
-            {#each multiGroups as g (g.coordinator_id)}
-                <div class="group-wrap">
-                    <div class="glabel">
-                        <Icon name="check" size={11} />
-                        <span>{groupTitle(g)}</span>
-                        <button class="ungroup" disabled={busy["ungroup:" + g.coordinator_id]}
-                            onclick={() => ungroup(g)}>Ungroup</button>
-                    </div>
-                    <div class="puck-grid">
-                        {#each g.member_ids as id (id)}
-                            {@const sp = speakerById.get(id)}
-                            {#if sp}
-                                {@render puck(sp)}
-                            {/if}
-                        {/each}
-                    </div>
-                </div>
-            {/each}
-            {#if soloSpeakers.length}
-                <div class="puck-grid">
-                    {#each soloSpeakers as sp (sp.id)}
-                        {@render puck(sp)}
-                    {/each}
-                </div>
-            {/if}
-            <!-- Grouping is a Sonos capability. A house with only KEF
-                 speakers would otherwise land on a blank screen with no
-                 explanation, which reads as broken rather than as
-                 "this doesn't apply to your speakers". -->
-            {#if multiGroups.length === 0 && soloSpeakers.length === 0}
-                <div class="quiet-card">
-                    <span class="quiet-ico"><Icon name="speaker" size={20} /></span>
-                    <span class="quiet-meta">
-                        <span class="quiet-title">Nothing to group</span>
-                        <span class="quiet-sub">
-                            {#if kefSpeakers.length > 0}
-                                KEF speakers stand alone — they have no zones to
-                                group. Their controls are on Speakers.
-                            {:else}
-                                No Sonos speaker is answering right now — check
-                                them under Speakers.
-                            {/if}
-                        </span>
-                    </span>
-                    <button class="chip quiet-go" onclick={() => goto("speakers")}>Speakers</button>
-                </div>
-            {/if}
-        </div>
-    </section>
-
-    <!-- Speakers that the live topology never mentioned can't be pucks and
-         can't be grouped, so Rooms only points at them. The Speakers screen
-         is where they are listed and fixed. -->
-    {#if offline.length > 0}
-        <button class="lu-row" onclick={() => goto("speakers")}>
-            <span class="lu-ico"><Icon name="speaker" size={18} /></span>
-            <span class="lu-meta">
-                <span class="lu-title">
+    <!-- The way through to the device inventory. A plain row rather than a
+         header icon, because what it opens is a screen — Speakers pushes,
+         Search and Zones lift. -->
+    <button class="lu-row" onclick={openSpeakers}>
+        <span class="lu-ico"><Icon name="speaker" size={18} /></span>
+        <span class="lu-meta">
+            <span class="lu-title">Speakers</span>
+            <span class="lu-sub">
+                {#if offline.length > 0}
                     <span class="mono">{offline.length}</span>
-                    speaker{offline.length === 1 ? "" : "s"} unreachable
-                </span>
-                <span class="lu-sub">Not in the current Sonos topology — check them under Speakers</span>
+                    unreachable — fix an address, or set one up
+                {:else}
+                    Names, addresses, tone and the status light
+                {/if}
             </span>
-            <span class="lu-chev" aria-hidden="true"><Icon name="chevronDown" size={18} /></span>
-        </button>
-    {/if}
+        </span>
+        <span class="lu-count mono">{totalSpeakers}</span>
+        <span class="lu-chev" aria-hidden="true"><Icon name="chevronDown" size={18} /></span>
+    </button>
 
-    {:else if screen === "speakers"}
+    {:else}
     <!-- ── Speakers — the device inventory and its settings ────────────
-         Rooms answers "what plays together"; this answers "what is each of
+         Zones answers "what plays together"; this answers "what is each of
          these, and how is it set up".
 
          Two panes where the width allows, one where it doesn't: the list
          column stays put on desktop and the settings open beside it; on a
          phone the settings take over the screen and `has-detail` folds the
-         list away. Not a sheet — none of Music's other screens are one, and
-         this content is too long to spend its life at 92vh. -->
+         list away. Not a sheet — its rows open one, and a sheet must never
+         open another sheet; the content is also too long to spend its life
+         at 92vh. -->
     <div class="sp-split" class:has-detail={anyDetail}>
     <div class="sp-col">
     {#if allSpeakers.length > 0}
@@ -2101,7 +2634,156 @@
     {/if}
     </div><!-- /.sp-split -->
 
-    {:else}
+    {/if}
+
+    <!-- ── Docked mini-player ──────────────────────────────────────────
+         Present everywhere — including over the Zones and Search sheets,
+         which is where the transport would otherwise disappear — but stands
+         down while the Home card it would duplicate is on screen. It also
+         survives a pause: that is where a paused zone stays reachable once
+         "Playing now" (which means playing, literally) has let go of it. -->
+    {#if showDock && dockGroup}
+        {@const c = coordinatorOf(dockGroup)}
+        {@const st = c?.state}
+        {@const dockPlaying = isPlaying(dockGroup)}
+        {@const p = progressOf(dockGroup)}
+        <div class="mini" class:paused={!dockPlaying} class:over-sheet={overSheet}
+            transition:fly={{ y: 20, duration: dur(220), easing: cubicOut }}>
+            <button class="mini-open" onclick={() => openPlayer(dockGroup)}>
+                {#if st?.track?.art_uri}
+                    <img class="mini-art" src={st.track.art_uri} alt="" loading="lazy" />
+                {:else}
+                    <div class="mini-art placeholder"></div>
+                {/if}
+                <div class="mini-meta">
+                    <div class="mini-t">{st?.track?.title ?? "Playing"}</div>
+                    <div class="mini-s">
+                        {[st?.track?.artist, groupTitle(dockGroup)].filter(Boolean).join(" · ")}
+                    </div>
+                </div>
+                <!-- Playing is a waveform; a zone the dock is holding open
+                     after a pause gets the idle speaker icon instead. -->
+                {#if dockPlaying}
+                    {@render wave()}
+                {:else}
+                    <span class="mini-idle" aria-hidden="true"><Icon name="speaker" size={14} /></span>
+                {/if}
+            </button>
+            <div class="card-transport">
+                <button class="mini-btn skip" aria-label="Previous track"
+                    disabled={!c || busy["previous:" + c?.id]}
+                    onclick={() => skip(dockGroup, "previous")}>
+                    <Icon name="skipPrev" size={16} />
+                </button>
+                <button class="mini-btn on" aria-label={dockPlaying ? "Pause" : "Play"}
+                    disabled={!c || busy["play:" + c?.id]}
+                    onclick={() => togglePlay(dockGroup)}>
+                    <Icon name={dockPlaying ? "pause" : "play"} size={16} />
+                </button>
+                <button class="mini-btn skip" aria-label="Next track"
+                    disabled={!c || busy["next:" + c?.id]}
+                    onclick={() => skip(dockGroup, "next")}>
+                    <Icon name="skipNext" size={16} />
+                </button>
+            </div>
+            {#if p > 0}
+                <span class="prog" aria-hidden="true"><i style:width="{p * 100}%"></i></span>
+            {/if}
+        </div>
+    {/if}
+{/if}
+
+<!-- ── Room puck ─────────────────────────────────────────────────────
+     One object, two gestures on the same target: tap opens that room's
+     player, drag it onto another room groups them. There is no second
+     control — dragging one thing onto another *is* the grouping gesture, so
+     the select circle that used to sit in the corner has nothing left to say.
+
+     The keyboard gets the gesture too, since a pointer-only one would leave
+     grouping with no path at all: G picks the room up, Tab moves, Enter
+     drops it in. -->
+{#snippet puck(sp: SonosSpeakerView)}
+    {@const playing = speakerPlaying(sp.id)}
+    {@const g = groupOfSpeaker(sp.id)}
+    {@const held = grabId === sp.id || puckDrag?.id === sp.id}
+    {@const target = dropId === sp.id || (grabId !== null && grabId !== sp.id)}
+    <button
+        class="puck"
+        class:playing
+        class:held
+        class:lifted={puckDrag?.id === sp.id}
+        class:drop={dropId === sp.id}
+        class:aiming={grabId !== null && grabId !== sp.id}
+        data-speaker={sp.id}
+        disabled={!g}
+        aria-keyshortcuts="g"
+        aria-label={grabId !== null && grabId !== sp.id
+            ? `Group ${grabbedName} with ${sp.name}`
+            : `${sp.name} — open player, or press G to pick it up for grouping`}
+        onpointerdown={(e) => onPuckPointerDown(e, sp)}
+        onpointermove={onPuckPointerMove}
+        onpointerup={onPuckPointerUp}
+        onpointercancel={endPuckDrag}
+        onclickcapture={onPuckClickCapture}
+        onkeydown={(e) => onPuckKey(e, sp)}
+        onclick={() => g && openPlayer(g)}
+    >
+        <span class="puck-icon">
+            {#if playing}{@render wave()}{:else}<Icon name="speaker" size={16} />{/if}
+        </span>
+        <!-- Says "this object moves", on hover only and to a pointer only:
+             touch has the press-and-hold to discover, and a mouse has
+             nothing but the cursor otherwise. Not a control — it takes no
+             pointer events, so it can't be mistaken for the select circle
+             that used to sit here. -->
+        <span class="puck-grip" aria-hidden="true"><Icon name="grip" size={14} /></span>
+        <span class="puck-body">
+            <span class="puck-name">{sp.name}</span>
+            <span class="puck-sub">
+                {#if target && grabId !== null}
+                    Drop {grabbedName} here
+                {:else if held}
+                    Held
+                {:else}
+                    {speakerNowLine(sp.id)}
+                {/if}
+            </span>
+        </span>
+    </button>
+{/snippet}
+
+<!-- ── Where playback lands ──────────────────────────────────────────
+     One destination shared by favorites and search, always visible — a
+     single room shows its name rather than hiding the answer entirely. Both
+     bridges are in the same row because there is only ever one destination;
+     the KEF speakers come after the Sonos zones behind one marker, so a name
+     that exists on both sides is still tellable apart without giving every
+     chip a badge it doesn't need. -->
+{#snippet targetRow()}
+    {#if destinations.length > 1}
+        <div class="fav-targets" role="radiogroup" aria-label="Play on">
+            <span class="t-label">Play on</span>
+            {#each destinations as d, i (d.kind + d.id)}
+                {#if i === groups.length && groups.length > 0}
+                    <span class="t-label">KEF</span>
+                {/if}
+                {@const on = isDest(d)}
+                <button class="chip" class:on role="radio" aria-checked={on}
+                    aria-label={`Play on ${destName(d)}${d.kind === "kef" ? " (KEF)" : ""}`}
+                    onclick={() => (dest = d)}>
+                    {destName(d)}
+                </button>
+            {/each}
+        </div>
+    {:else if destinations.length === 1}
+        <div class="fav-targets">
+            <span class="t-label">Play on</span>
+            <span class="t-one">{destName(destinations[0])}</span>
+        </div>
+    {/if}
+{/snippet}
+
+{#snippet searchBody()}
     <!-- ── Spotify search ──────────────────────────────────────────── -->
     {#if spotify}
         <section class="card">
@@ -2171,8 +2853,9 @@
                     </div>
                 {/if}
             {:else}
+                <!-- No <h2> here: the sheet's own head already says
+                     "Search". This row only answers "as whom". -->
                 <div class="card-header sp-head">
-                    <h2>Search</h2>
                     <div class="sp-account">
                         <span class="sp-conn" title="Connected to Spotify">
                             <span class="sp-dot" aria-hidden="true"></span>
@@ -2316,151 +2999,227 @@
             {/if}
         </section>
     {/if}
-    {/if}
+{/snippet}
 
-    <!-- ── Docked mini-player ──────────────────────────────────────────
-         Present on every screen, but stands down while the Home card it
-         would duplicate is on screen. It also survives a pause — that is
-         where a paused zone stays reachable once "Playing now" (which means
-         playing, literally) has let go of it. -->
-    {#if showDock && dockGroup}
-        {@const c = coordinatorOf(dockGroup)}
-        {@const st = c?.state}
-        {@const dockPlaying = isPlaying(dockGroup)}
-        {@const p = progressOf(dockGroup)}
-        <div class="mini" class:paused={!dockPlaying}
-            transition:fly={{ y: 20, duration: dur(220), easing: cubicOut }}>
-            <button class="mini-open" onclick={() => openPlayer(dockGroup)}>
-                {#if st?.track?.art_uri}
-                    <img class="mini-art" src={st.track.art_uri} alt="" loading="lazy" />
-                {:else}
-                    <div class="mini-art placeholder"></div>
-                {/if}
-                <div class="mini-meta">
-                    <div class="mini-t">{st?.track?.title ?? "Playing"}</div>
-                    <div class="mini-s">
-                        {[st?.track?.artist, groupTitle(dockGroup)].filter(Boolean).join(" · ")}
-                    </div>
-                </div>
-                <!-- Playing is a waveform; a zone the dock is holding open
-                     after a pause gets the idle speaker icon instead. -->
-                {#if dockPlaying}
-                    {@render wave()}
-                {:else}
-                    <span class="mini-idle" aria-hidden="true"><Icon name="speaker" size={14} /></span>
-                {/if}
+<!-- ── Sheet chrome ─────────────────────────────────────────────────
+     The grabber + centered head every one of Music's sheets wears, so Zones,
+     Search and the player all read as the same object and answer the same
+     swipe. §5: a sheet must look dismissible at a glance. -->
+{#snippet sheetHead(title: string, sub: string)}
+    <div
+        class="sheet-top"
+        role="none"
+        onpointerdown={onTopPointerDown}
+        onpointermove={onTopPointerMove}
+        onpointerup={onTopPointerUp}
+        onpointercancel={cancelDrag}
+    >
+        <div class="grabber" aria-hidden="true"></div>
+        <header class="player-head">
+            <button class="icon-btn p-icon" aria-label="Close {title}" onclick={dropSheet}>
+                <Icon name="chevronDown" size={18} />
             </button>
-            <div class="card-transport">
-                <button class="mini-btn skip" aria-label="Previous track"
-                    disabled={!c || busy["previous:" + c?.id]}
-                    onclick={() => skip(dockGroup, "previous")}>
-                    <Icon name="skipPrev" size={16} />
-                </button>
-                <button class="mini-btn on" aria-label={dockPlaying ? "Pause" : "Play"}
-                    disabled={!c || busy["play:" + c?.id]}
-                    onclick={() => togglePlay(dockGroup)}>
-                    <Icon name={dockPlaying ? "pause" : "play"} size={16} />
-                </button>
-                <button class="mini-btn skip" aria-label="Next track"
-                    disabled={!c || busy["next:" + c?.id]}
-                    onclick={() => skip(dockGroup, "next")}>
-                    <Icon name="skipNext" size={16} />
-                </button>
+            <div class="p-onair">
+                <div class="p-onair-name">{title}</div>
+                {#if sub}<div class="p-onair-sub">{sub}</div>{/if}
             </div>
-            {#if p > 0}
-                <span class="prog" aria-hidden="true"><i style:width="{p * 100}%"></i></span>
-            {/if}
-        </div>
-    {/if}
-{/if}
+            <!-- Balances the close button so the title stays centered. -->
+            <span class="p-icon-gap" aria-hidden="true"></span>
+        </header>
+    </div>
+{/snippet}
 
-<!-- ── Room puck ─────────────────────────────────────────────────────
-     Two intents, two targets: the body opens that room's player (the thing
-     you want nine times out of ten), the corner circle selects it for
-     grouping. Tapping the body used to select, which left the Rooms screen
-     with no way through to playback at all. -->
-{#snippet puck(sp: SonosSpeakerView)}
-    {@const playing = speakerPlaying(sp.id)}
-    {@const selected = selectedIds.includes(sp.id)}
-    {@const g = groupOfSpeaker(sp.id)}
-    <div class="puck" class:playing class:selected>
-        <button class="puck-open" disabled={!g} onclick={() => g && openPlayer(g)}>
-            <span class="puck-icon">
-                {#if playing}{@render wave()}{:else}<Icon name="speaker" size={16} />{/if}
-            </span>
-            <span class="puck-body">
-                <span class="puck-name">{sp.name}</span>
-                <span class="puck-sub">{speakerNowLine(sp.id)}</span>
-            </span>
-        </button>
-        <button
-            class="check"
-            aria-pressed={selected}
-            aria-label={selected ? `Deselect ${sp.name}` : `Select ${sp.name} for grouping`}
-            onclick={() => toggleSelect(sp.id)}
+<!-- ── Zones sheet ──────────────────────────────────────────────────
+     Grouping, and only grouping: what plays together. Opens over Home the
+     same way the player does, and swaps to the player when a room is tapped
+     rather than stacking a second sheet on top of itself. -->
+{#if zonesOpen}
+    <div class="scrim" transition:fade={{ duration: dur(200) }} onclick={dropSheet} aria-hidden="true"></div>
+    <div
+        class="sheet"
+        class:dragging
+        role="dialog"
+        aria-modal="true"
+        aria-label="Zones"
+        tabindex="-1"
+        style:transform={dragY > 0 ? `translateY(${dragY}px)` : ""}
+        style:opacity={dragY > 0 ? Math.max(0.4, 1 - dragY / 300) : undefined}
+        style:transition={dragging
+            ? "none"
+            : dragY > 0
+              ? "transform 0.22s ease-in, opacity 0.22s ease-in"
+              : "transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)"}
+        in:sheet={{}}
+        out:sheet={{ instant: dismissing }}
+    >
+        <div
+            class="sheet-scroll"
+            class:docked={showDock}
+            role="none"
+            bind:this={scrollEl}
+            onpointerdown={onBodyPointerDown}
+            onpointermove={onBodyPointerMove}
+            onpointerup={onBodyPointerUp}
+            onpointercancel={onBodyPointerCancel}
         >
-            <span class="check-dot" aria-hidden="true"><Icon name="check" size={12} /></span>
-        </button>
-    </div>
-{/snippet}
+            {@render sheetHead("Zones", "Tap a room to open it · drag one onto another to group")}
 
-<!-- ── Where playback lands ──────────────────────────────────────────
-     One destination shared by favorites and search, always visible — a
-     single room shows its name rather than hiding the answer entirely. Both
-     bridges are in the same row because there is only ever one destination;
-     the KEF speakers come after the Sonos zones behind one marker, so a name
-     that exists on both sides is still tellable apart without giving every
-     chip a badge it doesn't need. -->
-{#snippet targetRow()}
-    {#if destinations.length > 1}
-        <div class="fav-targets" role="radiogroup" aria-label="Play on">
-            <span class="t-label">Play on</span>
-            {#each destinations as d, i (d.kind + d.id)}
-                {#if i === groups.length && groups.length > 0}
-                    <span class="t-label">KEF</span>
+            <div class="rooms">
+                {#each multiGroups as g (g.coordinator_id)}
+                    <!-- The enclosure is a drop target in its own right:
+                         "drag a third onto an existing group" reads as
+                         dropping on the group, so the gap between its pucks
+                         must not be a miss. -->
+                    <div class="group-wrap" class:drop={dropZone === g.coordinator_id}
+                        data-zone={g.coordinator_id}>
+                        <div class="glabel">
+                            <Icon name="check" size={11} />
+                            <span>{groupTitle(g)}</span>
+                            <button class="ungroup" disabled={busy["ungroup:" + g.coordinator_id]}
+                                onclick={() => ungroup(g)}>Ungroup</button>
+                        </div>
+                        <div class="puck-grid">
+                            {#each g.member_ids as id (id)}
+                                {@const sp = speakerById.get(id)}
+                                {#if sp}
+                                    {@render puck(sp)}
+                                {/if}
+                            {/each}
+                        </div>
+                    </div>
+                {/each}
+                {#if soloSpeakers.length}
+                    <div class="puck-grid">
+                        {#each soloSpeakers as sp (sp.id)}
+                            {@render puck(sp)}
+                        {/each}
+                    </div>
                 {/if}
-                {@const on = isDest(d)}
-                <button class="chip" class:on role="radio" aria-checked={on}
-                    aria-label={`Play on ${destName(d)}${d.kind === "kef" ? " (KEF)" : ""}`}
-                    onclick={() => (dest = d)}>
-                    {destName(d)}
-                </button>
-            {/each}
-        </div>
-    {:else if destinations.length === 1}
-        <div class="fav-targets">
-            <span class="t-label">Play on</span>
-            <span class="t-one">{destName(destinations[0])}</span>
-        </div>
-    {/if}
-{/snippet}
+                <!-- Grouping is a Sonos capability. A house with only KEF
+                     speakers would otherwise open a blank sheet with no
+                     explanation, which reads as broken rather than as
+                     "this doesn't apply to your speakers". -->
+                {#if multiGroups.length === 0 && soloSpeakers.length === 0}
+                    <div class="quiet-card">
+                        <span class="quiet-ico"><Icon name="speaker" size={20} /></span>
+                        <span class="quiet-meta">
+                            <span class="quiet-title">Nothing to group</span>
+                            <span class="quiet-sub">
+                                {#if kefSpeakers.length > 0}
+                                    KEF speakers stand alone — they have no zones to
+                                    group. Their controls are on Speakers.
+                                {:else}
+                                    No Sonos speaker is answering right now — check
+                                    them under Speakers.
+                                {/if}
+                            </span>
+                        </span>
+                        <button class="chip quiet-go" onclick={openSpeakers}>Speakers</button>
+                    </div>
+                {/if}
 
-<!-- ── Selection bar (grouping) ────────────────────────────────────── -->
-{#if selectionBarUp}
-    <div class="selbar" transition:fly={{ y: 16, duration: dur(200), easing: cubicOut }}>
-        <!-- Getting out of selection mode used to mean un-tapping every
-             circle one by one. -->
-        <button class="icon-btn sel-clear" aria-label="Clear selection"
-            onclick={() => (selectedIds = [])}>
-            <Icon name="close" size={15} />
-        </button>
-        <span class="sel-count mono">{selectedIds.length} selected</span>
-        <span class="sel-names">{selectedNames}</span>
-        <button class="btn btn-primary sel-go" disabled={busy["group:" + groupTargetId]}
-            onclick={groupSelected}>Group</button>
+                <!-- Speakers the live topology never mentioned can't be pucks
+                     and can't be grouped, so Zones only points at them. -->
+                {#if offline.length > 0}
+                    <button class="lu-row" onclick={openSpeakers}>
+                        <span class="lu-ico"><Icon name="speaker" size={18} /></span>
+                        <span class="lu-meta">
+                            <span class="lu-title">
+                                <span class="mono">{offline.length}</span>
+                                speaker{offline.length === 1 ? "" : "s"} unreachable
+                            </span>
+                            <span class="lu-sub">
+                                Not in the current Sonos topology — check them under Speakers
+                            </span>
+                        </span>
+                        <span class="lu-chev" aria-hidden="true"><Icon name="chevronDown" size={18} /></span>
+                    </button>
+                {/if}
+
+                <p class="hint zones-keys">
+                    On a keyboard: press <kbd>G</kbd> on a room to pick it up,
+                    <kbd>Tab</kbd> to another and <kbd>Enter</kbd> to group them.
+                </p>
+            </div>
+        </div>
     </div>
 {/if}
 
-<!-- ── Full player sheet ───────────────────────────────────────────── -->
-{#if playerOpen && activeGroup}
-    {@const g = activeGroup}
-    {@const c = coordinatorOf(g)}
-    {@const st = c?.state}
-    {@const gs = c?.group_state}
-    {@const grouped = g.member_ids.length > 1}
+<!-- Drag ghost — a copy of the puck under the finger. Fixed to the viewport
+     and outside the sheet's own scroll, so it never clips at the edges. -->
+{#if puckDrag}
+    <div
+        class="puck puck-ghost"
+        class:playing={puckDrag.playing}
+        aria-hidden="true"
+        style:width="{puckDrag.w}px"
+        style:height="{puckDrag.h}px"
+        style:left="{puckDrag.x}px"
+        style:top="{puckDrag.y}px"
+    >
+        <span class="puck-icon">
+            {#if puckDrag.playing}{@render wave()}{:else}<Icon name="speaker" size={16} />{/if}
+        </span>
+        <span class="puck-body">
+            <span class="puck-name">{puckDrag.name}</span>
+            <span class="puck-sub">{puckDrag.sub}</span>
+        </span>
+    </div>
+{/if}
+
+<!-- ── Search sheet ─────────────────────────────────────────────────
+     Behind a plain search icon in Home's header, opening the same way
+     everything else in Music opens. -->
+{#if searchOpen}
+    <div class="scrim" transition:fade={{ duration: dur(200) }} onclick={dropSheet} aria-hidden="true"></div>
+    <div
+        class="sheet"
+        class:dragging
+        role="dialog"
+        aria-modal="true"
+        aria-label="Search"
+        tabindex="-1"
+        style:transform={dragY > 0 ? `translateY(${dragY}px)` : ""}
+        style:opacity={dragY > 0 ? Math.max(0.4, 1 - dragY / 300) : undefined}
+        style:transition={dragging
+            ? "none"
+            : dragY > 0
+              ? "transform 0.22s ease-in, opacity 0.22s ease-in"
+              : "transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)"}
+        in:sheet={{}}
+        out:sheet={{ instant: dismissing }}
+    >
+        <div
+            class="sheet-scroll"
+            class:docked={showDock}
+            role="none"
+            bind:this={scrollEl}
+            onpointerdown={onBodyPointerDown}
+            onpointermove={onBodyPointerMove}
+            onpointerup={onBodyPointerUp}
+            onpointercancel={onBodyPointerCancel}
+        >
+            {@render sheetHead("Search", spotify?.connected ? "Spotify" : "")}
+            {@render searchBody()}
+        </div>
+    </div>
+{/if}
+
+<!-- ── KEF player sheet ─────────────────────────────────────────────
+     The same object as the Sonos player, minus the two things KEF hasn't
+     got: a queue and a group. What it has instead is the input selector,
+     which is the question a KEF speaker actually raises. Every room chip on
+     Home now opens a player — the chips sit side by side and looked
+     identical, so sending one of them to a settings screen two levels away
+     was the module's worst seam (DESIGN.md §15). -->
+{#if playerOpen && activeKef}
+    {@const sp = activeKef}
+    {@const st = sp.state}
+    {@const p = kefProgress(sp)}
+    {@const durMs = st?.duration_ms ?? 0}
     <div class="scrim" transition:fade={{ duration: dur(200) }} onclick={closePlayer} aria-hidden="true"></div>
     <div
-        class="player"
+        class="sheet"
         class:dragging
         role="dialog"
         aria-modal="true"
@@ -2478,7 +3237,168 @@
         out:sheet={{ instant: dismissing }}
     >
         <div
-            class="player-scroll"
+            class="sheet-scroll"
+            role="none"
+            bind:this={scrollEl}
+            onpointerdown={onBodyPointerDown}
+            onpointermove={onBodyPointerMove}
+            onpointerup={onBodyPointerUp}
+            onpointercancel={onBodyPointerCancel}
+        >
+            <div
+                class="sheet-top"
+                role="none"
+                onpointerdown={onTopPointerDown}
+                onpointermove={onTopPointerMove}
+                onpointerup={onTopPointerUp}
+                onpointercancel={cancelDrag}
+            >
+                <div class="grabber" aria-hidden="true"></div>
+                <header class="player-head">
+                    <button class="icon-btn p-icon" aria-label="Collapse player" onclick={closePlayer}>
+                        <Icon name="chevronDown" size={18} />
+                    </button>
+                    <div class="p-onair">
+                        <div class="eyrow">Playing on</div>
+                        <div class="p-onair-name">{sp.name}</div>
+                    </div>
+                    <!-- Tone, EQ and the rest are the speaker's own settings,
+                         and they live on its screen. This is the way there,
+                         and the sheet stands down so a screen can push. -->
+                    <button
+                        class="icon-btn p-icon"
+                        aria-label="{sp.name} settings"
+                        onclick={() => { hideSheet(); openSpeakers(); openKEFSpeaker(sp); }}
+                    >
+                        <Icon name="sliders" size={17} />
+                    </button>
+                </header>
+            </div>
+
+            <div class="p-art">
+                {#if st?.track?.art_uri}
+                    <img src={st.track.art_uri} alt="" draggable="false" />
+                {:else}
+                    <div class="p-art-ph">[ album art ]</div>
+                {/if}
+            </div>
+
+            <div class="p-meta">
+                {#if st?.track?.title}
+                    <div class="p-title">{st.track.title}</div>
+                    <div class="p-sub">
+                        {[st.track.artist, st.track.album].filter(Boolean).join(" · ")
+                            || kefSourceLabel(st.source)}
+                    </div>
+                {:else if !st?.powered_on}
+                    <div class="p-title idle">Standby</div>
+                    <div class="p-sub">Press play to wake it.</div>
+                {:else}
+                    <div class="p-title idle">{kefNowLine(sp)}</div>
+                    <div class="p-sub">Pick an input below, or search Spotify.</div>
+                {/if}
+            </div>
+
+            <!-- A read-only line, not a scrubber: KEF's API has no seek. The
+                 physical inputs and live streams report no duration at all
+                 and get no line rather than a made-up one — the same rule
+                 Sonos radio follows one sheet over. -->
+            {#if durMs > 0}
+                <div class="p-scrub">
+                    <span class="kef-rail" aria-hidden="true"><i style:width="{p * 100}%"></i></span>
+                    <div class="p-times mono">
+                        <span>{fmtSecs(kefPosMs(sp) / 1000)}</span><span>{fmtSecs(durMs / 1000)}</span>
+                    </div>
+                </div>
+            {:else if st?.track?.title}
+                <div class="p-live mono">no track position on this input</div>
+            {/if}
+
+            <div class="p-transport">
+                <button class="icon-btn t-btn" aria-label="Previous track"
+                    disabled={busy["kefprevious:" + sp.id]} onclick={() => kefSkip(sp, "previous")}>
+                    <Icon name="skipPrev" size={22} />
+                </button>
+                <button class="p-play" class:playing={st?.playing}
+                    aria-label={st?.playing ? "Pause" : "Play"} title="Play / pause (space)"
+                    disabled={busy["kefplay:" + sp.id]} onclick={() => kefTogglePlay(sp)}>
+                    <Icon name={st?.playing ? "pause" : "play"} size={26} />
+                </button>
+                <button class="icon-btn t-btn" aria-label="Next track"
+                    disabled={busy["kefnext:" + sp.id]} onclick={() => kefSkip(sp, "next")}>
+                    <Icon name="skipNext" size={22} />
+                </button>
+            </div>
+
+            <div class="p-speakers">
+                <div class="eyrow">Volume</div>
+                <div class="member">
+                    <button class="icon-btn m-mute" aria-label={st?.muted ? "Unmute" : "Mute"}
+                        aria-pressed={st?.muted ?? false}
+                        disabled={busy["kefmute:" + sp.id]} onclick={() => kefToggleMute(sp)}>
+                        <Icon name={st?.muted ? "volumeOff" : "volume"} size={17} />
+                    </button>
+                    <span class="m-name" class:muted={st?.muted}>{sp.name}</span>
+                    <input type="range" min="0" max="100" step="1"
+                        aria-label="Volume for {sp.name}"
+                        value={kefShownVol(sp)}
+                        oninput={(e) => (kefVol[sp.id] = e.currentTarget.valueAsNumber)}
+                        onchange={(e) => kefSetVolume(sp, e.currentTarget.valueAsNumber)} />
+                    <span class="vol-num mono">{kefShownVol(sp)}</span>
+                </div>
+            </div>
+
+            <!-- The question a KEF speaker raises that a Sonos zone doesn't:
+                 which input. It sits where the group's member volumes sit on
+                 the other sheet, because it answers the same "where is this
+                 coming out" question. -->
+            <div class="p-speakers">
+                <div class="eyrow">Input</div>
+                <div class="src-row">
+                    {#each KEF_SOURCES as src (src.value)}
+                        <button class="chip" class:on={st?.source === src.value}
+                            aria-pressed={st?.source === src.value}
+                            disabled={busy["kefsrc:" + sp.id]}
+                            onclick={() => kefSetSource(sp, src.value)}>{src.label}</button>
+                    {/each}
+                </div>
+                <p class="hint">
+                    No queue and no grouping — a KEF speaker plays alone, so
+                    there is nothing to line up behind this or to play it with.
+                </p>
+            </div>
+        </div>
+    </div>
+{/if}
+
+<!-- ── Full player sheet ───────────────────────────────────────────── -->
+{#if playerOpen && activeGroup}
+    {@const g = activeGroup}
+    {@const c = coordinatorOf(g)}
+    {@const st = c?.state}
+    {@const gs = c?.group_state}
+    {@const grouped = g.member_ids.length > 1}
+    <div class="scrim" transition:fade={{ duration: dur(200) }} onclick={closePlayer} aria-hidden="true"></div>
+    <div
+        class="sheet"
+        class:dragging
+        role="dialog"
+        aria-modal="true"
+        aria-label="Now playing"
+        tabindex="-1"
+        bind:this={playerEl}
+        style:transform={dragY > 0 ? `translateY(${dragY}px)` : ""}
+        style:opacity={dragY > 0 ? Math.max(0.4, 1 - dragY / 300) : undefined}
+        style:transition={dragging
+            ? "none"
+            : dragY > 0
+              ? "transform 0.22s ease-in, opacity 0.22s ease-in"
+              : "transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)"}
+        in:sheet={{}}
+        out:sheet={{ instant: dismissing }}
+    >
+        <div
+            class="sheet-scroll"
             role="none"
             bind:this={scrollEl}
             onpointerdown={onBodyPointerDown}
@@ -2491,7 +3411,7 @@
                  The bar is also the drag handle, and it sticks as one unit so
                  content dissolves under it rather than meeting a hard edge. -->
             <div
-                class="player-top"
+                class="sheet-top"
                 role="none"
                 onpointerdown={onTopPointerDown}
                 onpointermove={onTopPointerMove}
@@ -2791,6 +3711,18 @@
 <style>
     .sk { height: 180px; border-radius: var(--r-md); }
 
+    /* Announced, never drawn — the running commentary on a grouping gesture
+       that has no visible one. */
+    .sr-only {
+        position: absolute;
+        width: 1px; height: 1px;
+        margin: -1px; padding: 0;
+        overflow: hidden;
+        clip-path: inset(50%);
+        white-space: nowrap;
+        border: 0;
+    }
+
     /* ── Section scaffolding ── */
     .block { display: flex; flex-direction: column; gap: var(--space-3); }
     .block-head {
@@ -2809,33 +3741,63 @@
     }
     .link-btn:hover { color: var(--text); }
 
-    /* ── Subnav — Music's own three screens ──
-       Sticks flush to the top and bleeds over the shell's page padding, so
-       nothing scrolls through a gap above it or past its sides — the pill
-       used to detach with cards sliding visibly through the gutters around
-       it. The band is the same glass as the player sheet's top bar:
-       translucent, blurred, with a fading bottom edge that content dissolves
-       under rather than being sliced against. */
-    .subnav {
-        --fade: 18px;
-        position: sticky; top: 0; z-index: 15;
-        margin: 0 -36px calc(var(--fade) * -1);
-        padding: var(--space-3) 36px var(--fade);
-        background: var(--bg-bar);
-        backdrop-filter: blur(18px) saturate(1.3);
-        -webkit-backdrop-filter: blur(18px) saturate(1.3);
-        -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - var(--fade)), transparent);
-        mask-image: linear-gradient(to bottom, #000 calc(100% - var(--fade)), transparent);
-    }
-    /* Match the shell's mobile page padding (App.svelte `.main`). */
-    @media (max-width: 900px) {
-        .subnav {
-            margin: 0 calc(var(--space-4) * -1) calc(var(--fade) * -1);
-            padding: var(--space-2) var(--space-4) var(--fade);
-        }
+    /* Only said once, at the foot of the Zones sheet — the gesture is the
+       affordance, this is the footnote for the keyboard. */
+    .zones-keys { margin-top: var(--space-2); }
+    .zones-keys kbd {
+        font-family: var(--font-mono);
+        font-size: 11px;
+        padding: 1px 5px;
+        border-radius: 5px;
+        background: var(--card-3);
+        border: 1px solid var(--hairline);
+        color: var(--text);
     }
 
-    /* ── Rooms at a glance (Home) ── */
+    /* ── Header actions ──
+       Search keeps its label wherever the header has room for it, and drops
+       to the icon alone on a phone — where a third labelled chip is exactly
+       what crushed the subtitle to a two-word stub. */
+    .act-search { flex-shrink: 0; }
+    @media (max-width: 620px) {
+        .act-search {
+            position: relative;
+            width: 38px; height: 38px; padding: 0;
+            justify-content: center; border-radius: 50%;
+        }
+        .act-label {
+            position: absolute;
+            width: 1px; height: 1px;
+            margin: -1px; padding: 0;
+            overflow: hidden;
+            clip-path: inset(50%);
+            white-space: nowrap;
+        }
+    }
+    @media (max-width: 620px) and (pointer: coarse) {
+        .act-search { width: 44px; height: 44px; }
+    }
+
+    /* ── Screen head (Speakers) ──
+       The §11 detail shape — back chip, centered title, action chip — because
+       Speakers is a screen pushed from Home, not a sheet lifted over it. */
+    .screen-head {
+        display: flex; align-items: center; gap: var(--space-3);
+    }
+    .screen-title {
+        flex: 1; min-width: 0;
+        display: flex; flex-direction: column; gap: 2px;
+        text-align: center;
+    }
+    .screen-title h1 {
+        font-family: var(--font-sans);
+        font-size: 20px; font-weight: 600; letter-spacing: -0.02em;
+        color: var(--text);
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .screen-sub { font-size: 12px; color: var(--text-mute); }
+
+    /* ── Zones at a glance (Home) ── */
     .room-chips {
         display: grid;
         grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
@@ -3015,7 +3977,9 @@
     .rooms { display: flex; flex-direction: column; gap: var(--space-3); }
     .puck-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+        /* 140, not 160: inside the dashed group enclosure the extra padding
+           tipped a phone's two-up grid into a single stacked column. */
+        grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
         gap: var(--space-3);
     }
     .group-wrap {
@@ -3023,6 +3987,14 @@
         border-radius: var(--r-lg);
         padding: var(--space-2);
         display: flex; flex-direction: column; gap: var(--space-2);
+        transition: border-color var(--t-fast), box-shadow var(--t-fast);
+    }
+    /* Aimed at as a whole — the dashed edge goes solid amber, the same
+       statement a puck's drop ring makes. */
+    .group-wrap.drop {
+        border-style: solid;
+        border-color: var(--on);
+        box-shadow: 0 0 0 1px var(--on), 0 0 22px -6px var(--on-glow);
     }
     .glabel {
         display: flex; align-items: center; gap: 6px;
@@ -3041,39 +4013,70 @@
     .ungroup:hover { color: var(--text); }
     .ungroup:disabled { opacity: 0.5; }
 
+    /* One element, one target: tap opens the room, drag groups it. The
+       select circle that used to sit in the corner is gone, so the padding
+       that reserved its space goes with it. */
     .puck {
         position: relative;
-        background: var(--card); border: 1px solid var(--hairline);
-        border-radius: var(--r-lg);
-        transition: border-color var(--t-fast), box-shadow var(--t-fast);
-    }
-    .puck.playing { background: var(--tile-on-gradient); border-color: var(--tile-on-border); }
-    .puck.selected { border-color: var(--on); box-shadow: 0 0 0 1px var(--on); }
-    .puck-open {
         width: 100%;
         display: flex; flex-direction: column; gap: 10px;
-        /* Room for the select circle in the corner. */
-        padding: 14px 46px 14px 14px;
-        background: none; border: 0; border-radius: var(--r-lg);
-        color: var(--text); text-align: left; cursor: pointer; font: inherit;
-        transition: transform var(--t-fast);
+        padding: 14px;
+        background: var(--card); border: 1px solid var(--hairline);
+        border-radius: var(--r-lg);
+        color: var(--text); text-align: left; cursor: grab; font: inherit;
+        /* Vertical panning still belongs to the sheet — a puck only lifts on
+           a press that stays put (see HOLD_MS). */
+        touch-action: pan-y;
+        -webkit-user-select: none; user-select: none;
+        transition: border-color var(--t-fast), box-shadow var(--t-fast),
+            opacity var(--t-fast), transform var(--t-fast);
     }
-    .puck-open:active { transform: scale(0.98); }
-    .puck-open:disabled { opacity: 0.6; cursor: default; }
-    .check {
-        position: absolute; top: 6px; right: 6px;
-        width: 38px; height: 38px;
-        display: grid; place-items: center;
-        background: none; border: 0; padding: 0; cursor: pointer;
+    .puck.playing { background: var(--tile-on-gradient); border-color: var(--tile-on-border); }
+    .puck:active { transform: scale(0.98); }
+    .puck:disabled { opacity: 0.6; cursor: default; }
+    /* The one being carried: dimmed in place, so the grid keeps its shape
+       while the ghost does the travelling. */
+    .puck.lifted { opacity: 0.35; cursor: grabbing; transform: none; }
+    .puck.held:not(.lifted) { border-color: var(--on); }
+    /* Where it would land. Same ring for the pointer's drop target and the
+       keyboard's candidates, because they mean the same thing. */
+    .puck.drop {
+        border-color: var(--on);
+        box-shadow: 0 0 0 2px var(--on), 0 0 22px -4px var(--on-glow);
     }
-    .check-dot {
-        width: 20px; height: 20px; border-radius: 50%;
-        display: grid; place-items: center;
-        background: var(--card-3); border: 1.5px solid var(--border-strong);
-        color: transparent;
-        transition: background var(--t-fast), border-color var(--t-fast);
+    .puck.aiming { border-color: var(--tile-on-border); }
+    .puck.aiming:focus-visible { box-shadow: var(--focus-ring), 0 0 0 2px var(--on); }
+    /* Grip: the only thing on a puck that says "this moves" to a mouse.
+       Hover-only so it is never permanent chrome, and inert so it is never
+       a second target. */
+    .puck-grip {
+        position: absolute; top: 10px; right: 10px;
+        display: flex;
+        color: var(--text-dim);
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity var(--t-fast);
     }
-    .puck.selected .check-dot { background: var(--on); border-color: var(--on); color: var(--primary-fg); }
+    @media (hover: hover) {
+        /* Not while lifted: the pointer is captured, so the source puck stays
+           :hover for the whole drag and would keep the grip lit under the
+           ghost that is already carrying it. */
+        .puck:not(:disabled):not(.lifted):hover .puck-grip { opacity: 0.7; }
+    }
+    /* Keep the name clear of the grip while it is showing. */
+    .puck-name { padding-right: 20px; }
+    /* The travelling copy. Fixed to the viewport and inert, so hit-testing
+       under the finger finds the room beneath it rather than itself. */
+    .puck-ghost {
+        position: fixed; z-index: 200;
+        pointer-events: none;
+        box-shadow: var(--shadow-lg);
+        /* Fully opaque and slightly lifted: at 94% the room underneath read
+           through the ghost and both sets of text fought. */
+        opacity: 1;
+        transform: scale(1.03);
+        transition: none;
+    }
     .puck-icon {
         width: 34px; height: 34px; border-radius: var(--r-md);
         display: grid; place-items: center;
@@ -3084,49 +4087,11 @@
        amber icon tile they'd be invisible, so they take the tile's ink. */
     .puck.playing .puck-icon .wave i { background: var(--primary-fg); }
     .puck-body { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-    .puck-name { font-size: 14px; font-weight: 600; }
+    /* Clear of the hover grip in the corner. */
+    .puck-name { font-size: 14px; font-weight: 600; padding-right: 20px; }
     .puck-sub {
         font-size: 11.5px; color: var(--text-mute);
         overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    }
-
-    /* ── Selection bar ── */
-    .selbar {
-        position: fixed; left: 50%; transform: translateX(-50%);
-        bottom: calc(var(--space-5) + env(safe-area-inset-bottom));
-        z-index: 45;
-        display: flex; align-items: center; gap: var(--space-3);
-        padding: 10px 10px 10px 16px;
-        /* Sized to its contents, not to the space left of `left: 50%` —
-           shrink-to-fit measures from there and left the Group button
-           hanging a few pixels past the bar's own edge. */
-        width: max-content;
-        max-width: min(440px, calc(100vw - 32px));
-        background: var(--card); border: 1px solid var(--on);
-        border-radius: var(--r-lg);
-        box-shadow: var(--shadow-lg);
-        transition: padding-right var(--t-med);
-    }
-    .sel-clear { width: 32px; height: 32px; flex-shrink: 0; color: var(--text-mute); }
-    .sel-count { font-size: 13px; font-weight: 600; flex-shrink: 0; }
-    .sel-names {
-        font-size: 12px; color: var(--text-mute);
-        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    }
-    .sel-go { margin-left: auto; border-radius: var(--r-pill); flex-shrink: 0; }
-    @media (max-width: 900px) {
-        .selbar {
-            bottom: calc(var(--nav-clear) + var(--space-3));
-            /* Keep the primary action out from under the assistant button,
-               which shares this band. The token is 0 when that button is
-               switched off, and the bar gets its edge back. */
-            padding-right: max(10px, var(--fab-clear));
-        }
-    }
-    /* On a narrow phone the count, the clear button and Group already fill
-       the bar; a two-character stub of the first room name says nothing. */
-    @media (max-width: 420px) {
-        .sel-names { display: none; }
     }
 
     /* ── Docked mini-player ── */
@@ -3154,9 +4119,27 @@
     @media (max-width: 900px) {
         .mini {
             bottom: calc(var(--nav-clear) + var(--space-3));
-            /* Same reserved gutter as .selbar — and the same reprieve when
-               the assistant button is switched off. */
+            /* A reserved gutter for the assistant button, which shares this
+               band — and the same reprieve when that button is switched off. */
             padding-right: max(10px, var(--fab-clear));
+        }
+    }
+    /* Over the Zones and Search sheets the dock leaves the page flow and
+       floats above them, because the transport has to persist across all
+       three (DESIGN.md §15). Above the sheet's own z-index, below the
+       player's, since tapping it swaps one for the other. */
+    .mini.over-sheet {
+        position: fixed;
+        left: var(--space-4); right: var(--space-4);
+        bottom: calc(var(--space-4) + env(safe-area-inset-bottom));
+        z-index: 127;
+        margin-top: 0;
+    }
+    @media (min-width: 601px) {
+        .mini.over-sheet {
+            left: 50%; right: auto;
+            transform: translateX(-50%);
+            width: min(440px, calc(100vw - 48px));
         }
     }
     .mini-open {
@@ -3505,7 +4488,7 @@
         position: fixed; inset: 0; z-index: 125;
         background: rgba(0, 0, 0, 0.5);
     }
-    .player {
+    .sheet {
         position: fixed; z-index: 126;
         left: 0; right: 0; bottom: 0;
         max-height: 92vh;
@@ -3525,7 +4508,7 @@
         margin: 8px auto 0;
         pointer-events: none;
     }
-    .player-scroll {
+    .sheet-scroll {
         max-height: 92vh; overflow-y: auto;
         overscroll-behavior: contain;
         -webkit-overflow-scrolling: touch;
@@ -3533,30 +4516,35 @@
             calc(var(--space-8) + env(safe-area-inset-bottom));
         display: flex; flex-direction: column; gap: var(--space-5);
     }
+    /* The dock floats over Zones and Search, so the last row of either has to
+       clear it rather than spending its life underneath. */
+    .sheet-scroll.docked {
+        padding-bottom: calc(var(--space-8) + 72px + env(safe-area-inset-bottom));
+    }
     /* On desktop the sheet becomes a centered dialog. */
     @media (min-width: 601px) {
-        .player {
+        .sheet {
             left: 50%; bottom: auto; top: 50%;
             transform: translate(-50%, -50%);
             width: min(440px, calc(100vw - 48px));
             max-height: 88vh;
             border-radius: var(--r-xl); border-bottom: 1px solid var(--hairline);
         }
-        .player-scroll { max-height: 88vh; }
+        .sheet-scroll { max-height: 88vh; }
     }
     /* The bar is the drag handle on phones, so the browser must not claim
        the gesture for scrolling first. */
     @media (max-width: 600px) {
-        .player-top { touch-action: none; cursor: grab; }
-        .player.dragging .player-top { cursor: grabbing; }
-        .player-scroll { touch-action: pan-y; }
+        .sheet-top { touch-action: none; cursor: grab; }
+        .sheet.dragging .sheet-top { cursor: grabbing; }
+        .sheet-scroll { touch-action: pan-y; }
     }
 
     /* Grabber + header travel together and stick, so a long queue never
        scrolls the way out off the screen. The band is translucent and
        blurred, and its bottom edge fades out — art and rows dissolve as they
        pass underneath instead of being cut off against an opaque slab. */
-    .player-top {
+    .sheet-top {
         --fade: 22px;
         position: sticky; top: 0; z-index: 3;
         margin: 0 calc(var(--space-5) * -1) calc(var(--fade) * -1);
@@ -3573,8 +4561,14 @@
         padding: var(--space-2) 0 var(--space-3);
     }
     .p-icon { width: 38px; height: 38px; border-radius: 50%; background: var(--card-2); border: 1px solid var(--hairline); }
+    /* Keeps the title centered on sheets whose head carries no action chip. */
+    .p-icon-gap { width: 38px; flex-shrink: 0; }
     .p-onair { text-align: center; min-width: 0; }
     .p-onair-name { font-size: 13px; font-weight: 600; margin-top: 2px; }
+    .p-onair-sub {
+        font-size: 11.5px; color: var(--text-mute); margin-top: 2px;
+        line-height: 1.35;
+    }
 
     /* Art leads the sheet — it is the largest thing on screen, and the
        glow underneath is the same bulb glow a lit device gets. */
@@ -3679,6 +4673,27 @@
 
     .p-speakers { display: flex; flex-direction: column; gap: 2px; }
     .p-speakers .eyrow { margin-bottom: var(--space-1); }
+
+    /* ── KEF player ──
+       A read-only progress line, because KEF's API has no seek — the Sonos
+       sheet's scrubber is a range input in the same slot. */
+    .kef-rail {
+        display: block; height: 6px; border-radius: 3px;
+        background: var(--card-3);
+        overflow: hidden;
+    }
+    .kef-rail i {
+        display: block; height: 100%;
+        background: var(--on);
+        /* Matches the 1s position tick, so the fill creeps instead of
+           stepping. */
+        transition: width 1s linear;
+    }
+    /* The input selector, where the group's member rows sit on the other
+       sheet — it answers the same "where is this coming out" question. */
+    .src-row { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+    .src-row .chip { flex-shrink: 0; }
+    .p-speakers .hint { margin-top: var(--space-2); }
     .m-icon {
         width: 36px; height: 36px; flex-shrink: 0;
         display: grid; place-items: center; color: var(--text-mute);
@@ -3742,21 +4757,19 @@
         input[type="range"]::-moz-range-thumb { width: 26px; height: 26px; }
         .member .m-name { width: 90px; }
         .sp-play { width: 44px; height: 44px; }
-        .sp-more, .q-rm, .fav-add, .sp-clear, .sel-clear { width: 44px; height: 44px; }
+        .sp-more, .q-rm, .fav-add, .sp-clear { width: 44px; height: 44px; }
         .mini-btn { width: 44px; height: 44px; }
-        .check { width: 44px; height: 44px; top: 3px; right: 3px; }
-        .puck-open { padding-right: 50px; }
         .sp-input, .sp-config input { font-size: 16px; } /* prevents iOS auto-zoom */
     }
 
     @media (prefers-reduced-motion: reduce) {
         .wave i { animation: none; height: 8px; }
-        .fav-art, .now-card, .puck, .puck-open, .check-dot, .p-play,
-        .p-upnext, .q-row, .sp-row, .mini, .mini-btn, .p-art, .prog i, .selbar {
+        .fav-art, .now-card, .puck, .p-play,
+        .p-upnext, .q-row, .sp-row, .mini, .mini-btn, .p-art, .prog i, .kef-rail i {
             transition-duration: 0.001ms;
         }
         /* The sheet's drag snap-back is an inline style, so it needs its own
            override here rather than a transition-duration on the class. */
-        .player { transition: none !important; }
+        .sheet { transition: none !important; }
     }
 </style>

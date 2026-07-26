@@ -357,8 +357,8 @@
 
 <div class="detail" in:fly={{ y: 10, duration: dur(240), easing: cubicOut }}>
     <!-- §11 detail head: back chip left, centered title block, action chip
-         right. The subnav above stays put — tapping Rooms or Search leaves
-         this screen the same way the back chip does. -->
+         right. This is one level below the Speakers screen, which is itself
+         one level below Home — a chain of pushes, never a sheet on a sheet. -->
     <div class="dhead" class:paned>
         {#if !paned}
             <button class="icon-btn" aria-label="Back to speakers" onclick={onBack}>

@@ -1,7 +1,8 @@
 <script lang="ts">
     // One speaker's device settings — the half of the Sonos app that isn't
-    // playback. A screen, not a sheet: it is reached from the Music subnav
-    // like Home, Rooms and Search, and none of those are sheets either. The
+    // playback. A screen, not a sheet: it opens from the Speakers screen,
+    // which is a screen precisely so this one can push from it — a sheet must
+    // never open another sheet (DESIGN.md §15). The
     // §11 detail shape (back chip · centered title · action chip, then a hero
     // card and secondary cards) rather than the §11 form shape, because there
     // is nothing to save — every control applies the moment it is touched.
@@ -182,8 +183,8 @@
 
 <div class="detail" in:fly={{ y: 10, duration: dur(240), easing: cubicOut }}>
     <!-- §11 detail head: back chip left, centered title block, action chip
-         right. The subnav above stays put — tapping Rooms or Search leaves
-         this screen the same way the back chip does. -->
+         right. This is one level below the Speakers screen, which is itself
+         one level below Home — a chain of pushes, never a sheet on a sheet. -->
     <div class="dhead" class:paned>
         {#if !paned}
             <button class="icon-btn" aria-label="Back to speakers" onclick={onBack}>
