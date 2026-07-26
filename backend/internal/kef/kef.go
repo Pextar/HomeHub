@@ -87,6 +87,11 @@ func ValidateHost(host string) error {
 // {"type":"bool_","bool_":true} are both one of these. Decoding keeps the
 // raw payload and unwraps it on demand: a caller that asked for an int
 // shouldn't fail because some other field of the same response was a string.
+//
+// Composite values break that shape: player:player/data answers
+// {"type":"playerData","state":"playing","trackRoles":{…}} — the fields sit
+// beside the type name rather than under it. So the payload is "whatever
+// `type` names, or the whole object when it names nothing".
 type value struct {
 	Type string
 	Raw  json.RawMessage
@@ -117,7 +122,12 @@ func (v *value) UnmarshalJSON(b []byte) error {
 	if err := json.Unmarshal(raw, &v.Type); err != nil {
 		return fmt.Errorf("kef: value type: %w", err)
 	}
-	v.Raw = obj[v.Type]
+	if payload, ok := obj[v.Type]; ok {
+		v.Raw = payload
+		return nil
+	}
+	// A composite value: the object itself is the payload.
+	v.Raw = append(json.RawMessage(nil), b...)
 	return nil
 }
 
@@ -234,15 +244,20 @@ func setValue(ctx context.Context, ip, path string, v value) error {
 // because it is an *action* rather than stored state — its role is
 // "activate" and its payload is a bare {"control":"…"} with no type
 // envelope, which is the one place this API breaks its own pattern.
-func setRaw(ctx context.Context, ip, path, role string, val json.RawMessage) error {
+//
+// The field naming the role is "roles" — plural, as on the read side's query
+// string, because a request may name more than one. The singular reads
+// better and is not what the speaker looks for: sent that way, the transport
+// control never reached the player and came back HTTP 500.
+func setRaw(ctx context.Context, ip, path, roles string, val json.RawMessage) error {
 	if err := ValidateHost(ip); err != nil {
 		return fmt.Errorf("kef: %w", err)
 	}
 	body, err := json.Marshal(struct {
 		Path  string          `json:"path"`
-		Role  string          `json:"role"`
+		Roles string          `json:"roles"`
 		Value json.RawMessage `json:"value"`
-	}{path, role, val})
+	}{path, roles, val})
 	if err != nil {
 		return fmt.Errorf("kef: encode request: %w", err)
 	}
@@ -604,13 +619,14 @@ func SetVolumeLimit(ctx context.Context, ip string, on bool) error {
 	return setBool(ctx, ip, pathVolumeLimit, on)
 }
 
-// Transport controls accepted on the control path.
+// Transport controls accepted on the control path. There are only three:
+// the speaker has no "play" verb and no "stop" — ControlToggle flips
+// between playing and paused, and anything else on this path is answered
+// with HTTP 500.
 const (
-	ControlPlay     = "play"
-	ControlPause    = "pause"
+	ControlToggle   = "pause"
 	ControlNext     = "next"
 	ControlPrevious = "previous"
-	ControlStop     = "stop"
 )
 
 // control sends one transport action. Unlike every other path this is an
@@ -624,19 +640,43 @@ func control(ctx context.Context, ip, action string) error {
 }
 
 // Play resumes playback on whatever source is selected.
-func Play(ctx context.Context, ip string) error { return control(ctx, ip, ControlPlay) }
+func Play(ctx context.Context, ip string) error { return setPlaying(ctx, ip, true) }
 
 // Pause pauses playback.
-func Pause(ctx context.Context, ip string) error { return control(ctx, ip, ControlPause) }
+func Pause(ctx context.Context, ip string) error { return setPlaying(ctx, ip, false) }
+
+// setPlaying drives the one control the speaker has towards a wanted state:
+// read what the player is doing, and send the toggle only when it is on the
+// wrong side — a blind send would pause the music of anyone whose UI was a
+// beat out of date. A speaker that won't say what it is doing still gets the
+// toggle: the caller pressed a button drawn from a reading of its own, and
+// doing nothing at all is the worse answer.
+func setPlaying(ctx context.Context, ip string, want bool) error {
+	if status, err := PlaybackStatus(ctx, ip); err == nil && (status == StatusPlaying) == want {
+		return nil
+	}
+	return control(ctx, ip, ControlToggle)
+}
+
+// PlaybackStatus reads the player's own word for what it is doing, without
+// the rest of GetState's fan-out.
+func PlaybackStatus(ctx context.Context, ip string) (string, error) {
+	v, err := getValue(ctx, ip, pathPlayerData)
+	if err != nil {
+		return "", err
+	}
+	_, status, _ := ParsePlayerData(v.Raw)
+	if status == "" {
+		return "", fmt.Errorf("kef: %s did not report a playback status", ip)
+	}
+	return status, nil
+}
 
 // Next skips to the next track.
 func Next(ctx context.Context, ip string) error { return control(ctx, ip, ControlNext) }
 
 // Previous goes back one track.
 func Previous(ctx context.Context, ip string) error { return control(ctx, ip, ControlPrevious) }
-
-// Stop stops playback.
-func Stop(ctx context.Context, ip string) error { return control(ctx, ip, ControlStop) }
 
 // ── Now playing ──────────────────────────────────────────────────────────
 
@@ -675,9 +715,14 @@ type State struct {
 // sends considerably more — queue ids, service tokens, per-service artwork
 // variants — none of which this bridge exposes.
 type playerData struct {
-	State  string `json:"state"`
+	// State is where the speaker puts "playing" / "paused" / "stopped".
+	State string `json:"state"`
+	// Status is the *track's* status rather than the player's: its duration
+	// lives here. Some firmware also names the playback state under it, so
+	// that is read as a fallback for State.
 	Status struct {
-		Name string `json:"name"`
+		Name     string `json:"name"`
+		Duration int64  `json:"duration"`
 	} `json:"status"`
 	TrackRoles struct {
 		Title     string `json:"title"`
@@ -710,12 +755,15 @@ func ParsePlayerData(raw []byte) (*Track, string, int64) {
 	if err := json.Unmarshal(raw, &d); err != nil {
 		return nil, "", 0
 	}
-	status := strings.ToLower(strings.TrimSpace(d.Status.Name))
+	status := strings.ToLower(strings.TrimSpace(d.State))
 	if status == "" {
-		// Older firmware puts it in "state" instead.
-		status = strings.ToLower(strings.TrimSpace(d.State))
+		status = strings.ToLower(strings.TrimSpace(d.Status.Name))
 	}
-	dur := d.TrackRoles.MediaData.MetaData.Duration
+	// Duration, in the order the speaker actually fills it in.
+	dur := d.Status.Duration
+	if dur == 0 {
+		dur = d.TrackRoles.MediaData.MetaData.Duration
+	}
 	if dur == 0 && len(d.TrackRoles.MediaData.Resources) > 0 {
 		dur = d.TrackRoles.MediaData.Resources[0].Duration
 	}
