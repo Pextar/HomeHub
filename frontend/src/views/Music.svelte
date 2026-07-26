@@ -21,358 +21,60 @@
     import * as sheetRun from "../lib/sheet-run";
     import type { SheetRun } from "../lib/sheet-run";
     import { kefSourceLabel, KEF_SOURCES } from "../lib/kef";
-    import { secs, trimClock, fmtSecs, toClock } from "../lib/music/time";
+    import { secs, trimClock, fmtSecs } from "../lib/music/time";
     import { settleScroll, restoreScroll, toTop } from "../lib/music/scroll";
     import { clock } from "../lib/music/clock.svelte";
     import { createBusy } from "../lib/music/busy.svelte";
+    import { createSonosBridge, NEXT_REPEAT, repeatLabel } from "../lib/music/sonos.svelte";
+    import { createKEFBridge } from "../lib/music/kef.svelte";
     import type {
-        SonosStatus, SonosSpeakerView, SonosGroupView, SonosFavorite,
-        SonosQueueItem, SonosRepeat,
-        KEFStatus, KEFSpeakerView, KEFSource,
+        SonosSpeakerView, SonosGroupView, SonosFavorite,
+        KEFSpeakerView,
         SpotifyStatus, SpotifyItem, SpotifyResults,
     } from "../lib/types";
 
-    let status = $state<SonosStatus | null>(null);
-    let loaded = $state(false);
-    let favorites = $state<SonosFavorite[]>([]);
-    let favsLoaded = $state(false);
-
-    // Volume the user just set, keyed by speaker id. The 5s poll must not
-    // yank the slider back to a stale value while the command is still
-    // propagating, so recent local sets win over polled state briefly.
-    let volOverride: Record<string, { v: number; at: number }> = {};
-    let localVol = $state<Record<string, number>>({});
-    let groupVol = $state<Record<string, number>>({});
-
-    // Actions in flight (play/pause/join/…) keyed by "<action>:<id>". One map
-    // for both bridges and the view's own calls; the key namespace is what
-    // keeps a dozen cards' transports from disabling each other.
+    // Both bridges, as state. They sit beside each other rather than one
+    // folded into the other: a Sonos household is zones that group and share a
+    // sonos.queue, a KEF speaker is one standalone stereo pair with an input
+    // selector, and DESIGN.md §15 is explicit that neither should have to
+    // pretend to be the other. The busy map is shared, since the key namespace
+    // is what keeps their controls from disabling each other.
     const busy = createBusy();
+    const sonos = createSonosBridge(busy);
+    const kef = createKEFBridge(busy);
 
-    // A play/pause round-trip plus the refresh behind it takes long enough
-    // that an un-flipped button reads as a dropped tap. The new state is
-    // applied locally and wins until the poll reports it — the same trick
-    // volOverride plays for the sliders. Rolled back if the call fails.
-    let playOverride = $state<Record<string, { playing: boolean; at: number }>>({});
-
-    // Wall-clock of the last successful poll. The player advances the track
-    // position from here so the scrubber moves every second instead of
-    // jumping every five.
-    let polledAt = $state(0);
-
-    const speakerById = $derived(new Map((status?.speakers ?? []).map((s) => [s.id, s])));
-    const groups = $derived(status?.groups ?? []);
-    // Registered speakers the live topology doesn't mention — offline or on
-    // another network. Shown separately so they stay visible and editable.
-    const offline = $derived(
-        (status?.speakers ?? []).filter((s) => !groups.some((g) => g.member_ids.includes(s.id))),
-    );
-    const reachable = $derived((status?.speakers ?? []).filter((s) => s.reachable));
-    const playingGroups = $derived(groups.filter((g) => isPlaying(g)));
-    const playingCount = $derived(playingGroups.length);
-    // Multi-speaker zones render inside a dashed enclosure in the room grid;
-    // everything reachable that isn't in one shows as a loose puck.
-    const multiGroups = $derived(groups.filter((g) => g.member_ids.length > 1));
-    const soloSpeakers = $derived(
-        reachable.filter((s) => !multiGroups.some((g) => g.member_ids.includes(s.id))),
-    );
-
-    function coordinatorOf(g: SonosGroupView): SonosSpeakerView | undefined {
-        return speakerById.get(g.coordinator_id) ?? speakerById.get(g.member_ids[0]);
-    }
-
-    // Shuffle / repeat / crossfade / queue length belong to the group, so the
-    // backend only reports them on the coordinator's view.
-    function groupStateOf(g: SonosGroupView) {
-        return coordinatorOf(g)?.group_state;
-    }
-
-    function groupTitle(g: SonosGroupView): string {
-        const names = g.member_ids
-            .map((id) => speakerById.get(id)?.name)
-            .filter((n): n is string => !!n);
-        if (names.length <= 2) return names.join(" + ");
-        return `${names[0]} + ${names.length - 1} more`;
-    }
-
-    function groupOfSpeaker(id: string): SonosGroupView | undefined {
-        return groups.find((g) => g.member_ids.includes(id));
-    }
-    // The one place "is this playing?" is answered, so a tapped play/pause
-    // flips every waveform, card and icon at once instead of waiting out the
-    // poll on each surface separately.
-    function isPlaying(g: SonosGroupView | undefined): boolean {
-        if (!g) return false;
-        const ov = playOverride[g.coordinator_id];
-        return ov ? ov.playing : !!coordinatorOf(g)?.state?.playing;
-    }
-    function speakerPlaying(id: string): boolean {
-        return isPlaying(groupOfSpeaker(id));
-    }
-    function speakerNowLine(id: string): string {
-        const g = groupOfSpeaker(id);
-        const st = g && coordinatorOf(g)?.state;
-        if (!st?.track?.title) return "Idle";
-        return isPlaying(g) ? st.track.title : `Paused · ${st.track.title}`;
-    }
-
-    // ── Track position, for any group ────────────────────────────────────
-    // Positions are polled every 5s; every surface that shows progress
-    // extrapolates from the last reading so the bar creeps forward once a
-    // second instead of stepping five at a time.
-    function posOf(g: SonosGroupView): number {
-        void clock.beat; // re-derive once a second
-        const st = coordinatorOf(g)?.state;
-        const base = secs(st?.position);
-        if (!isPlaying(g) || !polledAt) return base;
-        const total = secs(st?.duration);
-        const advanced = base + (Date.now() - polledAt) / 1000;
-        return total ? Math.min(total, advanced) : advanced;
-    }
-    // 0–1, or 0 when the source reports no duration (radio, line-in, TV) —
-    // those get no progress line rather than a fake one.
-    function progressOf(g: SonosGroupView): number {
-        const total = secs(coordinatorOf(g)?.state?.duration);
-        return total > 0 ? Math.min(1, posOf(g) / total) : 0;
-    }
-
-    // ── Data loading ─────────────────────────────────────────────────────
-    let pollTimer: ReturnType<typeof setInterval> | undefined;
-    let stopLive: (() => void) | undefined;
-    let statusSeq = 0;
-
-    async function refresh() {
-        const seq = ++statusSeq;
-        try {
-            const st = await api.sonosStatus();
-            if (seq !== statusSeq) return;
-            status = st;
-            polledAt = Date.now();
-            const now = polledAt;
-            // Retire an optimistic play/pause as soon as the speaker agrees
-            // with it — or after 6s, so a command the speaker quietly ignored
-            // can't leave a button lying about its state forever.
-            for (const [id, ov] of Object.entries(playOverride)) {
-                const sp = st.speakers.find((s) => s.id === id);
-                if (!sp || sp.state?.playing === ov.playing || now - ov.at > 6000) {
-                    delete playOverride[id];
-                }
-            }
-            for (const sp of st.speakers) {
-                const ov = volOverride[sp.id];
-                if (ov && now - ov.at < 3000) continue; // user just moved it
-                if (sp.state) localVol[sp.id] = sp.state.volume;
-            }
-            for (const g of st.groups) {
-                // Group volume isn't reported by the status poll; seed the
-                // slider with the members' average unless recently set.
-                const key = "g:" + g.coordinator_id;
-                const ov = volOverride[key];
-                if (ov && now - ov.at < 3000) continue;
-                const vols = g.member_ids
-                    .map((id) => st.speakers.find((s) => s.id === id)?.state?.volume)
-                    .filter((v): v is number => v !== undefined);
-                if (vols.length) {
-                    groupVol[g.coordinator_id] = Math.round(vols.reduce((a, b) => a + b, 0) / vols.length);
-                }
-            }
-            // Picking the destination is the destinations effect's job — it
-            // spans both bridges, so it can't live inside one bridge's poll.
-            if (!favsLoaded && st.speakers.some((s) => s.reachable)) {
-                void loadFavorites(st.speakers.find((s) => s.reachable)!.id);
-            }
-        } catch (e) {
-            if (seq !== statusSeq) return;
-            if (!loaded) toasts.error("Couldn't reach Sonos", (e as Error).message);
-        } finally {
-            if (seq === statusSeq) loaded = true;
-        }
-    }
-
-    async function loadFavorites(speakerId: string) {
-        favsLoaded = true;
-        try {
-            favorites = await api.sonosFavorites(speakerId);
-        } catch {
-            favsLoaded = false; // retry on a later poll
-        }
-    }
-
-    // ── KEF ──────────────────────────────────────────────────────────────
-    // The second bridge, alongside Sonos rather than folded into it: a KEF
-    // speaker is one standalone stereo pair with an input selector, where a
-    // Sonos household is zones that group and share a queue. Nothing above
-    // this line applies to it — no groups, no queue, no favorites — so it
-    // gets its own poll and its own surfaces instead of being bent into the
-    // group model. See internal/kef.
-    let kef = $state<KEFStatus | null>(null);
-    let kefSeq = 0;
-
-    // "Transport is optimistic" (DESIGN.md §15) is a rule about the whole
-    // module, not about Sonos — this is playOverride's twin for the second
-    // bridge. Without it a tapped KEF play/pause sat unchanged until the next
-    // read landed, which on a KEF is up to a poll away, and the card, its icon
-    // and the zone chip all disagreed with the finger that just pressed them.
-    let kefPlayOverride = $state<Record<string, { playing: boolean; at: number }>>({});
-
-    /** The one place "is this KEF speaker playing?" is answered. */
-    function kefIsPlaying(sp: KEFSpeakerView): boolean {
-        const ov = kefPlayOverride[sp.id];
-        return ov ? ov.playing : !!sp.state?.playing;
-    }
-
-    async function refreshKEF() {
-        const seq = ++kefSeq;
-        try {
-            const st = await api.kefStatus();
-            if (seq !== kefSeq) return;
-            kef = st;
-            // Retire an optimistic flip once the speaker agrees with it — or
-            // after 6s, so a command it quietly ignored can't leave a card
-            // claiming to play forever. Same contract as the Sonos poll's.
-            const now = Date.now();
-            for (const [id, ov] of Object.entries(kefPlayOverride)) {
-                const sp = st.speakers.find((s) => s.id === id);
-                if (!sp || !!sp.state?.playing === ov.playing || now - ov.at > 6000) {
-                    delete kefPlayOverride[id];
-                }
-            }
-        } catch {
-            // A home with no KEF speakers must not see an error every poll;
-            // an empty list is indistinguishable from a failed one here, and
-            // the Speakers screen is where a broken registration shows up.
-            if (seq === kefSeq && !kef) kef = { speakers: [] };
-        }
-    }
-
-    /** Registered KEF speakers, reachable ones first, then by name. */
-    const kefSpeakers = $derived.by(() => {
-        const list = [...(kef?.speakers ?? [])];
-        list.sort((a, b) => {
-            if (a.reachable !== b.reachable) return a.reachable ? -1 : 1;
-            return a.name.localeCompare(b.name);
-        });
-        return list;
-    });
-    const kefReachable = $derived(kefSpeakers.filter((s) => s.reachable));
-    const kefPlaying = $derived(kefSpeakers.filter((s) => kefIsPlaying(s)));
     /** Speakers that answered, across both bridges — "ready" on the Home head. */
-    const readyCount = $derived(reachable.length + kefReachable.length);
+    const readyCount = $derived(sonos.reachable.length + kef.reachable.length);
     /** Every registered speaker across both bridges — what "is this view empty" means. */
-    const totalSpeakers = $derived((status?.speakers.length ?? 0) + kefSpeakers.length);
-
-    function kefNowLine(sp: KEFSpeakerView): string {
-        if (!sp.state?.powered_on) return "In standby";
-        const t = sp.state.track;
-        if (t?.title) return t.title;
-        return sp.state.source ? `${kefSourceLabel(sp.state.source)} input` : "Idle";
-    }
-    function kefSubLine(sp: KEFSpeakerView): string {
-        const t = sp.state?.track;
-        return [t?.artist, t?.album].filter(Boolean).join(" · ");
-    }
-    /** How far through the track, 0–1. Sources with no duration get no line. */
-    function kefProgress(sp: KEFSpeakerView): number {
-        void clock.beat; // re-derive once a second, exactly as posOf does for Sonos
-        const total = sp.state?.duration_ms ?? 0;
-        if (total <= 0) return 0;
-        // Extrapolated from when the reading was taken, like the Sonos
-        // scrubber, so the line advances between polls instead of stepping.
-        // Without the tick above this only recomputed when a poll replaced
-        // the object — every 20s once Sonos push is up — so the hairline sat
-        // dead beside a Sonos one creeping every second.
-        const base = sp.state?.position_ms ?? 0;
-        const since = kefIsPlaying(sp) && sp.read_at ? Date.now() - sp.read_at : 0;
-        return Math.max(0, Math.min(1, (base + since) / total));
-    }
-
-    /** Where the track has got to, extrapolated the same way the bar is. */
-    function kefPosMs(sp: KEFSpeakerView): number {
-        void clock.beat; // re-read every second so the clock counts rather than jumps
-        const total = sp.state?.duration_ms ?? 0;
-        const base = sp.state?.position_ms ?? 0;
-        const since = kefIsPlaying(sp) && sp.read_at ? Date.now() - sp.read_at : 0;
-        return total > 0 ? Math.min(total, base + since) : base + since;
-    }
-
-    async function kefTogglePlay(sp: KEFSpeakerView) {
-        const next = !kefIsPlaying(sp);
-        await busy.claim("kefplay:" + sp.id, async () => {
-            kefPlayOverride[sp.id] = { playing: next, at: Date.now() };
-            try {
-                await (next ? api.kefPlay(sp.id) : api.kefPause(sp.id));
-                await refreshKEF();
-            } catch (e) {
-                delete kefPlayOverride[sp.id];
-                toasts.error(
-                    next ? "Couldn't start playback" : "Couldn't pause",
-                    (e as Error).message,
-                );
-            }
-        });
-    }
-    function kefSkip(sp: KEFSpeakerView, dir: "next" | "previous") {
-        void kefRun(
-            `kef${dir}:` + sp.id,
-            () => (dir === "next" ? api.kefNext(sp.id) : api.kefPrevious(sp.id)),
-            "Skip failed",
-        );
-    }
-    /** Volume the slider shows: the live drag if there is one, else the read. */
-    let kefVol = $state<Record<string, number>>({});
-    let kefVolAt: Record<string, number> = {};
-    function kefShownVol(sp: KEFSpeakerView): number {
-        const ov = kefVol[sp.id];
-        const fresh = ov !== undefined && Date.now() - (kefVolAt[sp.id] ?? 0) < 4000;
-        return fresh ? ov : (sp.state?.volume ?? 0);
-    }
-    function kefSetVolume(sp: KEFSpeakerView, v: number) {
-        const level = clampVol(v);
-        kefVol[sp.id] = level;
-        kefVolAt[sp.id] = Date.now();
-        void kefRun("kefvol:" + sp.id, () => api.kefSetVolume(sp.id, level), "Volume failed");
-    }
-    function kefToggleMute(sp: KEFSpeakerView) {
-        const next = !sp.state?.muted;
-        void kefRun("kefmute:" + sp.id, () => api.kefSetMute(sp.id, next), "Mute failed");
-    }
-    function kefSetSource(sp: KEFSpeakerView, source: KEFSource) {
-        if (sp.state?.source === source) return;
-        void kefRun(
-            "kefsrc:" + sp.id,
-            () => api.kefSetSource(sp.id, source),
-            "Couldn't switch input",
-        );
-    }
+    const totalSpeakers = $derived((sonos.status?.speakers.length ?? 0) + kef.speakers.length);
+    const playingCount = $derived(sonos.playingGroups.length);
 
     // ── Where playback lands ─────────────────────────────────────────────
     // One destination for the whole module (DESIGN.md §15, "one visible
     // destination"), and it spans both bridges — so it carries a kind rather
     // than being a bare id. A Sonos zone is started through its coordinator's
-    // queue; a KEF speaker through Spotify Connect, because its own API can
+    // sonos.queue; a KEF speaker through Spotify Connect, because its own API can
     // play and pause but has nothing to be handed. The two are not
     // interchangeable, which is exactly why the destination says which it is.
     type Dest = { kind: "sonos" | "kef"; id: string };
     let dest = $state<Dest | null>(null);
     /** The Sonos coordinator, when the destination is one. Favorites and the
-     *  queue exist only on that side, so they read this and not `dest`. */
+     *  sonos.queue exist only on that side, so they read this and not `dest`. */
     const sonosTarget = $derived(dest?.kind === "sonos" ? dest.id : null);
     /** The KEF speaker, when the destination is one. */
     const kefTarget = $derived(dest?.kind === "kef" ? dest.id : null);
-    const kefTargetSpeaker = $derived(
-        kefTarget ? (kefSpeakers.find((s) => s.id === kefTarget) ?? null) : null,
-    );
+    const kefTargetSpeaker = $derived(kef.byId(kefTarget));
     /** Everywhere music can be sent, in the order the destination row lists
      *  them. Unreachable KEF speakers are left out: they have no Connect
      *  device while they're off the network. */
     const destinations = $derived<Dest[]>([
-        ...groups.map((g) => ({ kind: "sonos" as const, id: g.coordinator_id })),
-        ...kefReachable.map((s) => ({ kind: "kef" as const, id: s.id })),
+        ...sonos.groups.map((g) => ({ kind: "sonos" as const, id: g.coordinator_id })),
+        ...kef.reachable.map((s) => ({ kind: "kef" as const, id: s.id })),
     ]);
     function destName(d: Dest): string {
-        if (d.kind === "kef") return kefSpeakers.find((s) => s.id === d.id)?.name ?? "Speaker";
-        const g = groups.find((x) => x.coordinator_id === d.id);
-        return g ? groupTitle(g) : "Zone";
+        if (d.kind === "kef") return kef.byId(d.id)?.name ?? "Speaker";
+        const g = sonos.groupById(d.id);
+        return g ? sonos.groupTitle(g) : "Zone";
     }
     const isDest = (d: Dest) => dest?.kind === d.kind && dest.id === d.id;
     /** What to call the destination in a toast or the one-destination label. */
@@ -388,23 +90,25 @@
     $effect(() => {
         const list = destinations;
         if (dest && list.some((d) => isDest(d))) return;
-        const livePick =
-            playingGroups[0] && { kind: "sonos" as const, id: playingGroups[0].coordinator_id };
-        const kefPick = kefPlaying[0] && { kind: "kef" as const, id: kefPlaying[0].id };
+        const livePick = sonos.playingGroups[0] && {
+            kind: "sonos" as const,
+            id: sonos.playingGroups[0].coordinator_id,
+        };
+        const kefPick = kef.playing[0] && { kind: "kef" as const, id: kef.playing[0].id };
         dest = livePick ?? kefPick ?? list[0] ?? null;
     });
 
     onMount(() => {
-        void refresh();
-        void refreshKEF();
+        void sonos.refresh();
+        void kef.refresh();
         // Speaker changes arrive pushed — someone pressing play on the
         // speaker itself lands here in well under a second instead of
         // whenever the next poll happens to run.
         stopLive = onLive("music", () => {
-            void refresh();
+            void sonos.refresh();
             // The KEF poller publishes on the same topic when a speaker
             // actually changes, so this catches both bridges.
-            void refreshKEF();
+            void kef.refresh();
         });
     });
     onDestroy(() => {
@@ -423,113 +127,23 @@
     // the track position, which the player extrapolates between reads
     // anyway — so it can run four times slower. When it doesn't, this is
     // the only thing keeping the view current, and stays at the old rate.
-    //
-    // Derived rather than read straight off `status`, which every refresh
-    // reassigns: the interval must be rebuilt when the answer changes, not
-    // every time a poll lands.
-    const livePush = $derived(!!status?.live);
+    let pollTimer: ReturnType<typeof setInterval> | undefined;
+    let stopLive: (() => void) | undefined;
     $effect(() => {
         clearInterval(pollTimer);
-        pollTimer = setInterval(() => {
-            void refresh();
-            // KEF has no push to subscribe to, but the backend polls the
-            // speakers once for the whole process and pushes `music` on a
-            // real change — so this is a backstop for both, not the
-            // mechanism, and rides the same interval.
-            void refreshKEF();
-        }, livePush ? 20_000 : 5_000);
+        pollTimer = setInterval(
+            () => {
+                void sonos.refresh();
+                // KEF has no push to subscribe to, but the backend polls the
+                // speakers once for the whole process and pushes `music` on a
+                // real change — so this is a backstop for both, not the
+                // mechanism, and rides the same interval.
+                void kef.refresh();
+            },
+            sonos.livePush ? 20_000 : 5_000,
+        );
         return () => clearInterval(pollTimer);
     });
-
-    // ── Actions ──────────────────────────────────────────────────────────
-    // A KEF call changes nothing on the Sonos side and vice versa, so each
-    // action re-reads only the bridge it touched. Which one that is used to be
-    // guessed from a "kef" prefix on the key; naming it here means a key that
-    // doesn't follow the convention can't quietly re-read the wrong speakers.
-    const run = (key: string, fn: () => Promise<unknown>, errTitle: string) =>
-        busy.run(key, fn, errTitle, refresh);
-    const kefRun = (key: string, fn: () => Promise<unknown>, errTitle: string) =>
-        busy.run(key, fn, errTitle, refreshKEF);
-
-    async function togglePlay(g: SonosGroupView) {
-        const c = coordinatorOf(g);
-        if (!c) return;
-        const next = !isPlaying(g);
-        await busy.claim("play:" + c.id, async () => {
-            playOverride[c.id] = { playing: next, at: Date.now() };
-            try {
-                await (next ? api.sonosPlay(c.id) : api.sonosPause(c.id));
-                await refresh();
-            } catch (e) {
-                delete playOverride[c.id]; // the speaker never took it — roll back
-                toasts.error(next ? "Play failed" : "Pause failed", (e as Error).message);
-            }
-        });
-    }
-
-    function skip(g: SonosGroupView, dir: "next" | "previous") {
-        const c = coordinatorOf(g);
-        if (!c) return;
-        void run(dir + ":" + c.id, () => (dir === "next" ? api.sonosNext(c.id) : api.sonosPrevious(c.id)), "Skip failed");
-    }
-
-    // Sliders update the local value live (oninput) and send on release
-    // (onchange), so dragging doesn't flood the speaker with SOAP calls.
-    function setVolume(id: string, v: number) {
-        localVol[id] = v;
-        volOverride[id] = { v, at: Date.now() };
-        api.sonosSetVolume(id, v).catch((e) => toasts.error("Volume failed", (e as Error).message));
-    }
-
-    function setGroupVolume(coordinatorId: string, v: number) {
-        groupVol[coordinatorId] = v;
-        volOverride["g:" + coordinatorId] = { v, at: Date.now() };
-        api.sonosSetVolume(coordinatorId, v, true).catch((e) => toasts.error("Volume failed", (e as Error).message));
-    }
-
-    function toggleMute(sp: SonosSpeakerView) {
-        void run("mute:" + sp.id, () => api.sonosSetMute(sp.id, !sp.state?.muted), "Mute failed");
-    }
-
-    // Keyboard mute in the player acts on the whole zone: muting only the
-    // coordinator of a three-room group would look like the key did nothing.
-    function toggleMuteGroup(g: SonosGroupView) {
-        const members = g.member_ids
-            .map((id) => speakerById.get(id))
-            .filter((s): s is SonosSpeakerView => !!s);
-        if (!members.length) return;
-        const next = !members.some((s) => s.state?.muted);
-        void run(
-            "mute:" + g.coordinator_id,
-            () => Promise.all(members.map((s) => api.sonosSetMute(s.id, next))),
-            "Mute failed",
-        );
-    }
-
-    // Volume steps, used by the player's arrow-key shortcuts. Grouped zones
-    // move together (the same "All rooms" fader the sheet shows); a lone
-    // speaker moves on its own.
-    function nudgeVolume(g: SonosGroupView, delta: number) {
-        const grouped = g.member_ids.length > 1;
-        if (grouped) {
-            const cur = groupVol[g.coordinator_id] ?? coordinatorOf(g)?.state?.volume ?? 0;
-            setGroupVolume(g.coordinator_id, clampVol(cur + delta));
-            return;
-        }
-        const sp = coordinatorOf(g);
-        if (!sp) return;
-        const cur = localVol[sp.id] ?? sp.state?.volume ?? 0;
-        setVolume(sp.id, clampVol(cur + delta));
-    }
-    const clampVol = (v: number) => Math.max(0, Math.min(100, Math.round(v)));
-
-    function join(speakerId: string, g: SonosGroupView) {
-        void run("join:" + speakerId, () => api.sonosJoin(speakerId, g.coordinator_id), "Grouping failed");
-    }
-
-    function leave(speakerId: string) {
-        void run("leave:" + speakerId, () => api.sonosLeave(speakerId), "Ungrouping failed");
-    }
 
     // Starting playback is invisible until the next poll lands, so every
     // "play this" path confirms in words — `where` names the room, which is
@@ -545,7 +159,7 @@
         await busy.claim(key, async () => {
             try {
                 await fn();
-                await (bridge === "kef" ? refreshKEF() : refresh());
+                await (bridge === "kef" ? kef.refresh() : sonos.refresh());
                 // A KEF play answers as soon as *Spotify* accepted it — the
                 // audio then goes out to the cloud and comes back to the
                 // speaker, so the read above still says "stopped" and the
@@ -554,7 +168,7 @@
                 // the change; these are the backstop for an install where that
                 // push isn't getting through.
                 if (bridge === "kef") {
-                    for (const ms of [1200, 4000]) followUp(ms, refreshKEF);
+                    for (const ms of [1200, 4000]) followUp(ms, kef.refresh);
                 }
                 toasts.success("Playing", [what, where].filter(Boolean).join(" · "));
             } catch (e) {
@@ -578,9 +192,13 @@
     // a Sonos household list, so the destination here is always a coordinator.
     function playFavorite(f: SonosFavorite, target: string | null = sonosTarget) {
         if (!target) return;
-        const g = groups.find((x) => x.coordinator_id === target);
-        void startPlayback("fav:" + f.id, () => api.sonosPlayFavorite(target, f), f.title,
-            g ? groupTitle(g) : "");
+        const g = sonos.groupById(target);
+        void startPlayback(
+            "fav:" + f.id,
+            () => api.sonosPlayFavorite(target, f),
+            f.title,
+            g ? sonos.groupTitle(g) : "",
+        );
     }
 
     // ── Screens and sheets ───────────────────────────────────────────────
@@ -759,21 +377,10 @@
     // promise, and moving its former partners along with it would be a second
     // change the user never asked for.
     async function groupOnto(sourceId: string, targetId: string) {
-        const target = groupOfSpeaker(targetId)?.coordinator_id ?? targetId;
-        if (sourceId === target) return;
-        if (groupOfSpeaker(sourceId)?.coordinator_id === target) return; // already together
-        await busy.claim("group:" + target, async () => {
-            try {
-                await api.sonosJoin(sourceId, target);
-                await refresh();
-                announce(
-                    `${speakerById.get(sourceId)?.name ?? "Room"} now plays with ` +
-                        `${speakerById.get(targetId)?.name ?? "the other room"}.`,
-                );
-            } catch (e) {
-                toasts.error("Grouping failed", (e as Error).message);
-            }
-        });
+        const done = await sonos.groupOnto(sourceId, targetId);
+        // A drag has no running commentary of its own, so the one thing this
+        // view adds over the bridge call is saying out loud what happened.
+        if (done) announce(`${done.source} now plays with ${done.target}.`);
     }
 
     /**
@@ -793,7 +400,7 @@
     // grouping with no keyboard path at all — the pucks carry no second
     // control to fall back on any more.
     let grabId = $state<string | null>(null);
-    const grabbedName = $derived(grabId ? (speakerById.get(grabId)?.name ?? "") : "");
+    const grabbedName = $derived(grabId ? (sonos.speakerById.get(grabId)?.name ?? "") : "");
 
     function onPuckKey(e: KeyboardEvent, sp: SonosSpeakerView) {
         if (e.metaKey || e.ctrlKey || e.altKey) return;
@@ -900,8 +507,8 @@
         puckDrag = {
             id: sp.id,
             name: sp.name,
-            playing: speakerPlaying(sp.id),
-            sub: speakerNowLine(sp.id),
+            playing: sonos.speakerPlaying(sp.id),
+            sub: sonos.speakerNowLine(sp.id),
             w: r.width,
             h: r.height,
             offX: x - r.left,
@@ -952,7 +559,7 @@
         }
         const zone = hit?.dataset.zone ?? null;
         // A room already in this zone can't be dropped into it again.
-        const mine = groupOfSpeaker(puckDrag.id)?.coordinator_id;
+        const mine = sonos.groupOfSpeaker(puckDrag.id)?.coordinator_id;
         dropZone = zone && zone !== mine ? zone : null;
         dropId = null;
     }
@@ -1042,19 +649,6 @@
         dropZone = null;
     }
 
-    async function ungroup(g: SonosGroupView) {
-        await busy.claim("ungroup:" + g.coordinator_id, async () => {
-            try {
-                for (const id of g.member_ids) {
-                    if (id !== g.coordinator_id) await api.sonosLeave(id);
-                }
-                await refresh();
-            } catch (e) {
-                toasts.error("Ungrouping failed", (e as Error).message);
-            }
-        });
-    }
-
     // ── Player sheet ─────────────────────────────────────────────────────
     // The docked mini-player expands into a full sheet. Rendered inline (not
     // via the modal stack) so it stays live against the 5s status poll.
@@ -1065,15 +659,15 @@
     // and the reasoning behind it ("a full player would be an art-led sheet
     // with two controls in it") simply wasn't true: KEF reports art, title,
     // artist, position, duration, volume, mute and an input, and answers
-    // play/pause/next/previous. What it hasn't got is a queue and a group,
+    // play/pause/next/previous. What it hasn't got is a sonos.queue and a group,
     // so its sheet drops those two sections and keeps the rest.
     let playerGroupId = $state<string | null>(null);
     let playerKefId = $state<string | null>(null);
     const activeGroup = $derived(
-        groups.find((g) => g.coordinator_id === playerGroupId),
+        sonos.groups.find((g) => g.coordinator_id === playerGroupId),
     );
     const activeKef = $derived(
-        playerKefId ? (kefSpeakers.find((s) => s.id === playerKefId) ?? null) : null,
+        playerKefId ? (kef.speakers.find((s) => s.id === playerKefId) ?? null) : null,
     );
     const playerOpen = $derived(
         openSheet === "player" && (playerGroupId !== null || playerKefId !== null),
@@ -1085,17 +679,17 @@
     // is where a paused zone remains one tap from playing again.
     let lastLiveId = $state<string | null>(null);
     $effect(() => {
-        const g = playingGroups[0];
+        const g = sonos.playingGroups[0];
         if (g) lastLiveId = g.coordinator_id;
     });
     const pausedGroup = $derived(
-        groups.find((g) => {
+        sonos.groups.find((g) => {
             if (g.coordinator_id !== lastLiveId) return false;
-            const st = coordinatorOf(g)?.state;
+            const st = sonos.coordinatorOf(g)?.state;
             return !!st?.track?.title && st.transport_state !== "STOPPED";
         }),
     );
-    const dockGroup = $derived(playingGroups[0] ?? pausedGroup);
+    const dockGroup = $derived(sonos.playingGroups[0] ?? pausedGroup);
 
     // ── Dock visibility ──────────────────────────────────────────────────
     // The dock and the Home screen's "Playing now" card carry the same track
@@ -1212,7 +806,7 @@
     // The same gesture the shared Modal sheet carries, shared by all three of
     // Music's sheets (only one is ever up): the top bar always drags, and the
     // scroll body drags only from the top and only on a clear downward pull,
-    // so a long queue still scrolls normally.
+    // so a long sonos.queue still scrolls normally.
     let dragY = $state(0);
     let dragging = $state(false);
     let dismissing = $state(false);
@@ -1356,7 +950,7 @@
         artSwiping = false;
         artDX = 0;
         if (Math.abs(moved) < 30 || !activeGroup) return; // ~60px of travel
-        skip(activeGroup, moved < 0 ? "next" : "previous");
+        sonos.skip(activeGroup, moved < 0 ? "next" : "previous");
     }
     function onArtPointerCancel() {
         artStart = null;
@@ -1387,7 +981,7 @@
 
         if (key === "Escape") {
             // Escape always leaves the player outright rather than stepping
-            // back through the queue pane — the sheet covers the nav, so one
+            // back through the sonos.queue pane — the sheet covers the nav, so one
             // press must always be enough to get out (DESIGN.md §15).
             if (menuFor) menuFor = null;
             else if (puckDrag || grabId) {
@@ -1428,24 +1022,24 @@
         }
 
         // A KEF player answers the keys it can: play/pause, skip, volume. It
-        // has no seek, no queue and no play modes, so those keys stay unbound
+        // has no seek, no sonos.queue and no play modes, so those keys stay unbound
         // here rather than doing something almost-right.
         const kf = activeKef;
         if (kf) {
             if ((key === " " || key === "k") && !(key === " " && onControl)) {
                 e.preventDefault();
-                void kefTogglePlay(kf);
+                void kef.togglePlay(kf);
                 return;
             }
             if (slider) return;
             switch (key) {
-                case "ArrowRight": e.preventDefault(); kefSkip(kf, "next"); break;
-                case "ArrowLeft": e.preventDefault(); kefSkip(kf, "previous"); break;
-                case "ArrowUp": e.preventDefault(); kefSetVolume(kf, kefShownVol(kf) + 5); break;
-                case "ArrowDown": e.preventDefault(); kefSetVolume(kf, kefShownVol(kf) - 5); break;
-                case "n": kefSkip(kf, "next"); break;
-                case "p": kefSkip(kf, "previous"); break;
-                case "m": kefToggleMute(kf); break;
+                case "ArrowRight": e.preventDefault(); kef.skip(kf, "next"); break;
+                case "ArrowLeft": e.preventDefault(); kef.skip(kf, "previous"); break;
+                case "ArrowUp": e.preventDefault(); kef.setVolume(kf, kef.shownVolume(kf) + 5); break;
+                case "ArrowDown": e.preventDefault(); kef.setVolume(kf, kef.shownVolume(kf) - 5); break;
+                case "n": kef.skip(kf, "next"); break;
+                case "p": kef.skip(kf, "previous"); break;
+                case "m": kef.toggleMute(kf); break;
             }
             return;
         }
@@ -1456,36 +1050,36 @@
         // Space on a focused button belongs to that button, not to us.
         if ((key === " " || key === "k") && !(key === " " && onControl)) {
             e.preventDefault();
-            void togglePlay(g);
+            void sonos.togglePlay(g);
             return;
         }
         if (slider) return;
 
-        const gs = groupStateOf(g);
+        const gs = sonos.groupStateOf(g);
         switch (key) {
             case "ArrowRight":
                 e.preventDefault();
-                if (e.shiftKey || durationSec === 0) skip(g, "next");
+                if (e.shiftKey || durationSec === 0) sonos.skip(g, "next");
                 else commitSeek(g, Math.min(durationSec, livePos + 10));
                 break;
             case "ArrowLeft":
                 e.preventDefault();
-                if (e.shiftKey || durationSec === 0) skip(g, "previous");
+                if (e.shiftKey || durationSec === 0) sonos.skip(g, "previous");
                 else commitSeek(g, Math.max(0, livePos - 10));
                 break;
             case "ArrowUp":
                 e.preventDefault();
-                nudgeVolume(g, 5);
+                sonos.nudgeVolume(g, 5);
                 break;
             case "ArrowDown":
                 e.preventDefault();
-                nudgeVolume(g, -5);
+                sonos.nudgeVolume(g, -5);
                 break;
-            case "n": skip(g, "next"); break;
-            case "p": skip(g, "previous"); break;
-            case "m": toggleMuteGroup(g); break;
-            case "s": if (gs) setPlayMode(g, { shuffle: !gs.shuffle }); break;
-            case "r": if (gs) setPlayMode(g, { repeat: NEXT_REPEAT[gs.repeat] }); break;
+            case "n": sonos.skip(g, "next"); break;
+            case "p": sonos.skip(g, "previous"); break;
+            case "m": sonos.toggleMuteGroup(g); break;
+            case "s": if (gs) sonos.setPlayMode(g, { shuffle: !gs.shuffle }); break;
+            case "r": if (gs) sonos.setPlayMode(g, { repeat: NEXT_REPEAT[gs.repeat] }); break;
             case "q":
                 if (queuePane || (gs?.queue_length ?? 0) > 0) queuePane = !queuePane;
                 break;
@@ -1505,15 +1099,10 @@
     // A room held for grouping that drops off the network can't be dropped
     // anywhere — let go of it rather than leaving a puck lifted over nothing.
     $effect(() => {
-        const live = new Set(reachable.map((s) => s.id));
+        const live = new Set(sonos.reachable.map((s) => s.id));
         if (grabId && !live.has(grabId)) grabId = null;
         if (puckDrag && !live.has(puckDrag.id)) endPuckDrag();
     });
-    // Speakers outside the active group that could join it.
-    function joinables(g: SonosGroupView): SonosSpeakerView[] {
-        return reachable.filter((s) => !g.member_ids.includes(s.id));
-    }
-
     // ── Scrubbing ────────────────────────────────────────────────────────
     // The position is only polled every 5s, so between polls every surface
     // showing progress extrapolates from the last reading; `clock.beat`
@@ -1525,41 +1114,23 @@
         // clock at all: `playingCount` is the Sonos count, so a KEF card's
         // progress hairline stood still unless a Sonos zone happened to be
         // playing beside it.
-        if (!playerOpen && playingCount === 0 && kefPlaying.length === 0) return;
+        if (!playerOpen && playingCount === 0 && kef.playing.length === 0) return;
         return clock.start();
     });
 
-    // Non-null while a finger/pointer is on the scrubber.
+    // Non-null while a finger/pointer is on the scrubber. The only part of a
+    // position that is genuinely this view's: everything else — the poll, the
+    // extrapolation, the just-issued seek that outranks both — is the bridge's.
     let scrubSec = $state<number | null>(null);
-    // A just-issued seek wins over the polled position until the speaker has
-    // had time to report it — same idea as volOverride.
-    let seekOverride: { sec: number; at: number } | null = $state(null);
 
-    const activeState = $derived(activeGroup ? coordinatorOf(activeGroup)?.state : undefined);
+    const activeState = $derived(activeGroup ? sonos.coordinatorOf(activeGroup)?.state : undefined);
     // Sources without a duration (radio, line-in, TV) can't be seeked.
     const durationSec = $derived(secs(activeState?.duration));
-
-    const livePos = $derived.by(() => {
-        if (scrubSec !== null) return scrubSec;
-        void clock.beat; // re-derive once a second
-        const now = Date.now();
-        const ov = seekOverride;
-        const base = ov && now - ov.at < 4000 ? ov.sec : secs(activeState?.position);
-        const since = ov && now - ov.at < 4000 ? ov.at : polledAt;
-        if (!isPlaying(activeGroup) || !since) return base;
-        const advanced = base + (now - since) / 1000;
-        return durationSec ? Math.min(durationSec, advanced) : advanced;
-    });
+    const livePos = $derived(scrubSec ?? sonos.livePosition(activeGroup));
 
     function commitSeek(g: SonosGroupView, sec: number) {
-        const c = coordinatorOf(g);
         scrubSec = null;
-        if (!c) return;
-        seekOverride = { sec, at: Date.now() };
-        api.sonosSeek(c.id, toClock(sec)).catch((e) => {
-            seekOverride = null;
-            toasts.error("Seek failed", (e as Error).message);
-        });
+        sonos.seek(g, sec);
     }
 
     // Drop the scrub/seek overrides when the track or the target changes, so
@@ -1573,139 +1144,72 @@
         if (key === lastTrackKey) return;
         lastTrackKey = key;
         scrubSec = null;
-        seekOverride = null;
+        sonos.clearSeek();
     });
-
-    // ── Play modes ───────────────────────────────────────────────────────
-    // Sonos stores shuffle and repeat as one composite value, so both axes
-    // are always sent together; the patch fills in whichever isn't changing.
-    const NEXT_REPEAT: Record<SonosRepeat, SonosRepeat> = { off: "all", all: "one", one: "off" };
-
-    function setPlayMode(g: SonosGroupView, patch: { shuffle?: boolean; repeat?: SonosRepeat }) {
-        const c = coordinatorOf(g);
-        const gs = groupStateOf(g);
-        if (!c || !gs) return;
-        void run(
-            "mode:" + c.id,
-            () => api.sonosSetPlayMode(c.id, patch.shuffle ?? gs.shuffle, patch.repeat ?? gs.repeat),
-            "Couldn't change play mode",
-        );
-    }
-    function toggleCrossfade(g: SonosGroupView) {
-        const c = coordinatorOf(g);
-        const gs = groupStateOf(g);
-        if (!c || !gs) return;
-        void run("xfade:" + c.id, () => api.sonosSetCrossfade(c.id, !gs.crossfade), "Couldn't change crossfade");
-    }
-    function repeatLabel(r?: SonosRepeat): string {
-        if (r === "all") return "Repeat all — tap for repeat one";
-        if (r === "one") return "Repeat one — tap to turn repeat off";
-        return "Repeat off — tap to repeat all";
-    }
 
     // ── Queue ────────────────────────────────────────────────────────────
     let queuePane = $state(false);
     // The two panes share one scroll container, so switching has to rewind
-    // it — otherwise the queue opens halfway down at the player's offset.
+    // it — otherwise the sonos.queue opens halfway down at the player's offset.
     let scrollEl = $state<HTMLElement | null>(null);
     $effect(() => {
         void queuePane;
         if (scrollEl) scrollEl.scrollTop = 0;
     });
-    let queue = $state<SonosQueueItem[]>([]);
-    let queueLoading = $state(false);
-    let queueSeq = 0;
 
-    async function loadQueue(coordinatorId: string, skeleton = false) {
-        const seq = ++queueSeq;
-        if (skeleton) queueLoading = true;
-        try {
-            const q = await api.sonosQueue(coordinatorId);
-            if (seq !== queueSeq) return;
-            queue = q;
-        } catch {
-            if (seq === queueSeq) queue = []; // an unreachable coordinator shows empty
-        } finally {
-            if (seq === queueSeq) queueLoading = false;
-        }
-    }
-
-    // Load the queue whenever the player binds to a group: the "Up next" row
+    // Load the sonos.queue whenever the player binds to a group: the "Up next" row
     // needs a real track name, not just a count.
     $effect(() => {
         const id = playerGroupId;
         if (id === null) {
-            queueSeq++; // cancel any in-flight load
-            queue = [];
+            sonos.dropQueue();
             return;
         }
-        void loadQueue(id, true);
+        void sonos.loadQueue(id, true);
     });
 
-    // The first queued track after the one playing.
-    const nextInQueue = $derived.by(() => {
-        const cur = activeState?.queue_track ?? 0;
-        return queue.find((q) => q.track > cur);
-    });
+    const nextInQueue = $derived(sonos.nextInQueue(activeState?.queue_track));
 
-    function jumpTo(g: SonosGroupView, track: number) {
-        const c = coordinatorOf(g);
-        if (!c) return;
-        void run("jump:" + track, () => api.sonosSeekTrack(c.id, track), "Couldn't play that track");
-    }
-
-    async function removeQueued(g: SonosGroupView, track: number) {
-        const c = coordinatorOf(g);
-        if (!c) return;
-        await run("qrm:" + track, () => api.sonosQueueRemove(c.id, track), "Couldn't remove that track");
-        // Removing renumbers everything below it, so re-read rather than
-        // splicing locally.
-        void loadQueue(c.id);
-    }
-
+    /**
+     * Clearing stops playback, so it gets the same confirm treatment as any
+     * other destructive action — which is why this stays here rather than on
+     * the bridge: the bridge has no business raising a dialog.
+     */
     async function clearQueue(g: SonosGroupView) {
-        const c = coordinatorOf(g);
+        const c = sonos.coordinatorOf(g);
         if (!c) return;
-        // Clearing stops playback, so it gets the same confirm treatment as
-        // any other destructive action.
         const ok = await openModal<boolean>(ConfirmModal, {
-            title: "Clear the queue?",
-            message: `Every track queued on ${groupTitle(g)} will be removed, and playback stops.`,
-            confirmLabel: "Clear queue",
+            title: "Clear the sonos.queue?",
+            message: `Every track queued on ${sonos.groupTitle(g)} will be removed, and playback stops.`,
+            confirmLabel: "Clear sonos.queue",
             danger: true,
         });
         if (!ok) return;
-        await run("qclear:" + c.id, () => api.sonosQueueClear(c.id), "Couldn't clear the queue");
-        void loadQueue(c.id);
+        await sonos.clearQueue(c.id);
     }
 
-    // Enqueue without disturbing what's playing. Used by search results and
-    // favorites; `next` drops it in after the current track. The queue is a
-    // Sonos group's, so this is only ever offered for a Sonos destination.
+    /**
+     * Queue a search result or favorite without disturbing what's playing.
+     * The toast is the point: queueing onto a group playing radio is legal but
+     * silent, so the feedback has to name where it landed.
+     */
     async function enqueue(
         item: { uri: string; title?: string; service?: string; metadata?: string },
         next: boolean,
         target: string | null = sonosTarget,
     ) {
         if (!target) return;
-        await busy.claim("q:" + item.uri, async () => {
-            try {
-                const added = await api.sonosQueueAdd(target, { ...item, next });
-                const where = added.track
-                    ? `position ${added.track} of ${added.length}`
-                    : "the queue";
-                toasts.success(
-                    next ? "Playing next" : "Added to queue",
-                    `${item.title ?? "Track"} · ${where}`,
-                );
-                if (playerGroupId === target) void loadQueue(target);
-            } catch (e) {
-                toasts.error("Couldn't add to the queue", (e as Error).message);
-            }
-        });
+        const added = await sonos.enqueue(target, item, next);
+        if (!added) return;
+        const where = added.track ? `position ${added.track} of ${added.length}` : "the sonos.queue";
+        toasts.success(
+            next ? "Playing next" : "Added to sonos.queue",
+            `${item.title ?? "Track"} · ${where}`,
+        );
+        if (playerGroupId === target) void sonos.loadQueue(target);
     }
 
-    // ── Row overflow menus (search results, favorites) ───────────────────
+    // ── Row overflow menus (search results, favorites) ──────────────────
     // Keyed by item URI: at most one menu is open at a time.
     let menuFor = $state<string | null>(null);
     $effect(() => {
@@ -1975,7 +1479,7 @@
     );
 
     // A search result plays on whichever destination is selected. Same tap,
-    // same body, two roads: a Sonos group loads it into its queue and streams
+    // same body, two roads: a Sonos group loads it into its sonos.queue and streams
     // it with the household's linked account, while a KEF speaker is started
     // through Spotify Connect — its own API has no way to be handed content.
     function playItem(item: SpotifyItem) {
@@ -1999,8 +1503,8 @@
             sp ? { existing: sp, brand: "sonos" as const } : {},
         );
         if (changed) {
-            void refresh();
-            void refreshKEF();
+            void sonos.refresh();
+            void kef.refresh();
         }
     }
 
@@ -2013,7 +1517,7 @@
             // A removed speaker must not leave the pane open on a row that
             // no longer exists.
             if (kefDetailId === sp.id) kefDetailId = null;
-            void refreshKEF();
+            void kef.refresh();
         }
     }
 
@@ -2022,22 +1526,13 @@
     // status is re-read on the way out.
     async function openEventsModal() {
         await openModal(SonosEventsModal, {});
-        void refresh();
+        void sonos.refresh();
     }
 
     // ── Speakers screen ──────────────────────────────────────────────────
     // The device inventory: one row per registered speaker, reachable or not,
     // each opening that speaker's own settings. Ordered so the ones you can
     // actually do something with come first.
-    const allSpeakers = $derived.by(() => {
-        const list = [...(status?.speakers ?? [])];
-        list.sort((a, b) => {
-            if (a.reachable !== b.reachable) return a.reachable ? -1 : 1;
-            return a.name.localeCompare(b.name);
-        });
-        return list;
-    });
-
     // Device settings are a *sub-screen* of Speakers, not a sheet: they are
     // reached from the subnav like Home, Rooms and Search, and none of those
     // are sheets. Selecting a speaker swaps the list for its detail; the
@@ -2045,7 +1540,7 @@
     // same way its back chip does.
     let detailId = $state<string | null>(null);
     const detailSpeaker = $derived(
-        detailId ? (status?.speakers.find((s) => s.id === detailId) ?? null) : null,
+        detailId ? (sonos.status?.speakers.find((s) => s.id === detailId) ?? null) : null,
     );
 
     // The KEF pane is a separate selection rather than a shared one keyed by
@@ -2054,9 +1549,9 @@
     // component to render from the shape of an id.
     let kefDetailId = $state<string | null>(null);
     const kefDetailSpeaker = $derived(
-        kefDetailId ? (kefSpeakers.find((s) => s.id === kefDetailId) ?? null) : null,
+        kefDetailId ? (kef.speakers.find((s) => s.id === kefDetailId) ?? null) : null,
     );
-    const kefDetailSiblings = $derived(kefSpeakers.filter((s) => s.id !== kefDetailId));
+    const kefDetailSiblings = $derived(kef.speakers.filter((s) => s.id !== kefDetailId));
     /** Whichever pane is open — the split layout folds the list away for both. */
     const anyDetail = $derived(!!detailSpeaker || !!kefDetailSpeaker);
 
@@ -2087,26 +1582,26 @@
     // user picks a row — there, selecting means leaving the list.
     $effect(() => {
         if (!paned || screen !== "speakers" || detailId || kefDetailId) return;
-        const first = allSpeakers.find((s) => s.reachable);
+        const first = sonos.allSpeakers.find((s) => s.reachable);
         if (first) {
             detailId = first.id;
             return;
         }
         // A house with only KEF speakers still deserves an open pane.
-        const firstKEF = kefSpeakers.find((s) => s.reachable);
+        const firstKEF = kef.speakers.find((s) => s.reachable);
         if (firstKEF) kefDetailId = firstKEF.id;
     });
     // Speakers other than the open one, for the phone switcher.
-    const detailSiblings = $derived(allSpeakers.filter((s) => s.id !== detailId));
+    const detailSiblings = $derived(sonos.allSpeakers.filter((s) => s.id !== detailId));
     // The sleep timer belongs to the zone, not the speaker (DESIGN.md §15), so
     // a follower is told which room owns it rather than being given a control
     // the coordinator would answer for.
     const detailSleepOwner = $derived.by(() => {
         const sp = detailSpeaker;
         if (!sp) return null;
-        const g = groupOfSpeaker(sp.id);
+        const g = sonos.groupOfSpeaker(sp.id);
         return g && g.coordinator_id !== sp.id
-            ? (speakerById.get(g.coordinator_id)?.name ?? null)
+            ? (sonos.speakerById.get(g.coordinator_id)?.name ?? null)
             : null;
     });
 
@@ -2157,7 +1652,7 @@
                 <h1>Speakers</h1>
                 <span class="screen-sub">
                     <span class="mono">{totalSpeakers}</span>
-                    registered · <span class="mono">{readyCount}</span> reachable
+                    registered · <span class="mono">{readyCount}</span> sonos.reachable
                 </span>
             </div>
             <button class="icon-btn" aria-label="Add speaker" onclick={() => openSpeakerModal()}>
@@ -2168,8 +1663,8 @@
 {:else}
     <Topbar
         title="Music"
-        subtitle={status
-            ? `${totalSpeakers} speaker${totalSpeakers === 1 ? "" : "s"} · ${playingCount + kefPlaying.length} playing`
+        subtitle={sonos.status
+            ? `${totalSpeakers} speaker${totalSpeakers === 1 ? "" : "s"} · ${playingCount + kef.playing.length} playing`
             : "Sonos & KEF"}
     >
         {#snippet actions()}
@@ -2182,8 +1677,8 @@
                  no notifications to subscribe to (its own API has none), and a
                  chip that said "Polling" about them would be reporting a fault
                  that doesn't exist. -->
-            {#if loaded && (status?.speakers.length ?? 0) > 0}
-                <LiveStatusChip live={livePush} onClosed={() => void refresh()} />
+            {#if sonos.loaded && (sonos.status?.speakers.length ?? 0) > 0}
+                <LiveStatusChip live={sonos.livePush} onClosed={() => void sonos.refresh()} />
             {/if}
             <!-- Search rides in the header rather than in a subnav pill:
                  nothing sits below this header but content (DESIGN.md §15).
@@ -2193,7 +1688,7 @@
                  is what pushed the subtitle to a stub, so there it is the
                  icon alone. Registering a speaker isn't here at all: it
                  belongs on Speakers, with the rest of device management. -->
-            {#if loaded && totalSpeakers > 0}
+            {#if sonos.loaded && totalSpeakers > 0}
                 <button class="chip act-search" onclick={openSearch}>
                     <Icon name="search" size={14} />
                     <span class="act-label">Search</span>
@@ -2207,7 +1702,7 @@
     </Topbar>
 {/if}
 
-{#if !loaded}
+{#if !sonos.loaded}
     <section class="card"><div class="skeleton sk"></div></section>
 {:else if totalSpeakers === 0}
     <EmptyState
@@ -2219,7 +1714,7 @@
     </EmptyState>
 {/if}
 
-{#if loaded && totalSpeakers > 0}
+{#if sonos.loaded && totalSpeakers > 0}
     {#if screen === "home"}
     <!-- ── Playing now ─────────────────────────────────────────────────
          Only what is actually playing. Idle zones are one tap away in the
@@ -2227,7 +1722,7 @@
          lie and bury the thing the user came for. -->
     <section class="block">
         <div class="eyrow">Playing now</div>
-        {#if playingGroups.length === 0 && kefPlaying.length === 0}
+        {#if sonos.playingGroups.length === 0 && kef.playing.length === 0}
             <div class="quiet-card">
                 <span class="quiet-ico"><Icon name="speaker" size={20} /></span>
                 <span class="quiet-meta">
@@ -2235,7 +1730,7 @@
                     <span class="quiet-sub">
                         <span class="mono">{readyCount}</span>
                         speaker{readyCount === 1 ? "" : "s"} ready —
-                        {favorites.length > 0 && !kefTargetSpeaker
+                        {sonos.favorites.length > 0 && !kefTargetSpeaker
                             ? "start a favorite below"
                             : "pick a room to open it"}
                     </span>
@@ -2253,10 +1748,10 @@
             </div>
         {:else}
             <div class="now-grid">
-                {#each playingGroups as g (g.coordinator_id)}
-                    {@const c = coordinatorOf(g)}
+                {#each sonos.playingGroups as g (g.coordinator_id)}
+                    {@const c = sonos.coordinatorOf(g)}
                     {@const st = c?.state}
-                    {@const p = progressOf(g)}
+                    {@const p = sonos.progressOf(g)}
                     <div
                         class="now-card playing"
                         use:dockAnchor={g.coordinator_id === dockGroup?.coordinator_id}
@@ -2270,7 +1765,7 @@
                                 <div class="now-art placeholder">[ art ]</div>
                             {/if}
                             <span class="now-meta">
-                                <span class="now-name" title={groupTitle(g)}>{groupTitle(g)}</span>
+                                <span class="now-name" title={sonos.groupTitle(g)}>{sonos.groupTitle(g)}</span>
                                 <span class="now-line">
                                     {@render wave()}
                                     <span class="now-track">
@@ -2288,23 +1783,23 @@
                                 class="mini-btn skip"
                                 aria-label="Previous track"
                                 disabled={!c || busy.is("previous:" + c?.id)}
-                                onclick={() => skip(g, "previous")}
+                                onclick={() => sonos.skip(g, "previous")}
                             >
                                 <Icon name="skipPrev" size={16} />
                             </button>
                             <button
                                 class="mini-btn on"
-                                aria-label={isPlaying(g) ? "Pause" : "Play"}
+                                aria-label={sonos.isPlaying(g) ? "Pause" : "Play"}
                                 disabled={!c || busy.is("play:" + c?.id)}
-                                onclick={() => togglePlay(g)}
+                                onclick={() => sonos.togglePlay(g)}
                             >
-                                <Icon name={isPlaying(g) ? "pause" : "play"} size={16} />
+                                <Icon name={sonos.isPlaying(g) ? "pause" : "play"} size={16} />
                             </button>
                             <button
                                 class="mini-btn skip"
                                 aria-label="Next track"
                                 disabled={!c || busy.is("next:" + c?.id)}
-                                onclick={() => skip(g, "next")}
+                                onclick={() => sonos.skip(g, "next")}
                             >
                                 <Icon name="skipNext" size={16} />
                             </button>
@@ -2322,10 +1817,10 @@
 
                 <!-- KEF speakers that are playing, in the same grid and with
                      the same card. It is a way in to a player like every
-                     other card here — the sheet it opens drops the queue and
+                     other card here — the sheet it opens drops the sonos.queue and
                      the group, which KEF hasn't got, and keeps the rest. -->
-                {#each kefPlaying as sp (sp.id)}
-                    {@const p = kefProgress(sp)}
+                {#each kef.playing as sp (sp.id)}
+                    {@const p = kef.progress(sp)}
                     <div
                         class="now-card playing"
                         in:fly={{ y: 8, duration: dur(220), easing: cubicOut }}
@@ -2345,7 +1840,7 @@
                                 <span class="now-line">
                                     {@render wave()}
                                     <span class="now-track">
-                                        {[kefNowLine(sp), kefSubLine(sp)].filter(Boolean).join(" · ")}
+                                        {[kef.nowLine(sp), kef.subLine(sp)].filter(Boolean).join(" · ")}
                                     </span>
                                 </span>
                             </span>
@@ -2355,11 +1850,11 @@
                         <div class="card-transport">
                             <button
                                 class="mini-btn on"
-                                aria-label={kefIsPlaying(sp) ? "Pause" : "Play"}
+                                aria-label={kef.isPlaying(sp) ? "Pause" : "Play"}
                                 disabled={busy.is("kefplay:" + sp.id)}
-                                onclick={() => kefTogglePlay(sp)}
+                                onclick={() => kef.togglePlay(sp)}
                             >
-                                <Icon name={kefIsPlaying(sp) ? "pause" : "play"} size={16} />
+                                <Icon name={kef.isPlaying(sp) ? "pause" : "play"} size={16} />
                             </button>
                         </div>
                         {#if p > 0}
@@ -2374,7 +1869,7 @@
     </section>
 
     <!-- ── Favorites ───────────────────────────────────────────────── -->
-    {#if favorites.length > 0}
+    {#if sonos.favorites.length > 0}
         <section class="block">
             <div class="block-head">
                 <div class="eyrow">Favorites</div>
@@ -2404,7 +1899,7 @@
                 </div>
             {:else}
                 <div class="favs h-scroll">
-                    {#each favorites as f (f.id)}
+                    {#each sonos.favorites as f (f.id)}
                         {@render favCard(f, sonosTarget)}
                     {/each}
                 </div>
@@ -2422,15 +1917,15 @@
             <button class="link-btn" onclick={openZones}>Manage</button>
         </div>
         <div class="room-chips">
-            {#each reachable as sp (sp.id)}
-                {@const g = groupOfSpeaker(sp.id)}
+            {#each sonos.reachable as sp (sp.id)}
+                {@const g = sonos.groupOfSpeaker(sp.id)}
                 <button
                     class="room-chip"
-                    class:on={speakerPlaying(sp.id)}
+                    class:on={sonos.speakerPlaying(sp.id)}
                     disabled={!g}
                     onclick={() => g && openPlayer(g)}
                 >
-                    {#if speakerPlaying(sp.id)}
+                    {#if sonos.speakerPlaying(sp.id)}
                         {@render wave()}
                     {:else}
                         <Icon name="speaker" size={14} />
@@ -2442,13 +1937,13 @@
                  row — and they open a player, like every chip beside them.
                  They are absent from Zones instead, which is honest: Zones
                  answers what plays together, and a KEF speaker never does. -->
-            {#each kefReachable as sp (sp.id)}
+            {#each kef.reachable as sp (sp.id)}
                 <button
                     class="room-chip"
-                    class:on={kefIsPlaying(sp)}
+                    class:on={kef.isPlaying(sp)}
                     onclick={() => openKEFPlayer(sp)}
                 >
-                    {#if kefIsPlaying(sp)}
+                    {#if kef.isPlaying(sp)}
                         {@render wave()}
                     {:else}
                         <Icon name="speaker" size={14} />
@@ -2467,8 +1962,8 @@
         <span class="lu-meta">
             <span class="lu-title">Speakers</span>
             <span class="lu-sub">
-                {#if offline.length > 0}
-                    <span class="mono">{offline.length}</span>
+                {#if sonos.offline.length > 0}
+                    <span class="mono">{sonos.offline.length}</span>
                     unreachable — fix an address, or set one up
                 {:else}
                     Names, addresses, tone and the status light
@@ -2492,24 +1987,24 @@
          at 92vh. -->
     <div class="sp-split" class:has-detail={anyDetail}>
     <div class="sp-col">
-    {#if allSpeakers.length > 0}
+    {#if sonos.allSpeakers.length > 0}
     <section class="block">
         <div class="block-head">
             <!-- Named by bridge once there are two: "what is this thing and
                  how is it configured" has a different answer per protocol,
                  and the two lists don't interleave into anything meaningful. -->
-            <div class="eyrow">{kefSpeakers.length > 0 ? "Sonos" : "Speakers"}</div>
+            <div class="eyrow">{kef.speakers.length > 0 ? "Sonos" : "Speakers"}</div>
             <span class="hint">
-                <span class="mono">{reachable.length}</span>
-                of <span class="mono">{allSpeakers.length}</span> reachable
+                <span class="mono">{sonos.reachable.length}</span>
+                of <span class="mono">{sonos.allSpeakers.length}</span> sonos.reachable
             </span>
         </div>
         <div class="sp-list">
             <!-- One target per row, the §11 shape: chevron right, into that
                  speaker's settings. Editing its registration lives on the
                  detail's action chip rather than as a second control here. -->
-            {#each allSpeakers as sp (sp.id)}
-                {@const playing = speakerPlaying(sp.id)}
+            {#each sonos.allSpeakers as sp (sp.id)}
+                {@const playing = sonos.speakerPlaying(sp.id)}
                 <button
                     class="sp-row"
                     class:off={!sp.reachable}
@@ -2563,17 +2058,17 @@
          means different things (a Sonos row leads with its zone, a KEF row
          with its input), and the screen each one opens answers a different
          set of questions. -->
-    {#if kefSpeakers.length > 0}
+    {#if kef.speakers.length > 0}
     <section class="block">
         <div class="block-head">
             <div class="eyrow">KEF</div>
             <span class="hint">
-                <span class="mono">{kefReachable.length}</span>
-                of <span class="mono">{kefSpeakers.length}</span> reachable
+                <span class="mono">{kef.reachable.length}</span>
+                of <span class="mono">{kef.speakers.length}</span> sonos.reachable
             </span>
         </div>
         <div class="sp-list">
-            {#each kefSpeakers as sp (sp.id)}
+            {#each kef.speakers as sp (sp.id)}
                 <button
                     class="sp-row"
                     class:off={!sp.reachable}
@@ -2598,7 +2093,7 @@
                             {/if}
                         </span>
                     </span>
-                    {#if kefIsPlaying(sp)}
+                    {#if kef.isPlaying(sp)}
                         {@render wave()}
                     {/if}
                     <span class="sp-chev" aria-hidden="true"><Icon name="chevronDown" size={18} /></span>
@@ -2606,7 +2101,7 @@
             {/each}
         </div>
         <p class="hint">
-            KEF speakers stand alone — no grouping, no shared queue — so their
+            KEF speakers stand alone — no grouping, no shared sonos.queue — so their
             input, volume and EQ all live on the speaker's own screen.
         </p>
     </section>
@@ -2617,15 +2112,15 @@
          plumbing behind them belongs. The topbar chip says which state we're
          in; this row is the discoverable way in for someone who never
          noticed it. -->
-    {#if allSpeakers.length > 0}
+    {#if sonos.allSpeakers.length > 0}
     <button class="lu-row" onclick={openEventsModal}>
-        <span class="lu-ico" class:on={livePush}>
-            <Icon name={livePush ? "bolt" : "radio"} size={18} />
+        <span class="lu-ico" class:on={sonos.livePush}>
+            <Icon name={sonos.livePush ? "bolt" : "radio"} size={18} />
         </span>
         <span class="lu-meta">
             <span class="lu-title">Live updates</span>
             <span class="lu-sub">
-                {#if livePush}
+                {#if sonos.livePush}
                     Speakers push their changes — this app keeps up in real time
                 {:else}
                     Speakers are being polled — changes take a few seconds to show
@@ -2658,7 +2153,7 @@
                 onPick={(id) => (kefDetailId = id)}
                 onBack={() => (kefDetailId = null)}
                 onEdit={() => void openKEFModal(kefDetailSpeaker)}
-                onChanged={() => void refreshKEF()}
+                onChanged={() => void kef.refresh()}
             />
         </div>
     {/if}
@@ -2670,13 +2165,13 @@
          Present everywhere — including over the Zones and Search sheets,
          which is where the transport would otherwise disappear — but stands
          down while the Home card it would duplicate is on screen. It also
-         survives a pause: that is where a paused zone stays reachable once
+         survives a pause: that is where a paused zone stays sonos.reachable once
          "Playing now" (which means playing, literally) has let go of it. -->
     {#if showDock && dockGroup}
-        {@const c = coordinatorOf(dockGroup)}
+        {@const c = sonos.coordinatorOf(dockGroup)}
         {@const st = c?.state}
-        {@const dockPlaying = isPlaying(dockGroup)}
-        {@const p = progressOf(dockGroup)}
+        {@const dockPlaying = sonos.isPlaying(dockGroup)}
+        {@const p = sonos.progressOf(dockGroup)}
         <div class="mini" class:paused={!dockPlaying} class:over-sheet={overSheet}
             transition:fly={{ y: 20, duration: dur(220), easing: cubicOut }}>
             <button class="mini-open" onclick={() => openPlayer(dockGroup)}>
@@ -2688,7 +2183,7 @@
                 <div class="mini-meta">
                     <div class="mini-t">{st?.track?.title ?? "Playing"}</div>
                     <div class="mini-s">
-                        {[st?.track?.artist, groupTitle(dockGroup)].filter(Boolean).join(" · ")}
+                        {[st?.track?.artist, sonos.groupTitle(dockGroup)].filter(Boolean).join(" · ")}
                     </div>
                 </div>
                 <!-- Playing is a waveform; a zone the dock is holding open
@@ -2702,17 +2197,17 @@
             <div class="card-transport">
                 <button class="mini-btn skip" aria-label="Previous track"
                     disabled={!c || busy.is("previous:" + c?.id)}
-                    onclick={() => skip(dockGroup, "previous")}>
+                    onclick={() => sonos.skip(dockGroup, "previous")}>
                     <Icon name="skipPrev" size={16} />
                 </button>
                 <button class="mini-btn on" aria-label={dockPlaying ? "Pause" : "Play"}
                     disabled={!c || busy.is("play:" + c?.id)}
-                    onclick={() => togglePlay(dockGroup)}>
+                    onclick={() => sonos.togglePlay(dockGroup)}>
                     <Icon name={dockPlaying ? "pause" : "play"} size={16} />
                 </button>
                 <button class="mini-btn skip" aria-label="Next track"
                     disabled={!c || busy.is("next:" + c?.id)}
-                    onclick={() => skip(dockGroup, "next")}>
+                    onclick={() => sonos.skip(dockGroup, "next")}>
                     <Icon name="skipNext" size={16} />
                 </button>
             </div>
@@ -2725,7 +2220,7 @@
 
 <!-- ── Room puck ─────────────────────────────────────────────────────
      One object, two gestures on the same target: tap opens that room's
-     player, drag it onto another room groups them. There is no second
+     player, drag it onto another room sonos.groups them. There is no second
      control — dragging one thing onto another *is* the grouping gesture, so
      the select circle that used to sit in the corner has nothing left to say.
 
@@ -2733,8 +2228,8 @@
      grouping with no path at all: G picks the room up, Tab moves, Enter
      drops it in. -->
 {#snippet puck(sp: SonosSpeakerView)}
-    {@const playing = speakerPlaying(sp.id)}
-    {@const g = groupOfSpeaker(sp.id)}
+    {@const playing = sonos.speakerPlaying(sp.id)}
+    {@const g = sonos.groupOfSpeaker(sp.id)}
     {@const held = grabId === sp.id || puckDrag?.id === sp.id}
     {@const target = dropId === sp.id || (grabId !== null && grabId !== sp.id)}
     <button
@@ -2775,7 +2270,7 @@
                 {:else if held}
                     Held
                 {:else}
-                    {speakerNowLine(sp.id)}
+                    {sonos.speakerNowLine(sp.id)}
                 {/if}
             </span>
         </span>
@@ -2783,7 +2278,7 @@
 {/snippet}
 
 <!-- ── Where playback lands ──────────────────────────────────────────
-     One destination shared by favorites and search, always visible — a
+     One destination shared by sonos.favorites and search, always visible — a
      single room shows its name rather than hiding the answer entirely. Both
      bridges are in the same row because there is only ever one destination;
      the KEF speakers come after the Sonos zones behind one marker, so a name
@@ -2794,7 +2289,7 @@
         <div class="fav-targets" role="radiogroup" aria-label="Play on">
             <span class="t-label">Play on</span>
             {#each destinations as d, i (d.kind + d.id)}
-                {#if i === groups.length && groups.length > 0}
+                {#if i === sonos.groups.length && sonos.groups.length > 0}
                     <span class="t-label">KEF</span>
                 {/if}
                 {@const on = isDest(d)}
@@ -2997,7 +2492,7 @@
                                 <!-- Tapping the row plays now; queueing without
                                      interrupting lives behind the overflow —
                                      and only for a Sonos destination, since
-                                     the queue is a Sonos group's. A KEF
+                                     the sonos.queue is a Sonos group's. A KEF
                                      speaker has none, so the control that
                                      would be refused isn't there at all. -->
                                 {#if sonosTarget}
@@ -3095,7 +2590,7 @@
             {@render sheetHead("Zones", "Tap a room to open it · drag one onto another to group")}
 
             <div class="rooms">
-                {#each multiGroups as g (g.coordinator_id)}
+                {#each sonos.multiGroups as g (g.coordinator_id)}
                     <!-- The enclosure is a drop target in its own right:
                          "drag a third onto an existing group" reads as
                          dropping on the group, so the gap between its pucks
@@ -3104,13 +2599,13 @@
                         data-zone={g.coordinator_id}>
                         <div class="glabel">
                             <Icon name="check" size={11} />
-                            <span>{groupTitle(g)}</span>
+                            <span>{sonos.groupTitle(g)}</span>
                             <button class="ungroup" disabled={busy.is("ungroup:" + g.coordinator_id)}
-                                onclick={() => ungroup(g)}>Ungroup</button>
+                                onclick={() => sonos.ungroup(g)}>Ungroup</button>
                         </div>
                         <div class="puck-grid">
                             {#each g.member_ids as id (id)}
-                                {@const sp = speakerById.get(id)}
+                                {@const sp = sonos.speakerById.get(id)}
                                 {#if sp}
                                     {@render puck(sp)}
                                 {/if}
@@ -3118,9 +2613,9 @@
                         </div>
                     </div>
                 {/each}
-                {#if soloSpeakers.length}
+                {#if sonos.soloSpeakers.length}
                     <div class="puck-grid">
-                        {#each soloSpeakers as sp (sp.id)}
+                        {#each sonos.soloSpeakers as sp (sp.id)}
                             {@render puck(sp)}
                         {/each}
                     </div>
@@ -3129,13 +2624,13 @@
                      speakers would otherwise open a blank sheet with no
                      explanation, which reads as broken rather than as
                      "this doesn't apply to your speakers". -->
-                {#if multiGroups.length === 0 && soloSpeakers.length === 0}
+                {#if sonos.multiGroups.length === 0 && sonos.soloSpeakers.length === 0}
                     <div class="quiet-card">
                         <span class="quiet-ico"><Icon name="speaker" size={20} /></span>
                         <span class="quiet-meta">
                             <span class="quiet-title">Nothing to group</span>
                             <span class="quiet-sub">
-                                {#if kefSpeakers.length > 0}
+                                {#if kef.speakers.length > 0}
                                     KEF speakers stand alone — they have no zones to
                                     group. Their controls are on Speakers.
                                 {:else}
@@ -3150,13 +2645,13 @@
 
                 <!-- Speakers the live topology never mentioned can't be pucks
                      and can't be grouped, so Zones only points at them. -->
-                {#if offline.length > 0}
+                {#if sonos.offline.length > 0}
                     <button class="lu-row" onclick={openSpeakers}>
                         <span class="lu-ico"><Icon name="speaker" size={18} /></span>
                         <span class="lu-meta">
                             <span class="lu-title">
-                                <span class="mono">{offline.length}</span>
-                                speaker{offline.length === 1 ? "" : "s"} unreachable
+                                <span class="mono">{sonos.offline.length}</span>
+                                speaker{sonos.offline.length === 1 ? "" : "s"} unreachable
                             </span>
                             <span class="lu-sub">
                                 Not in the current Sonos topology — check them under Speakers
@@ -3237,7 +2732,7 @@
 
 <!-- ── KEF player sheet ─────────────────────────────────────────────
      The same object as the Sonos player, minus the two things KEF hasn't
-     got: a queue and a group. What it has instead is the input selector,
+     got: a sonos.queue and a group. What it has instead is the input selector,
      which is the question a KEF speaker actually raises. Every room chip on
      Home now opens a player — the chips sit side by side and looked
      identical, so sending one of them to a settings screen two levels away
@@ -3245,7 +2740,7 @@
 {#if playerOpen && activeKef}
     {@const sp = activeKef}
     {@const st = sp.state}
-    {@const p = kefProgress(sp)}
+    {@const p = kef.progress(sp)}
     {@const durMs = st?.duration_ms ?? 0}
     <div class="scrim" transition:fade={{ duration: dur(200) }} onclick={closePlayer} aria-hidden="true"></div>
     <div
@@ -3324,7 +2819,7 @@
                     <div class="p-title idle">Standby</div>
                     <div class="p-sub">Press play to wake it.</div>
                 {:else}
-                    <div class="p-title idle">{kefNowLine(sp)}</div>
+                    <div class="p-title idle">{kef.nowLine(sp)}</div>
                     <div class="p-sub">Pick an input below, or search Spotify.</div>
                 {/if}
             </div>
@@ -3337,7 +2832,7 @@
                 <div class="p-scrub">
                     <span class="kef-rail" aria-hidden="true"><i style:width="{p * 100}%"></i></span>
                     <div class="p-times mono">
-                        <span>{fmtSecs(kefPosMs(sp) / 1000)}</span><span>{fmtSecs(durMs / 1000)}</span>
+                        <span>{fmtSecs(kef.positionMs(sp) / 1000)}</span><span>{fmtSecs(durMs / 1000)}</span>
                     </div>
                 </div>
             {:else if st?.track?.title}
@@ -3346,16 +2841,16 @@
 
             <div class="p-transport">
                 <button class="icon-btn t-btn" aria-label="Previous track"
-                    disabled={busy.is("kefprevious:" + sp.id)} onclick={() => kefSkip(sp, "previous")}>
+                    disabled={busy.is("kefprevious:" + sp.id)} onclick={() => kef.skip(sp, "previous")}>
                     <Icon name="skipPrev" size={22} />
                 </button>
-                <button class="p-play" class:playing={kefIsPlaying(sp)}
-                    aria-label={kefIsPlaying(sp) ? "Pause" : "Play"} title="Play / pause (space)"
-                    disabled={busy.is("kefplay:" + sp.id)} onclick={() => kefTogglePlay(sp)}>
-                    <Icon name={kefIsPlaying(sp) ? "pause" : "play"} size={26} />
+                <button class="p-play" class:playing={kef.isPlaying(sp)}
+                    aria-label={kef.isPlaying(sp) ? "Pause" : "Play"} title="Play / pause (space)"
+                    disabled={busy.is("kefplay:" + sp.id)} onclick={() => kef.togglePlay(sp)}>
+                    <Icon name={kef.isPlaying(sp) ? "pause" : "play"} size={26} />
                 </button>
                 <button class="icon-btn t-btn" aria-label="Next track"
-                    disabled={busy.is("kefnext:" + sp.id)} onclick={() => kefSkip(sp, "next")}>
+                    disabled={busy.is("kefnext:" + sp.id)} onclick={() => kef.skip(sp, "next")}>
                     <Icon name="skipNext" size={22} />
                 </button>
             </div>
@@ -3371,16 +2866,16 @@
                 <div class="member">
                     <button class="icon-btn m-mute" aria-label={st?.muted ? "Unmute" : "Mute"}
                         aria-pressed={st?.muted ?? false}
-                        disabled={busy.is("kefmute:" + sp.id)} onclick={() => kefToggleMute(sp)}>
+                        disabled={busy.is("kefmute:" + sp.id)} onclick={() => kef.toggleMute(sp)}>
                         <Icon name={st?.muted ? "volumeOff" : "volume"} size={17} />
                     </button>
                     <span class="m-name" class:muted={st?.muted}>{sp.name}</span>
                     <input type="range" min="0" max="100" step="1"
                         aria-label="Volume for {sp.name}"
-                        value={kefShownVol(sp)}
-                        oninput={(e) => (kefVol[sp.id] = e.currentTarget.valueAsNumber)}
-                        onchange={(e) => kefSetVolume(sp, e.currentTarget.valueAsNumber)} />
-                    <span class="vol-num mono">{kefShownVol(sp)}</span>
+                        value={kef.shownVolume(sp)}
+                        oninput={(e) => kef.dragVolume(sp, e.currentTarget.valueAsNumber)}
+                        onchange={(e) => kef.setVolume(sp, e.currentTarget.valueAsNumber)} />
+                    <span class="vol-num mono">{kef.shownVolume(sp)}</span>
                 </div>
             </div>
 
@@ -3395,11 +2890,11 @@
                         <button class="chip" class:on={st?.source === src.value}
                             aria-pressed={st?.source === src.value}
                             disabled={busy.is("kefsrc:" + sp.id)}
-                            onclick={() => kefSetSource(sp, src.value)}>{src.label}</button>
+                            onclick={() => kef.setSource(sp, src.value)}>{src.label}</button>
                     {/each}
                 </div>
                 <p class="hint">
-                    No queue and no grouping — a KEF speaker plays alone, so
+                    No sonos.queue and no grouping — a KEF speaker plays alone, so
                     there is nothing to line up behind this or to play it with.
                 </p>
             </div>
@@ -3410,7 +2905,7 @@
 <!-- ── Full player sheet ───────────────────────────────────────────── -->
 {#if playerOpen && activeGroup}
     {@const g = activeGroup}
-    {@const c = coordinatorOf(g)}
+    {@const c = sonos.coordinatorOf(g)}
     {@const st = c?.state}
     {@const gs = c?.group_state}
     {@const grouped = g.member_ids.length > 1}
@@ -3465,7 +2960,7 @@
                     </button>
                     <div class="p-onair">
                         <div class="eyrow">{queuePane ? "Queue" : "Playing on"}</div>
-                        <div class="p-onair-name">{groupTitle(g)}</div>
+                        <div class="p-onair-name">{sonos.groupTitle(g)}</div>
                     </div>
                     <button class="icon-btn p-icon" aria-label="Close player" onclick={closePlayer}>
                         <Icon name="close" size={18} />
@@ -3477,27 +2972,27 @@
                 <!-- ── Queue pane ──────────────────────────────────────── -->
                 <div class="q-bar">
                     <span class="q-total mono">
-                        {gs?.queue_length ?? queue.length}
-                        {(gs?.queue_length ?? queue.length) === 1 ? "track" : "tracks"}
+                        {gs?.queue_length ?? sonos.queue.length}
+                        {(gs?.queue_length ?? sonos.queue.length) === 1 ? "track" : "tracks"}
                     </span>
-                    <button class="chip" disabled={!c || busy.is("qclear:" + c?.id) || queue.length === 0}
+                    <button class="chip" disabled={!c || busy.is("qclear:" + c?.id) || sonos.queue.length === 0}
                         onclick={() => clearQueue(g)}>Clear</button>
                 </div>
 
-                {#if queueLoading}
+                {#if sonos.queueLoading}
                     <div class="skeleton q-skeleton"></div>
-                {:else if queue.length === 0}
+                {:else if sonos.queue.length === 0}
                     <p class="q-none">
                         Nothing queued. Play a favorite or a Spotify result and it lands here —
-                        radio and line-in play straight through without a queue.
+                        radio and line-in play straight through without a sonos.queue.
                     </p>
                 {:else}
                     <div class="q-list">
-                        {#each queue as item (item.track)}
+                        {#each sonos.queue as item (item.track)}
                             {@const current = item.track === st?.queue_track}
                             <div class="q-row" class:current>
                                 <button class="q-open" disabled={busy.is("jump:" + item.track)}
-                                    onclick={() => jumpTo(g, item.track)}>
+                                    onclick={() => sonos.jumpTo(g, item.track)}>
                                     <span class="q-num mono">
                                         {#if current && st?.playing}
                                             {@render wave()}
@@ -3514,16 +3009,16 @@
                                     {/if}
                                 </button>
                                 <button class="icon-btn q-rm"
-                                    aria-label="Remove {item.title || 'track ' + item.track} from the queue"
-                                    disabled={busy.is("qrm:" + item.track)} onclick={() => removeQueued(g, item.track)}>
+                                    aria-label="Remove {item.title || 'track ' + item.track} from the sonos.queue"
+                                    disabled={busy.is("qrm:" + item.track)} onclick={() => sonos.removeQueued(g, item.track)}>
                                     <Icon name="close" size={14} />
                                 </button>
                             </div>
                         {/each}
                     </div>
-                    {#if (gs?.queue_length ?? 0) > queue.length}
+                    {#if (gs?.queue_length ?? 0) > sonos.queue.length}
                         <div class="q-more mono">
-                            showing the first {queue.length} of {gs?.queue_length}
+                            showing the first {sonos.queue.length} of {gs?.queue_length}
                         </div>
                     {/if}
                 {/if}
@@ -3594,21 +3089,21 @@
                         aria-pressed={gs?.shuffle ?? false}
                         title="Shuffle (s)"
                         disabled={!gs || !c || busy.is("mode:" + c?.id)}
-                        onclick={() => setPlayMode(g, { shuffle: !gs?.shuffle })}
+                        onclick={() => sonos.setPlayMode(g, { shuffle: !gs?.shuffle })}
                     >
                         <Icon name="shuffle" size={18} />
                     </button>
                     <button class="icon-btn t-btn" aria-label="Previous track" title="Previous (shift ←)"
-                        disabled={!c || busy.is("previous:" + c?.id)} onclick={() => skip(g, "previous")}>
+                        disabled={!c || busy.is("previous:" + c?.id)} onclick={() => sonos.skip(g, "previous")}>
                         <Icon name="skipPrev" size={22} />
                     </button>
-                    <button class="p-play" class:playing={isPlaying(g)}
-                        aria-label={isPlaying(g) ? "Pause" : "Play"} title="Play / pause (space)"
-                        disabled={!c || busy.is("play:" + c?.id)} onclick={() => togglePlay(g)}>
-                        <Icon name={isPlaying(g) ? "pause" : "play"} size={26} />
+                    <button class="p-play" class:playing={sonos.isPlaying(g)}
+                        aria-label={sonos.isPlaying(g) ? "Pause" : "Play"} title="Play / pause (space)"
+                        disabled={!c || busy.is("play:" + c?.id)} onclick={() => sonos.togglePlay(g)}>
+                        <Icon name={sonos.isPlaying(g) ? "pause" : "play"} size={26} />
                     </button>
                     <button class="icon-btn t-btn" aria-label="Next track" title="Next (shift →)"
-                        disabled={!c || busy.is("next:" + c?.id)} onclick={() => skip(g, "next")}>
+                        disabled={!c || busy.is("next:" + c?.id)} onclick={() => sonos.skip(g, "next")}>
                         <Icon name="skipNext" size={22} />
                     </button>
                     <button
@@ -3617,7 +3112,7 @@
                         aria-label={repeatLabel(gs?.repeat)}
                         title="Repeat (r)"
                         disabled={!gs || !c || busy.is("mode:" + c?.id)}
-                        onclick={() => setPlayMode(g, { repeat: NEXT_REPEAT[gs?.repeat ?? "off"] })}
+                        onclick={() => sonos.setPlayMode(g, { repeat: NEXT_REPEAT[gs?.repeat ?? "off"] })}
                     >
                         <Icon name={gs?.repeat === "one" ? "repeatOne" : "repeat"} size={18} />
                     </button>
@@ -3626,13 +3121,13 @@
                 <!-- The keys are only worth advertising where there is a
                      keyboard; phones get the swipe gesture instead. -->
                 <p class="p-keys mono" aria-hidden="true">
-                    space play · ← → seek · ↑ ↓ volume · q queue
+                    space play · ← → seek · ↑ ↓ volume · q sonos.queue
                 </p>
 
                 {#if gs}
                     <div class="p-extras">
                         <button class="chip" class:on={gs.crossfade} aria-pressed={gs.crossfade}
-                            disabled={!c || busy.is("xfade:" + c?.id)} onclick={() => toggleCrossfade(g)}>
+                            disabled={!c || busy.is("xfade:" + c?.id)} onclick={() => sonos.toggleCrossfade(g)}>
                             Crossfade
                         </button>
                         {#if gs.queue_length > 0}
@@ -3641,7 +3136,7 @@
                                 <span class="up-body">
                                     <span class="up-label">Up next</span>
                                     <span class="up-track">
-                                        {nextInQueue?.title ?? "End of the queue"}
+                                        {nextInQueue?.title ?? "End of the sonos.queue"}
                                     </span>
                                 </span>
                                 <span class="up-count mono">{gs.queue_length}</span>
@@ -3664,41 +3159,43 @@
                             <span class="m-icon" aria-hidden="true"><Icon name="volume" size={16} /></span>
                             <span class="m-name">All rooms</span>
                             <input type="range" min="0" max="100" step="1" aria-label="Group volume"
-                                value={groupVol[g.coordinator_id] ?? 0}
-                                oninput={(e) => (groupVol[g.coordinator_id] = e.currentTarget.valueAsNumber)}
-                                onchange={(e) => setGroupVolume(g.coordinator_id, e.currentTarget.valueAsNumber)} />
-                            <span class="vol-num mono">{groupVol[g.coordinator_id] ?? 0}</span>
+                                value={sonos.shownGroupVolume(g.coordinator_id)}
+                                oninput={(e) =>
+                                    sonos.dragGroupVolume(g.coordinator_id, e.currentTarget.valueAsNumber)}
+                                onchange={(e) =>
+                                    sonos.setGroupVolume(g.coordinator_id, e.currentTarget.valueAsNumber)} />
+                            <span class="vol-num mono">{sonos.shownGroupVolume(g.coordinator_id)}</span>
                         </div>
                         <div class="m-divider" aria-hidden="true"></div>
                     {/if}
                     {#each g.member_ids as id (id)}
-                        {@const sp = speakerById.get(id)}
+                        {@const sp = sonos.speakerById.get(id)}
                         {#if sp}
                             <div class="member">
                                 <button class="icon-btn m-mute"
                                     aria-label={sp.state?.muted ? `Unmute ${sp.name}` : `Mute ${sp.name}`}
-                                    disabled={busy.is("mute:" + sp.id)} onclick={() => toggleMute(sp)}>
+                                    disabled={busy.is("mute:" + sp.id)} onclick={() => sonos.toggleMute(sp)}>
                                     <Icon name={sp.state?.muted ? "volumeOff" : "volume"} size={16} />
                                 </button>
                                 <span class="m-name" class:muted={sp.state?.muted}>{sp.name}</span>
                                 <input type="range" min="0" max="100" step="1" aria-label="{sp.name} volume"
-                                    value={localVol[sp.id] ?? sp.state?.volume ?? 0}
-                                    oninput={(e) => (localVol[sp.id] = e.currentTarget.valueAsNumber)}
-                                    onchange={(e) => setVolume(sp.id, e.currentTarget.valueAsNumber)} />
-                                <span class="vol-num mono">{localVol[sp.id] ?? sp.state?.volume ?? 0}</span>
+                                    value={sonos.shownVolume(sp)}
+                                    oninput={(e) => sonos.dragVolume(sp.id, e.currentTarget.valueAsNumber)}
+                                    onchange={(e) => sonos.setVolume(sp.id, e.currentTarget.valueAsNumber)} />
+                                <span class="vol-num mono">{sonos.shownVolume(sp)}</span>
                                 {#if grouped}
                                     <button class="icon-btn m-act" aria-label="Remove {sp.name} from group"
-                                        disabled={busy.is("leave:" + sp.id)} onclick={() => leave(sp.id)}>
+                                        disabled={busy.is("leave:" + sp.id)} onclick={() => sonos.leave(sp.id)}>
                                         <Icon name="close" size={14} />
                                     </button>
                                 {/if}
                             </div>
                         {/if}
                     {/each}
-                    {#if joinables(g).length > 0}
+                    {#if sonos.joinables(g).length > 0}
                         <div class="joiners">
-                            {#each joinables(g) as sp (sp.id)}
-                                <button class="chip" disabled={busy.is("join:" + sp.id)} onclick={() => join(sp.id, g)}>
+                            {#each sonos.joinables(g) as sp (sp.id)}
+                                <button class="chip" disabled={busy.is("join:" + sp.id)} onclick={() => sonos.join(sp.id, g)}>
                                     <Icon name="plus" size={13} /> {sp.name}
                                 </button>
                             {/each}
@@ -3721,14 +3218,14 @@
      for it — the history is keyed by destination, so these are the kitchen's,
      not the house's.
 
-     `favTarget` is the Sonos group whose favorites belong under it, and null
+     `favTarget` is the Sonos group whose sonos.favorites belong under it, and null
      when there are none to show — a playing group (it already has something)
-     or a KEF speaker (favorites are a Sonos household list, DESIGN.md §15). -->
+     or a KEF speaker (sonos.favorites are a Sonos household list, DESIGN.md §15). -->
 {#snippet startSomething(favTarget: string | null)}
     <!-- Nothing to offer is a reason to render nothing, not a heading over an
-         empty row: with the Spotify integration absent and no favorites,
+         empty row: with the Spotify integration absent and no sonos.favorites,
          there is no way to start something from here. -->
-    {#if spotify || (favTarget && favorites.length > 0)}
+    {#if spotify || (favTarget && sonos.favorites.length > 0)}
         <div class="p-idle">
             <div class="eyrow">Start something</div>
             {#if spotify}
@@ -3749,9 +3246,9 @@
                     {/if}
                 </div>
             {/if}
-            {#if favTarget && favorites.length > 0}
+            {#if favTarget && sonos.favorites.length > 0}
                 <div class="favs h-scroll">
-                    {#each favorites as f (f.id)}
+                    {#each sonos.favorites as f (f.id)}
                         {@render favCard(f, favTarget)}
                     {/each}
                 </div>
@@ -3762,7 +3259,7 @@
 
 <!-- ── Favorite card ───────────────────────────────────────────────────
      Shared by the Home shelf and the idle player: tap the art to play it
-     on `target`, or the corner button to queue it without interrupting. -->
+     on `target`, or the corner button to sonos.queue it without interrupting. -->
 {#snippet favCard(f: SonosFavorite, target: string | null)}
     <div class="fav">
         <button class="fav-play" disabled={busy.is("fav:" + f.id) || !target}
@@ -3775,7 +3272,7 @@
             <span class="fav-title">{f.title}</span>
             {#if f.service}<span class="fav-sub mono">{f.service}</span>{/if}
         </button>
-        <button class="icon-btn fav-add" aria-label="Add {f.title} to the queue"
+        <button class="icon-btn fav-add" aria-label="Add {f.title} to the sonos.queue"
             disabled={busy.is("q:" + f.uri) || !target}
             onclick={() => enqueue({ uri: f.uri, title: f.title, metadata: f.metadata }, false, target)}>
             <Icon name="plus" size={14} />
@@ -4558,7 +4055,7 @@
     /* ── Full player sheet ── */
     /* Above the mobile nav bar (z 100) and the nav drawer (120), below the
        modal stack (150) — DESIGN.md §15 has the player covering the nav, and
-       a "Clear queue" confirm still has to land on top of the player. */
+       a "Clear sonos.queue" confirm still has to land on top of the player. */
     .scrim {
         position: fixed; inset: 0; z-index: 125;
         background: rgba(0, 0, 0, 0.5);
@@ -4615,7 +4112,7 @@
         .sheet-scroll { touch-action: pan-y; }
     }
 
-    /* Grabber + header travel together and stick, so a long queue never
+    /* Grabber + header travel together and stick, so a long sonos.queue never
        scrolls the way out off the screen. The band is translucent and
        blurred, and its bottom edge fades out — art and rows dissolve as they
        pass underneath instead of being cut off against an opaque slab. */
@@ -4721,7 +4218,7 @@
 
     .p-extras { display: flex; flex-direction: column; gap: var(--space-3); }
     .p-extras .chip { align-self: flex-start; }
-    /* Up next doubles as the way into the queue pane. */
+    /* Up next doubles as the way into the sonos.queue pane. */
     .p-upnext {
         display: flex; align-items: center; gap: var(--space-3);
         min-height: 56px; padding: 10px var(--space-3);
