@@ -282,6 +282,11 @@ type Metadata struct {
 	// Live marks a stream with no end, which changes how Sonos presents it
 	// (no scrubber, no track duration) and stops it trying to advance.
 	Live bool
+	// ContentType is the MIME type of the stream being played. Sonos picks a
+	// decoder from the metadata before it has fetched a single byte, so this
+	// has to match what the transport actually serves — an empty value makes
+	// the adapter guess, and a wrong guess is silence.
+	ContentType string
 }
 
 // URIPlayer is CapPlayURI — the capability the stream route is built on.

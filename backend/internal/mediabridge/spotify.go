@@ -1,0 +1,282 @@
+package mediabridge
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strings"
+
+	"homehub/internal/media"
+	"homehub/internal/sonos"
+	"homehub/internal/spotify"
+)
+
+// SpotifyProvider adapts internal/spotify to media.Provider.
+//
+// Spotify is the awkward case the protocol was designed around, and it is
+// worth being precise about why. It can be served three different ways and
+// no two of them are interchangeable:
+//
+//   - Sonos streams it from the household's own account link, over SMAPI.
+//     HomeHub's command never leaves the LAN.
+//   - A KEF is served by Spotify's cloud through Connect, which reaches
+//     exactly one device at a time.
+//   - Anything else — a KEF and a Sonos together, two KEFs — needs HomeHub
+//     to hold the single Connect session itself and fan the audio out.
+//
+// The provider therefore advertises all four routes and lets the route engine
+// choose, rather than encoding any of this at the call site.
+type SpotifyProvider struct {
+	client *spotify.Client
+	// decoder is what turns a Spotify URI into audio HomeHub can re-serve.
+	// Optional: without it the provider is fully functional for search and
+	// for both native routes, and only the stream route reports unavailable.
+	decoder Decoder
+}
+
+// Decoder produces playable audio for a provider URI. Implemented by
+// internal/stream over librespot; kept as an interface here so the provider
+// does not depend on a running subprocess, and so tests can substitute a
+// generator.
+type Decoder interface {
+	// Open begins decoding and returns the audio plus its content type.
+	Open(ctx context.Context, uri string) (*media.Stream, error)
+	// Available reports whether decoding could work right now — binary
+	// present, account eligible — separately from whether search works.
+	Available() media.Availability
+}
+
+// NewSpotifyProvider wraps a Spotify client. Both arguments may be nil: a nil
+// client makes the provider report itself unconfigured rather than panicking,
+// which is what the API layer already relies on for an unwired integration.
+func NewSpotifyProvider(c *spotify.Client, d Decoder) *SpotifyProvider {
+	return &SpotifyProvider{client: c, decoder: d}
+}
+
+func (p *SpotifyProvider) ID() string   { return "spotify" }
+func (p *SpotifyProvider) Name() string { return "Spotify" }
+
+// SonosServiceName is what Spotify is called in a Sonos household's service
+// list, which is the name GetServiceAccount matches on.
+const SonosServiceName = "Spotify"
+
+func (p *SpotifyProvider) Available() media.Availability {
+	if p.client == nil {
+		return media.Availability{Reason: "Spotify isn't set up on this server"}
+	}
+	st := p.client.Status()
+	switch {
+	case !st.Configured:
+		return media.Availability{
+			Reason: "Add your Spotify client ID under Settings to search Spotify",
+		}
+	case !st.Connected:
+		return media.Availability{
+			Configured: true,
+			Reason:     "Connect your Spotify account to search and play",
+		}
+	}
+	return media.Availability{OK: true, Configured: true}
+}
+
+// Routes is every route Spotify can be served over. Which one is actually
+// used depends on the speakers, and is the route engine's decision.
+func (p *SpotifyProvider) Routes() media.RouteSet {
+	return media.RouteSet{
+		media.RouteNative, media.RouteGroup, media.RouteConnect, media.RouteStream,
+	}
+}
+
+func (p *SpotifyProvider) Search(ctx context.Context, query string, limit int) (*media.Results, error) {
+	if av := p.Available(); !av.OK {
+		return nil, errors.New(av.Reason)
+	}
+	res, err := p.client.Search(ctx, query, limit)
+	if err != nil {
+		return nil, err
+	}
+	out := &media.Results{
+		Tracks:    p.items(res.Tracks, media.KindTrack),
+		Albums:    p.items(res.Albums, media.KindAlbum),
+		Playlists: p.items(res.Playlists, media.KindPlaylist),
+		Artists:   []media.Item{},
+	}
+	return out, nil
+}
+
+func (p *SpotifyProvider) Browse(ctx context.Context, limit int) ([]media.Item, error) {
+	if av := p.Available(); !av.OK {
+		return nil, errors.New(av.Reason)
+	}
+	items, err := p.client.MyPlaylists(ctx, limit)
+	if err != nil {
+		return nil, err
+	}
+	return p.items(items, media.KindPlaylist), nil
+}
+
+// items maps the Spotify client's shape onto the neutral one. The kind is
+// passed in rather than read from the item because the client's own Kind
+// field is only set on search results, and a playlist browsed from the
+// account is still a playlist.
+func (p *SpotifyProvider) items(in []spotify.Item, kind media.ItemKind) []media.Item {
+	out := make([]media.Item, 0, len(in))
+	for _, it := range in {
+		k := kind
+		if it.Kind != "" {
+			k = media.ItemKind(it.Kind)
+		}
+		out = append(out, media.Item{
+			Provider: p.ID(),
+			Kind:     k,
+			URI:      it.URI,
+			Title:    it.Name,
+			Subtitle: it.Sub,
+			ArtURI:   it.ArtURL,
+		})
+	}
+	return out
+}
+
+// NativeItem implements media.NativeProvider: build the vendor URI + DIDL a
+// speaker needs to stream Spotify from its own account link.
+func (p *SpotifyProvider) NativeItem(vendor media.Vendor, item media.Item, acct media.Account) (string, string, error) {
+	if vendor != media.VendorSonos {
+		// Only Sonos has a native Spotify integration. Saying so plainly
+		// beats returning a URI that the speaker would silently ignore.
+		return "", "", fmt.Errorf("spotify: %s speakers can't stream Spotify themselves", vendor)
+	}
+	return sonos.SpotifyItem(item.URI, item.Title, &sonos.ServiceAccount{
+		Name:        SonosServiceName,
+		SID:         acct.SID,
+		SerialNum:   acct.Serial,
+		ServiceType: acct.Type,
+	})
+}
+
+// ServiceName implements media.NativeProvider.
+func (p *SpotifyProvider) ServiceName(vendor media.Vendor) string { return SonosServiceName }
+
+// ConnectDevices implements media.ConnectProvider.
+func (p *SpotifyProvider) ConnectDevices(ctx context.Context) ([]media.ConnectDevice, error) {
+	if p.client == nil {
+		return nil, spotify.ErrNotConnected
+	}
+	devs, err := p.client.Devices(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]media.ConnectDevice, len(devs))
+	for i, d := range devs {
+		out[i] = media.ConnectDevice{
+			ID: d.ID, Name: d.Name, Type: d.Type,
+			Active: d.Active, Restricted: d.Restricted,
+		}
+	}
+	return out, nil
+}
+
+// PlayOn implements media.ConnectProvider.
+func (p *SpotifyProvider) PlayOn(ctx context.Context, deviceID string, item media.Item) error {
+	if p.client == nil {
+		return spotify.ErrNotConnected
+	}
+	return p.client.PlayOn(ctx, deviceID, item.URI)
+}
+
+// StreamAvailable implements media.StreamProvider. It reports the union of
+// two independent requirements — an account that can play, and a decoder that
+// can run — because a user missing either needs a different sentence.
+func (p *SpotifyProvider) StreamAvailable() media.Availability {
+	if av := p.Available(); !av.OK {
+		return av
+	}
+	if !p.client.Status().Playback {
+		return media.Availability{
+			Configured: true,
+			Reason:     spotify.ErrPlaybackScope.Error(),
+		}
+	}
+	if p.decoder == nil {
+		return media.Availability{
+			Configured: true,
+			Reason: "playing to speakers of different makes at once needs librespot " +
+				"on the HomeHub host — see docs/MEDIA-PROTOCOL.md",
+		}
+	}
+	return p.decoder.Available()
+}
+
+// OpenStream implements media.StreamProvider.
+func (p *SpotifyProvider) OpenStream(ctx context.Context, item media.Item) (*media.Stream, error) {
+	if av := p.StreamAvailable(); !av.OK {
+		return nil, errors.New(av.Reason)
+	}
+	return p.decoder.Open(ctx, item.URI)
+}
+
+// MatchConnectDevice picks the Connect device for an endpoint out of a device
+// list, using the hints the endpoint supplies.
+//
+// A pinned id wins outright. Otherwise the endpoint is matched by name — its
+// pinned name first (a pin whose id rotated, which Spotify does when a device
+// re-registers), then the speaker's own name. Nothing is guessed beyond that:
+// starting music in the wrong room is worse than saying which speaker to pick.
+//
+// This is the same rule internal/api/kef_spotify.go applies, lifted to work
+// for any ConnectTarget rather than only a KEF.
+func MatchConnectDevice(t media.ConnectTarget, name string, devices []media.ConnectDevice) (media.ConnectDevice, error) {
+	pinned, names := t.ConnectHint()
+	if pinned != "" {
+		for _, d := range devices {
+			if d.ID == pinned {
+				return usableDevice(d)
+			}
+		}
+	}
+	for _, want := range names {
+		if normalizeDeviceName(want) == "" {
+			continue
+		}
+		for _, d := range devices {
+			if normalizeDeviceName(d.Name) == normalizeDeviceName(want) {
+				return usableDevice(d)
+			}
+		}
+	}
+	// Which of the two failures this is changes what the user should do
+	// about it, so they get different sentences.
+	if pinned != "" {
+		return media.ConnectDevice{}, fmt.Errorf(
+			"%w: %q isn't visible to Spotify right now — wake the speaker, or pick it again under its settings",
+			ErrNoConnectDevice, name)
+	}
+	return media.ConnectDevice{}, fmt.Errorf(
+		"%w: no Spotify Connect speaker is called %q — play to it once from the Spotify app, then pick it under the speaker's settings",
+		ErrNoConnectDevice, name)
+}
+
+// usableDevice rejects a matched device that would refuse the command anyway,
+// so the failure names the reason instead of arriving as a silent no-op.
+func usableDevice(d media.ConnectDevice) (media.ConnectDevice, error) {
+	if d.Restricted {
+		return media.ConnectDevice{}, fmt.Errorf("%w: Spotify won't let other apps control %q",
+			ErrNoConnectDevice, d.Name)
+	}
+	if d.ID == "" {
+		return media.ConnectDevice{}, fmt.Errorf("%w: %q has no Spotify device id",
+			ErrNoConnectDevice, d.Name)
+	}
+	return d, nil
+}
+
+// ErrNoConnectDevice marks "this speaker isn't a playable Connect device right
+// now" — a state the user can fix, so the API answers 409 rather than 502.
+var ErrNoConnectDevice = errors.New("spotify")
+
+// normalizeDeviceName folds the differences between what a speaker calls
+// itself and what it registered with Spotify: case, surrounding space, and
+// runs of whitespace ("Living  Room" vs "Living Room").
+func normalizeDeviceName(s string) string {
+	return strings.ToLower(strings.Join(strings.Fields(s), " "))
+}

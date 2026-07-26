@@ -295,6 +295,24 @@ func Pause(ctx context.Context, ip string) error {
 	return nil
 }
 
+// SetAVTransportURI points the speaker at a URI without going through the
+// queue, which is what a live stream needs: an endless source has nothing
+// after it, and enqueuing one leaves the speaker trying to advance to a next
+// track that never arrives. metadata is a DIDL-Lite document describing what
+// to display, and may be empty.
+//
+// Callers wanting on-demand service content want PlayServiceItem instead —
+// that path is queue-based on purpose, because it is how Sonos itself plays
+// tracks and albums.
+func SetAVTransportURI(ctx context.Context, ip, uri, metadata string) error {
+	_, err := soapCall(ctx, ip, avTransport, "SetAVTransportURI", []arg{
+		{"InstanceID", instance0},
+		{"CurrentURI", uri},
+		{"CurrentURIMetaData", metadata},
+	})
+	return err
+}
+
 // Next skips to the next track.
 func Next(ctx context.Context, ip string) error {
 	_, err := soapCall(ctx, ip, avTransport, "Next", []arg{{"InstanceID", instance0}})
