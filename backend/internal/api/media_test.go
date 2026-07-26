@@ -1,11 +1,13 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gorilla/mux"
 
@@ -372,12 +374,24 @@ func TestMediaProvidersReportsStreamingSeparately(t *testing.T) {
 // TestZonesListIncludesLiveState exercises the read path end to end. The
 // speakers are unreachable, so this also pins that an unreachable zone still
 // renders rather than failing the whole request.
+//
+// The request carries a short deadline of its own. The handler budgets
+// mediaTimeout for a zone read, and reaching a speaker at an unroutable
+// address costs whatever the host's network does with the packets — a fast
+// refusal on a developer's machine, a silent blackhole on a CI runner, where
+// the difference is minutes of a hung test rather than a failure. Since
+// context.WithTimeout takes the earlier of the two deadlines, capping it here
+// makes the test measure what it is about — that the zone renders without
+// live state — instead of measuring the network.
 func TestZonesListIncludesLiveState(t *testing.T) {
 	srv := withSpeakers(t)
 	createZone(t, srv, `{"name":"Downstairs","members":["sonos:son_1"]}`)
 
+	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+	defer cancel()
+
 	rec := httptest.NewRecorder()
-	srv.mediaZones(rec, httptest.NewRequest(http.MethodGet, "/api/media/zones", nil))
+	srv.mediaZones(rec, httptest.NewRequest(http.MethodGet, "/api/media/zones", nil).WithContext(ctx))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
 	}
