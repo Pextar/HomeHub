@@ -18,6 +18,8 @@
     import { cubicOut } from "svelte/easing";
     import { dur, sheet } from "../lib/motion";
     import { lockBodyScroll, unlockBodyScroll } from "../lib/scroll-lock";
+    import * as sheetRun from "../lib/sheet-run";
+    import type { SheetRun } from "../lib/sheet-run";
     import { kefSourceLabel } from "../lib/kef";
     import type {
         SonosStatus, SonosSpeakerView, SonosGroupView, SonosFavorite,
@@ -333,7 +335,8 @@
         stopLive?.();
         clearTimeout(announceTimer);
         endPuckDrag(); // takes the document-level touchmove block with it
-        unlockBodyScroll();
+        // The body-scroll lock is the sheet effect's, and its teardown runs on
+        // unmount — releasing it here as well would decrement it twice.
     });
 
     // The poll is the backstop, not the mechanism. When the backend has the
@@ -524,40 +527,65 @@
     }
 
     // Only ever one sheet at a time. Sheets *swap* — they never stack — so
-    // there is only ever one scrim, one Escape, one thing to swipe away.
+    // there is only ever one scrim, one Escape, one thing to swipe away. The
+    // rule and its invariants live in `lib/sheet-run.ts`, with tests, because
+    // the swap is subtle enough to break by accident from in here.
     type Sheet = "player" | "search" | "zones";
-    let openSheet = $state<Sheet | null>(null);
-    /**
-     * The sheet the player was opened from, restored when the player closes.
-     * Tapping a puck in Zones swaps to that room's player; dismissing it puts
-     * Zones back rather than dropping the user two levels out to Home.
-     */
-    let sheetReturn = $state<Sheet | null>(null);
+    let sheets = $state<SheetRun<Sheet>>(sheetRun.closed());
 
-    const searchOpen = $derived(openSheet === "search");
-    const zonesOpen = $derived(openSheet === "zones");
+    const openSheet = $derived(sheets.open);
+    const searchOpen = $derived(sheets.open === "search");
+    const zonesOpen = $derived(sheets.open === "zones");
+    const sheetUp = $derived(sheetRun.isUp(sheets));
 
-    /** Raise a sheet, taking the body-scroll lock once for the whole run. */
-    function showSheet(s: Sheet) {
-        if (openSheet === null) lockBodyScroll();
-        openSheet = s;
+    // The body-scroll lock keys on *whether* a sheet is up, never on which —
+    // so a swap doesn't release and retake it, which on iOS would unpin and
+    // re-pin the body for a frame. The teardown also runs on unmount, so a
+    // navigation away with a sheet open can't strand the lock.
+    $effect(() => {
+        if (!sheetUp) return;
+        lockBodyScroll();
+        return unlockBodyScroll;
+    });
+
+    /** Gesture state a sheet must not inherit from the one before it. */
+    function resetSheetGesture() {
         dragY = 0;
         dragging = false;
         dismissing = false;
+        pendingBody = false;
     }
-    /** Drop whatever sheet is up and give the page its scroll back. */
+    /** Raise a sheet over the page. Anything up is replaced, not remembered. */
+    function showSheet(s: Sheet) {
+        sheets = sheetRun.raise(sheets, s);
+        resetSheetGesture();
+    }
+    /** Close the open sheet — back to the one it was raised over, if any. */
+    function dropSheet() {
+        if (!sheetUp) return;
+        const back = sheetRun.dismiss(sheets);
+        sheets = back;
+        if (back.open !== "player") playerGroupId = null;
+        queuePane = false;
+        scrubSec = null;
+        endPuckDrag();
+        grabId = null;
+        // A drag-out close keeps its offset until the sheet is gone — zeroing
+        // it here would snap the sheet back up for one frame.
+        if (back.open !== null || !dismissing) resetSheetGesture();
+        else pendingBody = false;
+    }
+    /** Leave sheets entirely, whatever is up and whatever is under it. */
     function hideSheet() {
-        if (openSheet === null) return;
-        openSheet = null;
-        sheetReturn = null;
+        if (!sheetUp) return;
+        sheets = sheetRun.closeAll(sheets);
         playerGroupId = null;
         queuePane = false;
         scrubSec = null;
-        pendingBody = false;
         endPuckDrag();
         grabId = null;
-        if (!dismissing) { dragY = 0; dragging = false; }
-        unlockBodyScroll();
+        if (!dismissing) resetSheetGesture();
+        else pendingBody = false;
     }
 
     function openSearch() {
@@ -666,7 +694,10 @@
         y: number;
     };
     let puckDrag = $state<PuckDrag | null>(null);
+    /** The room under the pointer, if it's a room. */
     let dropId = $state<string | null>(null);
+    /** The zone under the pointer, when the pointer is on its enclosure. */
+    let dropZone = $state<string | null>(null);
     /** True from the lift until the click it would otherwise fire is eaten. */
     let dragConsumedClick = false;
 
@@ -748,16 +779,82 @@
         e.preventDefault();
         puckDrag.x = e.clientX - puckDrag.offX;
         puckDrag.y = e.clientY - puckDrag.offY;
-        const under = document.elementFromPoint(e.clientX, e.clientY);
-        const hit = under?.closest?.(".puck") as HTMLElement | null;
-        const id = hit?.dataset.speaker ?? null;
-        dropId = id && id !== puckDrag.id ? id : null;
+        lastPoint = { x: e.clientX, y: e.clientY };
+        aimAt(e.clientX, e.clientY);
+        edgeScroll(e.clientY);
+    }
+
+    /**
+     * What the pointer is over: a room, or the enclosure around an existing
+     * zone. The enclosure counts because "drag a third onto an existing group
+     * adds it" reads as dropping on the *group* — landing in the gap between
+     * its pucks shouldn't be a miss.
+     */
+    function aimAt(x: number, y: number) {
+        if (!puckDrag) return;
+        const under = document.elementFromPoint(x, y);
+        const hit = under?.closest?.(".puck, .group-wrap") as HTMLElement | null;
+        const speaker = hit?.dataset.speaker ?? null;
+        if (speaker) {
+            dropId = speaker !== puckDrag.id ? speaker : null;
+            dropZone = null;
+            return;
+        }
+        const zone = hit?.dataset.zone ?? null;
+        // A room already in this zone can't be dropped into it again.
+        const mine = groupOfSpeaker(puckDrag.id)?.coordinator_id;
+        dropZone = zone && zone !== mine ? zone : null;
+        dropId = null;
+    }
+
+    // ── Edge auto-scroll ─────────────────────────────────────────────────
+    // The zone grid is taller than the sheet as soon as there are a few
+    // rooms, so a target can sit off-screen with the finger already down and
+    // nothing left to reach it with. Holding the puck near an edge scrolls
+    // the sheet under it, speed rising as it gets closer.
+    let lastPoint: { x: number; y: number } | null = null;
+    let scrollStep = 0;
+    let scrollFrame: number | undefined;
+    const EDGE_PX = 72;
+    const EDGE_MAX = 16; // px per frame at the very edge
+
+    function edgeScroll(y: number) {
+        const el = scrollEl;
+        if (!el || !puckDrag) return (scrollStep = 0);
+        const r = el.getBoundingClientRect();
+        const over = y - (r.bottom - EDGE_PX);
+        const under = r.top + EDGE_PX - y;
+        scrollStep =
+            over > 0 ? Math.min(1, over / EDGE_PX) * EDGE_MAX
+            : under > 0 ? -Math.min(1, under / EDGE_PX) * EDGE_MAX
+            : 0;
+        if (scrollStep !== 0 && scrollFrame === undefined) stepScroll();
+    }
+    function stepScroll() {
+        scrollFrame = requestAnimationFrame(() => {
+            scrollFrame = undefined;
+            const el = scrollEl;
+            if (!puckDrag || !el || scrollStep === 0) return;
+            const before = el.scrollTop;
+            el.scrollTop += scrollStep;
+            if (el.scrollTop === before) return; // hit the end — nothing to chase
+            // The ghost is pinned to the viewport, so scrolling moves a
+            // different room under a finger that hasn't budged.
+            if (lastPoint) aimAt(lastPoint.x, lastPoint.y);
+            stepScroll();
+        });
+    }
+    function stopEdgeScroll() {
+        if (scrollFrame !== undefined) cancelAnimationFrame(scrollFrame);
+        scrollFrame = undefined;
+        scrollStep = 0;
+        lastPoint = null;
     }
 
     function onPuckPointerUp() {
         if (!pending) return;
         const src = puckDrag?.id;
-        const target = dropId;
+        const target = dropId ?? dropZone;
         if (puckDrag) dragConsumedClick = true;
         endPuckDrag();
         if (src && target) void groupOnto(src, target);
@@ -788,9 +885,11 @@
         if (puckDrag) {
             document.removeEventListener("touchmove", blockTouchScroll);
         }
+        stopEdgeScroll();
         pending = null;
         puckDrag = null;
         dropId = null;
+        dropZone = null;
     }
 
     async function ungroup(g: SonosGroupView) {
@@ -893,10 +992,9 @@
         // Opened from Zones, the player *replaces* that sheet and puts it back
         // on the way out — a swap, so there is never a sheet over a sheet, and
         // never a lost place either.
-        const from = zonesOpen ? "zones" : null;
         playerGroupId = g.coordinator_id;
-        showSheet("player");
-        sheetReturn = from;
+        sheets = sheetRun.swapTo(sheets, "player");
+        resetSheetGesture();
         // The room you just opened is also where you'd expect the next
         // favorite or search result to land, so opening the player sets the
         // destination too — one choice instead of two.
@@ -904,25 +1002,7 @@
     }
     function closePlayer() {
         if (openSheet !== "player") return;
-        const back = sheetReturn;
-        playerGroupId = null;
-        queuePane = false;
-        scrubSec = null;
-        pendingBody = false;
-        if (back) {
-            // Back to the sheet the player came from. The lock stays taken —
-            // one sheet is simply becoming another.
-            sheetReturn = null;
-            openSheet = back;
-            dragY = 0;
-            dragging = false;
-            dismissing = false;
-            return;
-        }
-        // A drag-out close keeps its offset until the sheet is gone —
-        // zeroing it here would snap the sheet back up for one frame.
-        // showSheet resets the gesture state instead.
-        hideSheet();
+        dropSheet();
     }
 
     // ── Drag-to-dismiss ──────────────────────────────────────────────────
@@ -948,11 +1028,8 @@
     function fromTop(e: PointerEvent): boolean {
         return !!(e.target as HTMLElement | null)?.closest?.(".sheet-top");
     }
-    /** Swiping down leaves whichever sheet is up, by that sheet's own rules. */
-    function dismissSheet() {
-        if (openSheet === "player") closePlayer();
-        else hideSheet();
-    }
+    /** Swiping down closes the open sheet — back to the one under it, if any. */
+    const dismissSheet = () => dropSheet();
 
     function startDrag(e: PointerEvent, target: HTMLElement) {
         dragging = true;
@@ -1116,8 +1193,7 @@
                 endPuckDrag();
                 grabId = null;
                 announce(`${name} put back.`);
-            } else if (playerOpen) closePlayer();
-            else if (openSheet) hideSheet();
+            } else if (openSheet) dropSheet();
             // Escape backs out of a speaker's settings the same way its back
             // chip does — a drill-down owes the user the key that leaves it.
             else if (detailId) detailId = null;
@@ -1891,14 +1967,18 @@
             {#if loaded && (status?.speakers.length ?? 0) > 0}
                 <LiveStatusChip live={livePush} onClosed={() => void refresh()} />
             {/if}
-            <!-- Search is a plain icon now rather than a slot in a subnav
-                 pill: nothing rides below this header but content
-                 (DESIGN.md §15). Registering a speaker is not here at all —
-                 it belongs on Speakers, with the rest of device management,
-                 and a third chip left the subtitle a stub on a phone. -->
+            <!-- Search rides in the header rather than in a subnav pill:
+                 nothing sits below this header but content (DESIGN.md §15).
+                 It wears its label wherever there is width for one — losing
+                 the pill shouldn't cost desktop a *named* way in when the
+                 room to name it was never the problem. On a phone the label
+                 is what pushed the subtitle to a stub, so there it is the
+                 icon alone. Registering a speaker isn't here at all: it
+                 belongs on Speakers, with the rest of device management. -->
             {#if loaded && totalSpeakers > 0}
-                <button class="icon-btn" aria-label="Search" onclick={openSearch}>
-                    <Icon name="search" size={17} />
+                <button class="chip act-search" onclick={openSearch}>
+                    <Icon name="search" size={14} />
+                    <span class="act-label">Search</span>
                 </button>
             {:else}
                 <button class="chip" onclick={() => openSpeakerModal()}>
@@ -1942,8 +2022,15 @@
                             : "pick a room to open it"}
                     </span>
                 </span>
-                {#if spotify?.connected}
-                    <button class="chip quiet-go" onclick={openSearch}>Search</button>
+                {#if spotify}
+                    <!-- Not gated on `connected`: the people who most need a
+                         pointer at Spotify are the ones who haven't set it up,
+                         and with the subnav gone this card and the header icon
+                         are the only things that say the module searches at
+                         all (DESIGN.md §15). -->
+                    <button class="chip quiet-go" onclick={openSearch}>
+                        {spotify.connected ? "Search" : "Set up Spotify"}
+                    </button>
                 {/if}
             </div>
         {:else}
@@ -2091,11 +2178,14 @@
                         <span class="quiet-title">Favorites need a Sonos room</span>
                         <span class="quiet-sub">
                             They come out of your Sonos household, so {kefTargetSpeaker.name} can't
-                            play one — pick a Sonos room above, or search to play there.
+                            play one — pick a Sonos room above{#if spotify?.connected}, or search to
+                            play there{/if}.
                         </span>
                     </span>
-                    {#if spotify?.connected}
-                        <button class="chip quiet-go" onclick={openSearch}>Search</button>
+                    {#if spotify}
+                        <button class="chip quiet-go" onclick={openSearch}>
+                            {spotify.connected ? "Search" : "Set up Spotify"}
+                        </button>
                     {/if}
                 </div>
             {:else}
@@ -2456,13 +2546,19 @@
         <span class="puck-icon">
             {#if playing}{@render wave()}{:else}<Icon name="speaker" size={16} />{/if}
         </span>
+        <!-- Says "this object moves", on hover only and to a pointer only:
+             touch has the press-and-hold to discover, and a mouse has
+             nothing but the cursor otherwise. Not a control — it takes no
+             pointer events, so it can't be mistaken for the select circle
+             that used to sit here. -->
+        <span class="puck-grip" aria-hidden="true"><Icon name="grip" size={14} /></span>
         <span class="puck-body">
             <span class="puck-name">{sp.name}</span>
             <span class="puck-sub">
                 {#if target && grabId !== null}
                     Drop {grabbedName} here
                 {:else if held}
-                    Held — drop it on another room
+                    Held
                 {:else}
                     {speakerNowLine(sp.id)}
                 {/if}
@@ -2735,7 +2831,7 @@
     >
         <div class="grabber" aria-hidden="true"></div>
         <header class="player-head">
-            <button class="icon-btn p-icon" aria-label="Close {title}" onclick={hideSheet}>
+            <button class="icon-btn p-icon" aria-label="Close {title}" onclick={dropSheet}>
                 <Icon name="chevronDown" size={18} />
             </button>
             <div class="p-onair">
@@ -2753,7 +2849,7 @@
      same way the player does, and swaps to the player when a room is tapped
      rather than stacking a second sheet on top of itself. -->
 {#if zonesOpen}
-    <div class="scrim" transition:fade={{ duration: dur(200) }} onclick={hideSheet} aria-hidden="true"></div>
+    <div class="scrim" transition:fade={{ duration: dur(200) }} onclick={dropSheet} aria-hidden="true"></div>
     <div
         class="sheet"
         class:dragging
@@ -2785,7 +2881,12 @@
 
             <div class="rooms">
                 {#each multiGroups as g (g.coordinator_id)}
-                    <div class="group-wrap">
+                    <!-- The enclosure is a drop target in its own right:
+                         "drag a third onto an existing group" reads as
+                         dropping on the group, so the gap between its pucks
+                         must not be a miss. -->
+                    <div class="group-wrap" class:drop={dropZone === g.coordinator_id}
+                        data-zone={g.coordinator_id}>
                         <div class="glabel">
                             <Icon name="check" size={11} />
                             <span>{groupTitle(g)}</span>
@@ -2885,7 +2986,7 @@
      Behind a plain search icon in Home's header, opening the same way
      everything else in Music opens. -->
 {#if searchOpen}
-    <div class="scrim" transition:fade={{ duration: dur(200) }} onclick={hideSheet} aria-hidden="true"></div>
+    <div class="scrim" transition:fade={{ duration: dur(200) }} onclick={dropSheet} aria-hidden="true"></div>
     <div
         class="sheet"
         class:dragging
@@ -3302,6 +3403,30 @@
         color: var(--text);
     }
 
+    /* ── Header actions ──
+       Search keeps its label wherever the header has room for it, and drops
+       to the icon alone on a phone — where a third labelled chip is exactly
+       what crushed the subtitle to a two-word stub. */
+    .act-search { flex-shrink: 0; }
+    @media (max-width: 620px) {
+        .act-search {
+            position: relative;
+            width: 38px; height: 38px; padding: 0;
+            justify-content: center; border-radius: 50%;
+        }
+        .act-label {
+            position: absolute;
+            width: 1px; height: 1px;
+            margin: -1px; padding: 0;
+            overflow: hidden;
+            clip-path: inset(50%);
+            white-space: nowrap;
+        }
+    }
+    @media (max-width: 620px) and (pointer: coarse) {
+        .act-search { width: 44px; height: 44px; }
+    }
+
     /* ── Screen head (Speakers) ──
        The §11 detail shape — back chip, centered title, action chip — because
        Speakers is a screen pushed from Home, not a sheet lifted over it. */
@@ -3511,6 +3636,14 @@
         border-radius: var(--r-lg);
         padding: var(--space-2);
         display: flex; flex-direction: column; gap: var(--space-2);
+        transition: border-color var(--t-fast), box-shadow var(--t-fast);
+    }
+    /* Aimed at as a whole — the dashed edge goes solid amber, the same
+       statement a puck's drop ring makes. */
+    .group-wrap.drop {
+        border-style: solid;
+        border-color: var(--on);
+        box-shadow: 0 0 0 1px var(--on), 0 0 22px -6px var(--on-glow);
     }
     .glabel {
         display: flex; align-items: center; gap: 6px;
@@ -3562,6 +3695,25 @@
     }
     .puck.aiming { border-color: var(--tile-on-border); }
     .puck.aiming:focus-visible { box-shadow: var(--focus-ring), 0 0 0 2px var(--on); }
+    /* Grip: the only thing on a puck that says "this moves" to a mouse.
+       Hover-only so it is never permanent chrome, and inert so it is never
+       a second target. */
+    .puck-grip {
+        position: absolute; top: 10px; right: 10px;
+        display: flex;
+        color: var(--text-dim);
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity var(--t-fast);
+    }
+    @media (hover: hover) {
+        /* Not while lifted: the pointer is captured, so the source puck stays
+           :hover for the whole drag and would keep the grip lit under the
+           ghost that is already carrying it. */
+        .puck:not(:disabled):not(.lifted):hover .puck-grip { opacity: 0.7; }
+    }
+    /* Keep the name clear of the grip while it is showing. */
+    .puck-name { padding-right: 20px; }
     /* The travelling copy. Fixed to the viewport and inert, so hit-testing
        under the finger finds the room beneath it rather than itself. */
     .puck-ghost {
@@ -3584,7 +3736,8 @@
        amber icon tile they'd be invisible, so they take the tile's ink. */
     .puck.playing .puck-icon .wave i { background: var(--primary-fg); }
     .puck-body { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-    .puck-name { font-size: 14px; font-weight: 600; }
+    /* Clear of the hover grip in the corner. */
+    .puck-name { font-size: 14px; font-weight: 600; padding-right: 20px; }
     .puck-sub {
         font-size: 11.5px; color: var(--text-mute);
         overflow: hidden; text-overflow: ellipsis; white-space: nowrap;

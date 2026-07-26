@@ -503,7 +503,14 @@ patterns on top. Keep these consistent if you extend it.
     player *replaces* Zones and puts it back on the way out. One scrim, one
     Escape, one thing to swipe away, and no lost place either. The same
     applies in the other direction: opening Speakers from inside Zones drops
-    the sheet rather than leaving it under the screen.
+    the sheet rather than leaving it under the screen. What may be
+    remembered is one level only — a swap out of a swapped-to sheet forgets
+    the first, because three levels of "back" is a navigation stack, and a
+    navigation stack is what screens are for. The rule lives in
+    `lib/sheet-run.ts` as a tested state machine rather than as loose flags
+    in a view, and the body-scroll lock keys on *whether* a sheet is up and
+    never on which — a swap that released and retook it would unpin and
+    re-pin the body on iOS for a frame.
   - **The global tab bar still never changes shape.** Music is one
     destination among the app's nav entries; none of Search, Zones, Speakers
     or the player replace or reshape it.
@@ -517,13 +524,24 @@ patterns on top. Keep these consistent if you extend it.
   them, because that is exactly where the transport would otherwise
   disappear, and Search's whole job is to feed it. Tapping it there swaps
   that sheet for the player rather than stacking one on the other.
-- **Home's header carries the search icon and nothing else.** Registering a
-  speaker moved to Speakers, where the rest of device management already
-  lives — a third action in that row left the subtitle a two-word stub on a
-  phone, and "add a device" was never a Home-screen job. The header keeps its
+- **Home's header carries Search and nothing else.** Registering a speaker
+  moved to Speakers, where the rest of device management already lives — a
+  third action in that row left the subtitle a two-word stub on a phone, and
+  "add a device" was never a Home-screen job. The header keeps its
   push-status chip, since that qualifies everything below it (§15, below).
   The empty state still offers "Add speaker" outright: with no speakers there
   is no Speakers row to go through.
+  - **Search wears its label wherever there is width for one** (a chip ≥
+    620px, the icon alone below, with the name still on the button for
+    assistive tech). Losing the subnav shouldn't cost a wide screen a *named*
+    way in — room to name it was never the problem there; a phone's header
+    was.
+  - **The pointer at Spotify is not gated on being connected.** With the
+    subnav gone, this header and the "Nothing playing" card are the only
+    things that say the module searches at all — so the card's chip shows
+    either way and reads "Set up Spotify" until it is. The people who most
+    need the pointer are exactly the ones a `connected` gate would hide it
+    from.
 - **Zones is zones; Speakers is devices.** They read as adjacent and are not,
   and "Zones" is the renamed version of what used to be called "Rooms" here —
   the app-level nav already owns that word for the whole house, and reusing
@@ -759,6 +777,19 @@ patterns on top. Keep these consistent if you extend it.
     re-elects behind us. "This room now plays with that one" is the whole
     promise; carrying its former partners along would be a second change
     nobody asked for.
+  - **The zone enclosure is a drop target too.** "Drag a third onto an
+    existing group" reads as dropping on the *group*, so landing in the gap
+    between its pucks must not be a miss; the dashed edge goes solid amber,
+    the same statement a puck's ring makes.
+  - **Holding a puck at an edge scrolls the sheet.** The grid is taller than
+    the sheet as soon as there are a few rooms, which otherwise leaves a
+    target unreachable with the finger already down. Speed rises towards the
+    edge, and the room under a stationary pointer is re-checked on every
+    frame, since the ghost is pinned to the viewport while the list moves.
+  - **A hover-only grip says the object moves.** Touch has the press-and-hold
+    to discover; a mouse had nothing but the cursor. So a grip glyph fades in
+    on `(hover: hover)` only — never permanent chrome, and inert, so it can't
+    be mistaken for the select circle that used to sit in that corner.
 - **Home shows what's playing, and only that.** The dashboard's "Playing now"
   section (`components/NowPlaying.svelte`) is the only piece of Music that
   lives outside the Music view. It is a *glance* surface, so it is
