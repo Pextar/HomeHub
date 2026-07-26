@@ -218,6 +218,8 @@ func (s *Server) kefDeleteSpeaker(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	delete(s.Store.KEF, id)
+	// Drop it from any zone that held it — see sonosDeleteSpeaker.
+	s.Store.CascadeDeleteSpeaker(store.QualifyKEF(id))
 	if err := s.Store.Save(); err != nil {
 		s.Store.Mu.Unlock()
 		writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())

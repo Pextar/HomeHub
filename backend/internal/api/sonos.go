@@ -244,6 +244,10 @@ func (s *Server) sonosDeleteSpeaker(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	delete(s.Store.Sonos, id)
+	// Drop it from any zone that held it, or the next unrelated edit to that
+	// zone fails validation with "no such speaker" for a change the user
+	// didn't make.
+	s.Store.CascadeDeleteSpeaker(store.QualifySonos(id))
 	if err := s.Store.Save(); err != nil {
 		s.Store.Mu.Unlock()
 		writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())

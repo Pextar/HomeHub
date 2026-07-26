@@ -50,6 +50,9 @@ type Store struct {
 	Rooms       map[string]*Room
 	Sonos       map[string]*SonosSpeaker
 	KEF         map[string]*KEFSpeaker
+	// Zones are user-arranged sets of speakers that play together, of
+	// any mix of makes. See docs/MEDIA-PROTOCOL.md.
+	Zones map[string]*Zone
 	// Readings is a rolling window of recent values per sensor id.
 	// Trimmed to ReadingsHistorySize on each append.
 	Readings  map[string][]SensorReading
@@ -122,6 +125,7 @@ const (
 	roomsFile       = "rooms.json"
 	sonosFile       = "sonos.json"
 	kefFile         = "kef.json"
+	zonesFile       = "zones.json"
 
 	// ReadingsHistorySize caps how many readings are kept per sensor.
 	// At one sample per minute that's ~16 hours; at one per five minutes
@@ -143,6 +147,7 @@ func New(dataDir string, rf RFSender) *Store {
 		Rooms:       make(map[string]*Room),
 		Sonos:       make(map[string]*SonosSpeaker),
 		KEF:         make(map[string]*KEFSpeaker),
+		Zones:       make(map[string]*Zone),
 		Readings:    make(map[string][]SensorReading),
 		Users:       make(map[string]*User),
 		Settings:    &Settings{},
@@ -198,6 +203,15 @@ func (s *Store) Load() error {
 	}
 	if err := readJSON(filepath.Join(s.DataDir, kefFile), &s.KEF); err != nil {
 		return fmt.Errorf("loading kef speakers: %w", err)
+	}
+	if err := readJSON(filepath.Join(s.DataDir, zonesFile), &s.Zones); err != nil {
+		return fmt.Errorf("loading zones: %w", err)
+	}
+	if s.Zones == nil {
+		// Absent file leaves the map from New() alone, but a file holding
+		// a literal null decodes over it. Callers index this map under Mu
+		// without checking, so it must never be nil after Load.
+		s.Zones = make(map[string]*Zone)
 	}
 	if s.Settings == nil {
 		s.Settings = &Settings{}
@@ -317,6 +331,9 @@ func (s *Store) Save() error {
 	}
 	if err := writeJSON(filepath.Join(s.DataDir, kefFile), s.KEF); err != nil {
 		return fmt.Errorf("saving kef speakers: %w", err)
+	}
+	if err := writeJSON(filepath.Join(s.DataDir, zonesFile), s.Zones); err != nil {
+		return fmt.Errorf("saving zones: %w", err)
 	}
 	return nil
 }
