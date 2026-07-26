@@ -3,6 +3,7 @@
     import Topbar from "../components/Topbar.svelte";
     import EmptyState from "../components/EmptyState.svelte";
     import Icon from "../components/Icon.svelte";
+    import MusicSheet from "../components/music/MusicSheet.svelte";
     import ConfirmModal from "../components/ConfirmModal.svelte";
     import SpeakerModal from "../modals/SpeakerModal.svelte";
     import SonosSpeakerDetail from "./SonosSpeakerDetail.svelte";
@@ -15,7 +16,7 @@
     import { openModal } from "../lib/modal.svelte";
     import { fly, fade, scale } from "svelte/transition";
     import { cubicOut } from "svelte/easing";
-    import { dur, sheet } from "../lib/motion";
+    import { dur } from "../lib/motion";
     import { lockBodyScroll, unlockBodyScroll } from "../lib/scroll-lock";
     import * as sheetRun from "../lib/sheet-run";
     import type { SheetRun } from "../lib/sheet-run";
@@ -259,13 +260,6 @@
         return unlockBodyScroll;
     });
 
-    /** Gesture state a sheet must not inherit from the one before it. */
-    function resetSheetGesture() {
-        dragY = 0;
-        dragging = false;
-        dismissing = false;
-        pendingBody = false;
-    }
     /**
      * How far each sheet was scrolled when it handed over. A swap unmounts
      * the sheet underneath, so without this, opening a room from halfway down
@@ -289,7 +283,7 @@
         rememberSheetScroll();
         sheets = sheetRun.raise(sheets, s);
         sheetScroll[s] = 0; // raised fresh, not returned to
-        resetSheetGesture();
+        sheetDismissing = false;
     }
     /** Close the open sheet — back to the one it was raised over, if any. */
     function dropSheet() {
@@ -302,10 +296,6 @@
         scrubSec = null;
         endPuckDrag();
         grabId = null;
-        // A drag-out close keeps its offset until the sheet is gone — zeroing
-        // it here would snap the sheet back up for one frame.
-        if (back.open !== null || !dismissing) resetSheetGesture();
-        else pendingBody = false;
     }
     /** Leave sheets entirely, whatever is up and whatever is under it. */
     function hideSheet() {
@@ -317,8 +307,6 @@
         scrubSec = null;
         endPuckDrag();
         grabId = null;
-        if (!dismissing) resetSheetGesture();
-        else pendingBody = false;
     }
 
     function openSearch() {
@@ -705,6 +693,10 @@
     }
 
     let playerEl = $state<HTMLElement | null>(null);
+    // Set by the open sheet while a drag-down rides out. The art swipe stands
+    // down for those 220ms; raising a sheet clears it, since the flag belongs
+    // to the sheet that is leaving, not to the one arriving.
+    let sheetDismissing = $state(false);
 
     function openPlayer(g: SonosGroupView) {
         playerKefId = null; // one player at a time
@@ -731,7 +723,7 @@
         rememberSheetScroll();
         sheets = sheetRun.swapTo(sheets, "player");
         sheetScroll.player = 0;
-        resetSheetGesture();
+        sheetDismissing = false;
     }
     function closePlayer() {
         if (openSheet !== "player") return;
@@ -753,7 +745,7 @@
         rememberSheetScroll();
         sheets = sheetRun.swapTo(sheets, "search");
         sheetScroll.search = 0;
-        resetSheetGesture();
+        sheetDismissing = false;
         if (q) {
             // A recent search is a request to *run* it, so it runs — and the
             // caret stays out of the way, keyboard and all, since the results
@@ -764,113 +756,6 @@
         if (spotify?.connected) focusSearch();
     }
 
-    // ── Drag-to-dismiss ──────────────────────────────────────────────────
-    // The same gesture the shared Modal sheet carries, shared by all three of
-    // Music's sheets (only one is ever up): the top bar always drags, and the
-    // scroll body drags only from the top and only on a clear downward pull,
-    // so a long sonos.queue still scrolls normally.
-    let dragY = $state(0);
-    let dragging = $state(false);
-    let dismissing = $state(false);
-    let pendingBody = false;
-    let dragStartY = 0;
-    let dragStartX = 0;
-
-    // Mobile only: from 601px the sheet is a centered dialog whose transform
-    // carries its centering, so a drag offset would knock it off-centre.
-    function sheetDraggable(): boolean {
-        return window.matchMedia("(max-width: 600px)").matches;
-    }
-    // Pointer events from the top bar bubble into the scroll container (and,
-    // once captured, keep reporting it as their target) — the body handlers
-    // ignore them so only one drag path is ever live.
-    function fromTop(e: PointerEvent): boolean {
-        return !!(e.target as HTMLElement | null)?.closest?.(".sheet-top");
-    }
-    /** Swiping down closes the open sheet — back to the one under it, if any. */
-    const dismissSheet = () => dropSheet();
-
-    function startDrag(e: PointerEvent, target: HTMLElement) {
-        dragging = true;
-        dragStartY = e.clientY;
-        dragStartX = e.clientX;
-        dragY = 0;
-        try { target.setPointerCapture(e.pointerId); } catch { /* not capturable */ }
-    }
-    function cancelDrag() {
-        if (!dragging) return;
-        dragging = false;
-        requestAnimationFrame(() => { dragY = 0; });
-    }
-    function finishDrag() {
-        dragging = false;
-        if (dragY > 90) {
-            // Ride the throw out instead of snapping back and then playing
-            // the sheet's own exit — the finger already did that animation.
-            dismissing = true;
-            dragY = 600;
-            setTimeout(dismissSheet, 220);
-        } else {
-            requestAnimationFrame(() => { dragY = 0; });
-        }
-    }
-
-    // Top bar — always drags.
-    function onTopPointerDown(e: PointerEvent) {
-        if (dismissing || !sheetDraggable()) return;
-        if ((e.target as HTMLElement).closest("button")) return; // close / back
-        startDrag(e, e.currentTarget as HTMLElement);
-        e.preventDefault();
-    }
-    function onTopPointerMove(e: PointerEvent) {
-        if (!dragging) return;
-        dragY = Math.max(0, e.clientY - dragStartY);
-    }
-    function onTopPointerUp() {
-        if (dragging) finishDrag();
-    }
-
-    // Body — drags when the scroll is at the top, otherwise scrolls.
-    function onBodyPointerDown(e: PointerEvent) {
-        if (dismissing || !sheetDraggable() || fromTop(e)) return;
-        if (e.pointerType === "mouse") return; // pointer devices use the bar
-        if (!scrollEl || scrollEl.scrollTop > 0) return;
-        if ((e.target as HTMLElement).closest("input, button, a, [role='slider']")) return;
-        pendingBody = true;
-        dragStartY = e.clientY;
-        dragStartX = e.clientX;
-    }
-    function onBodyPointerMove(e: PointerEvent) {
-        if (fromTop(e)) return;
-        if (dragging) {
-            dragY = Math.max(0, e.clientY - dragStartY);
-            e.preventDefault(); // claimed: don't scroll as well
-            return;
-        }
-        if (!pendingBody) return;
-        const dy = e.clientY - dragStartY;
-        const dx = e.clientX - dragStartX;
-        if (dy > 8 && dy > Math.abs(dx)) {
-            pendingBody = false;
-            const from = dragStartY;
-            startDrag(e, scrollEl!);
-            dragStartY = from; // keep the origin so the sheet doesn't jump back
-            dragY = dy;
-            e.preventDefault();
-        } else if (dy < -4 || Math.abs(dx) > 12) {
-            pendingBody = false; // scrolling up or swiping sideways
-        }
-    }
-    function onBodyPointerUp(e: PointerEvent) {
-        if (fromTop(e)) return;
-        pendingBody = false;
-        if (dragging) finishDrag();
-    }
-    function onBodyPointerCancel(e: PointerEvent) {
-        if (fromTop(e)) return;
-        pendingBody = false;
-        cancelDrag();
-    }
     // ── Swipe the art to change track ────────────────────────────────────
     // The album art is the largest target in the sheet, so it carries the
     // gesture every phone player has: drag sideways, let go past a clear
@@ -881,7 +766,7 @@
     let artStart: { x: number; y: number } | null = null;
 
     function onArtPointerDown(e: PointerEvent) {
-        if (e.pointerType === "mouse" || dismissing) return;
+        if (e.pointerType === "mouse" || sheetDismissing) return;
         artStart = { x: e.clientX, y: e.clientY };
         artDX = 0;
     }
@@ -2321,69 +2206,21 @@
     {/if}
 {/snippet}
 
-<!-- ── Sheet chrome ─────────────────────────────────────────────────
-     The grabber + centered head every one of Music's sheets wears, so Zones,
-     Search and the player all read as the same object and answer the same
-     swipe. §5: a sheet must look dismissible at a glance. -->
-{#snippet sheetHead(title: string, sub: string)}
-    <div
-        class="sheet-top"
-        role="none"
-        onpointerdown={onTopPointerDown}
-        onpointermove={onTopPointerMove}
-        onpointerup={onTopPointerUp}
-        onpointercancel={cancelDrag}
-    >
-        <div class="grabber" aria-hidden="true"></div>
-        <header class="player-head">
-            <button class="icon-btn p-icon" aria-label="Close {title}" onclick={dropSheet}>
-                <Icon name="chevronDown" size={18} />
-            </button>
-            <div class="p-onair">
-                <div class="p-onair-name">{title}</div>
-                {#if sub}<div class="p-onair-sub">{sub}</div>{/if}
-            </div>
-            <!-- Balances the close button so the title stays centered. -->
-            <span class="p-icon-gap" aria-hidden="true"></span>
-        </header>
-    </div>
-{/snippet}
-
 <!-- ── Zones sheet ──────────────────────────────────────────────────
      Grouping, and only grouping: what plays together. Opens over Home the
      same way the player does, and swaps to the player when a room is tapped
      rather than stacking a second sheet on top of itself. -->
 {#if zonesOpen}
-    <div class="scrim" transition:fade={{ duration: dur(200) }} onclick={dropSheet} aria-hidden="true"></div>
-    <div
-        class="sheet"
-        class:dragging
-        role="dialog"
-        aria-modal="true"
-        aria-label="Zones"
-        tabindex="-1"
-        style:transform={dragY > 0 ? `translateY(${dragY}px)` : ""}
-        style:opacity={dragY > 0 ? Math.max(0.4, 1 - dragY / 300) : undefined}
-        style:transition={dragging
-            ? "none"
-            : dragY > 0
-              ? "transform 0.22s ease-in, opacity 0.22s ease-in"
-              : "transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)"}
-        in:sheet={{}}
-        out:sheet={{ instant: dismissing }}
+    <MusicSheet
+        label="Zones"
+        title="Zones"
+        sub="Tap a room to open it · drag one onto another to group"
+        backLabel="Close Zones"
+        onBack={dropSheet}
+        onDismiss={dropSheet}
+        docked={showDock}
+        bind:scrollEl
     >
-        <div
-            class="sheet-scroll"
-            class:docked={showDock}
-            role="none"
-            bind:this={scrollEl}
-            onpointerdown={onBodyPointerDown}
-            onpointermove={onBodyPointerMove}
-            onpointerup={onBodyPointerUp}
-            onpointercancel={onBodyPointerCancel}
-        >
-            {@render sheetHead("Zones", "Tap a room to open it · drag one onto another to group")}
-
             <div class="rooms">
                 {#each sonos.multiGroups as g (g.coordinator_id)}
                     <!-- The enclosure is a drop target in its own right:
@@ -2461,8 +2298,7 @@
                     <kbd>Tab</kbd> to another and <kbd>Enter</kbd> to group them.
                 </p>
             </div>
-        </div>
-    </div>
+    </MusicSheet>
 {/if}
 
 <!-- Drag ghost — a copy of the puck under the finger. Fixed to the viewport
@@ -2491,38 +2327,18 @@
      Behind a plain search icon in Home's header, opening the same way
      everything else in Music opens. -->
 {#if searchOpen}
-    <div class="scrim" transition:fade={{ duration: dur(200) }} onclick={dropSheet} aria-hidden="true"></div>
-    <div
-        class="sheet"
-        class:dragging
-        role="dialog"
-        aria-modal="true"
-        aria-label="Search"
-        tabindex="-1"
-        style:transform={dragY > 0 ? `translateY(${dragY}px)` : ""}
-        style:opacity={dragY > 0 ? Math.max(0.4, 1 - dragY / 300) : undefined}
-        style:transition={dragging
-            ? "none"
-            : dragY > 0
-              ? "transform 0.22s ease-in, opacity 0.22s ease-in"
-              : "transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)"}
-        in:sheet={{}}
-        out:sheet={{ instant: dismissing }}
+    <MusicSheet
+        label="Search"
+        title="Search"
+        sub={spotify.connected ? "Spotify" : ""}
+        backLabel="Close Search"
+        onBack={dropSheet}
+        onDismiss={dropSheet}
+        docked={showDock}
+        bind:scrollEl
     >
-        <div
-            class="sheet-scroll"
-            class:docked={showDock}
-            role="none"
-            bind:this={scrollEl}
-            onpointerdown={onBodyPointerDown}
-            onpointermove={onBodyPointerMove}
-            onpointerup={onBodyPointerUp}
-            onpointercancel={onBodyPointerCancel}
-        >
-            {@render sheetHead("Search", spotify?.connected ? "Spotify" : "")}
-            {@render searchBody()}
-        </div>
-    </div>
+        {@render searchBody()}
+    </MusicSheet>
 {/if}
 
 <!-- ── KEF player sheet ─────────────────────────────────────────────
@@ -2537,64 +2353,29 @@
     {@const st = sp.state}
     {@const p = kef.progress(sp)}
     {@const durMs = st?.duration_ms ?? 0}
-    <div class="scrim" transition:fade={{ duration: dur(200) }} onclick={closePlayer} aria-hidden="true"></div>
-    <div
-        class="sheet"
-        class:dragging
-        role="dialog"
-        aria-modal="true"
-        aria-label="Now playing"
-        tabindex="-1"
-        bind:this={playerEl}
-        style:transform={dragY > 0 ? `translateY(${dragY}px)` : ""}
-        style:opacity={dragY > 0 ? Math.max(0.4, 1 - dragY / 300) : undefined}
-        style:transition={dragging
-            ? "none"
-            : dragY > 0
-              ? "transform 0.22s ease-in, opacity 0.22s ease-in"
-              : "transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)"}
-        in:sheet={{}}
-        out:sheet={{ instant: dismissing }}
+    <MusicSheet
+        label="Now playing"
+        eyebrow="Playing on"
+        title={sp.name}
+        backLabel="Collapse player"
+        onBack={closePlayer}
+        onDismiss={closePlayer}
+        action={{
+            // Tone, EQ and the rest are the speaker's own settings, and they
+            // live on its screen. This is the way there, and the sheet stands
+            // down first so a screen can push without a sheet opening one.
+            icon: "sliders",
+            label: `${sp.name} settings`,
+            onClick: () => {
+                hideSheet();
+                openSpeakers();
+                openKEFSpeaker(sp);
+            },
+        }}
+        bind:scrollEl
+        bind:sheetEl={playerEl}
+        bind:dismissing={sheetDismissing}
     >
-        <div
-            class="sheet-scroll"
-            role="none"
-            bind:this={scrollEl}
-            onpointerdown={onBodyPointerDown}
-            onpointermove={onBodyPointerMove}
-            onpointerup={onBodyPointerUp}
-            onpointercancel={onBodyPointerCancel}
-        >
-            <div
-                class="sheet-top"
-                role="none"
-                onpointerdown={onTopPointerDown}
-                onpointermove={onTopPointerMove}
-                onpointerup={onTopPointerUp}
-                onpointercancel={cancelDrag}
-            >
-                <div class="grabber" aria-hidden="true"></div>
-                <header class="player-head">
-                    <button class="icon-btn p-icon" aria-label="Collapse player" onclick={closePlayer}>
-                        <Icon name="chevronDown" size={18} />
-                    </button>
-                    <div class="p-onair">
-                        <div class="eyrow">Playing on</div>
-                        <div class="p-onair-name">{sp.name}</div>
-                    </div>
-                    <!-- Tone, EQ and the rest are the speaker's own settings,
-                         and they live on its screen. This is the way there,
-                         and the sheet stands down so a screen can push. -->
-                    <button
-                        class="icon-btn p-icon"
-                        aria-label="{sp.name} settings"
-                        onclick={() => { hideSheet(); openSpeakers(); openKEFSpeaker(sp); }}
-                    >
-                        <Icon name="sliders" size={17} />
-                    </button>
-                </header>
-            </div>
-
             <div class="p-art">
                 {#if st?.track?.art_uri}
                     <img src={st.track.art_uri} alt="" draggable="false" />
@@ -2689,12 +2470,11 @@
                     {/each}
                 </div>
                 <p class="hint">
-                    No sonos.queue and no grouping — a KEF speaker plays alone, so
+                    No queue and no grouping — a KEF speaker plays alone, so
                     there is nothing to line up behind this or to play it with.
                 </p>
             </div>
-        </div>
-    </div>
+    </MusicSheet>
 {/if}
 
 <!-- ── Full player sheet ───────────────────────────────────────────── -->
@@ -2704,65 +2484,19 @@
     {@const st = c?.state}
     {@const gs = c?.group_state}
     {@const grouped = g.member_ids.length > 1}
-    <div class="scrim" transition:fade={{ duration: dur(200) }} onclick={closePlayer} aria-hidden="true"></div>
-    <div
-        class="sheet"
-        class:dragging
-        role="dialog"
-        aria-modal="true"
-        aria-label="Now playing"
-        tabindex="-1"
-        bind:this={playerEl}
-        style:transform={dragY > 0 ? `translateY(${dragY}px)` : ""}
-        style:opacity={dragY > 0 ? Math.max(0.4, 1 - dragY / 300) : undefined}
-        style:transition={dragging
-            ? "none"
-            : dragY > 0
-              ? "transform 0.22s ease-in, opacity 0.22s ease-in"
-              : "transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)"}
-        in:sheet={{}}
-        out:sheet={{ instant: dismissing }}
+    <MusicSheet
+        label="Now playing"
+        eyebrow={queuePane ? "Queue" : "Playing on"}
+        title={sonos.groupTitle(g)}
+        backIcon={queuePane ? "chevronLeft" : "chevronDown"}
+        backLabel={queuePane ? "Back to now playing" : "Collapse player"}
+        onBack={() => (queuePane ? (queuePane = false) : closePlayer())}
+        onDismiss={closePlayer}
+        action={{ icon: "close", label: "Close player", onClick: closePlayer }}
+        bind:scrollEl
+        bind:sheetEl={playerEl}
+        bind:dismissing={sheetDismissing}
     >
-        <div
-            class="sheet-scroll"
-            role="none"
-            bind:this={scrollEl}
-            onpointerdown={onBodyPointerDown}
-            onpointermove={onBodyPointerMove}
-            onpointerup={onBodyPointerUp}
-            onpointercancel={onBodyPointerCancel}
-        >
-            <!-- Grabber + close X, per DESIGN.md §5 — the sheet must read as
-                 dismissible at a glance, not only via the collapse chevron.
-                 The bar is also the drag handle, and it sticks as one unit so
-                 content dissolves under it rather than meeting a hard edge. -->
-            <div
-                class="sheet-top"
-                role="none"
-                onpointerdown={onTopPointerDown}
-                onpointermove={onTopPointerMove}
-                onpointerup={onTopPointerUp}
-                onpointercancel={cancelDrag}
-            >
-                <div class="grabber" aria-hidden="true"></div>
-                <header class="player-head">
-                    <button
-                        class="icon-btn p-icon"
-                        aria-label={queuePane ? "Back to now playing" : "Collapse player"}
-                        onclick={() => (queuePane ? (queuePane = false) : closePlayer())}
-                    >
-                        <Icon name={queuePane ? "chevronLeft" : "chevronDown"} size={18} />
-                    </button>
-                    <div class="p-onair">
-                        <div class="eyrow">{queuePane ? "Queue" : "Playing on"}</div>
-                        <div class="p-onair-name">{sonos.groupTitle(g)}</div>
-                    </div>
-                    <button class="icon-btn p-icon" aria-label="Close player" onclick={closePlayer}>
-                        <Icon name="close" size={18} />
-                    </button>
-                </header>
-            </div>
-
             {#if queuePane}
                 <!-- ── Queue pane ──────────────────────────────────────── -->
                 <div class="q-bar">
@@ -3003,8 +2737,7 @@
                     {/if}
                 </div>
             {/if}
-        </div>
-    </div>
+    </MusicSheet>
 {/if}
 
 <!-- ── Start something ─────────────────────────────────────────────────
@@ -3847,95 +3580,6 @@
     }
     .sp-row:hover .sp-play { background: var(--on-soft); color: var(--on); }
 
-    /* ── Full player sheet ── */
-    /* Above the mobile nav bar (z 100) and the nav drawer (120), below the
-       modal stack (150) — DESIGN.md §15 has the player covering the nav, and
-       a "Clear sonos.queue" confirm still has to land on top of the player. */
-    .scrim {
-        position: fixed; inset: 0; z-index: 125;
-        background: rgba(0, 0, 0, 0.5);
-    }
-    .sheet {
-        position: fixed; z-index: 126;
-        left: 0; right: 0; bottom: 0;
-        max-height: 92vh;
-        background: var(--bg);
-        border-radius: var(--r-xl) var(--r-xl) 0 0;
-        border: 1px solid var(--hairline); border-bottom: 0;
-        box-shadow: var(--shadow-lg);
-        outline: none;
-        /* Keep scrolled content inside the top radius, and GPU-promote the
-           sheet so the drag transform stays smooth. */
-        overflow: hidden;
-        will-change: transform;
-    }
-    .grabber {
-        width: 38px; height: 4px; border-radius: 2px;
-        background: var(--border-strong);
-        margin: 8px auto 0;
-        pointer-events: none;
-    }
-    .sheet-scroll {
-        max-height: 92vh; overflow-y: auto;
-        overscroll-behavior: contain;
-        -webkit-overflow-scrolling: touch;
-        padding: 0 var(--space-5)
-            calc(var(--space-8) + env(safe-area-inset-bottom));
-        display: flex; flex-direction: column; gap: var(--space-5);
-    }
-    /* The dock floats over Zones and Search, so the last row of either has to
-       clear it rather than spending its life underneath. */
-    .sheet-scroll.docked {
-        padding-bottom: calc(var(--space-8) + 72px + env(safe-area-inset-bottom));
-    }
-    /* On desktop the sheet becomes a centered dialog. */
-    @media (min-width: 601px) {
-        .sheet {
-            left: 50%; bottom: auto; top: 50%;
-            transform: translate(-50%, -50%);
-            width: min(440px, calc(100vw - 48px));
-            max-height: 88vh;
-            border-radius: var(--r-xl); border-bottom: 1px solid var(--hairline);
-        }
-        .sheet-scroll { max-height: 88vh; }
-    }
-    /* The bar is the drag handle on phones, so the browser must not claim
-       the gesture for scrolling first. */
-    @media (max-width: 600px) {
-        .sheet-top { touch-action: none; cursor: grab; }
-        .sheet.dragging .sheet-top { cursor: grabbing; }
-        .sheet-scroll { touch-action: pan-y; }
-    }
-
-    /* Grabber + header travel together and stick, so a long sonos.queue never
-       scrolls the way out off the screen. The band is translucent and
-       blurred, and its bottom edge fades out — art and rows dissolve as they
-       pass underneath instead of being cut off against an opaque slab. */
-    .sheet-top {
-        --fade: 22px;
-        position: sticky; top: 0; z-index: 3;
-        margin: 0 calc(var(--space-5) * -1) calc(var(--fade) * -1);
-        padding: 0 var(--space-5) var(--fade);
-        background: var(--bg-bar);
-        backdrop-filter: blur(18px) saturate(1.3);
-        -webkit-backdrop-filter: blur(18px) saturate(1.3);
-        -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - var(--fade)), transparent);
-        mask-image: linear-gradient(to bottom, #000 calc(100% - var(--fade)), transparent);
-    }
-    .player-head {
-        display: flex; align-items: center; justify-content: space-between;
-        gap: var(--space-3);
-        padding: var(--space-2) 0 var(--space-3);
-    }
-    .p-icon { width: 38px; height: 38px; border-radius: 50%; background: var(--card-2); border: 1px solid var(--hairline); }
-    /* Keeps the title centered on sheets whose head carries no action chip. */
-    .p-icon-gap { width: 38px; flex-shrink: 0; }
-    .p-onair { text-align: center; min-width: 0; }
-    .p-onair-name { font-size: 13px; font-weight: 600; margin-top: 2px; }
-    .p-onair-sub {
-        font-size: 11.5px; color: var(--text-mute); margin-top: 2px;
-        line-height: 1.35;
-    }
 
     /* Art leads the sheet — it is the largest thing on screen, and the
        glow underneath is the same bulb glow a lit device gets. */
@@ -4151,8 +3795,5 @@
         .p-upnext, .q-row, .sp-row, .mini, .mini-btn, .p-art, .prog i, .kef-rail i {
             transition-duration: 0.001ms;
         }
-        /* The sheet's drag snap-back is an inline style, so it needs its own
-           override here rather than a transition-duration on the class. */
-        .sheet { transition: none !important; }
     }
 </style>
