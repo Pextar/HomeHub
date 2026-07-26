@@ -514,6 +514,18 @@ patterns on top. Keep these consistent if you extend it.
   - **The global tab bar still never changes shape.** Music is one
     destination among the app's nav entries; none of Search, Zones, Speakers
     or the player replace or reshape it.
+  - **Back means "up one", not "leave the module".** Music stacks up to two
+    levels inside a single route, so it holds one history entry the whole
+    time it is deeper than Home and re-takes it after each step back. An
+    Android back gesture then closes the player, then Zones, then leaves —
+    the same ladder Escape and the back chip climb. Without it, back skipped
+    all of it, which reads as the app losing your place rather than as
+    navigation.
+  - **Coming back means coming back to where you were.** A swap unmounts the
+    sheet underneath and a screen push replaces Home, so both remember their
+    scroll offset and restore it once the returning content has *laid out* —
+    one tick is too early, the content is still sizing and the offset gets
+    clamped to whatever fits at that instant.
 
   Screen contents: **Home** = Playing now + Favorites + room chips ("Manage"
   opens Zones) + a row through to Speakers. **Zones** = the grouping puck
@@ -843,17 +855,36 @@ patterns on top. Keep these consistent if you extend it.
   inventing groups KEF doesn't have or dropping the ones Sonos does.
   Consequences for the UI, all of them the "stay honest about the backend"
   rule applied:
-  - **KEF has no Zones presence and no player sheet.** Zones answers *what
-    plays together*; a KEF speaker never plays together with anything, so it
-    is not a puck and there is nothing to group. And with no queue, no
-    favorites and no group state, a full player would be an art-led sheet
-    with a volume slider in it — so there isn't one.
-  - **Its transport lives on its Speakers screen.** `views/KEFSpeakerDetail.svelte`
-    is the one place with playback in the settings pane, which the Sonos pane
-    deliberately refuses. The reason is the same one: no duplication. The
-    Sonos pane omits transport *because the player already has it*; the KEF
-    pane carries it because nothing else does. Do not read this as licence to
-    put volume back on the Sonos pane.
+  - **KEF has no Zones presence — but it does get a player.** Zones answers
+    *what plays together*; a KEF speaker never plays together with anything,
+    so it is not a puck and there is nothing to group. That much stands.
+
+    The player does not. This section used to say a KEF sheet would be "an
+    art-led sheet with a volume slider in it", so there wasn't one, and a KEF
+    room's chip pushed the Speakers screen instead — from a row of chips
+    where every neighbour lifted a player, and which was the module's worst
+    seam by a distance: two rooms that look identical, one tap apart, going
+    to completely different places. The premise was also wrong. KEF reports
+    art, title, artist, album, position and duration, and answers
+    play/pause/next/previous, volume and mute. What it hasn't got is a queue
+    and a group — two sections — not a player.
+
+    So it gets one, and it is the same object minus those two sections, plus
+    the input selector in the slot where the group's per-speaker volumes sit
+    (both answer "where is this coming out"). No scrubber: KEF's API has no
+    seek, so the position line is read-only, and inputs that report no
+    duration get no line at all — the same rule Sonos radio follows one sheet
+    over. The keyboard binds what exists (space, skip, volume, mute) and
+    leaves seek, queue and play-mode unbound rather than doing something
+    almost-right.
+  - **Its settings live on its Speakers screen, reached from the player.**
+    `views/KEFSpeakerDetail.svelte` still carries transport, because it is
+    also reachable directly from Speakers and would otherwise be a settings
+    pane you cannot play from. The player's action chip is the way *out* to
+    it — the sheet stands down first, so a screen can push without a sheet
+    ever opening one. The Sonos pane still omits transport, because its
+    player already has it; do not read this as licence to put volume back
+    there.
   - **The input selector is the "play this" control.** There is no queue to
     point somewhere, so switching to the optical input *is* the "play the TV"
     action. It renders as chips (§2), and every model shows the same list —
@@ -888,13 +919,14 @@ patterns on top. Keep these consistent if you extend it.
     it" — an LSX II has no subwoofer output, so the whole Subwoofer card is
     absent for one. Same discipline as Sonos' `capabilities`, different
     mechanism.
-  - **It shares Home, the destination row, the Home glance card and the
-    Speakers screen.** A
+  - **It shares Home, the player, the destination row, the Home glance card
+    and the Speakers screen.** A
     playing KEF speaker gets a card in "Playing now" (in both the Music view
     and `components/NowPlaying.svelte`) and a chip in the Zones row, on the
-    same `.tile.on` surface with the same §6.8 waveform — a peer, not a
-    lesser citizen. Its cards carry play/pause only, because skip has nothing
-    to step through on most of its sources. On Speakers it is its own list
+    same `.tile.on` surface with the same §6.8 waveform, opening the same
+    kind of sheet — a peer, not a lesser citizen. Its cards carry play/pause
+    only, like a Sonos card below 430px: the sheet is where the skips are.
+    On Speakers it is its own list
     under a `KEF` heading, not interleaved with the Sonos one: the rows'
     sub-lines mean different things and the screens they open answer
     different questions.

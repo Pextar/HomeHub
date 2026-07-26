@@ -20,11 +20,11 @@
     import { lockBodyScroll, unlockBodyScroll } from "../lib/scroll-lock";
     import * as sheetRun from "../lib/sheet-run";
     import type { SheetRun } from "../lib/sheet-run";
-    import { kefSourceLabel } from "../lib/kef";
+    import { kefSourceLabel, KEF_SOURCES } from "../lib/kef";
     import type {
         SonosStatus, SonosSpeakerView, SonosGroupView, SonosFavorite,
         SonosQueueItem, SonosRepeat,
-        KEFStatus, KEFSpeakerView,
+        KEFStatus, KEFSpeakerView, KEFSource,
         SpotifyStatus, SpotifyItem, SpotifyResults,
     } from "../lib/types";
 
@@ -253,6 +253,15 @@
         return Math.max(0, Math.min(1, (base + since) / total));
     }
 
+    /** Where the track has got to, extrapolated the same way the bar is. */
+    function kefPosMs(sp: KEFSpeakerView): number {
+        tick; // re-read every second so the clock counts rather than jumps
+        const total = sp.state?.duration_ms ?? 0;
+        const base = sp.state?.position_ms ?? 0;
+        const since = sp.state?.playing && sp.read_at ? Date.now() - sp.read_at : 0;
+        return total > 0 ? Math.min(total, base + since) : base + since;
+    }
+
     async function kefTogglePlay(sp: KEFSpeakerView) {
         const key = "kefplay:" + sp.id;
         if (busy[key]) return;
@@ -266,6 +275,35 @@
         } finally {
             busy[key] = false;
         }
+    }
+    function kefSkip(sp: KEFSpeakerView, dir: "next" | "previous") {
+        void run(
+            `kef${dir}:` + sp.id,
+            () => (dir === "next" ? api.kefNext(sp.id) : api.kefPrevious(sp.id)),
+            "Skip failed",
+        );
+    }
+    /** Volume the slider shows: the live drag if there is one, else the read. */
+    let kefVol = $state<Record<string, number>>({});
+    let kefVolAt: Record<string, number> = {};
+    function kefShownVol(sp: KEFSpeakerView): number {
+        const ov = kefVol[sp.id];
+        const fresh = ov !== undefined && Date.now() - (kefVolAt[sp.id] ?? 0) < 4000;
+        return fresh ? ov : (sp.state?.volume ?? 0);
+    }
+    function kefSetVolume(sp: KEFSpeakerView, v: number) {
+        const level = clampVol(v);
+        kefVol[sp.id] = level;
+        kefVolAt[sp.id] = Date.now();
+        void run("kefvol:" + sp.id, () => api.kefSetVolume(sp.id, level), "Volume failed");
+    }
+    function kefToggleMute(sp: KEFSpeakerView) {
+        const next = !sp.state?.muted;
+        void run("kefmute:" + sp.id, () => api.kefSetMute(sp.id, next), "Mute failed");
+    }
+    function kefSetSource(sp: KEFSpeakerView, source: KEFSource) {
+        if (sp.state?.source === source) return;
+        void run("kefsrc:" + sp.id, () => api.kefSetSource(sp.id, source), "Couldn't switch input");
     }
 
     // ── Where playback lands ─────────────────────────────────────────────
@@ -368,7 +406,9 @@
         busy[key] = true;
         try {
             await fn();
-            await refresh();
+            // A KEF call changes nothing on the Sonos side and vice versa, so
+            // each one re-reads only the bridge it touched.
+            await (key.startsWith("kef") ? refreshKEF() : refresh());
         } catch (e) {
             toasts.error(errTitle, (e as Error).message);
         } finally {
@@ -509,8 +549,17 @@
     type Screen = "home" | "speakers";
     let screen = $state<Screen>("home");
 
+    /**
+     * Where Home was left. Pushing to Speakers is a navigation, so it starts
+     * at the top — but coming *back* has to land where you were, or the row
+     * you tapped (which lives at the bottom of Home) is off screen the moment
+     * you return from it.
+     */
+    let homeScrollY = 0;
+
     function openSpeakers() {
         hideSheet(); // a screen replaces the sheet rather than stacking under it
+        if (screen === "home") homeScrollY = window.scrollY;
         screen = "speakers";
         toTop();
     }
@@ -518,12 +567,36 @@
         screen = "home";
         detailId = null;
         kefDetailId = null;
-        toTop();
+        restoreScroll(homeScrollY);
     }
     /** A screen change is a navigation, so it starts at the top — the same
      *  thing the shell does for a route change (App.svelte). */
     function toTop() {
         window.scrollTo({ top: 0, behavior: "instant" });
+    }
+    /**
+     * Put a scroller back where it was once the new content has *laid out*,
+     * not merely rendered. One tick isn't enough: art and rows are still
+     * sizing, so the container's scroll height is short and the offset gets
+     * clamped to whatever fits at that instant. Re-apply for a few frames
+     * until it sticks, then stop.
+     */
+    function settleScroll(target: () => Window | HTMLElement | null, top: number) {
+        if (top <= 0) return;
+        let tries = 0;
+        const at = (el: Window | HTMLElement) =>
+            el === window ? window.scrollY : (el as HTMLElement).scrollTop;
+        const step = () => {
+            const el = target();
+            if (!el) return;
+            el.scrollTo({ top, behavior: "instant" });
+            if (Math.abs(at(el) - top) > 1 && tries++ < 8) requestAnimationFrame(step);
+        };
+        void flushDOM().then(() => requestAnimationFrame(step));
+    }
+    /** Put the page back where it was, once the screen has re-rendered. */
+    function restoreScroll(top: number) {
+        settleScroll(() => window, top);
     }
 
     // Only ever one sheet at a time. Sheets *swap* — they never stack — so
@@ -537,6 +610,44 @@
     const searchOpen = $derived(sheets.open === "search");
     const zonesOpen = $derived(sheets.open === "zones");
     const sheetUp = $derived(sheetRun.isUp(sheets));
+
+    // ── Back closes one level ────────────────────────────────────────────
+    // Music stacks up to two levels inside a single route — the Speakers
+    // screen, and a sheet (or a sheet swapped over a sheet). Without this,
+    // an Android back gesture or a browser back button skips all of it and
+    // leaves the module entirely, which on a phone reads as the app losing
+    // your place rather than as navigation.
+    //
+    // One history entry is held for the whole time Music is deeper than its
+    // home screen, and re-taken after each step back while depth remains. So
+    // back always means "up one", exactly like Escape and the back chip, and
+    // the entry is handed straight back when the last level closes by any
+    // other route.
+    const navDepth = $derived(
+        (screen === "speakers" ? 1 : 0) + (sheets.open ? (sheets.under ? 2 : 1) : 0),
+    );
+    let holdsEntry = false;
+
+    $effect(() => {
+        if (navDepth > 0) {
+            if (!holdsEntry) {
+                history.pushState({ musicNav: true }, "");
+                holdsEntry = true;
+            }
+        } else if (holdsEntry) {
+            // Back at Home by some other means (Escape, a chip, a swipe) —
+            // give the entry back so the next press leaves Music for real.
+            holdsEntry = false;
+            history.back();
+        }
+    });
+
+    function onPopState() {
+        if (navDepth === 0) return; // not our entry — a real route change
+        holdsEntry = false; // the browser consumed it; the effect re-takes it
+        if (sheetUp) dropSheet();
+        else if (screen === "speakers") leaveSpeakers();
+    }
 
     // The body-scroll lock keys on *whether* a sheet is up, never on which —
     // so a swap doesn't release and retake it, which on iOS would unpin and
@@ -555,9 +666,29 @@
         dismissing = false;
         pendingBody = false;
     }
+    /**
+     * How far each sheet was scrolled when it handed over. A swap unmounts
+     * the sheet underneath, so without this, opening a room from halfway down
+     * Zones and dismissing the player would put Zones back at the top —
+     * "puts it back" has to mean where you left it, not merely which one.
+     */
+    const sheetScroll: Partial<Record<Sheet, number>> = {};
+
+    /** Note where the sheet on screen had got to, before it hands over. */
+    function rememberSheetScroll() {
+        if (sheets.open) sheetScroll[sheets.open] = scrollEl?.scrollTop ?? 0;
+    }
+    /** Put a returning sheet back where it was — `scrollEl` only points at
+     *  the incoming sheet after the flush, and only settles a frame later. */
+    function restoreSheetScroll(s: Sheet) {
+        settleScroll(() => scrollEl, sheetScroll[s] ?? 0);
+    }
+
     /** Raise a sheet over the page. Anything up is replaced, not remembered. */
     function showSheet(s: Sheet) {
+        rememberSheetScroll();
         sheets = sheetRun.raise(sheets, s);
+        sheetScroll[s] = 0; // raised fresh, not returned to
         resetSheetGesture();
     }
     /** Close the open sheet — back to the one it was raised over, if any. */
@@ -565,7 +696,8 @@
         if (!sheetUp) return;
         const back = sheetRun.dismiss(sheets);
         sheets = back;
-        if (back.open !== "player") playerGroupId = null;
+        if (back.open) restoreSheetScroll(back.open);
+        if (back.open !== "player") { playerGroupId = null; playerKefId = null; }
         queuePane = false;
         scrubSec = null;
         endPuckDrag();
@@ -580,6 +712,7 @@
         if (!sheetUp) return;
         sheets = sheetRun.closeAll(sheets);
         playerGroupId = null;
+        playerKefId = null;
         queuePane = false;
         scrubSec = null;
         endPuckDrag();
@@ -911,10 +1044,25 @@
     // ── Player sheet ─────────────────────────────────────────────────────
     // The docked mini-player expands into a full sheet. Rendered inline (not
     // via the modal stack) so it stays live against the 5s status poll.
+    //
+    // Both bridges open one. A KEF speaker used to send you to its settings
+    // screen instead — two levels away, from a chip that sat beside Sonos
+    // chips and looked exactly like them. That was the module's worst seam,
+    // and the reasoning behind it ("a full player would be an art-led sheet
+    // with two controls in it") simply wasn't true: KEF reports art, title,
+    // artist, position, duration, volume, mute and an input, and answers
+    // play/pause/next/previous. What it hasn't got is a queue and a group,
+    // so its sheet drops those two sections and keeps the rest.
     let playerGroupId = $state<string | null>(null);
-    const playerOpen = $derived(openSheet === "player" && playerGroupId !== null);
+    let playerKefId = $state<string | null>(null);
     const activeGroup = $derived(
         groups.find((g) => g.coordinator_id === playerGroupId),
+    );
+    const activeKef = $derived(
+        playerKefId ? (kefSpeakers.find((s) => s.id === playerKefId) ?? null) : null,
+    );
+    const playerOpen = $derived(
+        openSheet === "player" && (playerGroupId !== null || playerKefId !== null),
     );
     // The group the docked mini-player represents. Normally the first thing
     // playing — but a pause must not carry the transport off the screen with
@@ -989,16 +1137,31 @@
     let playerEl = $state<HTMLElement | null>(null);
 
     function openPlayer(g: SonosGroupView) {
-        // Opened from Zones, the player *replaces* that sheet and puts it back
-        // on the way out — a swap, so there is never a sheet over a sheet, and
-        // never a lost place either.
+        playerKefId = null; // one player at a time
         playerGroupId = g.coordinator_id;
-        sheets = sheetRun.swapTo(sheets, "player");
-        resetSheetGesture();
+        raisePlayer();
         // The room you just opened is also where you'd expect the next
         // favorite or search result to land, so opening the player sets the
         // destination too — one choice instead of two.
         dest = { kind: "sonos", id: g.coordinator_id };
+    }
+    /** The same gesture for a KEF room, so the chips beside it don't lie. */
+    function openKEFPlayer(sp: KEFSpeakerView) {
+        if (!sp.reachable) return void openKEFModal(sp); // fix the address instead
+        playerGroupId = null;
+        playerKefId = sp.id;
+        raisePlayer();
+        dest = { kind: "kef", id: sp.id };
+    }
+    function raisePlayer() {
+        // Opened from Zones or Search, the player *replaces* that sheet and
+        // puts it back on the way out — a swap, so there is never a sheet over
+        // a sheet, and never a lost place either. "Its place" includes how far
+        // it was scrolled, which is why the outgoing offset is kept.
+        rememberSheetScroll();
+        sheets = sheetRun.swapTo(sheets, "player");
+        sheetScroll.player = 0;
+        resetSheetGesture();
     }
     function closePlayer() {
         if (openSheet !== "player") return;
@@ -1214,9 +1377,33 @@
             return;
         }
 
+        if (field && !slider) return; // typing, not controlling
+
+        // A KEF player answers the keys it can: play/pause, skip, volume. It
+        // has no seek, no queue and no play modes, so those keys stay unbound
+        // here rather than doing something almost-right.
+        const kf = activeKef;
+        if (kf) {
+            if ((key === " " || key === "k") && !(key === " " && onControl)) {
+                e.preventDefault();
+                void kefTogglePlay(kf);
+                return;
+            }
+            if (slider) return;
+            switch (key) {
+                case "ArrowRight": e.preventDefault(); kefSkip(kf, "next"); break;
+                case "ArrowLeft": e.preventDefault(); kefSkip(kf, "previous"); break;
+                case "ArrowUp": e.preventDefault(); kefSetVolume(kf, kefShownVol(kf) + 5); break;
+                case "ArrowDown": e.preventDefault(); kefSetVolume(kf, kefShownVol(kf) - 5); break;
+                case "n": kefSkip(kf, "next"); break;
+                case "p": kefSkip(kf, "previous"); break;
+                case "m": kefToggleMute(kf); break;
+            }
+            return;
+        }
+
         const g = activeGroup;
         if (!g) return;
-        if (field && !slider) return; // typing, not controlling
 
         // Space on a focused button belongs to that button, not to us.
         if ((key === " " || key === "k") && !(key === " " && onControl)) {
@@ -1260,7 +1447,8 @@
     // to. Close instead of leaving an empty sheet — and, more importantly,
     // a permanently locked body scroll.
     $effect(() => {
-        if (playerOpen && !activeGroup) closePlayer();
+        if (playerOpen && playerGroupId !== null && !activeGroup) closePlayer();
+        if (playerOpen && playerKefId !== null && !activeKef) closePlayer();
     });
     // Move focus into the sheet when it opens so keyboard users land there.
     $effect(() => {
@@ -1909,7 +2097,7 @@
     let noImage = $state<Record<string, boolean>>({});
 </script>
 
-<svelte:window onkeydown={onWindowKey} />
+<svelte:window onkeydown={onWindowKey} onpopstate={onPopState} />
 
 <!-- The live waveform — the music module's motif for "actually playing",
      used everywhere a plain status dot would otherwise sit. -->
@@ -2102,12 +2290,10 @@
                     </div>
                 {/each}
 
-                <!-- KEF speakers that are playing, in the same grid. They
-                     carry a smaller card by necessity, not by choice: there
-                     is no player sheet behind them to open, so the card is
-                     the control rather than a way in to one. Tapping the body
-                     goes to that speaker's screen, where its volume, source
-                     and settings are. -->
+                <!-- KEF speakers that are playing, in the same grid and with
+                     the same card. It is a way in to a player like every
+                     other card here — the sheet it opens drops the queue and
+                     the group, which KEF hasn't got, and keeps the rest. -->
                 {#each kefPlaying as sp (sp.id)}
                     {@const p = kefProgress(sp)}
                     <div
@@ -2117,7 +2303,7 @@
                     >
                         <button
                             class="now-open"
-                            onclick={() => { openSpeakers(); openKEFSpeaker(sp); }}
+                            onclick={() => openKEFPlayer(sp)}
                         >
                             {#if sp.state?.track?.art_uri}
                                 <img class="now-art" src={sp.state.track.art_uri} alt="" loading="lazy" />
@@ -2134,10 +2320,8 @@
                                 </span>
                             </span>
                         </button>
-                        <!-- Play/pause only: KEF has no queue, so there is
-                             nothing for prev/next to step through on most
-                             sources, and the speaker's screen carries the
-                             skips where they do apply. -->
+                        <!-- Play/pause only, like the Sonos card below 430px:
+                             the sheet is where the skips live. -->
                         <div class="card-transport">
                             <button
                                 class="mini-btn on"
@@ -2225,13 +2409,14 @@
                 </button>
             {/each}
             <!-- KEF speakers are rooms that play too, so they belong in this
-                 row — they just open their own screen instead of the player
-                 sheet, which is where all their controls live. -->
+                 row — and they open a player, like every chip beside them.
+                 They are absent from Zones instead, which is honest: Zones
+                 answers what plays together, and a KEF speaker never does. -->
             {#each kefReachable as sp (sp.id)}
                 <button
                     class="room-chip"
                     class:on={sp.state?.playing}
-                    onclick={() => { openSpeakers(); openKEFSpeaker(sp); }}
+                    onclick={() => openKEFPlayer(sp)}
                 >
                     {#if sp.state?.playing}
                         {@render wave()}
@@ -3016,6 +3201,172 @@
         >
             {@render sheetHead("Search", spotify?.connected ? "Spotify" : "")}
             {@render searchBody()}
+        </div>
+    </div>
+{/if}
+
+<!-- ── KEF player sheet ─────────────────────────────────────────────
+     The same object as the Sonos player, minus the two things KEF hasn't
+     got: a queue and a group. What it has instead is the input selector,
+     which is the question a KEF speaker actually raises. Every room chip on
+     Home now opens a player — the chips sit side by side and looked
+     identical, so sending one of them to a settings screen two levels away
+     was the module's worst seam (DESIGN.md §15). -->
+{#if playerOpen && activeKef}
+    {@const sp = activeKef}
+    {@const st = sp.state}
+    {@const p = kefProgress(sp)}
+    {@const durMs = st?.duration_ms ?? 0}
+    <div class="scrim" transition:fade={{ duration: dur(200) }} onclick={closePlayer} aria-hidden="true"></div>
+    <div
+        class="sheet"
+        class:dragging
+        role="dialog"
+        aria-modal="true"
+        aria-label="Now playing"
+        tabindex="-1"
+        bind:this={playerEl}
+        style:transform={dragY > 0 ? `translateY(${dragY}px)` : ""}
+        style:opacity={dragY > 0 ? Math.max(0.4, 1 - dragY / 300) : undefined}
+        style:transition={dragging
+            ? "none"
+            : dragY > 0
+              ? "transform 0.22s ease-in, opacity 0.22s ease-in"
+              : "transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)"}
+        in:sheet={{}}
+        out:sheet={{ instant: dismissing }}
+    >
+        <div
+            class="sheet-scroll"
+            role="none"
+            bind:this={scrollEl}
+            onpointerdown={onBodyPointerDown}
+            onpointermove={onBodyPointerMove}
+            onpointerup={onBodyPointerUp}
+            onpointercancel={onBodyPointerCancel}
+        >
+            <div
+                class="sheet-top"
+                role="none"
+                onpointerdown={onTopPointerDown}
+                onpointermove={onTopPointerMove}
+                onpointerup={onTopPointerUp}
+                onpointercancel={cancelDrag}
+            >
+                <div class="grabber" aria-hidden="true"></div>
+                <header class="player-head">
+                    <button class="icon-btn p-icon" aria-label="Collapse player" onclick={closePlayer}>
+                        <Icon name="chevronDown" size={18} />
+                    </button>
+                    <div class="p-onair">
+                        <div class="eyrow">Playing on</div>
+                        <div class="p-onair-name">{sp.name}</div>
+                    </div>
+                    <!-- Tone, EQ and the rest are the speaker's own settings,
+                         and they live on its screen. This is the way there,
+                         and the sheet stands down so a screen can push. -->
+                    <button
+                        class="icon-btn p-icon"
+                        aria-label="{sp.name} settings"
+                        onclick={() => { hideSheet(); openSpeakers(); openKEFSpeaker(sp); }}
+                    >
+                        <Icon name="sliders" size={17} />
+                    </button>
+                </header>
+            </div>
+
+            <div class="p-art">
+                {#if st?.track?.art_uri}
+                    <img src={st.track.art_uri} alt="" draggable="false" />
+                {:else}
+                    <div class="p-art-ph">[ album art ]</div>
+                {/if}
+            </div>
+
+            <div class="p-meta">
+                {#if st?.track?.title}
+                    <div class="p-title">{st.track.title}</div>
+                    <div class="p-sub">
+                        {[st.track.artist, st.track.album].filter(Boolean).join(" · ")
+                            || kefSourceLabel(st.source)}
+                    </div>
+                {:else if !st?.powered_on}
+                    <div class="p-title idle">Standby</div>
+                    <div class="p-sub">Press play to wake it.</div>
+                {:else}
+                    <div class="p-title idle">{kefNowLine(sp)}</div>
+                    <div class="p-sub">Pick an input below, or search Spotify.</div>
+                {/if}
+            </div>
+
+            <!-- A read-only line, not a scrubber: KEF's API has no seek. The
+                 physical inputs and live streams report no duration at all
+                 and get no line rather than a made-up one — the same rule
+                 Sonos radio follows one sheet over. -->
+            {#if durMs > 0}
+                <div class="p-scrub">
+                    <span class="kef-rail" aria-hidden="true"><i style:width="{p * 100}%"></i></span>
+                    <div class="p-times mono">
+                        <span>{fmtSecs(kefPosMs(sp) / 1000)}</span><span>{fmtSecs(durMs / 1000)}</span>
+                    </div>
+                </div>
+            {:else if st?.track?.title}
+                <div class="p-live mono">no track position on this input</div>
+            {/if}
+
+            <div class="p-transport">
+                <button class="icon-btn t-btn" aria-label="Previous track"
+                    disabled={busy["kefprevious:" + sp.id]} onclick={() => kefSkip(sp, "previous")}>
+                    <Icon name="skipPrev" size={22} />
+                </button>
+                <button class="p-play" class:playing={st?.playing}
+                    aria-label={st?.playing ? "Pause" : "Play"} title="Play / pause (space)"
+                    disabled={busy["kefplay:" + sp.id]} onclick={() => kefTogglePlay(sp)}>
+                    <Icon name={st?.playing ? "pause" : "play"} size={26} />
+                </button>
+                <button class="icon-btn t-btn" aria-label="Next track"
+                    disabled={busy["kefnext:" + sp.id]} onclick={() => kefSkip(sp, "next")}>
+                    <Icon name="skipNext" size={22} />
+                </button>
+            </div>
+
+            <div class="p-speakers">
+                <div class="eyrow">Volume</div>
+                <div class="member">
+                    <button class="icon-btn m-mute" aria-label={st?.muted ? "Unmute" : "Mute"}
+                        aria-pressed={st?.muted ?? false}
+                        disabled={busy["kefmute:" + sp.id]} onclick={() => kefToggleMute(sp)}>
+                        <Icon name={st?.muted ? "volumeOff" : "volume"} size={17} />
+                    </button>
+                    <span class="m-name" class:muted={st?.muted}>{sp.name}</span>
+                    <input type="range" min="0" max="100" step="1"
+                        aria-label="Volume for {sp.name}"
+                        value={kefShownVol(sp)}
+                        oninput={(e) => (kefVol[sp.id] = e.currentTarget.valueAsNumber)}
+                        onchange={(e) => kefSetVolume(sp, e.currentTarget.valueAsNumber)} />
+                    <span class="vol-num mono">{kefShownVol(sp)}</span>
+                </div>
+            </div>
+
+            <!-- The question a KEF speaker raises that a Sonos zone doesn't:
+                 which input. It sits where the group's member volumes sit on
+                 the other sheet, because it answers the same "where is this
+                 coming out" question. -->
+            <div class="p-speakers">
+                <div class="eyrow">Input</div>
+                <div class="src-row">
+                    {#each KEF_SOURCES as src (src.value)}
+                        <button class="chip" class:on={st?.source === src.value}
+                            aria-pressed={st?.source === src.value}
+                            disabled={busy["kefsrc:" + sp.id]}
+                            onclick={() => kefSetSource(sp, src.value)}>{src.label}</button>
+                    {/each}
+                </div>
+                <p class="hint">
+                    No queue and no grouping — a KEF speaker plays alone, so
+                    there is nothing to line up behind this or to play it with.
+                </p>
+            </div>
         </div>
     </div>
 {/if}
@@ -4322,6 +4673,27 @@
 
     .p-speakers { display: flex; flex-direction: column; gap: 2px; }
     .p-speakers .eyrow { margin-bottom: var(--space-1); }
+
+    /* ── KEF player ──
+       A read-only progress line, because KEF's API has no seek — the Sonos
+       sheet's scrubber is a range input in the same slot. */
+    .kef-rail {
+        display: block; height: 6px; border-radius: 3px;
+        background: var(--card-3);
+        overflow: hidden;
+    }
+    .kef-rail i {
+        display: block; height: 100%;
+        background: var(--on);
+        /* Matches the 1s position tick, so the fill creeps instead of
+           stepping. */
+        transition: width 1s linear;
+    }
+    /* The input selector, where the group's member rows sit on the other
+       sheet — it answers the same "where is this coming out" question. */
+    .src-row { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+    .src-row .chip { flex-shrink: 0; }
+    .p-speakers .hint { margin-top: var(--space-2); }
     .m-icon {
         width: 36px; height: 36px; flex-shrink: 0;
         display: grid; place-items: center; color: var(--text-mute);
@@ -4393,7 +4765,7 @@
     @media (prefers-reduced-motion: reduce) {
         .wave i { animation: none; height: 8px; }
         .fav-art, .now-card, .puck, .p-play,
-        .p-upnext, .q-row, .sp-row, .mini, .mini-btn, .p-art, .prog i {
+        .p-upnext, .q-row, .sp-row, .mini, .mini-btn, .p-art, .prog i, .kef-rail i {
             transition-duration: 0.001ms;
         }
         /* The sheet's drag snap-back is an inline style, so it needs its own
