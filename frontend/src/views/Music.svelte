@@ -21,6 +21,8 @@
     import * as sheetRun from "../lib/sheet-run";
     import type { SheetRun } from "../lib/sheet-run";
     import { kefSourceLabel, KEF_SOURCES } from "../lib/kef";
+    import { secs, trimClock, fmtSecs, toClock } from "../lib/music/time";
+    import { settleScroll, restoreScroll, toTop } from "../lib/music/scroll";
     import type {
         SonosStatus, SonosSpeakerView, SonosGroupView, SonosFavorite,
         SonosQueueItem, SonosRepeat,
@@ -619,36 +621,6 @@
         kefDetailId = null;
         restoreScroll(homeScrollY);
     }
-    /** A screen change is a navigation, so it starts at the top — the same
-     *  thing the shell does for a route change (App.svelte). */
-    function toTop() {
-        window.scrollTo({ top: 0, behavior: "instant" });
-    }
-    /**
-     * Put a scroller back where it was once the new content has *laid out*,
-     * not merely rendered. One tick isn't enough: art and rows are still
-     * sizing, so the container's scroll height is short and the offset gets
-     * clamped to whatever fits at that instant. Re-apply for a few frames
-     * until it sticks, then stop.
-     */
-    function settleScroll(target: () => Window | HTMLElement | null, top: number) {
-        if (top <= 0) return;
-        let tries = 0;
-        const at = (el: Window | HTMLElement) =>
-            el === window ? window.scrollY : (el as HTMLElement).scrollTop;
-        const step = () => {
-            const el = target();
-            if (!el) return;
-            el.scrollTo({ top, behavior: "instant" });
-            if (Math.abs(at(el) - top) > 1 && tries++ < 8) requestAnimationFrame(step);
-        };
-        void flushDOM().then(() => requestAnimationFrame(step));
-    }
-    /** Put the page back where it was, once the screen has re-rendered. */
-    function restoreScroll(top: number) {
-        settleScroll(() => window, top);
-    }
-
     // Only ever one sheet at a time. Sheets *swap* — they never stack — so
     // there is only ever one scrim, one Escape, one thing to swipe away. The
     // rule and its invariants live in `lib/sheet-run.ts`, with tests, because
@@ -1548,31 +1520,6 @@
     // Speakers outside the active group that could join it.
     function joinables(g: SonosGroupView): SonosSpeakerView[] {
         return reachable.filter((s) => !g.member_ids.includes(s.id));
-    }
-
-    // "0:03:12" → seconds; "" / undefined → 0.
-    function secs(t?: string): number {
-        if (!t) return 0;
-        const p = t.split(":").map(Number);
-        return p.reduce((acc, n) => acc * 60 + (Number.isFinite(n) ? n : 0), 0);
-    }
-    // "0:03:12" → "3:12" (Sonos always sends leading hours)
-    function clock(t?: string): string {
-        if (!t) return "";
-        return t.replace(/^0:0?/, "");
-    }
-    // seconds → "3:12" for display
-    function fmtSecs(t: number): string {
-        const total = Math.max(0, Math.round(t));
-        const s = String(total % 60).padStart(2, "0");
-        const m = Math.floor(total / 60);
-        if (m < 60) return `${m}:${s}`;
-        return `${Math.floor(m / 60)}:${String(m % 60).padStart(2, "0")}:${s}`;
-    }
-    // seconds → "0:03:12", the H:MM:SS form the seek endpoint takes
-    function toClock(t: number): string {
-        const total = Math.max(0, Math.round(t));
-        return `${Math.floor(total / 3600)}:${String(Math.floor(total / 60) % 60).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
     }
 
     // ── Scrubbing ────────────────────────────────────────────────────────
@@ -3570,7 +3517,7 @@
                                         {#if item.artist}<span class="q-sub">{item.artist}</span>{/if}
                                     </span>
                                     {#if item.duration}
-                                        <span class="q-dur mono">{clock(item.duration)}</span>
+                                        <span class="q-dur mono">{trimClock(item.duration)}</span>
                                     {/if}
                                 </button>
                                 <button class="icon-btn q-rm"
