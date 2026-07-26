@@ -13,7 +13,6 @@
     import { toasts, route, bottomBar } from "../lib/stores.svelte";
     import { onLive } from "../lib/live";
     import { openModal } from "../lib/modal.svelte";
-    import { copyText } from "../lib/clipboard";
     import { fly, fade, scale } from "svelte/transition";
     import { cubicOut } from "svelte/easing";
     import { dur, sheet } from "../lib/motion";
@@ -27,10 +26,12 @@
     import { createBusy } from "../lib/music/busy.svelte";
     import { createSonosBridge, NEXT_REPEAT, repeatLabel } from "../lib/music/sonos.svelte";
     import { createKEFBridge } from "../lib/music/kef.svelte";
+    import { createDestination } from "../lib/music/destination.svelte";
+    import { createSearchHistory } from "../lib/music/history.svelte";
+    import { createSpotify } from "../lib/music/spotify.svelte";
     import type {
         SonosSpeakerView, SonosGroupView, SonosFavorite,
-        KEFSpeakerView,
-        SpotifyStatus, SpotifyItem, SpotifyResults,
+        KEFSpeakerView, SpotifyItem,
     } from "../lib/types";
 
     // Both bridges, as state. They sit beside each other rather than one
@@ -56,47 +57,8 @@
     // sonos.queue; a KEF speaker through Spotify Connect, because its own API can
     // play and pause but has nothing to be handed. The two are not
     // interchangeable, which is exactly why the destination says which it is.
-    type Dest = { kind: "sonos" | "kef"; id: string };
-    let dest = $state<Dest | null>(null);
-    /** The Sonos coordinator, when the destination is one. Favorites and the
-     *  sonos.queue exist only on that side, so they read this and not `dest`. */
-    const sonosTarget = $derived(dest?.kind === "sonos" ? dest.id : null);
-    /** The KEF speaker, when the destination is one. */
-    const kefTarget = $derived(dest?.kind === "kef" ? dest.id : null);
-    const kefTargetSpeaker = $derived(kef.byId(kefTarget));
-    /** Everywhere music can be sent, in the order the destination row lists
-     *  them. Unreachable KEF speakers are left out: they have no Connect
-     *  device while they're off the network. */
-    const destinations = $derived<Dest[]>([
-        ...sonos.groups.map((g) => ({ kind: "sonos" as const, id: g.coordinator_id })),
-        ...kef.reachable.map((s) => ({ kind: "kef" as const, id: s.id })),
-    ]);
-    function destName(d: Dest): string {
-        if (d.kind === "kef") return kef.byId(d.id)?.name ?? "Speaker";
-        const g = sonos.groupById(d.id);
-        return g ? sonos.groupTitle(g) : "Zone";
-    }
-    const isDest = (d: Dest) => dest?.kind === d.kind && dest.id === d.id;
-    /** What to call the destination in a toast or the one-destination label. */
-    const destLabel = $derived(dest ? destName(dest) : "");
-    /** Stable key for per-destination state (the search history). */
-    const destKey = $derived(dest ? `${dest.kind}:${dest.id}` : null);
-
-    // Keep the destination pointing at something that exists, and prefer a
-    // room that is already playing — "play this too" almost always means the
-    // room the music is coming out of. Runs on both bridges' polls, so a KEF
-    // speaker that answers first is a perfectly good default in a house
-    // without Sonos.
-    $effect(() => {
-        const list = destinations;
-        if (dest && list.some((d) => isDest(d))) return;
-        const livePick = sonos.playingGroups[0] && {
-            kind: "sonos" as const,
-            id: sonos.playingGroups[0].coordinator_id,
-        };
-        const kefPick = kef.playing[0] && { kind: "kef" as const, id: kef.playing[0].id };
-        dest = livePick ?? kefPick ?? list[0] ?? null;
-    });
+    const destination = createDestination(sonos, kef);
+    $effect(() => destination.settle());
 
     onMount(() => {
         void sonos.refresh();
@@ -190,7 +152,7 @@
     // Favorites play on the chip-selected destination, except inside the
     // player sheet, where the group being viewed is the obvious one. They are
     // a Sonos household list, so the destination here is always a coordinator.
-    function playFavorite(f: SonosFavorite, target: string | null = sonosTarget) {
+    function playFavorite(f: SonosFavorite, target: string | null = destination.sonosTarget) {
         if (!target) return;
         const g = sonos.groupById(target);
         void startPlayback(
@@ -751,7 +713,7 @@
         // The room you just opened is also where you'd expect the next
         // favorite or search result to land, so opening the player sets the
         // destination too — one choice instead of two.
-        dest = { kind: "sonos", id: g.coordinator_id };
+        destination.current = { kind: "sonos", id: g.coordinator_id };
     }
     /** The same gesture for a KEF room, so the chips beside it don't lie. */
     function openKEFPlayer(sp: KEFSpeakerView) {
@@ -759,7 +721,7 @@
         playerGroupId = null;
         playerKefId = sp.id;
         raisePlayer();
-        dest = { kind: "kef", id: sp.id };
+        destination.current = { kind: "kef", id: sp.id };
     }
     function raisePlayer() {
         // Opened from Zones or Search, the player *replaces* that sheet and
@@ -1196,7 +1158,7 @@
     async function enqueue(
         item: { uri: string; title?: string; service?: string; metadata?: string },
         next: boolean,
-        target: string | null = sonosTarget,
+        target: string | null = destination.sonosTarget,
     ) {
         if (!target) return;
         const added = await sonos.enqueue(target, item, next);
@@ -1242,28 +1204,10 @@
     }
 
     // ── Spotify search ───────────────────────────────────────────────────
-    let spotify = $state<SpotifyStatus | null>(null);
-    let spotifySetup = $state(false); // client-ID form expanded
-    let clientId = $state("");
-    let spotifySaving = $state(false);
-    let query = $state("");
-    let searching = $state(false);
-    let results = $state<SpotifyResults | null>(null);
-    let kindFilter = $state<"tracks" | "albums" | "playlists">("tracks");
-    let myPlaylists = $state<SpotifyItem[]>([]);
-    let myPlaylistsLoaded = false;
-
-    async function loadSpotify() {
-        try {
-            spotify = await api.spotifyStatus();
-            if (spotify.connected && !myPlaylistsLoaded) {
-                myPlaylistsLoaded = true;
-                myPlaylists = await api.spotifyMyPlaylists().catch(() => []);
-            }
-        } catch {
-            spotify = null; // integration unavailable — hide the card
-        }
-    }
+    // Keyed by the destination, so "recent searches" in the kitchen aren't the
+    // bedroom's. A single-room home only ever has one key.
+    const recents = createSearchHistory(() => destination.key);
+    const spotify = createSpotify((q) => recents.add(q));
 
     // The OAuth callback bounces back to /#/music?spotify=… — surface the
     // outcome once, then clean the query off the URL.
@@ -1276,100 +1220,32 @@
             toasts.error("Spotify login failed", q.spotify_error);
             route.go("music");
         }
-        // Search now lives behind an icon, and the round trip to Spotify ends
+        // Search lives behind an icon, and the round trip to Spotify ends
         // here — land back on the sheet the user left, not on a Home screen
         // with no sign of what just happened.
         if (q.spotify || q.spotify_error) openSearch();
-        void loadSpotify();
+        void spotify.load();
     });
 
-    async function saveClientId() {
-        if (spotifySaving || !clientId.trim()) return;
-        spotifySaving = true;
-        try {
-            await api.spotifySetConfig(clientId.trim());
-            spotifySetup = false;
-            await loadSpotify();
-            toasts.success("Client ID saved", "Now connect your Spotify account.");
-        } catch (e) {
-            toasts.error("Save failed", (e as Error).message);
-        } finally {
-            spotifySaving = false;
-        }
-    }
-
-    let pasteUrl = $state("");
-    let finishing = $state(false);
-    let copied = $state(false);
-
-    async function copyRedirect() {
-        if (!spotify) return;
-        if (await copyText(spotify.redirect_uri)) {
-            copied = true;
-            setTimeout(() => (copied = false), 1800);
-        }
-    }
-
-    async function connectSpotify() {
-        // Manual flow: keep this page open — the consent tab is opened
-        // synchronously (before the await) so popup blockers allow it,
-        // then pointed at the authorize URL once it arrives.
-        const tab = spotify?.manual ? window.open("about:blank", "_blank") : null;
-        try {
-            const { url } = await api.spotifyLoginURL();
-            if (spotify?.manual) {
-                if (tab) tab.location.href = url;
-                else window.location.href = url; // popup blocked — same tab still works
-            } else {
-                window.location.href = url; // bounces back here automatically
-            }
-        } catch (e) {
-            tab?.close();
-            toasts.error("Couldn't start Spotify login", (e as Error).message);
-        }
-    }
-
-    async function finishConnect() {
-        if (finishing || !pasteUrl.trim()) return;
-        finishing = true;
-        try {
-            await api.spotifyExchange(pasteUrl);
-            pasteUrl = "";
-            toasts.success("Spotify connected");
-            await loadSpotify();
-        } catch (e) {
-            toasts.error("Couldn't finish the login", (e as Error).message);
-        } finally {
-            finishing = false;
-        }
-    }
-
+    /**
+     * Disconnecting drops the tokens, so the card falls back to the connect
+     * page and the only way forward is the full OAuth flow again. An
+     * accidental tap must not strand the user there — hence the confirm, which
+     * lives here rather than in the store: raising a dialog is a surface's job.
+     */
     async function disconnectSpotify() {
-        // Confirm first: disconnecting drops the tokens, so the card drops
-        // back to the connect page and the only way back is the full OAuth
-        // flow again. An accidental tap must not strand the user there.
-        const who = spotify?.display_name ? `"${spotify.display_name}"` : "Your Spotify account";
+        const who = spotify.status?.display_name
+            ? `"${spotify.status.display_name}"`
+            : "Your Spotify account";
         const ok = await openModal<boolean>(ConfirmModal, {
             title: "Disconnect Spotify?",
             message: `${who} will be unlinked. To search again you'll need to reconnect through Spotify.`,
             confirmLabel: "Disconnect",
             danger: true,
         });
-        if (!ok) return;
-        try {
-            await api.spotifyDisconnect();
-            results = null;
-            query = "";
-            myPlaylists = [];
-            myPlaylistsLoaded = false;
-            await loadSpotify();
-        } catch (e) {
-            toasts.error("Disconnect failed", (e as Error).message);
-        }
+        if (ok) await spotify.disconnect();
     }
 
-    let searchTimer: ReturnType<typeof setTimeout> | undefined;
-    let searchSeq = 0;
     let searchEl = $state<HTMLInputElement | null>(null);
 
     // Focus the box on the way into Search — but only where a keyboard is
@@ -1380,117 +1256,36 @@
         // The box may not be in the DOM yet — this can run on the way in.
         void flushDOM().then(() => searchEl?.focus());
     }
-    function onQueryInput() {
-        clearTimeout(searchTimer);
-        searchTimer = setTimeout(doSearch, 400);
-    }
     // Enter runs the search now instead of waiting out the debounce; Escape
     // clears the box rather than closing something behind it.
     function onQueryKey(e: KeyboardEvent) {
         if (e.key === "Enter") {
             e.preventDefault();
-            clearTimeout(searchTimer);
-            const q = query.trim();
-            if (q) addToHistory(q);
-            void doSearch();
-        } else if (e.key === "Escape" && query) {
+            spotify.runNow();
+        } else if (e.key === "Escape" && spotify.query) {
             e.stopPropagation();
-            clearQuery();
+            spotify.clearQuery();
+            searchEl?.focus();
         }
-    }
-    function clearQuery() {
-        clearTimeout(searchTimer);
-        searchSeq++; // drop an in-flight search
-        query = "";
-        results = null;
-        searching = false;
-        searchEl?.focus();
-    }
-    async function doSearch() {
-        const q = query.trim();
-        const seq = ++searchSeq;
-        if (!q) { results = null; searching = false; return; }
-        searching = true;
-        try {
-            const r = await api.spotifySearch(q, 8);
-            if (seq !== searchSeq) return;
-            results = r;
-        } catch (e) {
-            if (seq !== searchSeq) return;
-            toasts.error("Search failed", (e as Error).message);
-        } finally {
-            if (seq === searchSeq) searching = false;
-        }
-    }
-
-    // ── Search history ───────────────────────────────────────────────────
-    // Keyed by the room a search is played on (the destination), since "recent
-    // searches" reads differently in the kitchen than in the bedroom. A
-    // single-room home only ever has one key, which collapses this to a
-    // plain, unscoped history without any extra code path.
-    const HISTORY_KEY = "music.searchHistory.v1";
-    const HISTORY_MAX = 8;
-    function loadHistory(): Record<string, string[]> {
-        try {
-            const raw = localStorage.getItem(HISTORY_KEY);
-            return raw ? JSON.parse(raw) : {};
-        } catch { return {}; }
-    }
-    let searchHistory = $state<Record<string, string[]>>(loadHistory());
-    $effect(() => {
-        try { localStorage.setItem(HISTORY_KEY, JSON.stringify(searchHistory)); }
-        catch { /* private mode */ }
-    });
-    // Falls back to one shared bucket when there's no destination yet (e.g. no
-    // speakers loaded), so history still works before speakers are set up.
-    const historyKey = $derived(destKey ?? "_all");
-    const historyList = $derived(searchHistory[historyKey] ?? []);
-    /** The same list for the player's row, kept to a row rather than a list. */
-    const playerRecents = $derived(historyList.slice(0, 6));
-
-    function addToHistory(q: string) {
-        const key = historyKey;
-        const rest = (searchHistory[key] ?? []).filter((x) => x.toLowerCase() !== q.toLowerCase());
-        searchHistory = { ...searchHistory, [key]: [q, ...rest].slice(0, HISTORY_MAX) };
-    }
-    function removeHistoryEntry(q: string) {
-        const key = historyKey;
-        searchHistory = {
-            ...searchHistory,
-            [key]: (searchHistory[key] ?? []).filter((x) => x !== q),
-        };
-    }
-    function clearHistory() {
-        const key = historyKey;
-        const next = { ...searchHistory };
-        delete next[key];
-        searchHistory = next;
     }
     function runHistoryQuery(q: string) {
-        clearTimeout(searchTimer);
-        query = q;
-        addToHistory(q);
-        void doSearch();
+        spotify.runQuery(q);
         searchEl?.focus();
     }
 
-    const shownItems = $derived<SpotifyItem[]>(
-        results ? results[kindFilter] : myPlaylists,
-    );
-
     // A search result plays on whichever destination is selected. Same tap,
-    // same body, two roads: a Sonos group loads it into its sonos.queue and streams
+    // same body, two roads: a Sonos group loads it into its queue and streams
     // it with the household's linked account, while a KEF speaker is started
     // through Spotify Connect — its own API has no way to be handed content.
     function playItem(item: SpotifyItem) {
-        const d = dest;
+        const d = destination.current;
         if (!d) return;
         const body = { service: "Spotify", uri: item.uri, title: item.name };
         void startPlayback(
             "item:" + item.uri,
             () => (d.kind === "kef" ? api.kefPlayItem(d.id, body) : api.sonosPlayItem(d.id, body)),
             item.name,
-            destName(d),
+            destination.name(d),
             d.kind,
         );
     }
@@ -1561,7 +1356,7 @@
         // Same reasoning as openPlayer: the speaker you just opened is where
         // you'd expect the next search result to land, so opening it sets the
         // destination too. Only when it can actually take one.
-        if (sp.reachable) dest = { kind: "kef", id: sp.id };
+        if (sp.reachable) destination.current = { kind: "kef", id: sp.id };
     }
 
     // From 1024px up the list and the selected speaker's settings sit side by
@@ -1730,7 +1525,7 @@
                     <span class="quiet-sub">
                         <span class="mono">{readyCount}</span>
                         speaker{readyCount === 1 ? "" : "s"} ready —
-                        {sonos.favorites.length > 0 && !kefTargetSpeaker
+                        {sonos.favorites.length > 0 && !destination.kefSpeaker
                             ? "start a favorite below"
                             : "pick a room to open it"}
                     </span>
@@ -1875,7 +1670,7 @@
                 <div class="eyrow">Favorites</div>
                 {@render targetRow()}
             </div>
-            {#if kefTargetSpeaker}
+            {#if destination.kefSpeaker}
                 <!-- "My Sonos" is a household list, and a KEF speaker has no
                      way to play an entry from it. A rail of disabled cards
                      would be a row of dead controls (§15), so the section
@@ -1886,7 +1681,7 @@
                     <span class="quiet-meta">
                         <span class="quiet-title">Favorites need a Sonos room</span>
                         <span class="quiet-sub">
-                            They come out of your Sonos household, so {kefTargetSpeaker.name} can't
+                            They come out of your Sonos household, so {destination.kefSpeaker.name} can't
                             play one — pick a Sonos room above{#if spotify?.connected}, or search to
                             play there{/if}.
                         </span>
@@ -1900,7 +1695,7 @@
             {:else}
                 <div class="favs h-scroll">
                     {#each sonos.favorites as f (f.id)}
-                        {@render favCard(f, sonosTarget)}
+                        {@render favCard(f, destination.sonosTarget)}
                     {/each}
                 </div>
             {/if}
@@ -2285,25 +2080,25 @@
      that exists on both sides is still tellable apart without giving every
      chip a badge it doesn't need. -->
 {#snippet targetRow()}
-    {#if destinations.length > 1}
+    {#if destination.list.length > 1}
         <div class="fav-targets" role="radiogroup" aria-label="Play on">
             <span class="t-label">Play on</span>
-            {#each destinations as d, i (d.kind + d.id)}
+            {#each destination.list as d, i (d.kind + d.id)}
                 {#if i === sonos.groups.length && sonos.groups.length > 0}
                     <span class="t-label">KEF</span>
                 {/if}
-                {@const on = isDest(d)}
+                {@const on = destination.is(d)}
                 <button class="chip" class:on role="radio" aria-checked={on}
-                    aria-label={`Play on ${destName(d)}${d.kind === "kef" ? " (KEF)" : ""}`}
-                    onclick={() => (dest = d)}>
-                    {destName(d)}
+                    aria-label={`Play on ${destination.name(d)}${d.kind === "kef" ? " (KEF)" : ""}`}
+                    onclick={() => (destination.current = d)}>
+                    {destination.name(d)}
                 </button>
             {/each}
         </div>
-    {:else if destinations.length === 1}
+    {:else if destination.list.length === 1}
         <div class="fav-targets">
             <span class="t-label">Play on</span>
-            <span class="t-one">{destName(destinations[0])}</span>
+            <span class="t-one">{destination.name(destination.list[0])}</span>
         </div>
     {/if}
 {/snippet}
@@ -2312,7 +2107,7 @@
     <!-- ── Spotify search ──────────────────────────────────────────── -->
     {#if spotify}
         <section class="card">
-            {#if !spotify.configured || spotifySetup}
+            {#if !spotify.status?.configured || spotify.setupOpen}
                 <div class="card-header"><h2>Spotify search</h2></div>
                 <p class="sp-help">
                     Search Spotify's catalog and play straight to your speakers.
@@ -2328,40 +2123,40 @@
                     <li>
                         Give the app this Redirect URI:
                         <span class="sp-redirect">
-                            <code class="mono">{spotify.redirect_uri}</code>
-                            <button type="button" class="chip" onclick={copyRedirect}>
-                                <Icon name={copied ? "check" : "copy"} size={13} />
-                                {copied ? "Copied" : "Copy"}
+                            <code class="mono">{spotify.status?.redirect_uri}</code>
+                            <button type="button" class="chip" onclick={() => spotify.copyRedirect()}>
+                                <Icon name={spotify.copied ? "check" : "copy"} size={13} />
+                                {spotify.copied ? "Copied" : "Copy"}
                             </button>
                         </span>
                     </li>
                     <li>Paste the app's Client ID here:</li>
                 </ol>
-                <form class="sp-config" onsubmit={(e) => { e.preventDefault(); saveClientId(); }}>
+                <form class="sp-config" onsubmit={(e) => { e.preventDefault(); spotify.saveClientId(); }}>
                     <input type="text" class="mono" placeholder="Client ID"
-                        aria-label="Spotify client ID" bind:value={clientId} />
-                    <button type="submit" class="btn btn-primary" disabled={spotifySaving || !clientId.trim()}>
-                        {spotifySaving ? "Saving…" : "Save"}
+                        aria-label="Spotify client ID" bind:value={spotify.clientId} />
+                    <button type="submit" class="btn btn-primary" disabled={spotify.saving || !spotify.clientId.trim()}>
+                        {spotify.saving ? "Saving…" : "Save"}
                     </button>
-                    {#if spotifySetup}
-                        <button type="button" class="btn btn-ghost" onclick={() => (spotifySetup = false)}>Cancel</button>
+                    {#if spotify.setupOpen}
+                        <button type="button" class="btn btn-ghost" onclick={() => (spotify.setupOpen = false)}>Cancel</button>
                     {/if}
                 </form>
             {:else if !spotify.connected}
                 <div class="card-header"><h2>Spotify search</h2></div>
                 <p class="sp-help">
                     Client ID saved — now connect your Spotify account. You'll
-                    approve access once on Spotify's page{spotify.manual
+                    approve access once on Spotify's page{spotify.status?.manual
                         ? "; it opens in a new tab and ends on an unreachable 127.0.0.1 address — that's expected."
                         : ", then land back here."}
                 </p>
                 <div class="sp-actions">
-                    <button class="btn btn-primary" onclick={connectSpotify}>Connect Spotify</button>
-                    <button class="btn btn-ghost" onclick={() => { clientId = ""; spotifySetup = true; }}>
+                    <button class="btn btn-primary" onclick={spotify.connect}>Connect Spotify</button>
+                    <button class="btn btn-ghost" onclick={() => { spotify.clientId = ""; spotify.setupOpen = true; }}>
                         Change client ID
                     </button>
                 </div>
-                {#if spotify.manual}
+                {#if spotify.status?.manual}
                     <div class="field sp-paste">
                         <label for="sp-paste-input">
                             After approving, copy the full address from that tab and paste it here to finish:
@@ -2369,10 +2164,10 @@
                         <div class="sp-config">
                             <input id="sp-paste-input" type="text" class="mono"
                                 placeholder="http://127.0.0.1:…/api/spotify/callback?code=…"
-                                bind:value={pasteUrl} />
+                                bind:value={spotify.pasteUrl} />
                             <button type="button" class="btn btn-primary"
-                                disabled={finishing || !pasteUrl.trim()} onclick={finishConnect}>
-                                {finishing ? "Finishing…" : "Finish"}
+                                disabled={spotify.finishing || !spotify.pasteUrl.trim()} onclick={spotify.finishConnect}>
+                                {spotify.finishing ? "Finishing…" : "Finish"}
                             </button>
                         </div>
                     </div>
@@ -2385,7 +2180,7 @@
                         <span class="sp-conn" title="Connected to Spotify">
                             <span class="sp-dot" aria-hidden="true"></span>
                             <span class="sp-conn-label">Connected</span>
-                            <span class="sp-user mono">{spotify.display_name || "Spotify"}</span>
+                            <span class="sp-user mono">{spotify.status?.display_name || "Spotify"}</span>
                         </span>
                         <button class="chip" onclick={disconnectSpotify}
                             aria-label="Disconnect Spotify">Disconnect</button>
@@ -2401,26 +2196,26 @@
                         autocomplete="off"
                         enterkeyhint="search"
                         bind:this={searchEl}
-                        bind:value={query}
-                        oninput={onQueryInput}
+                        bind:value={spotify.query}
+                        oninput={() => spotify.onQueryInput()}
                         onkeydown={onQueryKey}
                     />
-                    {#if query}
-                        <button class="icon-btn sp-clear" aria-label="Clear search" onclick={clearQuery}>
+                    {#if spotify.query}
+                        <button class="icon-btn sp-clear" aria-label="Clear search" onclick={spotify.clearQuery}>
                             <Icon name="close" size={14} />
                         </button>
                     {/if}
                 </div>
-                {#if !query && !results && historyList.length > 0}
+                {#if !spotify.query && !spotify.results && recents.list.length > 0}
                     <div class="sp-history">
                         <div class="sp-history-head">
                             <span class="sp-browse-label">
-                                Recent searches{#if destinations.length > 1 && destLabel} · {destLabel}{/if}
+                                Recent searches{#if destination.list.length > 1 && destination.label} · {destination.label}{/if}
                             </span>
-                            <button type="button" class="chip sp-hist-clear" onclick={clearHistory}>Clear</button>
+                            <button type="button" class="chip sp-hist-clear" onclick={() => recents.clear()}>Clear</button>
                         </div>
                         <div class="sp-history-list">
-                            {#each historyList as h (h)}
+                            {#each recents.list as h (h)}
                                 <div class="sp-hist-chip">
                                     <button type="button" class="sp-hist-run" onclick={() => runHistoryQuery(h)}>
                                         <Icon name="search" size={12} />
@@ -2428,7 +2223,7 @@
                                     </button>
                                     <button type="button" class="icon-btn sp-hist-x"
                                         aria-label={`Remove "${h}" from recent searches`}
-                                        onclick={() => removeHistoryEntry(h)}>
+                                        onclick={() => recents.remove(h)}>
                                         <Icon name="close" size={10} />
                                     </button>
                                 </div>
@@ -2437,46 +2232,46 @@
                     </div>
                 {/if}
                 <div class="sp-filters">
-                    {#if results}
-                        <button class="chip" class:active={kindFilter === "tracks"} onclick={() => (kindFilter = "tracks")}>Songs</button>
-                        <button class="chip" class:active={kindFilter === "albums"} onclick={() => (kindFilter = "albums")}>Albums</button>
-                        <button class="chip" class:active={kindFilter === "playlists"} onclick={() => (kindFilter = "playlists")}>Playlists</button>
-                    {:else if myPlaylists.length > 0}
+                    {#if spotify.results}
+                        <button class="chip" class:active={spotify.kindFilter === "tracks"} onclick={() => (spotify.kindFilter = "tracks")}>Songs</button>
+                        <button class="chip" class:active={spotify.kindFilter === "albums"} onclick={() => (spotify.kindFilter = "albums")}>Albums</button>
+                        <button class="chip" class:active={spotify.kindFilter === "playlists"} onclick={() => (spotify.kindFilter = "playlists")}>Playlists</button>
+                    {:else if spotify.myPlaylists.length > 0}
                         <span class="sp-browse-label">Your playlists</span>
                     {/if}
-                    <div class="sp-targets" class:pushed={!!results}>{@render targetRow()}</div>
+                    <div class="sp-targets" class:pushed={!!spotify.results}>{@render targetRow()}</div>
                 </div>
                 <!-- Playing on a KEF speaker goes out through Spotify Connect,
                      which needs a permission this login may predate. Saying so
                      before the tap beats a 409 after it, and reconnecting is
                      the only thing that fixes it. -->
-                {#if kefTargetSpeaker && spotify && !spotify.playback}
+                {#if destination.kefSpeaker && spotify && !spotify.status?.playback}
                     <div class="sp-note">
                         <Icon name="info" size={14} />
                         <span>
-                            Reconnect Spotify to start music on {kefTargetSpeaker.name} —
+                            Reconnect Spotify to start music on {destination.kefSpeaker.name} —
                             this login was made before HomeHub could ask for that.
                         </span>
-                        <button class="chip" onclick={connectSpotify}>Reconnect</button>
+                        <button class="chip" onclick={spotify.connect}>Reconnect</button>
                     </div>
                 {/if}
-                {#if searching}
+                {#if spotify.searching}
                     <div class="skeleton sp-skeleton"></div>
-                {:else if results && shownItems.length === 0}
-                    <div class="sp-none">No {kindFilter} matched "{query.trim()}".</div>
-                {:else if !results && shownItems.length === 0}
+                {:else if spotify.results && spotify.shownItems.length === 0}
+                    <div class="sp-none">No {spotify.kindFilter} matched "{spotify.query.trim()}".</div>
+                {:else if !spotify.results && spotify.shownItems.length === 0}
                     <!-- No query and no playlists to browse — say what this
                          box does rather than leaving a blank panel. -->
                     <div class="sp-none">
                         Search Spotify for a song, album or playlist. Tapping a result
-                        plays it on the room shown above{#if !kefTargetSpeaker}; the row's
+                        plays it on the room shown above{#if !destination.kefSpeaker}; the row's
                         overflow menu queues it without interrupting{/if}.
                     </div>
                 {:else}
                     <div class="sp-results">
-                        {#each shownItems as item (item.uri)}
+                        {#each spotify.shownItems as item (item.uri)}
                             <div class="sp-row">
-                                <button class="sp-open" disabled={busy.is("item:" + item.uri) || !dest}
+                                <button class="sp-open" disabled={busy.is("item:" + item.uri) || !destination.current}
                                     onclick={() => playItem(item)}>
                                     {#if item.art_url}
                                         <img class="sp-art" src={item.art_url} alt="" loading="lazy" />
@@ -2495,7 +2290,7 @@
                                      the sonos.queue is a Sonos group's. A KEF
                                      speaker has none, so the control that
                                      would be refused isn't there at all. -->
-                                {#if sonosTarget}
+                                {#if destination.sonosTarget}
                                     <button class="icon-btn sp-more" aria-label="More for {item.name}"
                                         aria-haspopup="menu" aria-expanded={menuFor === item.uri}
                                         disabled={busy.is("q:" + item.uri)}
@@ -3238,7 +3033,7 @@
                         <span>{spotify.connected ? "Search Spotify" : "Set up Spotify"}</span>
                     </button>
                     {#if spotify.connected}
-                        {#each playerRecents as h (h)}
+                        {#each recents.recent as h (h)}
                             <button class="chip start-recent" onclick={() => searchFromPlayer(h)}>
                                 <span>{h}</span>
                             </button>
