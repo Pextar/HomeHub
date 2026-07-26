@@ -120,9 +120,13 @@ func (s *Server) kefPlayItem(w http.ResponseWriter, r *http.Request) {
 		writeError(w, kefSpotifyStatus(err), err.Error())
 		return
 	}
-	// The poller would notice within a few seconds; touching it means the
-	// caller's own refresh already sees the new track.
+	// Spotify has accepted the command; the speaker has not necessarily
+	// started yet, since the audio comes back to it from the cloud. So two
+	// re-reads: the usual prompt one, and a later one for the handoff. Each
+	// pushes the `music` signal if it found a change, which is what moves the
+	// caller's now-playing off "nothing playing".
 	s.kefEvents().Touch(sp.ID)
+	s.kefEvents().TouchAfter(sp.ID, 3*time.Second)
 	w.WriteHeader(http.StatusNoContent)
 }
 

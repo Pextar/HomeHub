@@ -73,7 +73,7 @@ func (f *fakeSpeaker) playable(volume int) {
 	f.set(pathSpeakerStatus, `{"type":"kefSpeakerStatus","kefSpeakerStatus":"powerOn"}`)
 	f.set(pathSource, `{"type":"kefPhysicalSource","kefPhysicalSource":"wifi"}`)
 	f.set(pathMute, `{"type":"bool_","bool_":false}`)
-	f.set(pathPlayerData, `{"type":"playerData","playerData":`+playerDataJSON+`}`)
+	f.set(pathPlayerData, playerDataJSON)
 	f.set(pathPlayTime, `{"type":"i64_","i64_":1000}`)
 	f.setVolume(volume)
 }

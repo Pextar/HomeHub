@@ -181,14 +181,20 @@ func (m *Monitor) Nudge() {
 // Touch schedules a prompt re-read of one speaker, after a short settle.
 // Called once a control action has been accepted, so the cache catches up
 // with what the user just did without waiting out the poll interval.
-func (m *Monitor) Touch(id string) {
+func (m *Monitor) Touch(id string) { m.TouchAfter(id, touchDelay) }
+
+// TouchAfter is Touch with the settle time named. Starting music through
+// Spotify Connect is the case that needs it: the command goes out to
+// Spotify's cloud and comes back to the speaker, so the track appears
+// seconds after the request that asked for it returned.
+func (m *Monitor) TouchAfter(id string, delay time.Duration) {
 	m.mu.RLock()
 	e := m.entries[id]
 	m.mu.RUnlock()
 	if e == nil {
 		return
 	}
-	time.AfterFunc(touchDelay, func() {
+	time.AfterFunc(delay, func() {
 		select {
 		case e.wake <- struct{}{}:
 		default:

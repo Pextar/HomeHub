@@ -100,11 +100,22 @@ func (f *fakeSpeaker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "/api/setData":
 		var body struct {
 			Path  string          `json:"path"`
-			Role  string          `json:"role"`
+			Roles string          `json:"roles"`
 			Value json.RawMessage `json:"value"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		// The real speaker answers HTTP 500 to a body whose role it can't
+		// read, which is how a control call that never reached the player
+		// looked from the outside.
+		want := "value"
+		if body.Path == pathControl {
+			want = "activate"
+		}
+		if body.Roles != want {
+			http.Error(w, "no role", http.StatusInternalServerError)
 			return
 		}
 		f.mu.Lock()
@@ -216,6 +227,27 @@ func TestValueDecodeRejectsWrongType(t *testing.T) {
 	// returning 0 would put a wrong number on screen.
 	if err := v.decode(typeI32, &n); err == nil {
 		t.Error("decode accepted a string_ payload as i32_")
+	}
+}
+
+func TestValueKeepsCompositePayload(t *testing.T) {
+	// player:player/data names its type and then puts its fields *beside*
+	// that name rather than under it. Reading it as "payload under the key
+	// the type names" left the payload empty, which is what made a playing
+	// speaker report nothing playing.
+	var v value
+	if err := json.Unmarshal([]byte(playerDataJSON), &v); err != nil {
+		t.Fatal(err)
+	}
+	if v.Type != "playerData" {
+		t.Errorf("type = %q, want playerData", v.Type)
+	}
+	track, status, dur := ParsePlayerData(v.Raw)
+	if track == nil || track.Title != "Teardrop" {
+		t.Errorf("track = %+v, want the composite payload parsed", track)
+	}
+	if status != StatusPlaying || dur != 330000 {
+		t.Errorf("status = %q, duration = %d", status, dur)
 	}
 }
 
@@ -331,11 +363,8 @@ func TestTransportControls(t *testing.T) {
 		fn   func(context.Context, string) error
 		want string
 	}{
-		{Play, ControlPlay},
-		{Pause, ControlPause},
 		{Next, ControlNext},
 		{Previous, ControlPrevious},
-		{Stop, ControlStop},
 	} {
 		if err := c.fn(ctx(t), testIP); err != nil {
 			t.Fatalf("%s: %v", c.want, err)
@@ -344,9 +373,58 @@ func TestTransportControls(t *testing.T) {
 	f.mu.Lock()
 	got := strings.Join(f.controls, ",")
 	f.mu.Unlock()
-	want := "play,pause,next,previous,stop"
+	want := "next,previous"
 	if got != want {
 		t.Errorf("controls sent = %q, want %q", got, want)
+	}
+}
+
+// The speaker has no play verb: play and pause are one toggle, so sending it
+// when the player is already on the wanted side would stop the music.
+func TestPlayPauseToggle(t *testing.T) {
+	f := newFakeSpeaker(t)
+	playing := func(state string) {
+		f.set(pathPlayerData, `{"type":"playerData","state":"`+state+`","trackRoles":{"title":"A"}}`)
+	}
+
+	playing(StatusPlaying)
+	if err := Play(ctx(t), testIP); err != nil {
+		t.Fatalf("Play: %v", err)
+	}
+	if err := Pause(ctx(t), testIP); err != nil {
+		t.Fatalf("Pause: %v", err)
+	}
+	playing(StatusPaused)
+	if err := Pause(ctx(t), testIP); err != nil {
+		t.Fatalf("Pause: %v", err)
+	}
+	if err := Play(ctx(t), testIP); err != nil {
+		t.Fatalf("Play: %v", err)
+	}
+
+	f.mu.Lock()
+	got := strings.Join(f.controls, ",")
+	f.mu.Unlock()
+	// One toggle per call that had something to change: the pause of a
+	// playing speaker, and the play of a paused one.
+	if want := "pause,pause"; got != want {
+		t.Errorf("controls sent = %q, want %q", got, want)
+	}
+}
+
+// A speaker that won't answer for its player still gets the toggle — the
+// alternative is a play button that does nothing at all.
+func TestPlayTogglesWhenStatusUnreadable(t *testing.T) {
+	f := newFakeSpeaker(t)
+	f.fail[pathPlayerData] = true
+	if err := Play(ctx(t), testIP); err != nil {
+		t.Fatalf("Play: %v", err)
+	}
+	f.mu.Lock()
+	got := strings.Join(f.controls, ",")
+	f.mu.Unlock()
+	if got != ControlToggle {
+		t.Errorf("controls sent = %q, want %q", got, ControlToggle)
 	}
 }
 
@@ -401,14 +479,18 @@ func TestSetStandbyWakesViaSource(t *testing.T) {
 
 // ── Now playing ──────────────────────────────────────────────────────────
 
+// playerDataJSON is the shape a speaker really answers with: a composite
+// value whose fields sit beside "type" rather than under it, the playback
+// state in "state", and the track length in "status".
 const playerDataJSON = `{
+  "type": "playerData",
   "state": "playing",
-  "status": {"name": "playing"},
+  "status": {"duration": 330000},
   "trackRoles": {
     "title": "Teardrop",
     "icon": "https://art.example/teardrop.jpg",
     "mediaData": {
-      "metaData": {"artist": "Massive Attack", "album": "Mezzanine", "duration": 330000}
+      "metaData": {"artist": "Massive Attack", "album": "Mezzanine"}
     }
   }
 }`
@@ -471,7 +553,7 @@ func TestGetState(t *testing.T) {
 	f.set(pathSource, `{"type":"kefPhysicalSource","kefPhysicalSource":"wifi"}`)
 	f.set(pathVolume, `{"type":"i32_","i32_":34}`)
 	f.set(pathMute, `{"type":"bool_","bool_":false}`)
-	f.set(pathPlayerData, `{"type":"playerData","playerData":`+playerDataJSON+`}`)
+	f.set(pathPlayerData, playerDataJSON)
 	f.set(pathPlayTime, `{"type":"i64_","i64_":42000}`)
 
 	st, err := GetState(ctx(t), testIP)
