@@ -323,7 +323,7 @@
                                 <!-- Tapping the row plays now; queueing without
                                      interrupting lives behind the overflow —
                                      and only for a Sonos destination, since
-                                     the sonos.queue is a Sonos group's. A KEF
+                                     the queue is a Sonos group's. A KEF
                                      speaker has none, so the control that
                                      would be refused isn't there at all. -->
                                 {#if destination.sonosTarget}

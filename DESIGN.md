@@ -454,7 +454,9 @@ frontend/src/
 │   ├── Sheet.svelte         ← bottom-sheet host
 │   ├── TabBar.svelte        ← mobile shell
 │   ├── NavRail.svelte       ← desktop shell
-│   └── Icon.svelte          ← single <Icon name="..."> wrapping the path map
+│   ├── Icon.svelte          ← single <Icon name="..."> wrapping the path map
+│   └── music/               ← the Music module's own pieces (see below)
+├── lib/music/               ← the Music module's state (see below)
 ├── views/                   ← one .svelte per top-level surface
 └── modals/                  ← sheets and confirms; one per flow
 ```
@@ -462,6 +464,26 @@ frontend/src/
 When adding a brand-new view, place it in `views/`, register the route in
 `App.svelte`, and add an entry to the NavRail (desktop) and/or TabBar
 (mobile) if it's top-level. Sub-screens don't get nav entries.
+
+**A module with more surfaces than one file can hold gets a folder.** Music is
+the first: its screens, sheets and player sections live in
+`components/music/`, and its state — the two bridges, the destination, search
+and its history, the grouping gesture — in `lib/music/`. `views/Music.svelte`
+stays the single entry in `views/` and is the shell: the topbar, the
+navigation of §15, the polling, and which surface is up.
+
+Two rules keep that from becoming a dumping ground:
+
+- **A folder, not a prefix.** `components/` is documented above as the shared
+  primitives; twenty `MusicSomething.svelte` files interleaved with them would
+  make that list unreadable. Anything genuinely shared beyond the module
+  graduates *out* of the folder — the §6.8 waveform did the opposite journey
+  and became `components/music/Waveform.svelte` because three files had grown
+  their own copy of it.
+- **State factories, never singletons.** A module-level store outlives the
+  view and strands whatever it was holding; every store in `lib/music/` is a
+  `create*()` the view instantiates, and none of them own an `$effect` —
+  effects belong to the component whose lifetime they should share.
 
 ---
 

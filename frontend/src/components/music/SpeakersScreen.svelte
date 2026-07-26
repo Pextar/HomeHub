@@ -168,16 +168,7 @@
     </div>
 {/if}
 
-         Zones answers "what plays together"; this answers "what is each of
-         these, and how is it set up".
-
-         Two panes where the width allows, one where it doesn't: the list
-         column stays put on desktop and the settings open beside it; on a
-         phone the settings take over the screen and `has-detail` folds the
-         list away. Not a sheet — its rows open one, and a sheet must never
-         open another sheet; the content is also too long to spend its life
-         at 92vh. -->
-    <div class="sp-split" class:has-detail={anyDetail}>
+<div class="sp-split" class:has-detail={anyDetail}>
     <div class="sp-col">
     {#if sonos.allSpeakers.length > 0}
     <section class="block">
@@ -188,7 +179,7 @@
             <div class="eyrow">{kef.speakers.length > 0 ? "Sonos" : "Speakers"}</div>
             <span class="hint">
                 <span class="mono">{sonos.reachable.length}</span>
-                of <span class="mono">{sonos.allSpeakers.length}</span> sonos.reachable
+                of <span class="mono">{sonos.allSpeakers.length}</span> reachable
             </span>
         </div>
         <div class="sp-list">
@@ -256,7 +247,7 @@
             <div class="eyrow">KEF</div>
             <span class="hint">
                 <span class="mono">{kef.reachable.length}</span>
-                of <span class="mono">{kef.speakers.length}</span> sonos.reachable
+                of <span class="mono">{kef.speakers.length}</span> reachable
             </span>
         </div>
         <div class="sp-list">
@@ -293,7 +284,7 @@
             {/each}
         </div>
         <p class="hint">
-            KEF speakers stand alone — no grouping, no shared sonos.queue — so their
+            KEF speakers stand alone — no grouping, no shared queue — so their
             input, volume and EQ all live on the speaker's own screen.
         </p>
     </section>

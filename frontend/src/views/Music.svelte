@@ -42,7 +42,7 @@
 
     // Both bridges, as state. They sit beside each other rather than one
     // folded into the other: a Sonos household is zones that group and share a
-    // sonos.queue, a KEF speaker is one standalone stereo pair with an input
+    // queue, a KEF speaker is one standalone stereo pair with an input
     // selector, and DESIGN.md §15 is explicit that neither should have to
     // pretend to be the other. The busy map is shared, since the key namespace
     // is what keeps their controls from disabling each other.
@@ -60,7 +60,7 @@
     // One destination for the whole module (DESIGN.md §15, "one visible
     // destination"), and it spans both bridges — so it carries a kind rather
     // than being a bare id. A Sonos zone is started through its coordinator's
-    // sonos.queue; a KEF speaker through Spotify Connect, because its own API can
+    // queue; a KEF speaker through Spotify Connect, because its own API can
     // play and pause but has nothing to be handed. The two are not
     // interchangeable, which is exactly why the destination says which it is.
     const destination = createDestination(sonos, kef);
@@ -364,7 +364,7 @@
     // and the reasoning behind it ("a full player would be an art-led sheet
     // with two controls in it") simply wasn't true: KEF reports art, title,
     // artist, position, duration, volume, mute and an input, and answers
-    // play/pause/next/previous. What it hasn't got is a sonos.queue and a group,
+    // play/pause/next/previous. What it hasn't got is a queue and a group,
     // so its sheet drops those two sections and keeps the rest.
     let playerGroupId = $state<string | null>(null);
     let playerKefId = $state<string | null>(null);
@@ -613,9 +613,9 @@
         const c = sonos.coordinatorOf(g);
         if (!c) return;
         const ok = await openModal<boolean>(ConfirmModal, {
-            title: "Clear the sonos.queue?",
+            title: "Clear the queue?",
             message: `Every track queued on ${sonos.groupTitle(g)} will be removed, and playback stops.`,
-            confirmLabel: "Clear sonos.queue",
+            confirmLabel: "Clear queue",
             danger: true,
         });
         if (!ok) return;
@@ -635,9 +635,9 @@
         if (!target) return;
         const added = await sonos.enqueue(target, item, next);
         if (!added) return;
-        const where = added.track ? `position ${added.track} of ${added.length}` : "the sonos.queue";
+        const where = added.track ? `position ${added.track} of ${added.length}` : "the queue";
         toasts.success(
-            next ? "Playing next" : "Added to sonos.queue",
+            next ? "Playing next" : "Added to queue",
             `${item.title ?? "Track"} · ${where}`,
         );
         if (playerGroupId === target) void sonos.loadQueue(target);
