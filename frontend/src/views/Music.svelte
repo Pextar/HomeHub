@@ -1168,6 +1168,34 @@
         dropSheet();
     }
 
+    /**
+     * Search from inside the player. The sheet *hands over* rather than
+     * opening one over another, so closing Search comes back to the room you
+     * started from — and that room is already the destination, set when the
+     * player opened, so a result plays where you were looking.
+     *
+     * Without this the player was a dead end for the one thing it kept
+     * pointing at: both sheets' idle copy says "or search Spotify", and a
+     * KEF speaker has no favorites to offer instead, so its idle player named
+     * the only way to start music and then didn't offer it.
+     */
+    function searchFromPlayer(q?: string) {
+        rememberSheetScroll();
+        sheets = sheetRun.swapTo(sheets, "search");
+        sheetScroll.search = 0;
+        resetSheetGesture();
+        if (q) {
+            // A recent search is a request to *run* it, so it runs — and the
+            // caret stays out of the way, keyboard and all, since the results
+            // are what was asked for.
+            runHistoryQuery(q);
+            return;
+        }
+        if (spotify?.connected) focusSearch();
+    }
+    /** Recent searches for this room, kept to a row rather than a list. */
+    const playerRecents = $derived(historyList.slice(0, 6));
+
     // ── Drag-to-dismiss ──────────────────────────────────────────────────
     // The same gesture the shared Modal sheet carries, shared by all three of
     // Music's sheets (only one is ever up): the top bar always drags, and the
@@ -1378,6 +1406,14 @@
         }
 
         if (field && !slider) return; // typing, not controlling
+
+        // "/" keeps its meaning inside the player — it just searches *for
+        // this room*, and hands the sheet over rather than stacking one.
+        if (key === "/") {
+            e.preventDefault();
+            searchFromPlayer();
+            return;
+        }
 
         // A KEF player answers the keys it can: play/pause, skip, volume. It
         // has no seek, no queue and no play modes, so those keys stay unbound
@@ -3330,6 +3366,12 @@
                 </button>
             </div>
 
+            <!-- Spotify Connect is the only road content takes to a KEF
+                 speaker, so this row is the whole of "play something else"
+                 here — and it sits above the input selector, which answers
+                 the same question for the physical inputs. -->
+            {@render startSomething(null)}
+
             <div class="p-speakers">
                 <div class="eyrow">Volume</div>
                 <div class="member">
@@ -3615,17 +3657,11 @@
                     </div>
                 {/if}
 
-                <!-- Idle groups get somewhere to go rather than a dead end. -->
-                {#if !st?.track?.title && favorites.length > 0}
-                    <div class="p-idle">
-                        <div class="eyrow">Start something</div>
-                        <div class="favs h-scroll">
-                            {#each favorites as f (f.id)}
-                                {@render favCard(f, g.coordinator_id)}
-                            {/each}
-                        </div>
-                    </div>
-                {/if}
+                <!-- Somewhere to go, playing or not: swapping a song out is
+                     as ordinary a thing to want here as starting the first
+                     one. Favorites still only stand in for an empty player —
+                     with a track up, the row that matters is the search. -->
+                {@render startSomething(st?.track?.title ? null : g.coordinator_id)}
 
                 <div class="p-speakers">
                     <div class="eyrow">Volume</div>
@@ -3684,6 +3720,51 @@
         </div>
     </div>
 {/if}
+
+<!-- ── Start something ─────────────────────────────────────────────────
+     The way to start something new from inside the player, on both sheets.
+     One row: the search that feeds this room, then the searches already made
+     for it — the history is keyed by destination, so these are the kitchen's,
+     not the house's.
+
+     `favTarget` is the Sonos group whose favorites belong under it, and null
+     when there are none to show — a playing group (it already has something)
+     or a KEF speaker (favorites are a Sonos household list, DESIGN.md §15). -->
+{#snippet startSomething(favTarget: string | null)}
+    <!-- Nothing to offer is a reason to render nothing, not a heading over an
+         empty row: with the Spotify integration absent and no favorites,
+         there is no way to start something from here. -->
+    {#if spotify || (favTarget && favorites.length > 0)}
+        <div class="p-idle">
+            <div class="eyrow">Start something</div>
+            {#if spotify}
+                <div class="start-row h-scroll">
+                    <!-- Not gated on being connected, for the same reason
+                         Home's card isn't: the people who most need the
+                         pointer are the ones a gate would hide it from. -->
+                    <button class="chip start-go" onclick={() => searchFromPlayer()}>
+                        <Icon name="search" size={13} />
+                        <span>{spotify.connected ? "Search Spotify" : "Set up Spotify"}</span>
+                    </button>
+                    {#if spotify.connected}
+                        {#each playerRecents as h (h)}
+                            <button class="chip start-recent" onclick={() => searchFromPlayer(h)}>
+                                <span>{h}</span>
+                            </button>
+                        {/each}
+                    {/if}
+                </div>
+            {/if}
+            {#if favTarget && favorites.length > 0}
+                <div class="favs h-scroll">
+                    {#each favorites as f (f.id)}
+                        {@render favCard(f, favTarget)}
+                    {/each}
+                </div>
+            {/if}
+        </div>
+    {/if}
+{/snippet}
 
 <!-- ── Favorite card ───────────────────────────────────────────────────
      Shared by the Home shelf and the idle player: tap the art to play it
@@ -4670,6 +4751,22 @@
     .up-go { display: flex; transform: rotate(180deg); flex-shrink: 0; }
 
     .p-idle { display: flex; flex-direction: column; gap: var(--space-3); }
+
+    /* ── Start something ──
+       The search row inside the player. Chips rather than a search box: the
+       box lives on the Search sheet, and a second one here would be a second
+       thing to focus, keep and clear (DESIGN.md §15 — sheets swap, and the
+       player hands over rather than growing a copy of what it hands over to). */
+    .start-row { align-items: center; }
+    /* The row's primary action, marked the way every other lead chip in the
+       module is — a stronger edge and full-strength text, not a new colour. */
+    .start-go { color: var(--text); border-color: var(--border-strong); }
+    /* A recent search is whatever was typed, so it is capped rather than
+       trusted to be short. */
+    .start-recent > span { display: block; max-width: 52vw; overflow: hidden; text-overflow: ellipsis; }
+    @media (pointer: coarse) {
+        .start-row .chip { min-height: 44px; padding-inline: 14px; }
+    }
 
     .p-speakers { display: flex; flex-direction: column; gap: 2px; }
     .p-speakers .eyrow { margin-bottom: var(--space-1); }
