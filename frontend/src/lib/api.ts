@@ -44,6 +44,7 @@ import type {
   KEFSettings,
   KEFSettingsPatch,
   KEFSource,
+  KEFSpotifyView,
   SpotifyStatus,
   SpotifyItem,
   SpotifyResults,
@@ -412,6 +413,26 @@ export const api = {
   // One field per interaction, so "what did the speaker refuse" stays clear.
   kefUpdateSettings(id: string, patch: KEFSettingsPatch) {
     return req<void>(`/kef/${encodeURIComponent(id)}/settings`, { method: "PUT", body: json(patch) });
+  },
+  // Starts a Spotify item on a KEF speaker. Same body as sonosPlayItem, a
+  // different road underneath: the speaker's own API can't be handed content,
+  // so this asks Spotify to point Connect playback at it. The backend wakes
+  // the speaker onto Wi-Fi first. A 409 means something the user can fix —
+  // reconnect Spotify, or pick which Connect device this speaker is.
+  kefPlayItem(id: string, body: { service: string; uri: string; title: string }) {
+    return req<void>(`/kef/${encodeURIComponent(id)}/play-item`, { method: "POST", body: json(body) });
+  },
+  // The Connect pairing for one speaker, plus the account's visible devices.
+  kefSpotifyDevices(id: string) {
+    return req<KEFSpotifyView>(`/kef/${encodeURIComponent(id)}/spotify`);
+  },
+  // Pin which Connect device a speaker is; an empty id goes back to matching
+  // on the speaker's name.
+  kefSetSpotifyDevice(id: string, device_id: string, device_name = "") {
+    return req<KEFSpeaker>(`/kef/${encodeURIComponent(id)}/spotify`, {
+      method: "PUT",
+      body: json({ device_id, device_name }),
+    });
   },
 
   // Spotify search/browse (user's own account via PKCE — configured in the Music view)

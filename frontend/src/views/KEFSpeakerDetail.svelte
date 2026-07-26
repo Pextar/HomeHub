@@ -30,6 +30,8 @@
         KEFSettings,
         KEFSettingsPatch,
         KEFSource,
+        KEFSpotifyView,
+        SpotifyDevice,
     } from "../lib/types";
 
     interface Props {
@@ -67,7 +69,9 @@
         loaded = false;
         loadError = null;
         dragging = {};
+        connect = null;
         void load(id);
+        void loadConnect(id);
     });
 
     let settings = $state<KEFSettings | null>(null);
@@ -205,6 +209,49 @@
         const t = now?.track;
         return [t?.artist, t?.album].filter(Boolean).join(" · ");
     });
+
+    // ── Spotify Connect ──────────────────────────────────────────────────
+    // The one thing on this screen that isn't the speaker's own doing. Its
+    // local API can play, pause and skip but has no way to be *handed*
+    // something, so starting music on it goes through Spotify Connect — and
+    // that only works once HomeHub knows which Connect device this speaker is.
+    // Normally the name matches and there is nothing to do here; this card
+    // exists for when it doesn't, and to say plainly where the music will
+    // come from when the Search screen sends something.
+    //
+    // Read on demand with the settings, never polled: which device a speaker
+    // is doesn't change on its own. The card renders only when the read
+    // succeeded — a home with no Spotify account must not see a dead section,
+    // and setting Spotify up already has one home, on the Search screen.
+    let connect = $state<KEFSpotifyView | null>(null);
+    let connectBusy = $state(false);
+
+    async function loadConnect(id: string) {
+        try {
+            const v = await api.kefSpotifyDevices(id);
+            if (id !== speaker.id) return;
+            connect = v;
+        } catch {
+            if (id === speaker.id) connect = null;
+        }
+    }
+
+    /** Pin a device, or clear the pin by passing null (back to name matching). */
+    function pinDevice(d: SpotifyDevice | null) {
+        if (connectBusy) return;
+        connectBusy = true;
+        void api
+            .kefSetSpotifyDevice(speaker.id, d?.id ?? "", d?.name ?? "")
+            .then(() => {
+                toasts.success(
+                    d ? "Spotify device set" : "Matching by name again",
+                    d ? `${speaker.name} starts on "${d.name}"` : `Uses the name "${speaker.name}"`,
+                );
+                return loadConnect(speaker.id);
+            })
+            .catch((e) => toasts.error("Couldn't set the Spotify device", (e as Error).message))
+            .finally(() => (connectBusy = false));
+    }
 
     // ── Settings ─────────────────────────────────────────────────────────
 
@@ -480,6 +527,73 @@
                 have will simply be refused.
             </p>
         </section>
+
+        <!-- ── Spotify ────────────────────────────────────────────────────
+             Where music comes from when the Search screen sends something
+             here. The speaker's own API can't be handed content, so a search
+             result reaches it through Spotify Connect — which means HomeHub
+             has to know which Connect device this speaker is. It matches on
+             the name by itself; this card is for when that isn't enough, and
+             for saying which device it landed on when it is. Absent entirely
+             when there is no Spotify account to ask (setup lives on Search). -->
+        {#if connect}
+            <section class="card">
+                <div class="card-header">
+                    <span class="c-ico" aria-hidden="true"><Icon name="musicNotes" size={16} /></span>
+                    <h2>Spotify</h2>
+                </div>
+
+                <div class="row wrap">
+                    <span class="r-meta">
+                        <span class="r-label">Starts music on</span>
+                        <span class="r-help">
+                            Search plays here through Spotify Connect — the speaker's own
+                            controls can't be handed a track.
+                        </span>
+                    </span>
+                    {#if connect.device}
+                        <span class="sp-dev">
+                            <span class="mono">{connect.device.name}</span>
+                            {#if connect.pinned_id}
+                                <button class="chip" disabled={connectBusy}
+                                    onclick={() => pinDevice(null)}>Match by name</button>
+                            {/if}
+                        </span>
+                    {:else}
+                        <span class="sp-dev none">Not paired yet</span>
+                    {/if}
+                </div>
+
+                {#if connect.reason}
+                    <p class="c-none">{connect.reason}</p>
+                {/if}
+
+                {#if connect.devices.length > 0}
+                    <div class="row wrap">
+                        <span class="r-meta">
+                            <span class="r-label">Pick the device</span>
+                            <span class="r-help">
+                                Only speakers that are awake and signed in to this Spotify
+                                account show up here.
+                            </span>
+                        </span>
+                        <div class="chips" role="radiogroup" aria-label="Spotify Connect device">
+                            {#each connect.devices as d (d.id)}
+                                {@const on = connect.device?.id === d.id}
+                                <button
+                                    class="chip" class:on
+                                    role="radio" aria-checked={on}
+                                    disabled={connectBusy || d.restricted}
+                                    onclick={() => pinDevice(d)}
+                                >
+                                    {d.name}
+                                </button>
+                            {/each}
+                        </div>
+                    </div>
+                {/if}
+            </section>
+        {/if}
 
         {#if !loaded}
             <section class="card"><div class="skeleton sk"></div></section>
@@ -1018,6 +1132,14 @@
     input[type="range"]:disabled { opacity: 0.5; }
 
     .chips { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+
+    /* ── Spotify block ── */
+    .sp-dev {
+        display: inline-flex; align-items: center; gap: var(--space-2);
+        font-size: 12px; color: var(--text);
+    }
+    .sp-dev .mono { font-size: 11.5px; overflow-wrap: anywhere; }
+    .sp-dev.none { color: var(--text-mute); }
 
     /* ── Device block ── */
     .info {

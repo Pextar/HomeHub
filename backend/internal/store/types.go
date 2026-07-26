@@ -39,13 +39,22 @@ type SonosSpeaker struct {
 // MAC is the stable id: KEF has no equivalent of Sonos' RINCON, and a
 // speaker that moves to a new DHCP lease has to stay recognisable as the
 // same device. It is stored normalised (lower case, no separators).
+// SpotifyDeviceID/SpotifyDeviceName pin which Spotify Connect endpoint this
+// speaker is, for the one thing its local API can't do: be handed something
+// to play (see internal/api/kef_spotify.go). Both are optional — the name
+// the speaker reports usually matches what it registers with Spotify, so
+// they are only needed when it doesn't, or when two devices share a name.
+// The id is what gets used; the name is kept so a rotated id can still be
+// re-resolved, and so the settings pane can say which device is pinned.
 type KEFSpeaker struct {
-	ID    string `json:"id"`
-	Name  string `json:"name"`
-	IP    string `json:"ip"`
-	MAC   string `json:"mac"`
-	Room  string `json:"room,omitempty"`
-	Model string `json:"model,omitempty"`
+	ID                string `json:"id"`
+	Name              string `json:"name"`
+	IP                string `json:"ip"`
+	MAC               string `json:"mac"`
+	Room              string `json:"room,omitempty"`
+	Model             string `json:"model,omitempty"`
+	SpotifyDeviceID   string `json:"spotify_device_id,omitempty"`
+	SpotifyDeviceName string `json:"spotify_device_name,omitempty"`
 }
 
 // Schedule represents a recurring timer for a socket, group, or scene.

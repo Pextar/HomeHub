@@ -545,6 +545,15 @@ export interface KEFSpeaker {
   mac: string;
   room?: string;
   model?: string;
+  /**
+   * Which Spotify Connect device this speaker is, when the name it registers
+   * with Spotify isn't the name here. Optional: normally the names match and
+   * the backend resolves it on its own. Starting music on a KEF speaker goes
+   * through Connect — its local API can play and pause but has nothing to be
+   * handed — so this is the pairing that makes a search result playable.
+   */
+  spotify_device_id?: string;
+  spotify_device_name?: string;
 }
 
 /** Physical inputs. Not every model has every one — read `source` to see. */
@@ -682,6 +691,35 @@ export interface SpotifyStatus {
    * callback completes automatically.
    */
   manual: boolean;
+  /**
+   * Whether this login may start playback (KEF speakers go through Spotify
+   * Connect). False on a login granted before HomeHub asked for the player
+   * scopes: search still works, playing doesn't, and only reconnecting
+   * fixes it — so it is worth saying before the tap rather than after.
+   */
+  playback: boolean;
+}
+
+/** One Spotify Connect endpoint the connected account can play to. */
+export interface SpotifyDevice {
+  id: string;
+  name: string;
+  type: string; // Speaker | Computer | Smartphone | …
+  active: boolean;
+  /** Spotify accepts no commands for these at all (some car/TV integrations). */
+  restricted: boolean;
+  volume?: number;
+}
+
+/** The Connect pairing for one KEF speaker, plus what else is on offer. */
+export interface KEFSpotifyView {
+  pinned_id?: string;
+  pinned_name?: string;
+  /** What a play would use right now; absent when nothing matches. */
+  device?: SpotifyDevice;
+  /** Why `device` is absent, in words worth showing. */
+  reason?: string;
+  devices: SpotifyDevice[];
 }
 
 export interface SpotifyItem {

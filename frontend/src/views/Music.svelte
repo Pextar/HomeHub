@@ -31,9 +31,6 @@
     let loaded = $state(false);
     let favorites = $state<SonosFavorite[]>([]);
     let favsLoaded = $state(false);
-    // Which group's coordinator receives a tapped favorite. Defaults to the
-    // first group; shown as chips when there is more than one group.
-    let favTarget = $state<string | null>(null);
 
     // Volume the user just set, keyed by speaker id. The 5s poll must not
     // yank the slider back to a stale value while the command is still
@@ -172,14 +169,8 @@
                     groupVol[g.coordinator_id] = Math.round(vols.reduce((a, b) => a + b, 0) / vols.length);
                 }
             }
-            if (!favTarget || !st.groups.some((g) => g.coordinator_id === favTarget)) {
-                // Prefer a zone that's already playing: "play this too" almost
-                // always means the room the music is coming out of.
-                const live = st.groups.find((g) =>
-                    st.speakers.some((s) => s.id === g.coordinator_id && s.state?.playing),
-                );
-                favTarget = (live ?? st.groups[0])?.coordinator_id ?? null;
-            }
+            // Picking the destination is the destinations effect's job — it
+            // spans both bridges, so it can't live inside one bridge's poll.
             if (!favsLoaded && st.speakers.some((s) => s.reachable)) {
                 void loadFavorites(st.speakers.find((s) => s.reachable)!.id);
             }
@@ -275,6 +266,55 @@
             busy[key] = false;
         }
     }
+
+    // ── Where playback lands ─────────────────────────────────────────────
+    // One destination for the whole module (DESIGN.md §15, "one visible
+    // destination"), and it spans both bridges — so it carries a kind rather
+    // than being a bare id. A Sonos zone is started through its coordinator's
+    // queue; a KEF speaker through Spotify Connect, because its own API can
+    // play and pause but has nothing to be handed. The two are not
+    // interchangeable, which is exactly why the destination says which it is.
+    type Dest = { kind: "sonos" | "kef"; id: string };
+    let dest = $state<Dest | null>(null);
+    /** The Sonos coordinator, when the destination is one. Favorites and the
+     *  queue exist only on that side, so they read this and not `dest`. */
+    const sonosTarget = $derived(dest?.kind === "sonos" ? dest.id : null);
+    /** The KEF speaker, when the destination is one. */
+    const kefTarget = $derived(dest?.kind === "kef" ? dest.id : null);
+    const kefTargetSpeaker = $derived(
+        kefTarget ? (kefSpeakers.find((s) => s.id === kefTarget) ?? null) : null,
+    );
+    /** Everywhere music can be sent, in the order the destination row lists
+     *  them. Unreachable KEF speakers are left out: they have no Connect
+     *  device while they're off the network. */
+    const destinations = $derived<Dest[]>([
+        ...groups.map((g) => ({ kind: "sonos" as const, id: g.coordinator_id })),
+        ...kefReachable.map((s) => ({ kind: "kef" as const, id: s.id })),
+    ]);
+    function destName(d: Dest): string {
+        if (d.kind === "kef") return kefSpeakers.find((s) => s.id === d.id)?.name ?? "Speaker";
+        const g = groups.find((x) => x.coordinator_id === d.id);
+        return g ? groupTitle(g) : "Zone";
+    }
+    const isDest = (d: Dest) => dest?.kind === d.kind && dest.id === d.id;
+    /** What to call the destination in a toast or the one-destination label. */
+    const destLabel = $derived(dest ? destName(dest) : "");
+    /** Stable key for per-destination state (the search history). */
+    const destKey = $derived(dest ? `${dest.kind}:${dest.id}` : null);
+
+    // Keep the destination pointing at something that exists, and prefer a
+    // room that is already playing — "play this too" almost always means the
+    // room the music is coming out of. Runs on both bridges' polls, so a KEF
+    // speaker that answers first is a perfectly good default in a house
+    // without Sonos.
+    $effect(() => {
+        const list = destinations;
+        if (dest && list.some((d) => isDest(d))) return;
+        const livePick =
+            playingGroups[0] && { kind: "sonos" as const, id: playingGroups[0].coordinator_id };
+        const kefPick = kefPlaying[0] && { kind: "kef" as const, id: kefPlaying[0].id };
+        dest = livePick ?? kefPick ?? list[0] ?? null;
+    });
 
     onMount(() => {
         void refresh();
@@ -416,21 +456,22 @@
     }
 
     // Starting playback is invisible until the next poll lands, so every
-    // "play this" path confirms in words — including which room it went to,
-    // which is the one thing a tap can't show.
+    // "play this" path confirms in words — `where` names the room, which is
+    // the one thing a tap can't show. The refresh is the destination's own
+    // bridge: a KEF play would never show up in the Sonos poll.
     async function startPlayback(
         key: string,
         fn: () => Promise<unknown>,
         what: string,
-        target: string,
+        where: string,
+        bridge: "sonos" | "kef" = "sonos",
     ) {
         if (busy[key]) return;
         busy[key] = true;
         try {
             await fn();
-            await refresh();
-            const g = groups.find((x) => x.coordinator_id === target);
-            toasts.success("Playing", [what, g && groupTitle(g)].filter(Boolean).join(" · "));
+            await (bridge === "kef" ? refreshKEF() : refresh());
+            toasts.success("Playing", [what, where].filter(Boolean).join(" · "));
         } catch (e) {
             toasts.error("Couldn't play", (e as Error).message);
         } finally {
@@ -438,11 +479,14 @@
         }
     }
 
-    // Favorites play on the chip-selected target, except inside the player
-    // sheet, where the group being viewed is the obvious destination.
-    function playFavorite(f: SonosFavorite, target: string | null = favTarget) {
+    // Favorites play on the chip-selected destination, except inside the
+    // player sheet, where the group being viewed is the obvious one. They are
+    // a Sonos household list, so the destination here is always a coordinator.
+    function playFavorite(f: SonosFavorite, target: string | null = sonosTarget) {
         if (!target) return;
-        void startPlayback("fav:" + f.id, () => api.sonosPlayFavorite(target, f), f.title, target);
+        const g = groups.find((x) => x.coordinator_id === target);
+        void startPlayback("fav:" + f.id, () => api.sonosPlayFavorite(target, f), f.title,
+            g ? groupTitle(g) : "");
     }
 
     // ── Screens ──────────────────────────────────────────────────────────
@@ -601,7 +645,7 @@
         // The room you just opened is also where you'd expect the next
         // favorite or search result to land, so opening the player sets the
         // destination too — one choice instead of two.
-        favTarget = g.coordinator_id;
+        dest = { kind: "sonos", id: g.coordinator_id };
         dragY = 0;
         dragging = false;
         dismissing = false;
@@ -1071,11 +1115,12 @@
     }
 
     // Enqueue without disturbing what's playing. Used by search results and
-    // favorites; `next` drops it in after the current track.
+    // favorites; `next` drops it in after the current track. The queue is a
+    // Sonos group's, so this is only ever offered for a Sonos destination.
     async function enqueue(
         item: { uri: string; title?: string; service?: string; metadata?: string },
         next: boolean,
-        target: string | null = favTarget,
+        target: string | null = sonosTarget,
     ) {
         if (!target) return;
         const key = "q:" + item.uri;
@@ -1304,9 +1349,9 @@
     }
 
     // ── Search history ───────────────────────────────────────────────────
-    // Keyed by the room a search is played on (favTarget), since "recent
+    // Keyed by the room a search is played on (the destination), since "recent
     // searches" reads differently in the kitchen than in the bedroom. A
-    // single-zone home only ever has one key, which collapses this to a
+    // single-room home only ever has one key, which collapses this to a
     // plain, unscoped history without any extra code path.
     const HISTORY_KEY = "music.searchHistory.v1";
     const HISTORY_MAX = 8;
@@ -1321,11 +1366,10 @@
         try { localStorage.setItem(HISTORY_KEY, JSON.stringify(searchHistory)); }
         catch { /* private mode */ }
     });
-    // Falls back to one shared bucket when there's no target yet (e.g. no
-    // groups loaded), so history still works before speakers are set up.
-    const historyKey = $derived(favTarget ?? "_all");
+    // Falls back to one shared bucket when there's no destination yet (e.g. no
+    // speakers loaded), so history still works before speakers are set up.
+    const historyKey = $derived(destKey ?? "_all");
     const historyList = $derived(searchHistory[historyKey] ?? []);
-    const historyTargetGroup = $derived(groups.find((g) => g.coordinator_id === favTarget));
 
     function addToHistory(q: string) {
         const key = historyKey;
@@ -1357,14 +1401,20 @@
         results ? results[kindFilter] : myPlaylists,
     );
 
+    // A search result plays on whichever destination is selected. Same tap,
+    // same body, two roads: a Sonos group loads it into its queue and streams
+    // it with the household's linked account, while a KEF speaker is started
+    // through Spotify Connect — its own API has no way to be handed content.
     function playItem(item: SpotifyItem) {
-        const target = favTarget;
-        if (!target) return;
+        const d = dest;
+        if (!d) return;
+        const body = { service: "Spotify", uri: item.uri, title: item.name };
         void startPlayback(
             "item:" + item.uri,
-            () => api.sonosPlayItem(target, { service: "Spotify", uri: item.uri, title: item.name }),
+            () => (d.kind === "kef" ? api.kefPlayItem(d.id, body) : api.sonosPlayItem(d.id, body)),
             item.name,
-            target,
+            destName(d),
+            d.kind,
         );
     }
 
@@ -1440,6 +1490,10 @@
     function openKEFSpeaker(sp: KEFSpeakerView) {
         detailId = null; // one pane at a time
         kefDetailId = sp.id;
+        // Same reasoning as openPlayer: the speaker you just opened is where
+        // you'd expect the next search result to land, so opening it sets the
+        // destination too. Only when it can actually take one.
+        if (sp.reachable) dest = { kind: "kef", id: sp.id };
     }
 
     // From 1024px up the list and the selected speaker's settings sit side by
@@ -1574,7 +1628,9 @@
                     <span class="quiet-sub">
                         <span class="mono">{readyCount}</span>
                         speaker{readyCount === 1 ? "" : "s"} ready —
-                        {favorites.length > 0 ? "start a favorite below" : "pick a room to open it"}
+                        {favorites.length > 0 && !kefTargetSpeaker
+                            ? "start a favorite below"
+                            : "pick a room to open it"}
                     </span>
                 </span>
                 {#if spotify?.connected}
@@ -1714,11 +1770,32 @@
                 <div class="eyrow">Favorites</div>
                 {@render targetRow()}
             </div>
-            <div class="favs h-scroll">
-                {#each favorites as f (f.id)}
-                    {@render favCard(f, favTarget)}
-                {/each}
-            </div>
+            {#if kefTargetSpeaker}
+                <!-- "My Sonos" is a household list, and a KEF speaker has no
+                     way to play an entry from it. A rail of disabled cards
+                     would be a row of dead controls (§15), so the section
+                     says what it needs instead — and the fix is one tap on
+                     the destination row directly above. -->
+                <div class="quiet-card">
+                    <span class="quiet-ico"><Icon name="speaker" size={20} /></span>
+                    <span class="quiet-meta">
+                        <span class="quiet-title">Favorites need a Sonos room</span>
+                        <span class="quiet-sub">
+                            They come out of your Sonos household, so {kefTargetSpeaker.name} can't
+                            play one — pick a Sonos room above, or search to play there.
+                        </span>
+                    </span>
+                    {#if spotify?.connected}
+                        <button class="chip quiet-go" onclick={() => goto("search")}>Search</button>
+                    {/if}
+                </div>
+            {:else}
+                <div class="favs h-scroll">
+                    {#each favorites as f (f.id)}
+                        {@render favCard(f, sonosTarget)}
+                    {/each}
+                </div>
+            {/if}
         </section>
     {/if}
 
@@ -2130,7 +2207,7 @@
                     <div class="sp-history">
                         <div class="sp-history-head">
                             <span class="sp-browse-label">
-                                Recent searches{#if groups.length > 1 && historyTargetGroup} · {groupTitle(historyTargetGroup)}{/if}
+                                Recent searches{#if destinations.length > 1 && destLabel} · {destLabel}{/if}
                             </span>
                             <button type="button" class="chip sp-hist-clear" onclick={clearHistory}>Clear</button>
                         </div>
@@ -2161,6 +2238,20 @@
                     {/if}
                     <div class="sp-targets" class:pushed={!!results}>{@render targetRow()}</div>
                 </div>
+                <!-- Playing on a KEF speaker goes out through Spotify Connect,
+                     which needs a permission this login may predate. Saying so
+                     before the tap beats a 409 after it, and reconnecting is
+                     the only thing that fixes it. -->
+                {#if kefTargetSpeaker && spotify && !spotify.playback}
+                    <div class="sp-note">
+                        <Icon name="info" size={14} />
+                        <span>
+                            Reconnect Spotify to start music on {kefTargetSpeaker.name} —
+                            this login was made before HomeHub could ask for that.
+                        </span>
+                        <button class="chip" onclick={connectSpotify}>Reconnect</button>
+                    </div>
+                {/if}
                 {#if searching}
                     <div class="skeleton sp-skeleton"></div>
                 {:else if results && shownItems.length === 0}
@@ -2170,14 +2261,14 @@
                          box does rather than leaving a blank panel. -->
                     <div class="sp-none">
                         Search Spotify for a song, album or playlist. Tapping a result
-                        plays it on the room shown above; the row's overflow menu
-                        queues it without interrupting.
+                        plays it on the room shown above{#if !kefTargetSpeaker}; the row's
+                        overflow menu queues it without interrupting{/if}.
                     </div>
                 {:else}
                     <div class="sp-results">
                         {#each shownItems as item (item.uri)}
                             <div class="sp-row">
-                                <button class="sp-open" disabled={busy["item:" + item.uri] || !favTarget}
+                                <button class="sp-open" disabled={busy["item:" + item.uri] || !dest}
                                     onclick={() => playItem(item)}>
                                     {#if item.art_url}
                                         <img class="sp-art" src={item.art_url} alt="" loading="lazy" />
@@ -2191,13 +2282,19 @@
                                     <span class="sp-play"><Icon name="play" size={16} /></span>
                                 </button>
                                 <!-- Tapping the row plays now; queueing without
-                                     interrupting lives behind the overflow. -->
-                                <button class="icon-btn sp-more" aria-label="More for {item.name}"
-                                    aria-haspopup="menu" aria-expanded={menuFor === item.uri}
-                                    disabled={busy["q:" + item.uri] || !favTarget}
-                                    onclick={(e) => toggleMenu(e, item.uri)}>
-                                    <Icon name="more" size={16} />
-                                </button>
+                                     interrupting lives behind the overflow —
+                                     and only for a Sonos destination, since
+                                     the queue is a Sonos group's. A KEF
+                                     speaker has none, so the control that
+                                     would be refused isn't there at all. -->
+                                {#if sonosTarget}
+                                    <button class="icon-btn sp-more" aria-label="More for {item.name}"
+                                        aria-haspopup="menu" aria-expanded={menuFor === item.uri}
+                                        disabled={busy["q:" + item.uri]}
+                                        onclick={(e) => toggleMenu(e, item.uri)}>
+                                        <Icon name="more" size={16} />
+                                    </button>
+                                {/if}
                                 {#if menuFor === item.uri}
                                     <div class="overflow-menu" role="menu" use:menuNav
                                         in:scale={{ start: 0.95, duration: dur(140), easing: cubicOut, opacity: 0 }}
@@ -2309,23 +2406,31 @@
 
 <!-- ── Where playback lands ──────────────────────────────────────────
      One destination shared by favorites and search, always visible — a
-     single group shows its name rather than hiding the answer entirely. -->
+     single room shows its name rather than hiding the answer entirely. Both
+     bridges are in the same row because there is only ever one destination;
+     the KEF speakers come after the Sonos zones behind one marker, so a name
+     that exists on both sides is still tellable apart without giving every
+     chip a badge it doesn't need. -->
 {#snippet targetRow()}
-    {#if groups.length > 1}
+    {#if destinations.length > 1}
         <div class="fav-targets" role="radiogroup" aria-label="Play on">
             <span class="t-label">Play on</span>
-            {#each groups as g (g.coordinator_id)}
-                {@const on = favTarget === g.coordinator_id}
+            {#each destinations as d, i (d.kind + d.id)}
+                {#if i === groups.length && groups.length > 0}
+                    <span class="t-label">KEF</span>
+                {/if}
+                {@const on = isDest(d)}
                 <button class="chip" class:on role="radio" aria-checked={on}
-                    onclick={() => (favTarget = g.coordinator_id)}>
-                    {groupTitle(g)}
+                    aria-label={`Play on ${destName(d)}${d.kind === "kef" ? " (KEF)" : ""}`}
+                    onclick={() => (dest = d)}>
+                    {destName(d)}
                 </button>
             {/each}
         </div>
-    {:else if groups.length === 1}
+    {:else if destinations.length === 1}
         <div class="fav-targets">
             <span class="t-label">Play on</span>
-            <span class="t-one">{groupTitle(groups[0])}</span>
+            <span class="t-one">{destName(destinations[0])}</span>
         </div>
     {/if}
 {/snippet}
@@ -3297,6 +3402,18 @@
     .sp-targets.pushed { margin-left: auto; }
     .sp-skeleton { height: 120px; border-radius: var(--r-md); }
     .sp-none { font-size: 12.5px; color: var(--text-mute); }
+    /* One-line explanation above the results, for a destination that needs
+       something before it can play. Quiet: it isn't a fault, it's a step. */
+    .sp-note {
+        display: flex; align-items: center; gap: var(--space-2);
+        padding: var(--space-2) var(--space-3);
+        background: var(--card-2); border: 1px solid var(--hairline);
+        border-radius: var(--r-md);
+        font-size: 12.5px; color: var(--text-mute);
+    }
+    .sp-note :global(svg) { flex: none; color: var(--text-dim); }
+    .sp-note span { flex: 1; min-width: 0; }
+    .sp-note .chip { flex: none; }
 
     .sp-history { display: flex; flex-direction: column; gap: var(--space-2); }
     .sp-history-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }

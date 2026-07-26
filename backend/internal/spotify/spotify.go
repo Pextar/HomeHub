@@ -8,11 +8,19 @@
 // Sonos household, so Spotify's cloud is only used to *find* music, never to
 // route audio.
 //
+// KEF speakers are the exception, and the Connect section at the bottom of
+// this file exists for them: their local API has transport control but no way
+// to hand it something to play, so starting music there means asking Spotify
+// to point playback at the speaker's Spotify Connect endpoint. That path does
+// route audio through Spotify's cloud — the speaker streams it directly, but
+// the *command* goes out and back rather than staying on the LAN.
+//
 // Tokens persist in spotify.json in the data dir. Like push subscriptions,
 // they are credentials — deliberately excluded from the export bundle.
 package spotify
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -38,9 +46,24 @@ const (
 	stateFile = "spotify.json"
 
 	// Scopes: profile for the "connected as" label, playlist/library reads
-	// for browsing. Search itself needs no scope.
-	scopes = "user-read-private playlist-read-private user-library-read"
+	// for browsing, and the two player scopes that Connect playback needs
+	// (KEF speakers — see the Connect section). Search itself needs no scope.
+	scopes = "user-read-private playlist-read-private user-library-read " +
+		scopeReadPlayback + " " + scopeModifyPlayback
+
+	scopeReadPlayback   = "user-read-playback-state"
+	scopeModifyPlayback = "user-modify-playback-state"
 )
+
+// ErrNotConnected is returned by every call that needs an account when none
+// is linked. The API layer maps it to 409 so the frontend can prompt a login.
+var ErrNotConnected = errors.New("spotify: not connected")
+
+// ErrPlaybackScope means the stored login was granted before the player
+// scopes were asked for — everything else still works, but Connect playback
+// needs the user to reconnect once. Refreshing can't widen a grant, so this
+// is not something the backend can fix on its own.
+var ErrPlaybackScope = errors.New("spotify: reconnect Spotify to let HomeHub start playback — this login was granted before that permission existed")
 
 // persisted is the on-disk shape. Everything in here survives restarts.
 type persisted struct {
@@ -49,6 +72,12 @@ type persisted struct {
 	AccessToken  string    `json:"access_token,omitempty"`
 	Expiry       time.Time `json:"expiry,omitempty"`
 	DisplayName  string    `json:"display_name,omitempty"`
+	// Scope is what Spotify actually granted, as it reports it on every
+	// token response. Stored because a grant can be narrower than what we
+	// asked for — and because a login made by an older build of HomeHub
+	// predates the player scopes entirely, which is worth saying out loud
+	// rather than discovering as a 403 mid-tap.
+	Scope string `json:"scope,omitempty"`
 }
 
 // pendingAuth is one in-flight PKCE authorization, keyed by state. The
@@ -114,6 +143,10 @@ type Status struct {
 	Configured  bool   `json:"configured"` // client ID set
 	Connected   bool   `json:"connected"`  // tokens present
 	DisplayName string `json:"display_name,omitempty"`
+	// Playback reports whether this login can start Connect playback. False
+	// on a login made before the player scopes were requested, which is the
+	// one thing about the connection that a working search doesn't prove.
+	Playback bool `json:"playback"`
 }
 
 // Status returns the current connection state.
@@ -124,7 +157,23 @@ func (c *Client) Status() Status {
 		Configured:  c.p.ClientID != "",
 		Connected:   c.p.RefreshToken != "",
 		DisplayName: c.p.DisplayName,
+		Playback:    c.p.RefreshToken != "" && grantsPlayback(c.p.Scope),
 	}
+}
+
+// grantsPlayback reports whether a granted-scope string carries both player
+// scopes. An empty scope means the grant was stored by a build that didn't
+// record it, which in practice is a build that never asked for them.
+func grantsPlayback(scope string) bool {
+	has := func(want string) bool {
+		for _, s := range strings.Fields(scope) {
+			if s == want {
+				return true
+			}
+		}
+		return false
+	}
+	return has(scopeReadPlayback) && has(scopeModifyPlayback)
 }
 
 // SetClientID stores the developer app's client ID. Changing it invalidates
@@ -217,6 +266,7 @@ func (c *Client) HandleCallback(ctx context.Context, code, state string) error {
 	c.mu.Lock()
 	c.p.AccessToken = tok.AccessToken
 	c.p.RefreshToken = tok.RefreshToken
+	c.p.Scope = tok.Scope
 	c.p.Expiry = time.Now().Add(time.Duration(tok.ExpiresIn) * time.Second)
 	saveErr := c.save()
 	c.mu.Unlock()
@@ -274,6 +324,7 @@ type tokenResponse struct {
 	AccessToken  string `json:"access_token"`
 	RefreshToken string `json:"refresh_token"`
 	ExpiresIn    int    `json:"expires_in"`
+	Scope        string `json:"scope"`
 }
 
 func (c *Client) tokenRequest(ctx context.Context, form url.Values) (*tokenResponse, error) {
@@ -312,7 +363,7 @@ func (c *Client) accessToken(ctx context.Context) (string, error) {
 	c.mu.Lock()
 	if c.p.RefreshToken == "" {
 		c.mu.Unlock()
-		return "", errors.New("spotify: not connected")
+		return "", ErrNotConnected
 	}
 	if c.p.AccessToken != "" && time.Until(c.p.Expiry) > 30*time.Second {
 		tok := c.p.AccessToken
@@ -337,6 +388,11 @@ func (c *Client) accessToken(ctx context.Context) (string, error) {
 	// response omitted it.
 	if tok.RefreshToken != "" {
 		c.p.RefreshToken = tok.RefreshToken
+	}
+	// A refresh reports the grant too, which is how a login stored by an
+	// older build (no recorded scope) learns what it actually has.
+	if tok.Scope != "" {
+		c.p.Scope = tok.Scope
 	}
 	c.p.Expiry = time.Now().Add(time.Duration(tok.ExpiresIn) * time.Second)
 	_ = c.save()
@@ -367,18 +423,25 @@ func (c *Client) apiGet(ctx context.Context, path string, q url.Values, out inte
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 	if resp.StatusCode >= 400 {
-		var e struct {
-			Error struct {
-				Message string `json:"message"`
-			} `json:"error"`
-		}
-		_ = json.Unmarshal(raw, &e)
-		if e.Error.Message != "" {
-			return fmt.Errorf("spotify: %s", e.Error.Message)
-		}
-		return fmt.Errorf("spotify: HTTP %d", resp.StatusCode)
+		return apiError(resp.StatusCode, raw)
 	}
 	return json.Unmarshal(raw, out)
+}
+
+// apiError turns an error response into a message worth showing. Spotify puts
+// a human-readable reason in the body for most failures; the status code alone
+// is the fallback.
+func apiError(status int, raw []byte) error {
+	var e struct {
+		Error struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	_ = json.Unmarshal(raw, &e)
+	if e.Error.Message != "" {
+		return fmt.Errorf("spotify: %s", e.Error.Message)
+	}
+	return fmt.Errorf("spotify: HTTP %d", status)
 }
 
 // Item is one playable search/browse result, flattened for the frontend.
@@ -519,6 +582,174 @@ func (c *Client) MyPlaylists(ctx context.Context, limit int) ([]Item, error) {
 		})
 	}
 	return out, nil
+}
+
+// ── Spotify Connect ──────────────────────────────────────────────────────
+//
+// Everything above this line only *finds* music. This part starts it, and it
+// exists for one reason: a KEF speaker's local API can play, pause and skip
+// but has no way to be handed something to play. Its Spotify Connect endpoint
+// does, so HomeHub asks Spotify to point playback at the speaker.
+//
+// Two consequences worth knowing before building on it. The speaker has to
+// have been signed in to this account once from the Spotify app — Connect
+// devices are registered account-side, not discovered by us — and the account
+// has to be Premium, because that is what the player endpoints require.
+// Both failures are reported in those words rather than as an HTTP code.
+
+// Device is one Spotify Connect endpoint the account can play to.
+type Device struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Type string `json:"type"` // Speaker | Computer | Smartphone | …
+	// Active is Spotify's own "this is where playback is right now".
+	Active bool `json:"active"`
+	// Restricted devices accept no Web API commands at all (some car and
+	// TV integrations). Naming one is better than a silent no-op.
+	Restricted bool `json:"restricted"`
+	Volume     int  `json:"volume,omitempty"`
+}
+
+// Devices lists the account's currently visible Connect endpoints. A speaker
+// only appears while it is awake and on the network, which is why the KEF
+// bridge wakes the speaker before asking.
+func (c *Client) Devices(ctx context.Context) ([]Device, error) {
+	if err := c.requirePlayback(); err != nil {
+		return nil, err
+	}
+	var raw struct {
+		Devices []struct {
+			ID            string `json:"id"`
+			IsActive      bool   `json:"is_active"`
+			IsRestricted  bool   `json:"is_restricted"`
+			Name          string `json:"name"`
+			Type          string `json:"type"`
+			VolumePercent *int   `json:"volume_percent"`
+		} `json:"devices"`
+	}
+	if err := c.apiGet(ctx, "/me/player/devices", nil, &raw); err != nil {
+		return nil, err
+	}
+	out := make([]Device, 0, len(raw.Devices))
+	for _, d := range raw.Devices {
+		dev := Device{
+			ID: d.ID, Name: strings.TrimSpace(d.Name), Type: d.Type,
+			Active: d.IsActive, Restricted: d.IsRestricted,
+		}
+		if d.VolumePercent != nil {
+			dev.Volume = *d.VolumePercent
+		}
+		out = append(out, dev)
+	}
+	return out, nil
+}
+
+// PlayOn starts a Spotify URI on one Connect device, moving playback there if
+// it was somewhere else. A track plays on its own; an album, playlist or
+// artist plays as a context, so the rest of it follows.
+func (c *Client) PlayOn(ctx context.Context, deviceID, uri string) error {
+	if strings.TrimSpace(deviceID) == "" {
+		return errors.New("spotify: no Connect device to play on")
+	}
+	body, err := playBody(uri)
+	if err != nil {
+		return err
+	}
+	if err := c.requirePlayback(); err != nil {
+		return err
+	}
+	// 202 means the device was reachable but not ready yet — a speaker that
+	// has just woken says this. One retry is what the difference between
+	// "didn't work" and "took a second" costs.
+	err = c.apiPut(ctx, "/me/player/play", url.Values{"device_id": {deviceID}}, body)
+	if errors.Is(err, errDeviceNotReady) {
+		select {
+		case <-time.After(700 * time.Millisecond):
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+		err = c.apiPut(ctx, "/me/player/play", url.Values{"device_id": {deviceID}}, body)
+		if errors.Is(err, errDeviceNotReady) {
+			return errors.New("spotify: the speaker didn't pick it up — wake it and try again")
+		}
+	}
+	return err
+}
+
+// playBody builds the /me/player/play payload for one URI.
+func playBody(uri string) ([]byte, error) {
+	uri = strings.TrimSpace(uri)
+	switch {
+	case strings.HasPrefix(uri, "spotify:track:"):
+		return json.Marshal(map[string]any{"uris": []string{uri}})
+	case strings.HasPrefix(uri, "spotify:album:"),
+		strings.HasPrefix(uri, "spotify:playlist:"),
+		strings.HasPrefix(uri, "spotify:artist:"):
+		return json.Marshal(map[string]string{"context_uri": uri})
+	default:
+		return nil, fmt.Errorf("spotify: %q is not a playable Spotify URI", uri)
+	}
+}
+
+// requirePlayback fails early when the stored grant can't reach the player
+// endpoints, so the user gets "reconnect" instead of Spotify's 403.
+func (c *Client) requirePlayback() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.p.RefreshToken == "" {
+		return ErrNotConnected
+	}
+	if !grantsPlayback(c.p.Scope) {
+		return ErrPlaybackScope
+	}
+	return nil
+}
+
+// errDeviceNotReady is the internal marker for Spotify's 202: the command
+// arrived, the device hasn't taken it yet.
+var errDeviceNotReady = errors.New("spotify: device not ready")
+
+// apiPut performs an authenticated PUT with a JSON body. The player endpoints
+// answer 204 with no body on success.
+func (c *Client) apiPut(ctx context.Context, path string, q url.Values, body []byte) error {
+	tok, err := c.accessToken(ctx)
+	if err != nil {
+		return err
+	}
+	u := apiBase + path
+	if len(q) > 0 {
+		u += "?" + q.Encode()
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, u, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+tok)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.httpClient().Do(req)
+	if err != nil {
+		return fmt.Errorf("spotify: %w", err)
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	switch {
+	case resp.StatusCode == http.StatusAccepted:
+		return errDeviceNotReady
+	case resp.StatusCode == http.StatusNotFound:
+		// The device list is a snapshot; a speaker that went to sleep
+		// between listing and playing lands here.
+		return errors.New("spotify: that speaker is no longer available to Spotify — wake it and try again")
+	case resp.StatusCode == http.StatusForbidden:
+		// Premium is the usual reason the player endpoints refuse.
+		err := apiError(resp.StatusCode, raw)
+		if strings.Contains(strings.ToLower(err.Error()), "premium") {
+			return errors.New("spotify: starting playback needs Spotify Premium")
+		}
+		return err
+	case resp.StatusCode >= 400:
+		return apiError(resp.StatusCode, raw)
+	}
+	return nil
 }
 
 // randomString returns n bytes of randomness, base64url-encoded (unpadded) —
