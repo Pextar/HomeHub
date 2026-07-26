@@ -848,18 +848,45 @@ patterns on top. Keep these consistent if you extend it.
     eleven extra calls per speaker every five seconds to watch nothing happen.
 - **KEF is a second bridge, not a second Sonos.** `internal/kef` speaks the
   local HTTP API on KEF's wireless speakers (LS50 Wireless II, LSX II, LS60).
-  It sits *beside* the Sonos bridge rather than under a shared abstraction,
-  and that is a design decision, not a shortcut: a Sonos household is zones
-  that group and share a queue, while a KEF speaker is one standalone stereo
-  pair with an input selector. One abstraction over both would mean either
-  inventing groups KEF doesn't have or dropping the ones Sonos does.
+  It sits *beside* the Sonos bridge, and the shared layer above them
+  (`internal/media`, docs/MEDIA-PROTOCOL.md) deliberately does not flatten
+  them: it describes each speaker by *capability* and lets a route engine pick
+  a path, rather than inventing groups KEF doesn't have or dropping the ones
+  Sonos does. A Sonos household is zones that group and share a queue; a KEF
+  speaker is one standalone stereo pair with an input selector; the protocol
+  says so in both cases and neither has to pretend.
   Consequences for the UI, all of them the "stay honest about the backend"
   rule applied:
-  - **KEF has no Zones presence — but it does get a player.** Zones answers
-    *what plays together*; a KEF speaker never plays together with anything,
-    so it is not a puck and there is nothing to group. That much stands.
+  - **A KEF can now be in a zone with a Sonos — and the UI must say how.**
+    This section used to read "a KEF speaker never plays together with
+    anything", and that was true of what the vendors offer: Sonos grouping is
+    Sonos-only, and Spotify Connect reaches one device at a time. It is no
+    longer true of HomeHub, which can hold the single Spotify session itself,
+    decode once and serve the audio to both — the `stream` route.
 
-    The player does not. This section used to say a KEF sheet would be "an
+    What must not follow is presenting the two kinds of zone as the same
+    thing, because they are not. A native Sonos group is sample-locked and
+    full quality. A streamed mixed zone lands its speakers a few hundred
+    milliseconds apart, shows on Sonos as a stream rather than as a track,
+    and takes over the account's active Spotify device. So a zone whose route
+    is `stream` **names that in the UI**, using the backend's own `reason`
+    string — which already names the speaker responsible — rather than a
+    generic badge. The backend reports `route` and `sync` on every zone read
+    precisely so the UI never has to guess which case it is looking at.
+
+    The corollary is the rule that keeps this from being a regression: **a
+    Sonos-only zone must never show stream affordances**, because it never
+    takes that route. `native` and `group` are chosen ahead of `stream`
+    whenever they fit, so an all-Sonos zone behaves exactly as it did before
+    the protocol existed. If a Sonos-only zone ever renders as buffered, that
+    is a bug in route selection, not a labelling choice.
+  - **A KEF still isn't a Sonos puck, and still gets a player.** Grouping in
+    the puck grid remains a Sonos-side gesture — it drives Sonos' own
+    grouping, which a KEF cannot join. Cross-vendor zones are built by
+    membership (which speakers are in this zone), not by dragging one puck
+    onto another, and the two must not be conflated in the same gesture.
+
+    The player is unchanged. This section used to say a KEF sheet would be "an
     art-led sheet with a volume slider in it", so there wasn't one, and a KEF
     room's chip pushed the Speakers screen instead — from a row of chips
     where every neighbour lifted a player, and which was the module's worst
