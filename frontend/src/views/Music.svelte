@@ -17,11 +17,10 @@
     import ZonesSheet from "../components/music/ZonesSheet.svelte";
     import RoomPuck from "../components/music/RoomPuck.svelte";
     import SearchSheet from "../components/music/SearchSheet.svelte";
+    import SpeakersScreen from "../components/music/SpeakersScreen.svelte";
     import { createPuckDrag } from "../lib/music/puck-drag.svelte";
     import ConfirmModal from "../components/ConfirmModal.svelte";
     import SpeakerModal from "../modals/SpeakerModal.svelte";
-    import SonosSpeakerDetail from "./SonosSpeakerDetail.svelte";
-    import KEFSpeakerDetail from "./KEFSpeakerDetail.svelte";
     import SonosEventsModal from "../modals/SonosEventsModal.svelte";
     import LiveStatusChip from "../components/LiveStatusChip.svelte";
     import { api } from "../lib/api";
@@ -34,7 +33,6 @@
     import { lockBodyScroll, unlockBodyScroll } from "../lib/scroll-lock";
     import * as sheetRun from "../lib/sheet-run";
     import type { SheetRun } from "../lib/sheet-run";
-    import { kefSourceLabel } from "../lib/kef";
     import { settleScroll, restoreScroll, toTop } from "../lib/music/scroll";
     import { clock } from "../lib/music/clock.svelte";
     import { createBusy } from "../lib/music/busy.svelte";
@@ -436,6 +434,7 @@
     let sonosPlayer = $state<SonosPlayer | null>(null);
     let kefPlayer = $state<KEFPlayer | null>(null);
     let searchSheet = $state<SearchSheet | null>(null);
+    let speakersScreen = $state<SpeakersScreen | null>(null);
     // Set by the open sheet while a drag-down rides out. The art swipe stands
     // down for those 220ms; raising a sheet clears it, since the flag belongs
     // to the sheet that is leaving, not to the one arriving.
@@ -533,8 +532,7 @@
             } else if (openSheet) dropSheet();
             // Escape backs out of a speaker's settings the same way its back
             // chip does — a drill-down owes the user the key that leaves it.
-            else if (detailId) detailId = null;
-            else if (kefDetailId) kefDetailId = null;
+            else if (speakersScreen?.closeDetail()) return;
             // …and out of Speakers itself, which is a screen, not a sheet.
             else if (screen === "speakers") leaveSpeakers();
             return;
@@ -746,96 +744,22 @@
     }
 
     // ── Speakers screen ──────────────────────────────────────────────────
-    // The device inventory: one row per registered speaker, reachable or not,
-    // each opening that speaker's own settings. Ordered so the ones you can
-    // actually do something with come first.
-    // Device settings are a *sub-screen* of Speakers, not a sheet: they are
-    // reached from the subnav like Home, Rooms and Search, and none of those
-    // are sheets. Selecting a speaker swaps the list for its detail; the
-    // subnav above stays put, so tapping another screen leaves the detail the
-    // same way its back chip does.
+    // Which speaker's settings the screen has open. Held here rather than
+    // inside it because the KEF player's settings chip pushes the screen *and*
+    // opens a pane in one gesture — it has to be able to name the pane before
+    // the screen exists.
     let detailId = $state<string | null>(null);
-    const detailSpeaker = $derived(
-        detailId ? (sonos.status?.speakers.find((s) => s.id === detailId) ?? null) : null,
-    );
-
-    // The KEF pane is a separate selection rather than a shared one keyed by
-    // id: the two bridges' detail views take different props and answer
-    // different questions, and one selection would mean deciding which
-    // component to render from the shape of an id.
     let kefDetailId = $state<string | null>(null);
-    const kefDetailSpeaker = $derived(
-        kefDetailId ? (kef.speakers.find((s) => s.id === kefDetailId) ?? null) : null,
-    );
-    const kefDetailSiblings = $derived(kef.speakers.filter((s) => s.id !== kefDetailId));
-    /** Whichever pane is open — the split layout folds the list away for both. */
-    const anyDetail = $derived(!!detailSpeaker || !!kefDetailSpeaker);
 
     function openKEFSpeaker(sp: KEFSpeakerView) {
         detailId = null; // one pane at a time
         kefDetailId = sp.id;
         // Same reasoning as openPlayer: the speaker you just opened is where
-        // you'd expect the next search result to land, so opening it sets the
-        // destination too. Only when it can actually take one.
+        // you'd expect the next search result to land. Only when it can
+        // actually take one.
         if (sp.reachable) destination.current = { kind: "kef", id: sp.id };
     }
 
-    // From 1024px up the list and the selected speaker's settings sit side by
-    // side, because the width is there and the common job — the same change
-    // across several rooms — is otherwise back-and-forward for every one of
-    // them. Below that the settings replace the list and the detail carries
-    // switcher chips instead.
-    let paned = $state(false);
-    $effect(() => {
-        const mq = window.matchMedia("(min-width: 1024px)");
-        const sync = () => (paned = mq.matches);
-        sync();
-        mq.addEventListener("change", sync);
-        return () => mq.removeEventListener("change", sync);
-    });
-    // A blank right-hand pane is dead space, so the wide layout opens on the
-    // first speaker that can answer. On a phone nothing is selected until the
-    // user picks a row — there, selecting means leaving the list.
-    $effect(() => {
-        if (!paned || screen !== "speakers" || detailId || kefDetailId) return;
-        const first = sonos.allSpeakers.find((s) => s.reachable);
-        if (first) {
-            detailId = first.id;
-            return;
-        }
-        // A house with only KEF speakers still deserves an open pane.
-        const firstKEF = kef.speakers.find((s) => s.reachable);
-        if (firstKEF) kefDetailId = firstKEF.id;
-    });
-    // Speakers other than the open one, for the phone switcher.
-    const detailSiblings = $derived(sonos.allSpeakers.filter((s) => s.id !== detailId));
-    // The sleep timer belongs to the zone, not the speaker (DESIGN.md §15), so
-    // a follower is told which room owns it rather than being given a control
-    // the coordinator would answer for.
-    const detailSleepOwner = $derived.by(() => {
-        const sp = detailSpeaker;
-        if (!sp) return null;
-        const g = sonos.groupOfSpeaker(sp.id);
-        return g && g.coordinator_id !== sp.id
-            ? (sonos.speakerById.get(g.coordinator_id)?.name ?? null)
-            : null;
-    });
-
-    // An unreachable speaker has no settings to read, so its row goes where
-    // the only useful action is instead: the registration form, which is
-    // where a wrong address gets fixed. A form is a sheet, per §11.
-    function openSpeaker(sp: SonosSpeakerView) {
-        if (!sp.reachable) {
-            void openSpeakerModal(sp);
-            return;
-        }
-        kefDetailId = null; // one pane at a time
-        detailId = sp.id;
-    }
-
-    // Speakers that turned out to have no picture of their own. Remembered per
-    // id so a 404 isn't re-requested every time the list re-renders.
-    let noImage = $state<Record<string, boolean>>({});
 </script>
 
 <svelte:window onkeydown={onWindowKey} onpopstate={onPopState} />
@@ -844,33 +768,7 @@
      — the keyboard path especially — is said here instead. -->
 <div class="sr-only" role="status" aria-live="polite">{liveMsg}</div>
 
-{#if screen === "speakers"}
-    <!-- ── Speakers — a screen, not a sheet ────────────────────────────
-         Its rows open a speaker's settings one level further, and a sheet
-         must never open another sheet. So it pushes from Home properly, with
-         the §11 back chip that says so.
-
-         On a phone an open speaker replaces the list, and that pane carries
-         its own §11 head — two back chips on one screen would be one too
-         many, so this one stands down. -->
-    {#if !(anyDetail && !paned)}
-        <div class="screen-head">
-            <button class="icon-btn" aria-label="Back to Music" onclick={leaveSpeakers}>
-                <Icon name="chevronLeft" size={18} />
-            </button>
-            <div class="screen-title">
-                <h1>Speakers</h1>
-                <span class="screen-sub">
-                    <span class="mono">{totalSpeakers}</span>
-                    registered · <span class="mono">{readyCount}</span> sonos.reachable
-                </span>
-            </div>
-            <button class="icon-btn" aria-label="Add speaker" onclick={() => openSpeakerModal()}>
-                <Icon name="plus" size={16} />
-            </button>
-        </div>
-    {/if}
-{:else}
+{#if screen === "home"}
     <Topbar
         title="Music"
         subtitle={sonos.status
@@ -1109,195 +1007,28 @@
     </NavRow>
 
     {:else}
-    <!-- ── Speakers — the device inventory and its settings ────────────
-         Zones answers "what plays together"; this answers "what is each of
-         these, and how is it set up".
-
-         Two panes where the width allows, one where it doesn't: the list
-         column stays put on desktop and the settings open beside it; on a
-         phone the settings take over the screen and `has-detail` folds the
-         list away. Not a sheet — its rows open one, and a sheet must never
-         open another sheet; the content is also too long to spend its life
-         at 92vh. -->
-    <div class="sp-split" class:has-detail={anyDetail}>
-    <div class="sp-col">
-    {#if sonos.allSpeakers.length > 0}
-    <section class="block">
-        <div class="block-head">
-            <!-- Named by bridge once there are two: "what is this thing and
-                 how is it configured" has a different answer per protocol,
-                 and the two lists don't interleave into anything meaningful. -->
-            <div class="eyrow">{kef.speakers.length > 0 ? "Sonos" : "Speakers"}</div>
-            <span class="hint">
-                <span class="mono">{sonos.reachable.length}</span>
-                of <span class="mono">{sonos.allSpeakers.length}</span> sonos.reachable
-            </span>
-        </div>
-        <div class="sp-list">
-            <!-- One target per row, the §11 shape: chevron right, into that
-                 speaker's settings. Editing its registration lives on the
-                 detail's action chip rather than as a second control here. -->
-            {#each sonos.allSpeakers as sp (sp.id)}
-                {@const playing = sonos.speakerPlaying(sp.id)}
-                <button
-                    class="sp-row"
-                    class:off={!sp.reachable}
-                    class:sel={detailId === sp.id}
-                    aria-current={detailId === sp.id ? "true" : undefined}
-                    onclick={() => openSpeaker(sp)}
-                >
-                    <!-- The speaker's own portrait, served by the device.
-                         No picture published means the striped placeholder
-                         — never a guess at which model this is (§2). -->
-                    {#if noImage[sp.id]}
-                        <!-- §6.7's striped fill, without its caption: no
-                             wording fits a 40px box, and the row's name
-                             and model already say what this is. -->
-                        <span class="shot placeholder" aria-hidden="true"></span>
-                    {:else}
-                        <img
-                            class="shot"
-                            src={api.sonosImageURL(sp.id)}
-                            alt=""
-                            loading="lazy"
-                            onerror={() => (noImage[sp.id] = true)}
-                        />
-                    {/if}
-                    <span class="sp-meta">
-                        <span class="sp-name">{sp.name}</span>
-                        <span class="sp-sub">
-                            {#if !sp.reachable}
-                                Unreachable · <span class="mono">{sp.ip}</span>
-                            {:else}
-                                {[sp.model, sp.room].filter(Boolean).join(" · ") || sp.ip}
-                            {/if}
-                        </span>
-                    </span>
-                    {#if playing}
-                        <Waveform />
-                    {/if}
-                    <span class="sp-chev" aria-hidden="true"><Icon name="chevronDown" size={18} /></span>
-                </button>
-            {/each}
-        </div>
-        <p class="hint">
-            Tone, night mode, the status light and the touch controls are the
-            speaker's own settings — they stay set whatever is playing.
-        </p>
-    </section>
-    {/if}
-
-    <!-- ── KEF ─────────────────────────────────────────────────────────
-         Its own list, not interleaved with the Sonos one: the row's sub-line
-         means different things (a Sonos row leads with its zone, a KEF row
-         with its input), and the screen each one opens answers a different
-         set of questions. -->
-    {#if kef.speakers.length > 0}
-    <section class="block">
-        <div class="block-head">
-            <div class="eyrow">KEF</div>
-            <span class="hint">
-                <span class="mono">{kef.reachable.length}</span>
-                of <span class="mono">{kef.speakers.length}</span> sonos.reachable
-            </span>
-        </div>
-        <div class="sp-list">
-            {#each kef.speakers as sp (sp.id)}
-                <button
-                    class="sp-row"
-                    class:off={!sp.reachable}
-                    class:sel={kefDetailId === sp.id}
-                    aria-current={kefDetailId === sp.id ? "true" : undefined}
-                    onclick={() => (sp.reachable ? openKEFSpeaker(sp) : openKEFModal(sp))}
-                >
-                    <!-- KEF publishes no picture of itself the way Sonos
-                         does, so this is the §6.7 striped fill rather than a
-                         stock photo that might show the wrong model (§2). -->
-                    <span class="shot placeholder" aria-hidden="true"></span>
-                    <span class="sp-meta">
-                        <span class="sp-name">{sp.name}</span>
-                        <span class="sp-sub">
-                            {#if !sp.reachable}
-                                Unreachable · <span class="mono">{sp.ip}</span>
-                            {:else if !sp.state?.powered_on}
-                                Standby · {[sp.model, sp.room].filter(Boolean).join(" · ") || sp.ip}
-                            {:else}
-                                {[kefSourceLabel(sp.state?.source), sp.model, sp.room]
-                                    .filter(Boolean).join(" · ") || sp.ip}
-                            {/if}
-                        </span>
-                    </span>
-                    {#if kef.isPlaying(sp)}
-                        <Waveform />
-                    {/if}
-                    <span class="sp-chev" aria-hidden="true"><Icon name="chevronDown" size={18} /></span>
-                </button>
-            {/each}
-        </div>
-        <p class="hint">
-            KEF speakers stand alone — no grouping, no shared sonos.queue — so their
-            input, volume and EQ all live on the speaker's own screen.
-        </p>
-    </section>
-    {/if}
-
-    <!-- ── Live updates ────────────────────────────────────────────────
-         Speakers is where the devices are managed, so it is where the
-         plumbing behind them belongs. The topbar chip says which state we're
-         in; this row is the discoverable way in for someone who never
-         noticed it. -->
-    {#if sonos.allSpeakers.length > 0}
-    <NavRow
-        icon={sonos.livePush ? "bolt" : "radio"}
-        on={sonos.livePush}
-        title="Live updates"
-        onClick={openEventsModal}
-    >
-        {#snippet sub()}
-            {#if sonos.livePush}
-                Speakers push their changes — this app keeps up in real time
-            {:else}
-                Speakers are being polled — changes take a few seconds to show
-            {/if}
-        {/snippet}
-    </NavRow>
-    {/if}
-    </div><!-- /.sp-col -->
-
-    {#if detailSpeaker}
-        <div class="sp-pane">
-            <SonosSpeakerDetail
-                speaker={detailSpeaker}
-                sleepTimerOwner={detailSleepOwner}
-                {paned}
-                siblings={detailSiblings}
-                onPick={(id) => (detailId = id)}
-                onBack={() => (detailId = null)}
-                onEdit={() => void openSpeakerModal(detailSpeaker)}
-            />
-        </div>
-    {:else if kefDetailSpeaker}
-        <div class="sp-pane">
-            <KEFSpeakerDetail
-                speaker={kefDetailSpeaker}
-                {paned}
-                siblings={kefDetailSiblings}
-                onPick={(id) => (kefDetailId = id)}
-                onBack={() => (kefDetailId = null)}
-                onEdit={() => void openKEFModal(kefDetailSpeaker)}
-                onChanged={() => void kef.refresh()}
-            />
-        </div>
-    {/if}
-    </div><!-- /.sp-split -->
-
+    <SpeakersScreen
+        {sonos}
+        {kef}
+        {totalSpeakers}
+        {readyCount}
+        onBack={leaveSpeakers}
+        onAdd={() => openSpeakerModal()}
+        onEditSonos={(sp) => void openSpeakerModal(sp)}
+        onEditKEF={(sp) => void openKEFModal(sp)}
+        onOpenEvents={openEventsModal}
+        onKEFOpened={(sp) => (destination.current = { kind: "kef", id: sp.id })}
+        bind:this={speakersScreen}
+        bind:detailId
+        bind:kefDetailId
+    />
     {/if}
 
     <!-- ── Docked mini-player ──────────────────────────────────────────
          Present everywhere — including over the Zones and Search sheets,
          which is where the transport would otherwise disappear — but stands
          down while the Home card it would duplicate is on screen. It also
-         survives a pause: that is where a paused zone stays sonos.reachable once
+         survives a pause: that is where a paused zone stays reachable once
          "Playing now" (which means playing, literally) has let go of it. -->
     {#if showDock && dockGroup}
         {@const c = sonos.coordinatorOf(dockGroup)}
@@ -1479,18 +1210,6 @@
         border: 0;
     }
 
-    /* ── Section scaffolding ── */
-    .block { display: flex; flex-direction: column; gap: var(--space-3); }
-    .block-head {
-        display: flex; align-items: center; justify-content: space-between;
-        gap: var(--space-3); flex-wrap: wrap;
-    }
-    .eyrow {
-        font-family: var(--font-mono);
-        font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase;
-        color: var(--on);
-    }
-    .hint { font-size: 12px; color: var(--text-mute); }
     .link-btn {
         background: none; border: 0; padding: 0;
         color: var(--text-mute); font-size: 12.5px; cursor: pointer;
@@ -1520,25 +1239,6 @@
     @media (max-width: 620px) and (pointer: coarse) {
         .act-search { width: 44px; height: 44px; }
     }
-
-    /* ── Screen head (Speakers) ──
-       The §11 detail shape — back chip, centered title, action chip — because
-       Speakers is a screen pushed from Home, not a sheet lifted over it. */
-    .screen-head {
-        display: flex; align-items: center; gap: var(--space-3);
-    }
-    .screen-title {
-        flex: 1; min-width: 0;
-        display: flex; flex-direction: column; gap: 2px;
-        text-align: center;
-    }
-    .screen-title h1 {
-        font-family: var(--font-sans);
-        font-size: 20px; font-weight: 600; letter-spacing: -0.02em;
-        color: var(--text);
-        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    }
-    .screen-sub { font-size: 12px; color: var(--text-mute); }
 
     /* ── Zones at a glance (Home) ── */
     .room-chips {
@@ -1641,83 +1341,6 @@
     .mini-s {
         font-size: 11px; color: var(--text-mute);
         overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    }
-
-    /* ── Speaker list (Speakers) ──────────────────────────────────────
-       The §11 list-row shape, with the device's own portrait standing in for
-       the 36px icon — it is the one place in the app where a real photograph
-       beats a glyph, because telling a Sonos One from a Five is exactly what
-       the user is doing here. */
-    /* Two panes from 1024px, one below it. The list column folds away on a
-       phone once a speaker is open, which is what turns the same markup into
-       a drill-down without a second copy of it. */
-    .sp-split { display: flex; flex-direction: column; gap: var(--space-4); }
-    .sp-col { display: flex; flex-direction: column; gap: var(--space-4); min-width: 0; }
-    .sp-pane { min-width: 0; }
-    @media (max-width: 1023px) {
-        .sp-split.has-detail > .sp-col { display: none; }
-    }
-    @media (min-width: 1024px) {
-        .sp-split {
-            display: grid;
-            grid-template-columns: minmax(260px, 330px) minmax(0, 1fr);
-            gap: var(--space-5);
-            align-items: start;
-        }
-        /* The list is the shorter column; let the settings scroll past it
-           rather than stretching the rows to match. */
-        .sp-col { position: sticky; top: 76px; }
-    }
-
-    .sp-list { display: flex; flex-direction: column; gap: 6px; }
-    .sp-row {
-        width: 100%;
-        display: flex;
-        align-items: center;
-        gap: var(--space-3);
-        min-height: 60px;
-        padding: var(--space-3) var(--space-4);
-        text-align: left;
-        background: var(--bg-elevated);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-lg);
-        color: inherit;
-        font: inherit;
-        cursor: pointer;
-        transition: background var(--t-fast), border-color var(--t-fast);
-    }
-    .shot {
-        width: 40px;
-        height: 40px;
-        flex-shrink: 0;
-        border-radius: var(--radius-md);
-        object-fit: contain;
-        background: var(--surface);
-    }
-    /* Caption dropped (see markup); the striped fill carries the meaning. */
-    .sp-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-    .sp-name {
-        font-size: 14px; font-weight: 600; letter-spacing: -0.01em;
-        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    }
-    .sp-sub {
-        font-size: 12px; color: var(--text-mute);
-        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    }
-    .sp-row.off .shot { opacity: 0.45; }
-    .sp-row.off .sp-name { color: var(--text-mute); }
-    /* Which row the pane is showing. An amber edge, not the .tile.on
-       gradient — that treatment means "this device is on", and a selected
-       row is a statement about the screen, not about the speaker. */
-    .sp-row.sel { border-color: var(--on); background: var(--card-2); }
-    .sp-chev { flex-shrink: 0; display: flex; color: var(--text-dim); transform: rotate(-90deg); }
-    /* Beside the pane the chevron is redundant — the row's amber edge already
-       says which one is open, and there is nowhere further to go. */
-    @media (min-width: 1024px) {
-        .sp-chev { display: none; }
-    }
-    @media (hover: hover) {
-        .sp-row:hover { background: var(--bg-raised); border-color: var(--border-strong); }
     }
 
     /* ── Touch: hit areas grow to the 44px floor ── */

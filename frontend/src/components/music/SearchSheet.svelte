@@ -237,7 +237,7 @@
                         onkeydown={onQueryKey}
                     />
                     {#if spotify.query}
-                        <button class="icon-btn sp-clear" aria-label="Clear search" onclick={spotify.clearQuery}>
+                        <button class="icon-btn sp-clear" aria-label="Clear search" onclick={clearQuery}>
                             <Icon name="close" size={14} />
                         </button>
                     {/if}
