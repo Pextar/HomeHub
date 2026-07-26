@@ -3,12 +3,7 @@
     import Topbar from "../components/Topbar.svelte";
     import EmptyState from "../components/EmptyState.svelte";
     import Icon from "../components/Icon.svelte";
-    import Waveform from "../components/music/Waveform.svelte";
-    import ProgressLine from "../components/music/ProgressLine.svelte";
-    import QuietCard from "../components/music/QuietCard.svelte";
-    import NavRow from "../components/music/NavRow.svelte";
     import CardTransport from "../components/music/CardTransport.svelte";
-    import NowCard from "../components/music/NowCard.svelte";
     import FavoriteCard from "../components/music/FavoriteCard.svelte";
     import DestinationRow from "../components/music/DestinationRow.svelte";
     import StartSomething from "../components/music/StartSomething.svelte";
@@ -18,6 +13,8 @@
     import RoomPuck from "../components/music/RoomPuck.svelte";
     import SearchSheet from "../components/music/SearchSheet.svelte";
     import SpeakersScreen from "../components/music/SpeakersScreen.svelte";
+    import MiniPlayer from "../components/music/MiniPlayer.svelte";
+    import MusicHome from "../components/music/MusicHome.svelte";
     import { createPuckDrag } from "../lib/music/puck-drag.svelte";
     import ConfirmModal from "../components/ConfirmModal.svelte";
     import SpeakerModal from "../modals/SpeakerModal.svelte";
@@ -27,9 +24,6 @@
     import { toasts, route, bottomBar } from "../lib/stores.svelte";
     import { onLive } from "../lib/live";
     import { openModal } from "../lib/modal.svelte";
-    import { fly } from "svelte/transition";
-    import { cubicOut } from "svelte/easing";
-    import { dur } from "../lib/motion";
     import { lockBodyScroll, unlockBodyScroll } from "../lib/scroll-lock";
     import * as sheetRun from "../lib/sheet-run";
     import type { SheetRun } from "../lib/sheet-run";
@@ -824,187 +818,24 @@
 
 {#if sonos.loaded && totalSpeakers > 0}
     {#if screen === "home"}
-    <!-- ── Playing now ─────────────────────────────────────────────────
-         Only what is actually playing. Idle zones are one tap away in the
-         room chips below, so listing them here would just make the heading
-         lie and bury the thing the user came for. -->
-    <section class="block">
-        <div class="eyrow">Playing now</div>
-        {#if sonos.playingGroups.length === 0 && kef.playing.length === 0}
-            <QuietCard
-                title="Nothing playing"
-                action={spotify.status
-                    ? {
-                          // Not gated on `connected`: the people who most need
-                          // a pointer at Spotify are the ones who haven't set
-                          // it up, and with the subnav gone this card and the
-                          // header icon are the only things that say the
-                          // module searches at all (DESIGN.md §15).
-                          label: spotify.connected ? "Search" : "Set up Spotify",
-                          onClick: openSearch,
-                      }
-                    : undefined}
-            >
-                <span class="mono">{readyCount}</span>
-                speaker{readyCount === 1 ? "" : "s"} ready —
-                {sonos.favorites.length > 0 && !destination.kefSpeaker
-                    ? "start a favorite below"
-                    : "pick a room to open it"}
-            </QuietCard>
-        {:else}
-            <div class="now-grid">
-                {#each sonos.playingGroups as g (g.coordinator_id)}
-                    {@const c = sonos.coordinatorOf(g)}
-                    {@const st = c?.state}
-                    <NowCard
-                        name={sonos.groupTitle(g)}
-                        line={[st?.track?.title, st?.track?.artist].filter(Boolean).join(" · ") ||
-                            "Live audio"}
-                        artUri={st?.track?.art_uri}
-                        playing
-                        progress={sonos.progressOf(g)}
-                        onOpen={() => openPlayer(g)}
-                        isDock={g.coordinator_id === dockGroup?.coordinator_id}
-                        onDockVisible={(v) => (dockCardOnScreen = v)}
-                    >
-                        {#snippet transport()}
-                            <CardTransport
-                                playing={sonos.isPlaying(g)}
-                                onToggle={() => sonos.togglePlay(g)}
-                                toggleBusy={!c || busy.is("play:" + c?.id)}
-                                onPrev={() => sonos.skip(g, "previous")}
-                                prevBusy={!c || busy.is("previous:" + c?.id)}
-                                onNext={() => sonos.skip(g, "next")}
-                                nextBusy={!c || busy.is("next:" + c?.id)}
-                            />
-                        {/snippet}
-                    </NowCard>
-                {/each}
-
-                <!-- KEF speakers that are playing, in the same grid and with
-                     the same card. It is a way in to a player like every
-                     other card here — the sheet it opens drops the queue and
-                     the group, which KEF hasn't got, and keeps the rest. -->
-                {#each kef.playing as sp (sp.id)}
-                    <NowCard
-                        name={sp.name}
-                        line={[kef.nowLine(sp), kef.subLine(sp)].filter(Boolean).join(" · ")}
-                        artUri={sp.state?.track?.art_uri}
-                        playing
-                        progress={kef.progress(sp)}
-                        onOpen={() => openKEFPlayer(sp)}
-                    >
-                        {#snippet transport()}
-                            <!-- Play/pause only, like the Sonos card below
-                                 430px: the sheet is where the skips live. -->
-                            <CardTransport
-                                playing={kef.isPlaying(sp)}
-                                onToggle={() => kef.togglePlay(sp)}
-                                toggleBusy={busy.is("kefplay:" + sp.id)}
-                            />
-                        {/snippet}
-                    </NowCard>
-                {/each}
-            </div>
-        {/if}
-    </section>
-
-    <!-- ── Favorites ───────────────────────────────────────────────── -->
-    {#if sonos.favorites.length > 0}
-        <section class="block">
-            <div class="block-head">
-                <div class="eyrow">Favorites</div>
-                {@render targetRow()}
-            </div>
-            {#if destination.kefSpeaker}
-                <!-- "My Sonos" is a household list, and a KEF speaker has no
-                     way to play an entry from it. A rail of disabled cards
-                     would be a row of dead controls (§15), so the section
-                     says what it needs instead — and the fix is one tap on
-                     the destination row directly above. -->
-                <QuietCard
-                    title="Favorites need a Sonos room"
-                    action={spotify.status
-                        ? {
-                              label: spotify.connected ? "Search" : "Set up Spotify",
-                              onClick: openSearch,
-                          }
-                        : undefined}
-                >
-                    They come out of your Sonos household, so {destination.kefSpeaker.name} can't
-                    play one — pick a Sonos room above{#if spotify.connected}, or search to play
-                        there{/if}.
-                </QuietCard>
-            {:else}
-                <div class="favs h-scroll">
-                    {#each sonos.favorites as f (f.id)}
-                        {@render favShelf(f, destination.sonosTarget)}
-                    {/each}
-                </div>
-            {/if}
-        </section>
-    {/if}
-
-    <!-- ── Zones at a glance (Home) ─────────────────────────────────
-         "Zones", not "Rooms": the app-level nav already owns that word for
-         the whole house, and reusing it here for speaker grouping was the
-         confusing part (DESIGN.md §15). -->
-    <section class="block">
-        <div class="block-head">
-            <div class="eyrow">Zones</div>
-            <button class="link-btn" onclick={openZones}>Manage</button>
-        </div>
-        <div class="room-chips">
-            {#each sonos.reachable as sp (sp.id)}
-                {@const g = sonos.groupOfSpeaker(sp.id)}
-                <button
-                    class="room-chip"
-                    class:on={sonos.speakerPlaying(sp.id)}
-                    disabled={!g}
-                    onclick={() => g && openPlayer(g)}
-                >
-                    {#if sonos.speakerPlaying(sp.id)}
-                        <Waveform />
-                    {:else}
-                        <Icon name="speaker" size={14} />
-                    {/if}
-                    <span>{sp.name}</span>
-                </button>
-            {/each}
-            <!-- KEF speakers are rooms that play too, so they belong in this
-                 row — and they open a player, like every chip beside them.
-                 They are absent from Zones instead, which is honest: Zones
-                 answers what plays together, and a KEF speaker never does. -->
-            {#each kef.reachable as sp (sp.id)}
-                <button
-                    class="room-chip"
-                    class:on={kef.isPlaying(sp)}
-                    onclick={() => openKEFPlayer(sp)}
-                >
-                    {#if kef.isPlaying(sp)}
-                        <Waveform />
-                    {:else}
-                        <Icon name="speaker" size={14} />
-                    {/if}
-                    <span>{sp.name}</span>
-                </button>
-            {/each}
-        </div>
-    </section>
-
-    <!-- The way through to the device inventory. A plain row rather than a
-         header icon, because what it opens is a screen — Speakers pushes,
-         Search and Zones lift. -->
-    <NavRow icon="speaker" title="Speakers" count={totalSpeakers} onClick={openSpeakers}>
-        {#snippet sub()}
-            {#if sonos.offline.length > 0}
-                <span class="mono">{sonos.offline.length}</span>
-                unreachable — fix an address, or set one up
-            {:else}
-                Names, addresses, tone and the status light
-            {/if}
-        {/snippet}
-    </NavRow>
+    <MusicHome
+        {sonos}
+        {kef}
+        {busy}
+        {destination}
+        {spotify}
+        {totalSpeakers}
+        {readyCount}
+        dockCoordinator={dockGroup?.coordinator_id}
+        onDockVisible={(v) => (dockCardOnScreen = v)}
+        onOpenPlayer={openPlayer}
+        onOpenKEFPlayer={openKEFPlayer}
+        onOpenSearch={openSearch}
+        onOpenZones={openZones}
+        onOpenSpeakers={openSpeakers}
+        {targetRow}
+        favCard={favShelf}
+    />
 
     {:else}
     <SpeakersScreen
@@ -1034,40 +865,27 @@
         {@const c = sonos.coordinatorOf(dockGroup)}
         {@const st = c?.state}
         {@const dockPlaying = sonos.isPlaying(dockGroup)}
-        {@const p = sonos.progressOf(dockGroup)}
-        <div class="mini" class:paused={!dockPlaying} class:over-sheet={overSheet}
-            transition:fly={{ y: 20, duration: dur(220), easing: cubicOut }}>
-            <button class="mini-open" onclick={() => openPlayer(dockGroup)}>
-                {#if st?.track?.art_uri}
-                    <img class="mini-art" src={st.track.art_uri} alt="" loading="lazy" />
-                {:else}
-                    <div class="mini-art placeholder"></div>
-                {/if}
-                <div class="mini-meta">
-                    <div class="mini-t">{st?.track?.title ?? "Playing"}</div>
-                    <div class="mini-s">
-                        {[st?.track?.artist, sonos.groupTitle(dockGroup)].filter(Boolean).join(" · ")}
-                    </div>
-                </div>
-                <!-- Playing is a waveform; a zone the dock is holding open
-                     after a pause gets the idle speaker icon instead. -->
-                {#if dockPlaying}
-                    <Waveform />
-                {:else}
-                    <span class="mini-idle" aria-hidden="true"><Icon name="speaker" size={14} /></span>
-                {/if}
-            </button>
-            <CardTransport
-                playing={dockPlaying}
-                onToggle={() => sonos.togglePlay(dockGroup)}
-                toggleBusy={!c || busy.is("play:" + c?.id)}
-                onPrev={() => sonos.skip(dockGroup, "previous")}
-                prevBusy={!c || busy.is("previous:" + c?.id)}
-                onNext={() => sonos.skip(dockGroup, "next")}
-                nextBusy={!c || busy.is("next:" + c?.id)}
-            />
-            <ProgressLine value={p} />
-        </div>
+        <MiniPlayer
+            title={st?.track?.title ?? "Playing"}
+            sub={[st?.track?.artist, sonos.groupTitle(dockGroup)].filter(Boolean).join(" · ")}
+            artUri={st?.track?.art_uri}
+            playing={dockPlaying}
+            progress={sonos.progressOf(dockGroup)}
+            {overSheet}
+            onOpen={() => openPlayer(dockGroup)}
+        >
+            {#snippet transport()}
+                <CardTransport
+                    playing={dockPlaying}
+                    onToggle={() => sonos.togglePlay(dockGroup)}
+                    toggleBusy={!c || busy.is("play:" + c?.id)}
+                    onPrev={() => sonos.skip(dockGroup, "previous")}
+                    prevBusy={!c || busy.is("previous:" + c?.id)}
+                    onNext={() => sonos.skip(dockGroup, "next")}
+                    nextBusy={!c || busy.is("next:" + c?.id)}
+                />
+            {/snippet}
+        </MiniPlayer>
     {/if}
 {/if}
 
@@ -1210,12 +1028,6 @@
         border: 0;
     }
 
-    .link-btn {
-        background: none; border: 0; padding: 0;
-        color: var(--text-mute); font-size: 12.5px; cursor: pointer;
-    }
-    .link-btn:hover { color: var(--text); }
-
     /* ── Header actions ──
        Search keeps its label wherever the header has room for it, and drops
        to the icon alone on a phone — where a third labelled chip is exactly
@@ -1240,111 +1052,4 @@
         .act-search { width: 44px; height: 44px; }
     }
 
-    /* ── Zones at a glance (Home) ── */
-    .room-chips {
-        display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-        gap: var(--space-2);
-    }
-    .room-chip {
-        display: flex; align-items: center; justify-content: center; gap: 6px;
-        min-height: 44px; padding: 10px var(--space-3);
-        background: var(--card-2); border: 1px solid var(--hairline);
-        border-radius: var(--r-pill);
-        color: var(--text-mute); font-size: 12.5px; cursor: pointer;
-        transition: border-color var(--t-fast), color var(--t-fast);
-    }
-    .room-chip span {
-        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    }
-    .room-chip.on { background: var(--on-soft); color: var(--on); border-color: transparent; }
-    .room-chip:disabled { opacity: 0.5; cursor: default; }
-    @media (hover: hover) {
-        .room-chip:not(:disabled):hover { border-color: var(--border-strong); color: var(--text); }
-        .room-chip.on:not(:disabled):hover { color: var(--on); }
-    }
-
-    /* ── Playing-now cards ── */
-    .now-grid {
-        display: grid;
-        /* Wide enough that the track title still has room next to the
-           three-button transport — narrower columns crushed it to an
-           ellipsis on desktop. */
-        grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
-        gap: var(--space-3);
-    }
-    /* ── Favorites ── */
-    .favs { display: flex; gap: var(--space-3); padding-bottom: var(--space-1); }
-    /* ── Docked mini-player ── */
-    .mini {
-        position: sticky;
-        bottom: calc(var(--space-4) + env(safe-area-inset-bottom));
-        z-index: 30;
-        overflow: hidden;
-        display: flex; align-items: center; gap: var(--space-3);
-        padding: 9px 10px;
-        margin-top: var(--space-2);
-        background: var(--tile-on-gradient);
-        border: 1px solid var(--tile-on-border);
-        border-radius: var(--r-lg);
-        box-shadow: var(--shadow-md);
-        /* Padding animates so the bar glides into the gutter as the FAB it
-           was dodging scales away, instead of snapping the moment it goes. */
-        transition: background var(--t-med), border-color var(--t-med),
-            padding-right var(--t-med);
-    }
-    /* Held open after a pause: nothing is playing, so it drops the "ON"
-       surface a lit device gets and reads as a plain card. */
-    .mini.paused { background: var(--card); border-color: var(--hairline); }
-    .mini-idle { display: flex; color: var(--text-mute); flex-shrink: 0; }
-    @media (max-width: 900px) {
-        .mini {
-            bottom: calc(var(--nav-clear) + var(--space-3));
-            /* A reserved gutter for the assistant button, which shares this
-               band — and the same reprieve when that button is switched off. */
-            padding-right: max(10px, var(--fab-clear));
-        }
-    }
-    /* Over the Zones and Search sheets the dock leaves the page flow and
-       floats above them, because the transport has to persist across all
-       three (DESIGN.md §15). Above the sheet's own z-index, below the
-       player's, since tapping it swaps one for the other. */
-    .mini.over-sheet {
-        position: fixed;
-        left: var(--space-4); right: var(--space-4);
-        bottom: calc(var(--space-4) + env(safe-area-inset-bottom));
-        z-index: 127;
-        margin-top: 0;
-    }
-    @media (min-width: 601px) {
-        .mini.over-sheet {
-            left: 50%; right: auto;
-            transform: translateX(-50%);
-            width: min(440px, calc(100vw - 48px));
-        }
-    }
-    .mini-open {
-        flex: 1; min-width: 0;
-        display: flex; align-items: center; gap: var(--space-3);
-        background: none; border: 0; padding: 0;
-        color: var(--text); text-align: left; cursor: pointer;
-    }
-    .mini-art {
-        width: 40px; height: 40px; border-radius: var(--r-md);
-        object-fit: cover; background: var(--card-3); flex-shrink: 0;
-    }
-    .mini-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-    .mini-t {
-        font-size: 13px; font-weight: 600;
-        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    }
-    .mini-s {
-        font-size: 11px; color: var(--text-mute);
-        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    }
-
-    /* ── Touch: hit areas grow to the 44px floor ── */
-    @media (prefers-reduced-motion: reduce) {
-        .mini { transition-duration: 0.001ms; }
-    }
 </style>
