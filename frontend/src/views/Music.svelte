@@ -1,9 +1,8 @@
 <script lang="ts">
-    import { onMount, onDestroy, tick as flushDOM } from "svelte";
+    import { onMount, onDestroy } from "svelte";
     import Topbar from "../components/Topbar.svelte";
     import EmptyState from "../components/EmptyState.svelte";
     import Icon from "../components/Icon.svelte";
-    import MusicSheet from "../components/music/MusicSheet.svelte";
     import Waveform from "../components/music/Waveform.svelte";
     import ProgressLine from "../components/music/ProgressLine.svelte";
     import QuietCard from "../components/music/QuietCard.svelte";
@@ -15,6 +14,10 @@
     import StartSomething from "../components/music/StartSomething.svelte";
     import SonosPlayer from "../components/music/SonosPlayer.svelte";
     import KEFPlayer from "../components/music/KEFPlayer.svelte";
+    import ZonesSheet from "../components/music/ZonesSheet.svelte";
+    import RoomPuck from "../components/music/RoomPuck.svelte";
+    import SearchSheet from "../components/music/SearchSheet.svelte";
+    import { createPuckDrag } from "../lib/music/puck-drag.svelte";
     import ConfirmModal from "../components/ConfirmModal.svelte";
     import SpeakerModal from "../modals/SpeakerModal.svelte";
     import SonosSpeakerDetail from "./SonosSpeakerDetail.svelte";
@@ -25,7 +28,7 @@
     import { toasts, route, bottomBar } from "../lib/stores.svelte";
     import { onLive } from "../lib/live";
     import { openModal } from "../lib/modal.svelte";
-    import { fly, scale } from "svelte/transition";
+    import { fly } from "svelte/transition";
     import { cubicOut } from "svelte/easing";
     import { dur } from "../lib/motion";
     import { lockBodyScroll, unlockBodyScroll } from "../lib/scroll-lock";
@@ -90,7 +93,7 @@
         clearTimeout(announceTimer);
         for (const t of followUps) clearTimeout(t);
         followUps.clear();
-        endPuckDrag(); // takes the document-level touchmove block with it
+        drag.end(); // takes the document-level touchmove block with it
         // The body-scroll lock is the sheet effect's, and its teardown runs on
         // unmount — releasing it here as well would decrement it twice.
     });
@@ -302,8 +305,7 @@
         sheets = back;
         if (back.open) restoreSheetScroll(back.open);
         if (back.open !== "player") { playerGroupId = null; playerKefId = null; }
-        endPuckDrag();
-        grabId = null;
+        drag.release();
     }
     /** Leave sheets entirely, whatever is up and whatever is under it. */
     function hideSheet() {
@@ -311,27 +313,36 @@
         sheets = sheetRun.closeAll(sheets);
         playerGroupId = null;
         playerKefId = null;
-        endPuckDrag();
-        grabId = null;
+        drag.release();
     }
 
+    /** True when Search was opened to type in, rather than to read. */
+    let searchWantsFocus = $state(false);
+
     function openSearch() {
+        searchWantsFocus = true; // you came here to type
         showSheet("search");
-        if (spotify.connected) focusSearch(); // you came here to type
     }
     function openZones() {
         showSheet("zones");
     }
 
     // ── Zones: drag one room onto another to group ───────────────────────
-    // Dragging one thing onto another *is* the grouping gesture; the
-    // tap-to-select-then-"Group" flow this replaced needed a whole selection
-    // mode, with its own way out, to say the same thing (DESIGN.md §15).
-    //
-    // Only the dragged speaker moves. If it was leading a zone, Sonos
-    // re-elects behind us — "this room now plays with that one" is the whole
-    // promise, and moving its former partners along with it would be a second
-    // change the user never asked for.
+    // The gesture engine is its own module: it is the whole of grouping
+    // (pointer, hold, edge-scroll, keyboard, live region), and its ghost has
+    // to render outside the sheet, whose drag transform would otherwise
+    // re-anchor it.
+    const drag = createPuckDrag({
+        scroller: () => scrollEl,
+        zoneOf: (id) => sonos.groupOfSpeaker(id)?.coordinator_id,
+        describe: (id) => ({
+            playing: sonos.speakerPlaying(id),
+            sub: sonos.speakerNowLine(id),
+        }),
+        group: (source, target) => void groupOnto(source, target),
+        announce: (msg) => announce(msg),
+    });
+
     async function groupOnto(sourceId: string, targetId: string) {
         const done = await sonos.groupOnto(sourceId, targetId);
         // A drag has no running commentary of its own, so the one thing this
@@ -349,260 +360,6 @@
         clearTimeout(announceTimer);
         liveMsg = msg;
         announceTimer = setTimeout(() => (liveMsg = ""), 4000);
-    }
-
-    // Keyboard grouping: focus a room, press G to pick it up, Tab to another
-    // and press Enter to drop it in. A pointer-only gesture would have left
-    // grouping with no keyboard path at all — the pucks carry no second
-    // control to fall back on any more.
-    let grabId = $state<string | null>(null);
-    const grabbedName = $derived(grabId ? (sonos.speakerById.get(grabId)?.name ?? "") : "");
-
-    function onPuckKey(e: KeyboardEvent, sp: SonosSpeakerView) {
-        if (e.metaKey || e.ctrlKey || e.altKey) return;
-        const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
-        if (key === "g") {
-            e.preventDefault();
-            if (grabId === null) {
-                grabId = sp.id;
-                announce(
-                    `${sp.name} picked up. Move to another room and press Enter to group, ` +
-                        `Escape to put it back.`,
-                );
-            } else if (grabId === sp.id) {
-                grabId = null;
-                announce(`${sp.name} put back.`);
-            } else {
-                dropGrab(sp);
-            }
-            return;
-        }
-        // Enter on a puck normally opens that room's player. While something
-        // is held, it means "drop it here" instead — so the default activation
-        // has to be stopped before it fires a click.
-        if (key === "Enter" && grabId !== null && grabId !== sp.id) {
-            e.preventDefault();
-            dropGrab(sp);
-        }
-    }
-    function dropGrab(sp: SonosSpeakerView) {
-        const src = grabId;
-        grabId = null;
-        if (src) void groupOnto(src, sp.id);
-    }
-
-    // Pointer drag. A ghost follows the finger and the room under it takes an
-    // amber ring; below the move threshold nothing lifts at all, so opening a
-    // room never mis-fires as an attempted group.
-    type PuckDrag = {
-        id: string;
-        name: string;
-        playing: boolean;
-        sub: string;
-        w: number;
-        h: number;
-        offX: number;
-        offY: number;
-        x: number;
-        y: number;
-    };
-    let puckDrag = $state<PuckDrag | null>(null);
-    /** The room under the pointer, if it's a room. */
-    let dropId = $state<string | null>(null);
-    /** The zone under the pointer, when the pointer is on its enclosure. */
-    let dropZone = $state<string | null>(null);
-    /** True from the lift until the click it would otherwise fire is eaten. */
-    let dragConsumedClick = false;
-
-    type PuckPending = {
-        sp: SonosSpeakerView;
-        el: HTMLElement;
-        pid: number;
-        startX: number;
-        startY: number;
-        touch: boolean;
-    };
-    let pending: PuckPending | null = null;
-    let holdTimer: ReturnType<typeof setTimeout> | undefined;
-
-    const LIFT_PX = 8; // below this it's a tap, not a drag
-    const HOLD_MS = 260; // touch presses lift on a hold, so the sheet still scrolls
-
-    /**
-     * While a puck is lifted the page must not scroll under it. `touch-action`
-     * can't be changed mid-gesture, so the scroll is refused the only way it
-     * can be once a pointer is already down: a non-passive touchmove listener.
-     */
-    function blockTouchScroll(e: TouchEvent) {
-        e.preventDefault();
-    }
-
-    function onPuckPointerDown(e: PointerEvent, sp: SonosSpeakerView) {
-        if (e.button !== 0 || puckDrag) return;
-        const el = e.currentTarget as HTMLElement;
-        const touch = e.pointerType !== "mouse";
-        pending = { sp, el, pid: e.pointerId, startX: e.clientX, startY: e.clientY, touch };
-        if (touch) {
-            // A quick swipe is a scroll; a press that stays put is a lift.
-            clearTimeout(holdTimer);
-            holdTimer = setTimeout(() => lift(e.clientX, e.clientY), HOLD_MS);
-        }
-    }
-
-    function lift(x: number, y: number) {
-        if (!pending || puckDrag) return;
-        const { sp, el, pid } = pending;
-        const r = el.getBoundingClientRect();
-        try {
-            el.setPointerCapture(pid);
-        } catch {
-            // The pointer may already be gone — the drag still works without
-            // capture, it just ends on the first pointerup we see.
-        }
-        document.addEventListener("touchmove", blockTouchScroll, { passive: false });
-        puckDrag = {
-            id: sp.id,
-            name: sp.name,
-            playing: sonos.speakerPlaying(sp.id),
-            sub: sonos.speakerNowLine(sp.id),
-            w: r.width,
-            h: r.height,
-            offX: x - r.left,
-            offY: y - r.top,
-            x: r.left,
-            y: r.top,
-        };
-        announce(`${sp.name} lifted. Drop it on another room to group them.`);
-    }
-
-    function onPuckPointerMove(e: PointerEvent) {
-        if (!pending) return;
-        const dx = e.clientX - pending.startX;
-        const dy = e.clientY - pending.startY;
-        const moved = Math.hypot(dx, dy);
-        if (!puckDrag) {
-            if (pending.touch) {
-                // Moved before the hold landed — that was a scroll.
-                if (moved > LIFT_PX) cancelPending();
-            } else if (moved > LIFT_PX) {
-                lift(e.clientX, e.clientY);
-            }
-            if (!puckDrag) return;
-        }
-        e.preventDefault();
-        puckDrag.x = e.clientX - puckDrag.offX;
-        puckDrag.y = e.clientY - puckDrag.offY;
-        lastPoint = { x: e.clientX, y: e.clientY };
-        aimAt(e.clientX, e.clientY);
-        edgeScroll(e.clientY);
-    }
-
-    /**
-     * What the pointer is over: a room, or the enclosure around an existing
-     * zone. The enclosure counts because "drag a third onto an existing group
-     * adds it" reads as dropping on the *group* — landing in the gap between
-     * its pucks shouldn't be a miss.
-     */
-    function aimAt(x: number, y: number) {
-        if (!puckDrag) return;
-        const under = document.elementFromPoint(x, y);
-        const hit = under?.closest?.(".puck, .group-wrap") as HTMLElement | null;
-        const speaker = hit?.dataset.speaker ?? null;
-        if (speaker) {
-            dropId = speaker !== puckDrag.id ? speaker : null;
-            dropZone = null;
-            return;
-        }
-        const zone = hit?.dataset.zone ?? null;
-        // A room already in this zone can't be dropped into it again.
-        const mine = sonos.groupOfSpeaker(puckDrag.id)?.coordinator_id;
-        dropZone = zone && zone !== mine ? zone : null;
-        dropId = null;
-    }
-
-    // ── Edge auto-scroll ─────────────────────────────────────────────────
-    // The zone grid is taller than the sheet as soon as there are a few
-    // rooms, so a target can sit off-screen with the finger already down and
-    // nothing left to reach it with. Holding the puck near an edge scrolls
-    // the sheet under it, speed rising as it gets closer.
-    let lastPoint: { x: number; y: number } | null = null;
-    let scrollStep = 0;
-    let scrollFrame: number | undefined;
-    const EDGE_PX = 72;
-    const EDGE_MAX = 16; // px per frame at the very edge
-
-    function edgeScroll(y: number) {
-        const el = scrollEl;
-        if (!el || !puckDrag) return (scrollStep = 0);
-        const r = el.getBoundingClientRect();
-        const over = y - (r.bottom - EDGE_PX);
-        const under = r.top + EDGE_PX - y;
-        scrollStep =
-            over > 0 ? Math.min(1, over / EDGE_PX) * EDGE_MAX
-            : under > 0 ? -Math.min(1, under / EDGE_PX) * EDGE_MAX
-            : 0;
-        if (scrollStep !== 0 && scrollFrame === undefined) stepScroll();
-    }
-    function stepScroll() {
-        scrollFrame = requestAnimationFrame(() => {
-            scrollFrame = undefined;
-            const el = scrollEl;
-            if (!puckDrag || !el || scrollStep === 0) return;
-            const before = el.scrollTop;
-            el.scrollTop += scrollStep;
-            if (el.scrollTop === before) return; // hit the end — nothing to chase
-            // The ghost is pinned to the viewport, so scrolling moves a
-            // different room under a finger that hasn't budged.
-            if (lastPoint) aimAt(lastPoint.x, lastPoint.y);
-            stepScroll();
-        });
-    }
-    function stopEdgeScroll() {
-        if (scrollFrame !== undefined) cancelAnimationFrame(scrollFrame);
-        scrollFrame = undefined;
-        scrollStep = 0;
-        lastPoint = null;
-    }
-
-    function onPuckPointerUp() {
-        if (!pending) return;
-        const src = puckDrag?.id;
-        const target = dropId ?? dropZone;
-        if (puckDrag) dragConsumedClick = true;
-        endPuckDrag();
-        if (src && target) void groupOnto(src, target);
-    }
-
-    /** Swallow the click a finished drag would otherwise fire on the puck. */
-    function onPuckClickCapture(e: MouseEvent) {
-        if (!dragConsumedClick) return;
-        dragConsumedClick = false;
-        e.preventDefault();
-        e.stopPropagation();
-    }
-
-    function cancelPending() {
-        clearTimeout(holdTimer);
-        pending = null;
-    }
-
-    function endPuckDrag() {
-        clearTimeout(holdTimer);
-        if (pending && puckDrag) {
-            try {
-                pending.el.releasePointerCapture(pending.pid);
-            } catch {
-                // Already released with the pointer.
-            }
-        }
-        if (puckDrag) {
-            document.removeEventListener("touchmove", blockTouchScroll);
-        }
-        stopEdgeScroll();
-        pending = null;
-        puckDrag = null;
-        dropId = null;
-        dropZone = null;
     }
 
     // ── Player sheet ─────────────────────────────────────────────────────
@@ -678,6 +435,7 @@
     // hand the transport keys to it.
     let sonosPlayer = $state<SonosPlayer | null>(null);
     let kefPlayer = $state<KEFPlayer | null>(null);
+    let searchSheet = $state<SearchSheet | null>(null);
     // Set by the open sheet while a drag-down rides out. The art swipe stands
     // down for those 220ms; raising a sheet clears it, since the flag belongs
     // to the sheet that is leaving, not to the one arriving.
@@ -728,17 +486,14 @@
      */
     function searchFromPlayer(q?: string) {
         rememberSheetScroll();
+        // A recent search is a request to *run* it, so it runs — and the caret
+        // stays out of the way, keyboard and all, since the results are what
+        // was asked for.
+        searchWantsFocus = !q;
         sheets = sheetRun.swapTo(sheets, "search");
         sheetScroll.search = 0;
         sheetDismissing = false;
-        if (q) {
-            // A recent search is a request to *run* it, so it runs — and the
-            // caret stays out of the way, keyboard and all, since the results
-            // are what was asked for.
-            runHistoryQuery(q);
-            return;
-        }
-        if (spotify.connected) focusSearch();
+        if (q) spotify.runQuery(q);
     }
 
     // ── Keyboard ─────────────────────────────────────────────────────────
@@ -766,12 +521,14 @@
             // Escape always leaves the player outright rather than stepping
             // back through the queue pane — the sheet covers the nav, so one
             // press must always be enough to get out (DESIGN.md §15).
-            if (menuFor) menuFor = null;
-            else if (puckDrag || grabId) {
+            if (searchSheet?.closeMenu()) return;
+            if (drag.drag || drag.grabId) {
                 // Put a held room back before leaving the sheet it was held in.
-                const name = grabbedName || puckDrag?.name || "Room";
-                endPuckDrag();
-                grabId = null;
+                const name =
+                    drag.grabbedName((id) => sonos.speakerById.get(id)?.name) ||
+                    drag.drag?.name ||
+                    "Room";
+                drag.release();
                 announce(`${name} put back.`);
             } else if (openSheet) dropSheet();
             // Escape backs out of a speaker's settings the same way its back
@@ -824,9 +581,7 @@
     // A room held for grouping that drops off the network can't be dropped
     // anywhere — let go of it rather than leaving a puck lifted over nothing.
     $effect(() => {
-        const live = new Set(sonos.reachable.map((s) => s.id));
-        if (grabId && !live.has(grabId)) grabId = null;
-        if (puckDrag && !live.has(puckDrag.id)) endPuckDrag();
+        drag.prune(new Set(sonos.reachable.map((s) => s.id)));
     });
     // ── Scrubbing ────────────────────────────────────────────────────────
     // The position is only polled every 5s, so between polls every surface
@@ -896,38 +651,6 @@
         if (playerGroupId === target) void sonos.loadQueue(target);
     }
 
-    // ── Row overflow menus (search results, favorites) ──────────────────
-    // Keyed by item URI: at most one menu is open at a time.
-    let menuFor = $state<string | null>(null);
-    $effect(() => {
-        if (!menuFor) return;
-        const close = () => (menuFor = null);
-        // The opening click calls stopPropagation, so it never reaches here.
-        document.addEventListener("click", close);
-        return () => document.removeEventListener("click", close);
-    });
-    function toggleMenu(e: MouseEvent, uri: string) {
-        e.stopPropagation();
-        menuFor = menuFor === uri ? null : uri;
-    }
-    // An open menu takes focus and answers the arrow keys, so queueing a
-    // result never means tabbing back through the whole results list.
-    function menuNav(node: HTMLElement) {
-        const items = () =>
-            Array.from(node.querySelectorAll<HTMLButtonElement>("[role='menuitem']"));
-        items()[0]?.focus();
-        function onKey(e: KeyboardEvent) {
-            if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
-            e.preventDefault();
-            const list = items();
-            const i = list.indexOf(document.activeElement as HTMLButtonElement);
-            const next = e.key === "ArrowDown" ? i + 1 : i - 1;
-            list[(next + list.length) % list.length]?.focus();
-        }
-        node.addEventListener("keydown", onKey);
-        return { destroy: () => node.removeEventListener("keydown", onKey) };
-    }
-
     // ── Spotify search ───────────────────────────────────────────────────
     // Keyed by the destination, so "recent searches" in the kitchen aren't the
     // bedroom's. A single-room home only ever has one key.
@@ -969,33 +692,6 @@
             danger: true,
         });
         if (ok) await spotify.disconnect();
-    }
-
-    let searchEl = $state<HTMLInputElement | null>(null);
-
-    // Focus the box on the way into Search — but only where a keyboard is
-    // already there. On a phone an auto-focus throws up the software keyboard
-    // over the results the user came to look at.
-    function focusSearch() {
-        if (!window.matchMedia("(pointer: fine)").matches) return;
-        // The box may not be in the DOM yet — this can run on the way in.
-        void flushDOM().then(() => searchEl?.focus());
-    }
-    // Enter runs the search now instead of waiting out the debounce; Escape
-    // clears the box rather than closing something behind it.
-    function onQueryKey(e: KeyboardEvent) {
-        if (e.key === "Enter") {
-            e.preventDefault();
-            spotify.runNow();
-        } else if (e.key === "Escape" && spotify.query) {
-            e.stopPropagation();
-            spotify.clearQuery();
-            searchEl?.focus();
-        }
-    }
-    function runHistoryQuery(q: string) {
-        spotify.runQuery(q);
-        searchEl?.focus();
     }
 
     // A search result plays on whichever destination is selected. Same tap,
@@ -1644,67 +1340,6 @@
     {/if}
 {/if}
 
-<!-- ── Room puck ─────────────────────────────────────────────────────
-     One object, two gestures on the same target: tap opens that room's
-     player, drag it onto another room sonos.groups them. There is no second
-     control — dragging one thing onto another *is* the grouping gesture, so
-     the select circle that used to sit in the corner has nothing left to say.
-
-     The keyboard gets the gesture too, since a pointer-only one would leave
-     grouping with no path at all: G picks the room up, Tab moves, Enter
-     drops it in. -->
-{#snippet puck(sp: SonosSpeakerView)}
-    {@const playing = sonos.speakerPlaying(sp.id)}
-    {@const g = sonos.groupOfSpeaker(sp.id)}
-    {@const held = grabId === sp.id || puckDrag?.id === sp.id}
-    {@const target = dropId === sp.id || (grabId !== null && grabId !== sp.id)}
-    <button
-        class="puck"
-        class:playing
-        class:held
-        class:lifted={puckDrag?.id === sp.id}
-        class:drop={dropId === sp.id}
-        class:aiming={grabId !== null && grabId !== sp.id}
-        data-speaker={sp.id}
-        disabled={!g}
-        aria-keyshortcuts="g"
-        aria-label={grabId !== null && grabId !== sp.id
-            ? `Group ${grabbedName} with ${sp.name}`
-            : `${sp.name} — open player, or press G to pick it up for grouping`}
-        onpointerdown={(e) => onPuckPointerDown(e, sp)}
-        onpointermove={onPuckPointerMove}
-        onpointerup={onPuckPointerUp}
-        onpointercancel={endPuckDrag}
-        onclickcapture={onPuckClickCapture}
-        onkeydown={(e) => onPuckKey(e, sp)}
-        onclick={() => g && openPlayer(g)}
-    >
-        <span class="puck-icon">
-            <!-- On the filled amber tile the bars take the tile's ink; amber
-                 on amber would be invisible. -->
-            {#if playing}<Waveform ink />{:else}<Icon name="speaker" size={16} />{/if}
-        </span>
-        <!-- Says "this object moves", on hover only and to a pointer only:
-             touch has the press-and-hold to discover, and a mouse has
-             nothing but the cursor otherwise. Not a control — it takes no
-             pointer events, so it can't be mistaken for the select circle
-             that used to sit here. -->
-        <span class="puck-grip" aria-hidden="true"><Icon name="grip" size={14} /></span>
-        <span class="puck-body">
-            <span class="puck-name">{sp.name}</span>
-            <span class="puck-sub">
-                {#if target && grabId !== null}
-                    Drop {grabbedName} here
-                {:else if held}
-                    Held
-                {:else}
-                    {sonos.speakerNowLine(sp.id)}
-                {/if}
-            </span>
-        </span>
-    </button>
-{/snippet}
-
 <!-- Both surfaces that start something — the favorites shelf and the search
      results — point at the same destination row, so it is rendered through one
      snippet rather than placed twice. -->
@@ -1725,351 +1360,47 @@
     />
 {/snippet}
 
-{#snippet searchBody()}
-    <!-- ── Spotify search ──────────────────────────────────────────── -->
-    {#if spotify.status}
-        <section class="card">
-            {#if !spotify.status?.configured || spotify.setupOpen}
-                <div class="card-header"><h2>Spotify search</h2></div>
-                <p class="sp-help">
-                    Search Spotify's catalog and play straight to your speakers.
-                    One-time setup — playback itself uses the Spotify account
-                    already linked to your Sonos.
-                </p>
-                <ol class="sp-steps">
-                    <li>
-                        <a class="sp-link" href="https://developer.spotify.com/dashboard"
-                            target="_blank" rel="noopener noreferrer">Open the Spotify dashboard</a>
-                        and create an app (any name, "Web API" is enough).
-                    </li>
-                    <li>
-                        Give the app this Redirect URI:
-                        <span class="sp-redirect">
-                            <code class="mono">{spotify.status?.redirect_uri}</code>
-                            <button type="button" class="chip" onclick={() => spotify.copyRedirect()}>
-                                <Icon name={spotify.copied ? "check" : "copy"} size={13} />
-                                {spotify.copied ? "Copied" : "Copy"}
-                            </button>
-                        </span>
-                    </li>
-                    <li>Paste the app's Client ID here:</li>
-                </ol>
-                <form class="sp-config" onsubmit={(e) => { e.preventDefault(); spotify.saveClientId(); }}>
-                    <input type="text" class="mono" placeholder="Client ID"
-                        aria-label="Spotify client ID" bind:value={spotify.clientId} />
-                    <button type="submit" class="btn btn-primary" disabled={spotify.saving || !spotify.clientId.trim()}>
-                        {spotify.saving ? "Saving…" : "Save"}
-                    </button>
-                    {#if spotify.setupOpen}
-                        <button type="button" class="btn btn-ghost" onclick={() => (spotify.setupOpen = false)}>Cancel</button>
-                    {/if}
-                </form>
-            {:else if !spotify.connected}
-                <div class="card-header"><h2>Spotify search</h2></div>
-                <p class="sp-help">
-                    Client ID saved — now connect your Spotify account. You'll
-                    approve access once on Spotify's page{spotify.status?.manual
-                        ? "; it opens in a new tab and ends on an unreachable 127.0.0.1 address — that's expected."
-                        : ", then land back here."}
-                </p>
-                <div class="sp-actions">
-                    <button class="btn btn-primary" onclick={spotify.connect}>Connect Spotify</button>
-                    <button class="btn btn-ghost" onclick={() => { spotify.clientId = ""; spotify.setupOpen = true; }}>
-                        Change client ID
-                    </button>
-                </div>
-                {#if spotify.status?.manual}
-                    <div class="field sp-paste">
-                        <label for="sp-paste-input">
-                            After approving, copy the full address from that tab and paste it here to finish:
-                        </label>
-                        <div class="sp-config">
-                            <input id="sp-paste-input" type="text" class="mono"
-                                placeholder="http://127.0.0.1:…/api/spotify/callback?code=…"
-                                bind:value={spotify.pasteUrl} />
-                            <button type="button" class="btn btn-primary"
-                                disabled={spotify.finishing || !spotify.pasteUrl.trim()} onclick={spotify.finishConnect}>
-                                {spotify.finishing ? "Finishing…" : "Finish"}
-                            </button>
-                        </div>
-                    </div>
-                {/if}
-            {:else}
-                <!-- No <h2> here: the sheet's own head already says
-                     "Search". This row only answers "as whom". -->
-                <div class="card-header sp-head">
-                    <div class="sp-account">
-                        <span class="sp-conn" title="Connected to Spotify">
-                            <span class="sp-dot" aria-hidden="true"></span>
-                            <span class="sp-conn-label">Connected</span>
-                            <span class="sp-user mono">{spotify.status?.display_name || "Spotify"}</span>
-                        </span>
-                        <button class="chip" onclick={disconnectSpotify}
-                            aria-label="Disconnect Spotify">Disconnect</button>
-                    </div>
-                </div>
-                <div class="sp-search">
-                    <Icon name="search" size={16} />
-                    <input
-                        type="text"
-                        class="sp-input"
-                        placeholder="Songs, albums, playlists…"
-                        aria-label="Search Spotify"
-                        autocomplete="off"
-                        enterkeyhint="search"
-                        bind:this={searchEl}
-                        bind:value={spotify.query}
-                        oninput={() => spotify.onQueryInput()}
-                        onkeydown={onQueryKey}
-                    />
-                    {#if spotify.query}
-                        <button class="icon-btn sp-clear" aria-label="Clear search" onclick={spotify.clearQuery}>
-                            <Icon name="close" size={14} />
-                        </button>
-                    {/if}
-                </div>
-                {#if !spotify.query && !spotify.results && recents.list.length > 0}
-                    <div class="sp-history">
-                        <div class="sp-history-head">
-                            <span class="sp-browse-label">
-                                Recent searches{#if destination.list.length > 1 && destination.label} · {destination.label}{/if}
-                            </span>
-                            <button type="button" class="chip sp-hist-clear" onclick={() => recents.clear()}>Clear</button>
-                        </div>
-                        <div class="sp-history-list">
-                            {#each recents.list as h (h)}
-                                <div class="sp-hist-chip">
-                                    <button type="button" class="sp-hist-run" onclick={() => runHistoryQuery(h)}>
-                                        <Icon name="search" size={12} />
-                                        <span>{h}</span>
-                                    </button>
-                                    <button type="button" class="icon-btn sp-hist-x"
-                                        aria-label={`Remove "${h}" from recent searches`}
-                                        onclick={() => recents.remove(h)}>
-                                        <Icon name="close" size={10} />
-                                    </button>
-                                </div>
-                            {/each}
-                        </div>
-                    </div>
-                {/if}
-                <div class="sp-filters">
-                    {#if spotify.results}
-                        <button class="chip" class:active={spotify.kindFilter === "tracks"} onclick={() => (spotify.kindFilter = "tracks")}>Songs</button>
-                        <button class="chip" class:active={spotify.kindFilter === "albums"} onclick={() => (spotify.kindFilter = "albums")}>Albums</button>
-                        <button class="chip" class:active={spotify.kindFilter === "playlists"} onclick={() => (spotify.kindFilter = "playlists")}>Playlists</button>
-                    {:else if spotify.myPlaylists.length > 0}
-                        <span class="sp-browse-label">Your playlists</span>
-                    {/if}
-                    <div class="sp-targets" class:pushed={!!spotify.results}>{@render targetRow()}</div>
-                </div>
-                <!-- Playing on a KEF speaker goes out through Spotify Connect,
-                     which needs a permission this login may predate. Saying so
-                     before the tap beats a 409 after it, and reconnecting is
-                     the only thing that fixes it. -->
-                {#if destination.kefSpeaker && spotify.status && !spotify.status.playback}
-                    <div class="sp-note">
-                        <Icon name="info" size={14} />
-                        <span>
-                            Reconnect Spotify to start music on {destination.kefSpeaker.name} —
-                            this login was made before HomeHub could ask for that.
-                        </span>
-                        <button class="chip" onclick={spotify.connect}>Reconnect</button>
-                    </div>
-                {/if}
-                {#if spotify.searching}
-                    <div class="skeleton sp-skeleton"></div>
-                {:else if spotify.results && spotify.shownItems.length === 0}
-                    <div class="sp-none">No {spotify.kindFilter} matched "{spotify.query.trim()}".</div>
-                {:else if !spotify.results && spotify.shownItems.length === 0}
-                    <!-- No query and no playlists to browse — say what this
-                         box does rather than leaving a blank panel. -->
-                    <div class="sp-none">
-                        Search Spotify for a song, album or playlist. Tapping a result
-                        plays it on the room shown above{#if !destination.kefSpeaker}; the row's
-                        overflow menu queues it without interrupting{/if}.
-                    </div>
-                {:else}
-                    <div class="sp-results">
-                        {#each spotify.shownItems as item (item.uri)}
-                            <div class="sp-row">
-                                <button class="sp-open" disabled={busy.is("item:" + item.uri) || !destination.current}
-                                    onclick={() => playItem(item)}>
-                                    {#if item.art_url}
-                                        <img class="sp-art" src={item.art_url} alt="" loading="lazy" />
-                                    {:else}
-                                        <div class="sp-art placeholder">[ art ]</div>
-                                    {/if}
-                                    <span class="sp-meta">
-                                        <span class="sp-name">{item.name}</span>
-                                        {#if item.sub}<span class="sp-sub">{item.sub}</span>{/if}
-                                    </span>
-                                    <span class="sp-play"><Icon name="play" size={16} /></span>
-                                </button>
-                                <!-- Tapping the row plays now; queueing without
-                                     interrupting lives behind the overflow —
-                                     and only for a Sonos destination, since
-                                     the sonos.queue is a Sonos group's. A KEF
-                                     speaker has none, so the control that
-                                     would be refused isn't there at all. -->
-                                {#if destination.sonosTarget}
-                                    <button class="icon-btn sp-more" aria-label="More for {item.name}"
-                                        aria-haspopup="menu" aria-expanded={menuFor === item.uri}
-                                        disabled={busy.is("q:" + item.uri)}
-                                        onclick={(e) => toggleMenu(e, item.uri)}>
-                                        <Icon name="more" size={16} />
-                                    </button>
-                                {/if}
-                                {#if menuFor === item.uri}
-                                    <div class="overflow-menu" role="menu" use:menuNav
-                                        in:scale={{ start: 0.95, duration: dur(140), easing: cubicOut, opacity: 0 }}
-                                        out:scale={{ start: 0.95, duration: dur(100), easing: cubicOut, opacity: 0 }}>
-                                        <button class="overflow-item" role="menuitem"
-                                            onclick={() => enqueue({ service: "Spotify", uri: item.uri, title: item.name }, true)}>
-                                            <Icon name="skipNext" size={16} /><span>Play next</span>
-                                        </button>
-                                        <button class="overflow-item" role="menuitem"
-                                            onclick={() => enqueue({ service: "Spotify", uri: item.uri, title: item.name }, false)}>
-                                            <Icon name="queue" size={16} /><span>Add to queue</span>
-                                        </button>
-                                    </div>
-                                {/if}
-                            </div>
-                        {/each}
-                    </div>
-                {/if}
-            {/if}
-        </section>
-    {/if}
-{/snippet}
-
-<!-- The count is mono (§2), so the title is markup rather than a string. -->
-{#snippet offlineTitle()}
-    <span class="mono">{sonos.offline.length}</span>
-    speaker{sonos.offline.length === 1 ? "" : "s"} unreachable
-{/snippet}
-
-<!-- ── Zones sheet ──────────────────────────────────────────────────
-     Grouping, and only grouping: what plays together. Opens over Home the
-     same way the player does, and swaps to the player when a room is tapped
-     rather than stacking a second sheet on top of itself. -->
 {#if zonesOpen}
-    <MusicSheet
-        label="Zones"
-        title="Zones"
-        sub="Tap a room to open it · drag one onto another to group"
-        backLabel="Close Zones"
-        onBack={dropSheet}
-        onDismiss={dropSheet}
+    <ZonesSheet
+        {sonos}
+        {kef}
+        {busy}
+        {drag}
         docked={showDock}
+        onDismiss={dropSheet}
+        onOpenRoom={openPlayer}
+        onOpenSpeakers={openSpeakers}
         bind:scrollEl
-    >
-            <div class="rooms">
-                {#each sonos.multiGroups as g (g.coordinator_id)}
-                    <!-- The enclosure is a drop target in its own right:
-                         "drag a third onto an existing group" reads as
-                         dropping on the group, so the gap between its pucks
-                         must not be a miss. -->
-                    <div class="group-wrap" class:drop={dropZone === g.coordinator_id}
-                        data-zone={g.coordinator_id}>
-                        <div class="glabel">
-                            <Icon name="check" size={11} />
-                            <span>{sonos.groupTitle(g)}</span>
-                            <button class="ungroup" disabled={busy.is("ungroup:" + g.coordinator_id)}
-                                onclick={() => sonos.ungroup(g)}>Ungroup</button>
-                        </div>
-                        <div class="puck-grid">
-                            {#each g.member_ids as id (id)}
-                                {@const sp = sonos.speakerById.get(id)}
-                                {#if sp}
-                                    {@render puck(sp)}
-                                {/if}
-                            {/each}
-                        </div>
-                    </div>
-                {/each}
-                {#if sonos.soloSpeakers.length}
-                    <div class="puck-grid">
-                        {#each sonos.soloSpeakers as sp (sp.id)}
-                            {@render puck(sp)}
-                        {/each}
-                    </div>
-                {/if}
-                <!-- Grouping is a Sonos capability. A house with only KEF
-                     speakers would otherwise open a blank sheet with no
-                     explanation, which reads as broken rather than as
-                     "this doesn't apply to your speakers". -->
-                {#if sonos.multiGroups.length === 0 && sonos.soloSpeakers.length === 0}
-                    <QuietCard
-                        title="Nothing to group"
-                        action={{ label: "Speakers", onClick: openSpeakers }}
-                    >
-                        {#if kef.speakers.length > 0}
-                            KEF speakers stand alone — they have no zones to group. Their
-                            controls are on Speakers.
-                        {:else}
-                            No Sonos speaker is answering right now — check them under
-                            Speakers.
-                        {/if}
-                    </QuietCard>
-                {/if}
-
-                <!-- Speakers the live topology never mentioned can't be pucks
-                     and can't be grouped, so Zones only points at them. -->
-                {#if sonos.offline.length > 0}
-                    <NavRow icon="speaker" onClick={openSpeakers} title={offlineTitle}>
-                        {#snippet sub()}
-                            Not in the current Sonos topology — check them under Speakers
-                        {/snippet}
-                    </NavRow>
-                {/if}
-
-                <p class="hint zones-keys">
-                    On a keyboard: press <kbd>G</kbd> on a room to pick it up,
-                    <kbd>Tab</kbd> to another and <kbd>Enter</kbd> to group them.
-                </p>
-            </div>
-    </MusicSheet>
+    />
 {/if}
 
-<!-- Drag ghost — a copy of the puck under the finger. Fixed to the viewport
-     and outside the sheet's own scroll, so it never clips at the edges. -->
-{#if puckDrag}
-    <div
-        class="puck puck-ghost"
-        class:playing={puckDrag.playing}
-        aria-hidden="true"
-        style:width="{puckDrag.w}px"
-        style:height="{puckDrag.h}px"
-        style:left="{puckDrag.x}px"
-        style:top="{puckDrag.y}px"
-    >
-        <span class="puck-icon">
-            {#if puckDrag.playing}<Waveform ink />{:else}<Icon name="speaker" size={16} />{/if}
-        </span>
-        <span class="puck-body">
-            <span class="puck-name">{puckDrag.name}</span>
-            <span class="puck-sub">{puckDrag.sub}</span>
-        </span>
-    </div>
+<!-- The travelling ghost lives out here, not in the sheet: `.sheet` takes a
+     transform while it is dragged, and a `position: fixed` descendant would be
+     anchored to that rather than to the viewport. -->
+{#if drag.drag}
+    <RoomPuck ghost={drag.drag} />
 {/if}
 
 <!-- ── Search sheet ─────────────────────────────────────────────────
      Behind a plain search icon in Home's header, opening the same way
      everything else in Music opens. -->
 {#if searchOpen}
-    <MusicSheet
-        label="Search"
-        title="Search"
-        sub={spotify.connected ? "Spotify" : ""}
-        backLabel="Close Search"
-        onBack={dropSheet}
-        onDismiss={dropSheet}
+    <SearchSheet
+        {spotify}
+        {recents}
+        {destination}
+        {busy}
+        autofocus={searchWantsFocus}
         docked={showDock}
+        onDismiss={dropSheet}
+        onDisconnect={disconnectSpotify}
+        onPlayItem={playItem}
+        onEnqueue={(item, next) =>
+            enqueue({ service: "Spotify", uri: item.uri, title: item.name }, next)}
+        {targetRow}
+        bind:this={searchSheet}
         bind:scrollEl
-    >
-        {@render searchBody()}
-    </MusicSheet>
+    />
 {/if}
 
 <!-- ── The players ──────────────────────────────────────────────────
@@ -2166,19 +1497,6 @@
     }
     .link-btn:hover { color: var(--text); }
 
-    /* Only said once, at the foot of the Zones sheet — the gesture is the
-       affordance, this is the footnote for the keyboard. */
-    .zones-keys { margin-top: var(--space-2); }
-    .zones-keys kbd {
-        font-family: var(--font-mono);
-        font-size: 11px;
-        padding: 1px 5px;
-        border-radius: 5px;
-        background: var(--card-3);
-        border: 1px solid var(--hairline);
-        color: var(--text);
-    }
-
     /* ── Header actions ──
        Search keeps its label wherever the header has room for it, and drops
        to the icon alone on a phone — where a third labelled chip is exactly
@@ -2257,124 +1575,6 @@
     }
     /* ── Favorites ── */
     .favs { display: flex; gap: var(--space-3); padding-bottom: var(--space-1); }
-    /* ── Room grid ── */
-    .rooms { display: flex; flex-direction: column; gap: var(--space-3); }
-    .puck-grid {
-        display: grid;
-        /* 140, not 160: inside the dashed group enclosure the extra padding
-           tipped a phone's two-up grid into a single stacked column. */
-        grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-        gap: var(--space-3);
-    }
-    .group-wrap {
-        border: 1px dashed var(--tile-on-border);
-        border-radius: var(--r-lg);
-        padding: var(--space-2);
-        display: flex; flex-direction: column; gap: var(--space-2);
-        transition: border-color var(--t-fast), box-shadow var(--t-fast);
-    }
-    /* Aimed at as a whole — the dashed edge goes solid amber, the same
-       statement a puck's drop ring makes. */
-    .group-wrap.drop {
-        border-style: solid;
-        border-color: var(--on);
-        box-shadow: 0 0 0 1px var(--on), 0 0 22px -6px var(--on-glow);
-    }
-    .glabel {
-        display: flex; align-items: center; gap: 6px;
-        padding: 2px 6px;
-        font-family: var(--font-mono);
-        font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase;
-        color: var(--on);
-    }
-    .glabel span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .ungroup {
-        background: none; border: 0; padding: 2px 4px;
-        color: var(--text-mute); font-family: var(--font-sans);
-        font-size: 11px; letter-spacing: 0; text-transform: none;
-        cursor: pointer;
-    }
-    .ungroup:hover { color: var(--text); }
-    .ungroup:disabled { opacity: 0.5; }
-
-    /* One element, one target: tap opens the room, drag groups it. The
-       select circle that used to sit in the corner is gone, so the padding
-       that reserved its space goes with it. */
-    .puck {
-        position: relative;
-        width: 100%;
-        display: flex; flex-direction: column; gap: 10px;
-        padding: 14px;
-        background: var(--card); border: 1px solid var(--hairline);
-        border-radius: var(--r-lg);
-        color: var(--text); text-align: left; cursor: grab; font: inherit;
-        /* Vertical panning still belongs to the sheet — a puck only lifts on
-           a press that stays put (see HOLD_MS). */
-        touch-action: pan-y;
-        -webkit-user-select: none; user-select: none;
-        transition: border-color var(--t-fast), box-shadow var(--t-fast),
-            opacity var(--t-fast), transform var(--t-fast);
-    }
-    .puck.playing { background: var(--tile-on-gradient); border-color: var(--tile-on-border); }
-    .puck:active { transform: scale(0.98); }
-    .puck:disabled { opacity: 0.6; cursor: default; }
-    /* The one being carried: dimmed in place, so the grid keeps its shape
-       while the ghost does the travelling. */
-    .puck.lifted { opacity: 0.35; cursor: grabbing; transform: none; }
-    .puck.held:not(.lifted) { border-color: var(--on); }
-    /* Where it would land. Same ring for the pointer's drop target and the
-       keyboard's candidates, because they mean the same thing. */
-    .puck.drop {
-        border-color: var(--on);
-        box-shadow: 0 0 0 2px var(--on), 0 0 22px -4px var(--on-glow);
-    }
-    .puck.aiming { border-color: var(--tile-on-border); }
-    .puck.aiming:focus-visible { box-shadow: var(--focus-ring), 0 0 0 2px var(--on); }
-    /* Grip: the only thing on a puck that says "this moves" to a mouse.
-       Hover-only so it is never permanent chrome, and inert so it is never
-       a second target. */
-    .puck-grip {
-        position: absolute; top: 10px; right: 10px;
-        display: flex;
-        color: var(--text-dim);
-        opacity: 0;
-        pointer-events: none;
-        transition: opacity var(--t-fast);
-    }
-    @media (hover: hover) {
-        /* Not while lifted: the pointer is captured, so the source puck stays
-           :hover for the whole drag and would keep the grip lit under the
-           ghost that is already carrying it. */
-        .puck:not(:disabled):not(.lifted):hover .puck-grip { opacity: 0.7; }
-    }
-    /* Keep the name clear of the grip while it is showing. */
-    .puck-name { padding-right: 20px; }
-    /* The travelling copy. Fixed to the viewport and inert, so hit-testing
-       under the finger finds the room beneath it rather than itself. */
-    .puck-ghost {
-        position: fixed; z-index: 200;
-        pointer-events: none;
-        box-shadow: var(--shadow-lg);
-        /* Fully opaque and slightly lifted: at 94% the room underneath read
-           through the ghost and both sets of text fought. */
-        opacity: 1;
-        transform: scale(1.03);
-        transition: none;
-    }
-    .puck-icon {
-        width: 34px; height: 34px; border-radius: var(--r-md);
-        display: grid; place-items: center;
-        background: var(--card-3); color: var(--text-mute);
-    }
-    .puck.playing .puck-icon { background: var(--on); color: var(--primary-fg); }
-    .puck-body { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-    /* Clear of the hover grip in the corner. */
-    .puck-name { font-size: 14px; font-weight: 600; padding-right: 20px; }
-    .puck-sub {
-        font-size: 11.5px; color: var(--text-mute);
-        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    }
-
     /* ── Docked mini-player ── */
     .mini {
         position: sticky;
@@ -2520,179 +1720,8 @@
         .sp-row:hover { background: var(--bg-raised); border-color: var(--border-strong); }
     }
 
-    /* ── Spotify search ── */
-    .sp-help { font-size: 12.5px; color: var(--text-mute); line-height: 1.5; }
-    .sp-steps {
-        margin: 0; padding-left: 20px;
-        display: flex; flex-direction: column; gap: var(--space-2);
-        font-size: 12.5px; color: var(--text-mute); line-height: 1.5;
-    }
-    .sp-steps li::marker { font-family: var(--font-mono); color: var(--text-dim); }
-    .sp-link { color: var(--on); text-decoration: underline; text-underline-offset: 2px; }
-    .sp-redirect {
-        display: flex; align-items: center; gap: var(--space-2);
-        flex-wrap: wrap; margin-top: 4px;
-    }
-    .sp-redirect code {
-        font-family: var(--font-mono); font-size: 12px; color: var(--text);
-        background: var(--card-2); border: 1px solid var(--hairline);
-        border-radius: var(--r-sm); padding: 4px 8px;
-        word-break: break-all; user-select: all;
-    }
-    .sp-paste label { font-size: 12.5px; color: var(--text-mute); }
-    .sp-config { display: flex; gap: var(--space-2); align-items: center; }
-    .sp-config input { flex: 1; min-width: 0; }
-    .sp-actions { display: flex; gap: var(--space-2); }
-
-    .sp-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
-    .sp-account { display: flex; align-items: center; gap: var(--space-3); }
-    /* Positive "you're connected" signal, so the neighbouring Disconnect
-       button reads as an action and not as the account's status. */
-    .sp-conn { display: flex; align-items: center; gap: 6px; min-width: 0; }
-    .sp-dot {
-        width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0;
-        background: var(--on); box-shadow: 0 0 0 4px var(--on-soft);
-    }
-    .sp-conn-label {
-        font-family: var(--font-mono);
-        font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase;
-        color: var(--on);
-    }
-    .sp-user {
-        font-size: 11px; color: var(--text-mute);
-        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    }
-
-    .sp-search {
-        display: flex; align-items: center; gap: var(--space-2);
-        background: var(--card-2); border: 1px solid var(--hairline);
-        border-radius: var(--r-md); padding: 10px var(--space-3);
-        color: var(--text-mute);
-    }
-    .sp-input {
-        flex: 1; min-width: 0; background: none; border: 0; outline: none;
-        color: var(--text); font-size: 14px;
-    }
-    .sp-clear { width: 30px; height: 30px; flex-shrink: 0; color: var(--text-mute); }
-    /* The box already frames the field, so the ring goes on the container —
-       a second rounded shape drawn inside it read as a box in a box. */
-    .sp-search:focus-within { border-color: var(--border-strong); box-shadow: var(--focus-ring); }
-    .sp-input:focus, .sp-input:focus-visible { box-shadow: none; }
-    .sp-filters { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
-    .sp-browse-label {
-        font-family: var(--font-mono);
-        font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase;
-        color: var(--text-dim);
-    }
-    /* Sits opposite the kind filters when there are results to filter, and
-       leads the row when there aren't. */
-    .sp-targets.pushed { margin-left: auto; }
-    .sp-skeleton { height: 120px; border-radius: var(--r-md); }
-    .sp-none { font-size: 12.5px; color: var(--text-mute); }
-    /* One-line explanation above the results, for a destination that needs
-       something before it can play. Quiet: it isn't a fault, it's a step. */
-    .sp-note {
-        display: flex; align-items: center; gap: var(--space-2);
-        padding: var(--space-2) var(--space-3);
-        background: var(--card-2); border: 1px solid var(--hairline);
-        border-radius: var(--r-md);
-        font-size: 12.5px; color: var(--text-mute);
-    }
-    .sp-note :global(svg) { flex: none; color: var(--text-dim); }
-    .sp-note span { flex: 1; min-width: 0; }
-    .sp-note .chip { flex: none; }
-
-    .sp-history { display: flex; flex-direction: column; gap: var(--space-2); }
-    .sp-history-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
-    .sp-hist-clear { padding: 3px 10px; font-size: 11px; }
-    .sp-history-list { display: flex; flex-wrap: wrap; gap: var(--space-2); }
-    .sp-hist-chip {
-        display: inline-flex; align-items: center;
-        background: var(--card-2); border: 1px solid var(--hairline);
-        border-radius: var(--r-pill);
-    }
-    .sp-hist-run {
-        display: inline-flex; align-items: center; gap: 6px;
-        padding: 7px 4px 7px 12px;
-        background: transparent; border: 0; border-radius: var(--r-pill) 0 0 var(--r-pill);
-        font: inherit; font-size: 12.5px; color: var(--text-mute); cursor: pointer;
-    }
-    @media (hover: hover) { .sp-hist-run:hover { color: var(--text); } }
-    .sp-hist-chip .sp-hist-x { width: 26px; height: 26px; margin-right: 3px; color: var(--text-dim); }
-
-    .sp-results { display: flex; flex-direction: column; gap: 2px; }
-    /* The row is a container, not a control: tapping the body plays now,
-       the trailing overflow queues without interrupting. */
-    .sp-row {
-        position: relative;
-        display: flex; align-items: center; gap: var(--space-1);
-        border-radius: var(--r-md);
-        transition: background 150ms ease;
-    }
-    @media (hover: hover) { .sp-row:hover { background: var(--card-2); } }
-    .sp-open {
-        flex: 1; min-width: 0;
-        display: flex; align-items: center; gap: var(--space-3);
-        min-height: 52px; padding: 6px var(--space-2);
-        background: transparent; border: 0; border-radius: var(--r-md);
-        color: var(--text); cursor: pointer; text-align: left; font: inherit;
-    }
-    .sp-open:active:not(:disabled) { background: var(--card-3); }
-    .sp-open:disabled { opacity: 0.5; cursor: default; }
-    .sp-more { width: 36px; height: 36px; flex-shrink: 0; margin-right: 4px; }
-    .sp-more:disabled { opacity: 0.4; }
-
-    .overflow-menu {
-        position: absolute; right: 8px; top: 46px; z-index: 12;
-        min-width: 180px;
-        display: flex; flex-direction: column;
-        background: var(--card-2);
-        border: 1px solid var(--border-strong);
-        border-radius: var(--r-md);
-        overflow: hidden;
-        box-shadow: var(--shadow-md);
-    }
-    .overflow-item {
-        display: flex; align-items: center; gap: var(--space-3);
-        padding: 12px var(--space-4);
-        background: transparent; border: 0;
-        border-bottom: 1px solid var(--hairline);
-        cursor: pointer; font: inherit; font-size: 14px;
-        color: var(--text); text-align: left;
-    }
-    .overflow-item:last-child { border-bottom: 0; }
-    @media (hover: hover) { .overflow-item:hover { background: var(--card-3); } }
-    .sp-art {
-        width: 40px; height: 40px; border-radius: var(--r-sm);
-        object-fit: cover; background: var(--card-2);
-        border: 1px solid var(--hairline); flex-shrink: 0;
-    }
-    div.sp-art { display: grid; place-items: center; font-size: 8px; color: var(--text-dim); }
-    .sp-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-    .sp-name {
-        font-size: 13.5px; font-weight: 500;
-        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    }
-    .sp-sub {
-        font-size: 11.5px; color: var(--text-mute);
-        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    }
-    .sp-play {
-        width: 36px; height: 36px; display: grid; place-items: center;
-        border-radius: 50%; color: var(--text-mute); flex-shrink: 0;
-        transition: color 150ms ease, background 150ms ease;
-    }
-    .sp-row:hover .sp-play { background: var(--on-soft); color: var(--on); }
-
-
     /* ── Touch: hit areas grow to the 44px floor ── */
-    @media (pointer: coarse) {
-        .sp-play { width: 44px; height: 44px; }
-        .sp-more, .sp-clear { width: 44px; height: 44px; }
-        .sp-input, .sp-config input { font-size: 16px; } /* prevents iOS auto-zoom */
-    }
-
     @media (prefers-reduced-motion: reduce) {
-        .puck, .sp-row, .mini { transition-duration: 0.001ms; }
+        .mini { transition-duration: 0.001ms; }
     }
 </style>
