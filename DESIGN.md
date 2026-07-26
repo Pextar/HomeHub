@@ -578,12 +578,28 @@ patterns on top. Keep these consistent if you extend it.
   onward) instead of one dead card per zone. Idle zones stay one tap away in
   the room chips below, which is where "open a room" belongs.
 - **One visible destination.** Favorites and Search share a single "Play on"
-  row — chips when there is more than one group, the group's name when there
+  row — chips when there is more than one room, the room's name when there
   is only one, never nothing. Opening a room's player sets it too: the room
   you are looking at is the room the next favorite should land in. It
   defaults to whatever is already playing. Starting playback also **confirms
   in words** (`Playing · <track> · <room>`), because a tap has no visible
   effect until the speaker reports back.
+
+  The row **spans both bridges**, which is why the destination carries a
+  *kind* (`sonos` | `kef`) rather than being a bare id: the same tap starts a
+  Sonos zone through its coordinator's queue and a KEF speaker through
+  Spotify Connect. Reachable KEF speakers follow the Sonos zones behind a
+  single `KEF` marker in the row — one marker, not a badge per chip, because
+  the only thing it has to solve is telling apart a name that exists on both
+  sides. Consequences of one destination over two capability sets:
+  - **Favorites are Sonos-only**, so with a KEF destination selected the
+    favorites rail is replaced by one quiet card saying so and pointing at the
+    row above. A rail of disabled cards would be a screen of dead controls.
+  - **"Play next" / "Add to queue" disappear** for a KEF destination — the
+    queue is a Sonos group's, and the row's overflow is not rendered at all
+    rather than rendered to be refused.
+  - Opening a **KEF speaker's screen** sets the destination the same way
+    opening a room's player does.
 - **Docked mini-player.** When something is playing, a compact bar sticks to
   the bottom of the view (`position: sticky`, cleared above the mobile tab
   bar and safe area): art, track, waveform, transport. Tapping it — or any
@@ -764,12 +780,37 @@ patterns on top. Keep these consistent if you extend it.
     action. It renders as chips (§2), and every model shows the same list —
     there is no "what inputs do you have" call, so a model without USB simply
     refuses it rather than the UI hiding it.
+  - **Starting music goes out through Spotify, and only that one thing does.**
+    The speaker's API can play, pause and skip but has nothing that *takes*
+    content: no queue, no URI, no favorites. So a search result reaches a KEF
+    speaker through Spotify Connect — `internal/api/kef_spotify.go` asks the
+    Web API to point playback at the speaker, which then streams it itself.
+    Everything else about a KEF speaker stays on the LAN; this is the single
+    exception, and it must not become a habit. What follows from it:
+    - It needs the **user's** Spotify account (Premium, plus the two player
+      scopes), not the speaker's. A login made before HomeHub asked for those
+      scopes searches fine and cannot play, so `spotify/status` reports
+      `playback` and the Search screen says "reconnect" **before** the tap
+      rather than surfacing a 403 after it.
+    - The backend **wakes the speaker onto Wi-Fi first**: a speaker in standby
+      or on its optical input is not a Connect device at all, and "device not
+      found" for a speaker sitting right there is not an answer.
+    - **Which Connect device a speaker is** gets matched on its name, and the
+      `Spotify` card on its screen is where that is corrected when the names
+      differ — one row naming where music will come from, one chip row of the
+      account's visible devices, and a way back to name matching. The card is
+      absent when there is no Spotify account to ask: setting Spotify up has
+      one home, on Search, and a second one here would be duplication.
+    - **Transport stays local.** Once something is playing, pause and skip go
+      to the speaker over its own API — the cloud is only how playback is
+      *started*, never how it is controlled.
   - **Everything else follows the pointer rule.** The settings snapshot has a
     field per DSP path and `undefined` means "this model didn't answer for
     it" — an LSX II has no subwoofer output, so the whole Subwoofer card is
     absent for one. Same discipline as Sonos' `capabilities`, different
     mechanism.
-  - **It shares Home, the Home glance card and the Speakers screen.** A
+  - **It shares Home, the destination row, the Home glance card and the
+    Speakers screen.** A
     playing KEF speaker gets a card in "Playing now" (in both the Music view
     and `components/NowPlaying.svelte`) and a chip in the Rooms row, on the
     same `.tile.on` surface with the same §6.8 waveform — a peer, not a

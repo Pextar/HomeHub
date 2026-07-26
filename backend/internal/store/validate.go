@@ -442,6 +442,13 @@ func (s *Store) ValidateKEFSpeaker(sp *KEFSpeaker) error {
 	sp.IP = strings.TrimSpace(sp.IP)
 	sp.Room = strings.TrimSpace(sp.Room)
 	sp.Model = strings.TrimSpace(sp.Model)
+	// Spotify's own ids and device names, round-tripped from its API rather
+	// than typed, so trimming and a length cap is the whole of the check.
+	sp.SpotifyDeviceID = strings.TrimSpace(sp.SpotifyDeviceID)
+	sp.SpotifyDeviceName = strings.TrimSpace(sp.SpotifyDeviceName)
+	if len(sp.SpotifyDeviceID) > 128 || len(sp.SpotifyDeviceName) > 128 {
+		return errors.New("spotify device is not a value from Spotify")
+	}
 	// Stored normalised, so the same speaker read through two firmware
 	// versions — one colon-separated, one not — is still one device.
 	sp.MAC = kef.NormalizeMAC(sp.MAC)

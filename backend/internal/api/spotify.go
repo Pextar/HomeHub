@@ -65,6 +65,11 @@ func (s *Server) spotifyStatus(w http.ResponseWriter, r *http.Request) {
 		"display_name": st.DisplayName,
 		"redirect_uri": uri,
 		"manual":       manual,
+		// Whether this login can start Connect playback (KEF speakers). A
+		// login made before HomeHub asked for the player scopes searches
+		// fine and can't play, and only a reconnect fixes that — so the
+		// frontend has to be able to tell the difference.
+		"playback": st.Playback,
 	})
 }
 

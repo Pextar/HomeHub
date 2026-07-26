@@ -318,9 +318,15 @@ func (s *Server) Handler() http.Handler {
 	api.HandleFunc("/kef/{id}/art", s.requireAdmin(s.kefArt)).Methods("GET")
 	api.HandleFunc("/kef/{id}/settings", s.requireAdmin(s.kefSettings)).Methods("GET")
 	api.HandleFunc("/kef/{id}/settings", s.requireAdmin(s.kefUpdateSettings)).Methods("PUT")
+	// Starting music is the one KEF capability that isn't on the speaker's
+	// own API: it goes through Spotify Connect. See kef_spotify.go.
+	api.HandleFunc("/kef/{id}/play-item", s.requireAdmin(s.kefPlayItem)).Methods("POST")
+	api.HandleFunc("/kef/{id}/spotify", s.requireAdmin(s.kefSpotifyDevices)).Methods("GET")
+	api.HandleFunc("/kef/{id}/spotify", s.requireAdmin(s.kefSetSpotifyDevice)).Methods("PUT")
 
 	// Spotify search/browse for the Music view. OAuth is the user's own
-	// account (PKCE); playback stays local via the play-item route above.
+	// account (PKCE); Sonos playback stays local via the play-item route
+	// above, while KEF's goes back out through Connect.
 	api.HandleFunc("/spotify/status", s.requireAdmin(s.spotifyStatus)).Methods("GET")
 	api.HandleFunc("/spotify/config", s.requireAdmin(s.spotifySetConfig)).Methods("PUT")
 	api.HandleFunc("/spotify/login", s.requireAdmin(s.spotifyLogin)).Methods("GET")
