@@ -29,10 +29,15 @@ over decoration.
   ever.
 - **No pure black.** The deepest surface is `#0a0907` (Console only). App
   background is `#14130f`.
-- **No tabs inside views.** Use chip filters. *One sanctioned exception:*
-  the Music subnav (§15) — a pill segmented control switching between a
-  module's own screens. It is nav, not filtering, and it never reshapes the
-  global tab bar. Don't generalise it to other views without design review.
+- **No tabs inside views.** Use chip filters. There is no longer an
+  exception: Music carried one — a pill subnav across its own screens — and
+  it is gone (§15). A module with more than one screen uses sheets over its
+  home screen, or pushes a real screen with a back chip.
+- **No sheet opens another sheet.** A sheet over a sheet means two scrims,
+  two swipes and an ambiguous Escape. If the thing you are opening from has
+  to lead somewhere deeper, make *it* a screen. Sheets may swap for one
+  another (and put the first back on the way out) — that is one sheet, not
+  two.
 - **No drawers from the side.** Use bottom sheets.
 - **No spinners.** Use the existing skeleton primitive.
 - **No icon-only button under 44×44** hit area.
@@ -394,9 +399,11 @@ Is it a list of things?
 
 ## 12. Anti-patterns — reject these on sight
 
-- Tabs nested inside a view → use chip filters (except Music's subnav, §15)
+- Tabs nested inside a view → use chip filters
 - A module that reshapes the global tab bar to its own destinations → the
-  app-level nav is fixed; put module screens in a subnav instead
+  app-level nav is fixed; open module screens as sheets over its home screen,
+  or push a screen with a back chip
+- A sheet whose rows open another sheet → make the opener a screen (§15)
 - Side drawer → use sheet
 - Spinner → use skeleton
 - Brand gradient (purple/blue/teal) → warm-only palette
@@ -478,34 +485,50 @@ patterns on top. Keep these consistent if you extend it.
   status dot would otherwise sit — in group cards, room pucks, and the
   mini-player. Idle uses the `speaker` icon. This animated motif, not
   colour, is what marks Music as its own module.
-- **Four screens behind a subnav.** Music has its own Home / Rooms /
-  Speakers / Search screens, switched by a sticky pill segmented control at
-  the top of the view (`<Segmented full accent>`, `position: sticky`). This is
-  the §2 exception. Two rules make it work:
-  - **The global tab bar never changes shape.** Music is one destination
-    among the app's nav entries; entering it must not swap the app-level
-    bar for module-specific tabs. The subnav lives *inside* the view,
-    above the fold — never stacked on the tab bar.
-  - **Subnav is navigation, not filtering.** Kind filters inside Search
-    (Songs / Albums / Playlists) remain chip filters, per §2.
-  - **It sticks as a band, not as a floating pill.** `top: 0`, bled over the
-    shell's page padding (36px desktop, `--space-4` mobile) so nothing
-    scrolls through a gap above it or past its sides, on the same glass as
-    the player sheet's top bar: `--bg-bar`, `backdrop-filter`, and a fading
-    bottom edge. A pill that stuck 8px down over an unbled `--bg` strip left
-    cards visibly sliding through the gutters around it.
+- **No persistent switcher — Home is the only fixed screen.** The subnav pill
+  is gone; it doubled up on the app's own "no tabs inside a view" rule (§2)
+  in spirit even while carrying an exception for it, and it collided on the
+  word "Rooms" with the app-level nav destination of the same name. Music's
+  header now behaves like every other header in HomeHub: nothing rides below
+  it but content. **Search** lives behind a plain search icon in Home's
+  header. **Zones** (renamed from "Rooms" — see below) opens from a "Manage"
+  link next to the room chips. Both open as sheets over Home, the same
+  gesture as the player.
+  - **A sheet must never open another sheet.** This is the reason Speakers
+    is *not* on this list: its rows open a speaker's settings one level
+    further, so it has to be a real screen (§11 detail shape, back chip),
+    reached from a plain row on Home — see its own entry below.
+  - **Sheets swap; they never stack.** Tapping a room inside Zones has to
+    open that room's player, which would be a sheet over a sheet — so the
+    player *replaces* Zones and puts it back on the way out. One scrim, one
+    Escape, one thing to swipe away, and no lost place either. The same
+    applies in the other direction: opening Speakers from inside Zones drops
+    the sheet rather than leaving it under the screen.
+  - **The global tab bar still never changes shape.** Music is one
+    destination among the app's nav entries; none of Search, Zones, Speakers
+    or the player replace or reshape it.
 
-  Screen contents: **Home** = Playing now + Favorites + room chips
-  (each opens that room's player; "Manage" jumps to Rooms). **Rooms** =
-  the grouping puck grid. **Speakers** = the device inventory and its
-  settings. **Search** = Spotify. The mini-player and the full-player sheet
-  persist across all four.
-
-  Four labels is the ceiling: with `full`, the labels get an equal share and
-  clip rather than push the control past its container, so a fifth screen
-  needs a different shape, not a shorter word.
-- **Rooms is zones; Speakers is devices.** They read as adjacent and are not.
-  Rooms answers *what plays together* — the puck grid, grouping, ungrouping,
+  Screen contents: **Home** = Playing now + Favorites + room chips ("Manage"
+  opens Zones) + a row through to Speakers. **Zones** = the grouping puck
+  grid, as a sheet. **Speakers** = the device inventory and its settings, as
+  its own screen — reached from that row. **Search** = Spotify, as a sheet.
+  The mini-player and the full-player sheet persist across Home, Zones and
+  Search: over the two sheets the dock leaves the page flow and floats above
+  them, because that is exactly where the transport would otherwise
+  disappear, and Search's whole job is to feed it. Tapping it there swaps
+  that sheet for the player rather than stacking one on the other.
+- **Home's header carries the search icon and nothing else.** Registering a
+  speaker moved to Speakers, where the rest of device management already
+  lives — a third action in that row left the subtitle a two-word stub on a
+  phone, and "add a device" was never a Home-screen job. The header keeps its
+  push-status chip, since that qualifies everything below it (§15, below).
+  The empty state still offers "Add speaker" outright: with no speakers there
+  is no Speakers row to go through.
+- **Zones is zones; Speakers is devices.** They read as adjacent and are not,
+  and "Zones" is the renamed version of what used to be called "Rooms" here —
+  the app-level nav already owns that word for the whole house, and reusing
+  it for speaker grouping was the confusing part, not just a naming nitpick.
+  Zones answers *what plays together* — the puck grid, grouping, ungrouping,
   and nothing that isn't a playback zone. Speakers answers *what each of these
   things is and how it is configured* — one §11 list row per registered
   speaker, reachable or not, opening that speaker's settings. One target per
@@ -513,11 +536,11 @@ patterns on top. Keep these consistent if you extend it.
   rides on the settings head's action chip rather than as a second control in
   the row — reachable speakers previously had no path to it at all.
   Consequences worth keeping: **unreachable speakers live on Speakers**, since
-  the useful action for one is fixing its address, and Rooms carries only a
+  the useful action for one is fixing its address, and Zones carries only a
   one-line pointer at them (they can't be pucks and can't be grouped). And
   the **`Live updates` row moved to Speakers** with them — see the push
   section below; the row belongs wherever the devices are managed, and that is
-  no longer Rooms.
+  no longer Zones.
 - **The speaker's picture comes from the speaker.** Each row and the settings
   pane show the product image the device publishes in its own description's
   `iconList`, proxied through `/api/sonos/{id}/image` for the same reason
@@ -533,10 +556,13 @@ patterns on top. Keep these consistent if you extend it.
   the §11 form branch — there is nothing to save, every control applies on
   touch — so it takes the §11 *detail* shape instead: back chip, centered
   title block, action chip, hero card, secondary cards below. A sheet was
-  built first and rejected for three reasons: Music already owns a sheet (the
-  full player), so a second one made the module two stacked sheets deep; the
-  content scrolls twice, which is more than 92vh wants to hold; and the
-  screens it is reached from — Home, Rooms, Search — are not sheets either.
+  built first and rejected for three reasons: it is reached *from* a sheet's
+  worth of navigation, and a sheet must never open another sheet; the content
+  scrolls twice, which is more than 92vh wants to hold; and the screen it is
+  reached from — Speakers — is a screen precisely so this one can push off
+  it. On a phone, where an open speaker replaces the list, the Speakers
+  screen's own back chip stands down: this pane's §11 head is the one back
+  chip on screen.
 
   How it lays out is the point:
   - **From 1024px the list and the settings sit side by side** (`.sp-split`
@@ -553,9 +579,10 @@ patterns on top. Keep these consistent if you extend it.
     hopping between rooms on a phone doesn't mean back-and-forward either.
     Unreachable speakers appear in it disabled rather than missing.
   - The head adapts: beside the list it is a pane header (title left, no back
-    chip, nothing to go back to); on a phone it is the full §11 detail head.
-    Escape backs out of it like the back chip does, and switching subnav
-    screens leaves it.
+    chip, nothing to go back to); on a phone it is the full §11 detail head,
+    and the Speakers screen's own head stands down so there is one back chip
+    rather than two. Escape backs out of it like the back chip does, and
+    leaving Speakers leaves it.
 
   Volume, mute and transport are deliberately absent — they already live in
   the full player, and a second identical set of controls is the duplication
@@ -624,10 +651,11 @@ patterns on top. Keep these consistent if you extend it.
   and the same transport as the Home screen's "Playing now" card — both
   gain prev/next from 430px up and drop them below it, so neither is ever
   the richer control — and so it stands down while that card is on screen
-  and appears the moment the card scrolls away (`IntersectionObserver`, bottom inset discounting the band the
-  dock and tab bar occupy). On Rooms and Search no such card exists, so the
-  dock is simply always there. Reaching for the transport must never mean
-  choosing between two identical controls stacked on one screen.
+  and appears the moment the card scrolls away (`IntersectionObserver`,
+  bottom inset discounting the band the dock and tab bar occupy). On Zones
+  and Search no such card exists, so the dock is simply always there.
+  Reaching for the transport must never mean choosing between two identical
+  controls stacked on one screen.
 - **Full player = bottom sheet, art-led.** A bottom sheet on mobile (`--r-xl`
   top radius, `transition:sheet`, scrim, body-scroll-lock), a centered dialog
   ≥ 601px. Rendered inline (not the modal stack) so it stays live against
@@ -680,8 +708,8 @@ patterns on top. Keep these consistent if you extend it.
   group-level, so they only render when the coordinator reported a
   `group_state`; a follower's view never carries one.
 - **The queue is a second pane inside the same sheet**, reached from an
-  "Up next" row that names the actual next track. Not a segmented control:
-  §2's Music exception covers the view's subnav only. The header's left
+  "Up next" row that names the actual next track. Not a segmented control —
+  §2 has no exception left to lean on. The header's left
   button becomes a back chevron, the close X stays put, and Escape still
   leaves the player outright rather than stepping back a level. Rows show a
   mono track number, replaced by the §6.8 waveform on the one playing; that
@@ -700,17 +728,37 @@ patterns on top. Keep these consistent if you extend it.
   arriving on the Search screen puts the caret in the box — on `(pointer:
   fine)` only, since auto-focus on a phone throws the software keyboard over
   the results.
-- **Rooms grouping is a puck grid, not a list.** Each reachable speaker is a
-  puck carrying **two intents on two targets**: the body opens that room's
-  player, the corner circle selects it for grouping (amber ring + filled
-  check when selected, 44px hit area on touch). The body used to select,
-  which left the Rooms screen with no way through to playback at all —
-  opening a room is the common intent, grouping is the deliberate one.
-  Selecting 2+ raises a floating "Group" bar, which carries its own way out
-  (a clear X, and Escape) — leaving selection mode must never mean
-  un-tapping every circle one at a time. Existing multi-speaker zones sit
-  inside a dashed enclosure (`--tile-on-border`) with an "Ungroup"
-  affordance.
+- **Zones grouping is drag, not select-then-group.** Each reachable speaker
+  is a puck; tap opens that room's player (unchanged), and dragging one puck
+  onto another groups them — dragging a third onto an existing group adds it.
+  A tap-to-select-then-"Group" flow with a floating action bar was built
+  first and dropped: it needed a whole selection mode (with its own way out)
+  for something the pucks already spatially represent — dragging one thing
+  onto another *is* the grouping gesture, not a two-step proxy for it. The
+  drag shows a floating ghost of the puck and an amber ring on the drop
+  target; below the ~8px move threshold it's a tap, not a drag, so opening a
+  room never mis-fires as an attempted group. Existing multi-speaker zones
+  sit inside a dashed enclosure (`--tile-on-border`) with an "Ungroup"
+  affordance that returns every puck to standalone rows, not just clears the
+  wrapper.
+  - **On touch the lift is a hold, not a move.** A finger that moves straight
+    away is scrolling the sheet, so a puck only lifts after ~260 ms of
+    staying put; a mouse lifts on the 8px move instead. Once lifted, the
+    page's scroll is refused for the rest of the gesture — `touch-action`
+    can't be changed mid-gesture, so it takes a non-passive `touchmove`
+    handler.
+  - **The keyboard gets the same gesture.** Drag was the *whole* grouping
+    affordance once the select circles went, which would have left grouping
+    with no keyboard path at all. So a focused puck answers **G** to pick a
+    room up, **Tab** to move, **Enter** to drop it in and **Escape** to put
+    it back — with the candidate pucks ringed the same way a drop target is,
+    and every step announced through a live region, since a drag has no
+    running commentary of its own. The shortcut is stated once, as a footnote
+    at the bottom of the sheet, not as chrome on every puck.
+  - **Only the dragged speaker moves.** If it was leading a zone, Sonos
+    re-elects behind us. "This room now plays with that one" is the whole
+    promise; carrying its former partners along would be a second change
+    nobody asked for.
 - **Home shows what's playing, and only that.** The dashboard's "Playing now"
   section (`components/NowPlaying.svelte`) is the only piece of Music that
   lives outside the Music view. It is a *glance* surface, so it is
@@ -764,7 +812,7 @@ patterns on top. Keep these consistent if you extend it.
   inventing groups KEF doesn't have or dropping the ones Sonos does.
   Consequences for the UI, all of them the "stay honest about the backend"
   rule applied:
-  - **KEF has no Rooms presence and no player sheet.** Rooms answers *what
+  - **KEF has no Zones presence and no player sheet.** Zones answers *what
     plays together*; a KEF speaker never plays together with anything, so it
     is not a puck and there is nothing to group. And with no queue, no
     favorites and no group state, a full player would be an art-led sheet
@@ -812,7 +860,7 @@ patterns on top. Keep these consistent if you extend it.
   - **It shares Home, the destination row, the Home glance card and the
     Speakers screen.** A
     playing KEF speaker gets a card in "Playing now" (in both the Music view
-    and `components/NowPlaying.svelte`) and a chip in the Rooms row, on the
+    and `components/NowPlaying.svelte`) and a chip in the Zones row, on the
     same `.tile.on` surface with the same §6.8 waveform — a peer, not a
     lesser citizen. Its cards carry play/pause only, because skip has nothing
     to step through on most of its sources. On Speakers it is its own list

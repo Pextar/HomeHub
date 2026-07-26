@@ -116,6 +116,7 @@ is already up-to-date it's skipped.
 - No pure black; deepest surface is `--bg` (`#14130f`).
 - No tabs inside views — use chip filters.
 - No side drawers — use bottom sheets.
+- No sheet opens another sheet — make the opener a screen (sheets may swap).
 - No spinners — use the skeleton primitive.
 - All numerics in `var(--font-mono)`.
 - Icon-only buttons must have a ≥ 44×44 hit area on touch.

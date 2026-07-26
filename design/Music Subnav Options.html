@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="design_doc_mode" content="canvas">
+<title>Music subnav — layout options</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet"/>
+<style>
+:root{--font-sans:"Geist",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;--font-mono:"Geist Mono",ui-monospace,"SF Mono",Menlo,monospace;
+--bg:#14130f;--bg-2:#1c1a15;--card:#1f1d17;--card-2:#26231c;--card-3:#2e2a22;--hairline:#2a2720;--border:#34302a;
+--text:#eceae4;--text-mute:#9c988e;--text-dim:#66635c;--on:#f5bd6e;--on-soft:rgba(245,189,110,0.14);--r-pill:999px;}
+*{box-sizing:border-box;}
+html,body{margin:0;background:#0a0a08;color:var(--text);font-family:var(--font-sans);}
+.ico{width:18px;height:18px;display:block;}
+.label{position:absolute;font-family:var(--font-mono);font-size:12px;letter-spacing:0.08em;text-transform:uppercase;color:var(--on);white-space:nowrap;}
+.desc{position:absolute;font-size:13px;color:var(--text-mute);width:340px;line-height:1.45;}
+.phone{width:340px;height:640px;border-radius:40px;background:#000;padding:9px;box-shadow:0 1px 0 1px #2a2720,0 30px 60px -15px rgba(0,0,0,.8);position:relative;}
+.screen{width:100%;height:100%;border-radius:32px;overflow:hidden;background:var(--bg);position:relative;}
+.statusbar{position:absolute;top:0;left:0;right:0;height:40px;z-index:30;}
+.notch{position:absolute;top:8px;left:50%;transform:translateX(-50%);width:90px;height:22px;background:#000;border-radius:14px;z-index:31;}
+.app{position:absolute;inset:0;overflow:hidden auto;padding-top:40px;}
+.hdr{padding:14px 18px 0;}
+.hdr h1{margin:0;font-size:22px;letter-spacing:-0.02em;}
+.hdr .sub{margin-top:3px;font-size:12.5px;color:var(--text-mute);}
+.chiprow{display:flex;gap:8px;padding:16px 18px 4px;flex-wrap:wrap;}
+.chip{padding:8px 13px;border-radius:var(--r-pill);background:var(--card-2);border:1px solid var(--hairline);font-size:12px;color:var(--text-mute);}
+.body-fill{padding:16px 18px 40px;display:flex;flex-direction:column;gap:10px;}
+.row{height:52px;border-radius:14px;background:var(--card);border:1px solid var(--hairline);}
+</style>
+</head>
+<body>
+
+<div class="label" style="left:60px;top:20px">Option A — pill segmented (current)</div>
+<div class="desc" style="left:60px;top:44px">Three equal-weight buttons in a filled pill track, active tab solid amber. Clear group affordance, but adds a visually heavy second bar right under the header.</div>
+<div style="position:absolute;left:60px;top:100px" class="phone"><div class="notch"></div><div class="screen"><div class="app">
+<div class="hdr"><h1>Good evening</h1><div class="sub">4 rooms playing</div></div>
+<div style="display:flex;gap:3px;background:var(--card-2);border:1px solid var(--hairline);border-radius:999px;padding:3px;margin:14px 18px 0">
+<button style="flex:1;border:0;background:var(--on);color:#3a2400;padding:8px 0;border-radius:999px;font-size:12px;font-weight:600;font-family:var(--font-sans)">Home</button>
+<button style="flex:1;border:0;background:none;color:var(--text-mute);padding:8px 0;border-radius:999px;font-size:12px;font-weight:600;font-family:var(--font-sans)">Rooms</button>
+<button style="flex:1;border:0;background:none;color:var(--text-mute);padding:8px 0;border-radius:999px;font-size:12px;font-weight:600;font-family:var(--font-sans)">Search</button>
+</div>
+<div class="body-fill"><div class="row"></div><div class="row"></div><div class="row"></div></div>
+</div></div></div>
+
+<div class="label" style="left:460px;top:20px">Option B — underline tabs</div>
+<div class="desc" style="left:460px;top:44px">Text-only tabs left-aligned under the header, active tab gets a thin amber underline. Lighter weight, reads as a section switch rather than a second navbar.</div>
+<div style="position:absolute;left:460px;top:100px" class="phone"><div class="notch"></div><div class="screen"><div class="app">
+<div class="hdr"><h1>Good evening</h1><div class="sub">4 rooms playing</div></div>
+<div style="display:flex;gap:22px;margin:18px 18px 0;border-bottom:1px solid var(--hairline)">
+<div style="padding-bottom:10px;font-size:13.5px;font-weight:600;color:var(--text);border-bottom:2px solid var(--on)">Home</div>
+<div style="padding-bottom:10px;font-size:13.5px;font-weight:600;color:var(--text-mute)">Rooms</div>
+<div style="padding-bottom:10px;font-size:13.5px;font-weight:600;color:var(--text-mute)">Search</div>
+</div>
+<div class="body-fill"><div class="row"></div><div class="row"></div><div class="row"></div></div>
+</div></div></div>
+
+<div class="label" style="left:900px;top:20px">Option C — icon rail beside title</div>
+<div class="desc" style="left:900px;top:50px;width:320px">Three icon-only buttons inline with the greeting, right-aligned — trades label clarity for a single-line header.</div>
+<div style="position:absolute;left:900px;top:100px" class="phone"><div class="notch"></div><div class="screen"><div class="app">
+<div class="hdr" style="display:flex;align-items:flex-start;justify-content:space-between">
+<div><h1>Good evening</h1><div class="sub">4 rooms playing</div></div>
+<div style="display:flex;gap:6px;margin-top:2px">
+<div style="width:34px;height:34px;border-radius:10px;background:var(--on-soft);color:var(--on);display:grid;place-items:center"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-7h-6v7H4a1 1 0 0 1-1-1z"/></svg></div>
+<div style="width:34px;height:34px;border-radius:10px;background:var(--card-2);border:1px solid var(--hairline);color:var(--text-mute);display:grid;place-items:center"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 4h7v7H3zM14 4h7v7h-7zM3 13h7v7H3zM14 13h7v7h-7z"/></svg></div>
+<div style="width:34px;height:34px;border-radius:10px;background:var(--card-2);border:1px solid var(--hairline);color:var(--text-mute);display:grid;place-items:center"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M11 19a8 8 0 1 1 0-16 8 8 0 0 1 0 16zM21 21l-4.3-4.3"/></svg></div>
+</div>
+</div>
+<div class="body-fill" style="margin-top:14px"><div class="row"></div><div class="row"></div><div class="row"></div></div>
+</div></div></div>
+
+<div class="label" style="left:60px;top:800px">Option D — floating segmented, sticky-compact on scroll</div>
+<div class="desc" style="left:60px;top:824px">Same pill as A, but starts full-width and shrinks/pins as a slim floating capsule once you scroll past the header — keeps the switcher reachable without permanently costing header space.</div>
+<div style="position:absolute;left:60px;top:880px" class="phone"><div class="notch"></div><div class="screen"><div class="app" style="padding-top:0">
+<div style="height:40px"></div>
+<div style="position:sticky;top:40px;z-index:5;display:flex;justify-content:center;padding:10px 0;background:linear-gradient(var(--bg),var(--bg) 70%,transparent)">
+<div style="display:flex;gap:3px;background:var(--card-2);border:1px solid var(--hairline);border-radius:999px;padding:3px 4px;box-shadow:0 6px 16px rgba(0,0,0,.4)">
+<button style="border:0;background:var(--on);color:#3a2400;padding:6px 12px;border-radius:999px;font-size:11.5px;font-weight:600;font-family:var(--font-sans)">Home</button>
+<button style="border:0;background:none;color:var(--text-mute);padding:6px 12px;border-radius:999px;font-size:11.5px;font-weight:600;font-family:var(--font-sans)">Rooms</button>
+<button style="border:0;background:none;color:var(--text-mute);padding:6px 12px;border-radius:999px;font-size:11.5px;font-weight:600;font-family:var(--font-sans)">Search</button>
+</div>
+</div>
+<div class="body-fill"><div class="row" style="height:120px"></div><div class="row"></div><div class="row"></div><div class="row"></div><div class="row"></div></div>
+</div></div></div>
+
+<div class="label" style="left:460px;top:830px">Option E — no subnav, single scrolling page</div>
+<div class="desc" style="left:460px;top:854px">Drop the switcher entirely: Home, Rooms, and Search become stacked sections on one long scroll (like the main Home screen's rail pattern), reached via anchor jumps from quick-link chips instead of tabs.</div>
+<div style="position:absolute;left:460px;top:880px" class="phone"><div class="notch"></div><div class="screen"><div class="app">
+<div class="hdr"><h1>Good evening</h1><div class="sub">4 rooms playing</div></div>
+<div class="chiprow"><div class="chip">↓ Rooms</div><div class="chip">↓ Search</div></div>
+<div class="body-fill" style="margin-top:6px">
+<div style="font-size:11px;font-family:var(--font-mono);letter-spacing:.1em;text-transform:uppercase;color:var(--text-dim);margin-bottom:2px">Home</div>
+<div class="row"></div>
+<div style="font-size:11px;font-family:var(--font-mono);letter-spacing:.1em;text-transform:uppercase;color:var(--text-dim);margin:10px 0 2px">Rooms</div>
+<div class="row"></div><div class="row"></div>
+<div style="font-size:11px;font-family:var(--font-mono);letter-spacing:.1em;text-transform:uppercase;color:var(--text-dim);margin:10px 0 2px">Search</div>
+<div class="row"></div>
+</div>
+</div></div></div>
+
+</body>
+</html>
