@@ -48,6 +48,12 @@ import type {
   SpotifyStatus,
   SpotifyItem,
   SpotifyResults,
+  MediaEndpoint,
+  MediaProvider,
+  MediaResults,
+  MediaZone,
+  MediaZoneRoutes,
+  MediaPlayResult,
 } from "./types";
 
 const BASE = "/api";
@@ -487,6 +493,71 @@ export const api = {
   assistantStatus() {
     return req<AssistantStatus>("/assistant/status");
   },
+
+  // ── Media protocol ─────────────────────────────────────────────────────
+  // Speakers and services addressed uniformly, plus zones — sets of speakers
+  // that play together regardless of make. The sonos*/kef* calls above stay:
+  // they carry vendor specifics the detail views need.
+  // See docs/MEDIA-PROTOCOL.md.
+  mediaEndpoints() { return req<MediaEndpoint[]>("/media/endpoints"); },
+  mediaProviders() { return req<MediaProvider[]>("/media/providers"); },
+  mediaSearch(q: string, opts?: { provider?: string; limit?: number }) {
+    const p = new URLSearchParams({ q });
+    if (opts?.provider) p.set("provider", opts.provider);
+    if (opts?.limit) p.set("limit", String(opts.limit));
+    return req<MediaResults>(`/media/search?${p}`);
+  },
+  mediaZones() { return req<MediaZone[]>("/media/zones"); },
+  mediaCreateZone(body: { name: string; members: string[]; room?: string }) {
+    return req<MediaZone>("/media/zones", { method: "POST", body: json(body) });
+  },
+  mediaUpdateZone(id: string, body: { name?: string; members?: string[]; room?: string }) {
+    return req<MediaZone>(`/media/zones/${encodeURIComponent(id)}`, { method: "PUT", body: json(body) });
+  },
+  mediaDeleteZone(id: string) {
+    return req<void>(`/media/zones/${encodeURIComponent(id)}`, { method: "DELETE" });
+  },
+  // What this zone could do, and for anything it can't, which speaker blocked
+  // it. Read before playing so the UI can explain a limitation rather than
+  // letting the user discover it as a failure.
+  mediaZoneRoutes(id: string, provider?: string) {
+    const p = provider ? `?provider=${encodeURIComponent(provider)}` : "";
+    return req<MediaZoneRoutes>(`/media/zones/${encodeURIComponent(id)}/routes${p}`);
+  },
+  // Starts content on a zone. The response says which route was chosen and
+  // why — a streamed zone genuinely differs from a natively grouped one, and
+  // the UI is expected to say so rather than present them as equivalent.
+  // A 409 means something the user can fix: connect an account, wake a
+  // speaker, install librespot, or pick different speakers.
+  mediaZonePlay(id: string, body: { provider?: string; uri: string; title?: string; kind?: string }) {
+    return req<MediaPlayResult>(`/media/zones/${encodeURIComponent(id)}/play`, {
+      method: "POST", body: json(body),
+    });
+  },
+  mediaZoneResume(id: string) {
+    return req<void>(`/media/zones/${encodeURIComponent(id)}/resume`, { method: "POST" });
+  },
+  mediaZonePause(id: string) {
+    return req<void>(`/media/zones/${encodeURIComponent(id)}/pause`, { method: "POST" });
+  },
+  mediaZoneNext(id: string) {
+    return req<void>(`/media/zones/${encodeURIComponent(id)}/next`, { method: "POST" });
+  },
+  mediaZonePrevious(id: string) {
+    return req<void>(`/media/zones/${encodeURIComponent(id)}/previous`, { method: "POST" });
+  },
+  // Stop, unlike pause, also releases a stream session — so librespot stops
+  // holding the account's Spotify device.
+  mediaZoneStop(id: string) {
+    return req<void>(`/media/zones/${encodeURIComponent(id)}/stop`, { method: "POST" });
+  },
+  mediaZoneVolume(id: string, level: number) {
+    return req<void>(`/media/zones/${encodeURIComponent(id)}/volume`, { method: "PUT", body: json({ level }) });
+  },
+  mediaZoneMute(id: string, muted: boolean) {
+    return req<void>(`/media/zones/${encodeURIComponent(id)}/mute`, { method: "PUT", body: json({ muted }) });
+  },
+
 };
 
 export type Api = typeof api;

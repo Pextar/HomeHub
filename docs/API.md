@@ -253,6 +253,67 @@ POST   /api/sockets/{id}/timer   (convenience: target inferred from URL)
 
 `fires_at` (RFC3339) may be sent instead of `in_seconds`.
 
+### Media (zones, speakers, services)
+
+The vendor-neutral layer. `/api/sonos/*` and `/api/kef/*` remain for
+per-speaker specifics; these endpoints address any speaker uniformly and add
+zones — sets of speakers that play together regardless of make. See
+[MEDIA-PROTOCOL.md](MEDIA-PROTOCOL.md) for the model.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/media/endpoints` | Every speaker, with its capabilities and its zone member id |
+| GET | `/api/media/providers` | Music services, availability, and whether cross-vendor streaming works |
+| GET | `/api/media/search?q=&provider=&limit=` | Search a service |
+| GET | `/api/media/zones` | Zones with live speaker state and the route each would take |
+| POST | `/api/media/zones` | Create a zone |
+| PUT | `/api/media/zones/{id}` | Rename / change membership |
+| DELETE | `/api/media/zones/{id}` | Delete a zone |
+| GET | `/api/media/zones/{id}/routes` | What this zone can do, and which speaker blocks what it can't |
+| POST | `/api/media/zones/{id}/play` | Start content; answers with the route chosen and why |
+| POST | `/api/media/zones/{id}/pause` | Pause |
+| POST | `/api/media/zones/{id}/resume` | Resume |
+| POST | `/api/media/zones/{id}/next` | Next track |
+| POST | `/api/media/zones/{id}/previous` | Previous track |
+| POST | `/api/media/zones/{id}/stop` | Stop, and release a stream session |
+| PUT | `/api/media/zones/{id}/volume` | `{"level": 0-100}` across the zone |
+| PUT | `/api/media/zones/{id}/mute` | `{"muted": bool}` across the zone |
+
+Zone members are bridge-qualified speaker ids: `sonos:abc`, `kef:def`.
+
+`POST /play` answers with the route it chose, so a client can be honest about
+what is about to happen:
+
+```json
+{
+  "route": "stream",
+  "sync": "buffered",
+  "reason": "Kitchen can't stream Spotify itself, so HomeHub is decoding for all of them",
+  "stream_url": "http://192.168.1.10:8080/stream/9f2c…",
+  "speakers": ["Living Room", "Kitchen"]
+}
+```
+
+`route` is one of `native`, `connect`, `group`, `stream` — best first, with
+`stream` chosen only when nothing else can serve the whole zone. `sync` is
+`exact`, `single` or `buffered`; `buffered` is the honest label for the stream
+route and is never reported for a zone a native route can serve.
+
+A **409** means something the user can fix: connect an account, wake a speaker,
+install librespot, or pick different speakers. The body says which.
+
+#### Audio stream
+
+`GET /stream/{id}` serves the decoded audio for the cross-vendor route. It sits
+outside `/api` and is unauthenticated, because the clients are speakers and
+speakers have no credentials — the same reason Sonos event callbacks do. The
+128-bit id is minted per playback and stops resolving the moment it ends.
+
+Environment: `HOMEHUB_STREAM_URL` overrides the address speakers fetch from,
+`HOMEHUB_LIBRESPOT_BIN` / `HOMEHUB_LIBRESPOT_NAME` configure the decoder, and
+`HOMEHUB_STREAM_DELAY_SONOS` / `HOMEHUB_STREAM_DELAY_KEF` (Go durations) space
+out the start commands to line up buffers. All optional.
+
 ## Error Format
 
 All errors are returned as JSON:

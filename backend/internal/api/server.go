@@ -22,11 +22,13 @@ import (
 	"homehub/internal/kef"
 	"homehub/internal/llm"
 	"homehub/internal/matter"
+	"homehub/internal/media"
 	"homehub/internal/mqtt"
 	"homehub/internal/push"
 	"homehub/internal/sonos"
 	"homehub/internal/spotify"
 	"homehub/internal/store"
+	"homehub/internal/stream"
 )
 
 // maxRequestBody caps API request bodies. Generous for this app's config
@@ -87,6 +89,20 @@ type Server struct {
 	// the Sonos monitor it can be. Created lazily by kefEvents().
 	kefMonMu sync.Mutex
 	kefMon   *kef.Monitor
+
+	// zoneSessions tracks live zone playbacks. Only the stream route
+	// leaves anything running — a decoder holding the account's Spotify
+	// session and an HTTP stream several speakers pull from — so this is
+	// what remembers to shut it down. See media_session.go.
+	zoneMu       sync.Mutex
+	zoneSessions map[string]*media.Session
+
+	// stream serves decoded audio to speakers, and librespot is what
+	// decodes it. Both created lazily, both optional: without librespot
+	// installed only the cross-vendor route is unavailable.
+	streamMu  sync.Mutex
+	stream    *stream.Host
+	librespot *stream.Librespot
 }
 
 // sonosAcctEntry is one cached service-account resolution.
@@ -324,6 +340,31 @@ func (s *Server) Handler() http.Handler {
 	api.HandleFunc("/kef/{id}/spotify", s.requireAdmin(s.kefSpotifyDevices)).Methods("GET")
 	api.HandleFunc("/kef/{id}/spotify", s.requireAdmin(s.kefSetSpotifyDevice)).Methods("PUT")
 
+	// Media protocol: speakers and services addressed uniformly, and zones —
+	// sets of speakers that play together regardless of make. The vendor
+	// routes above stay: they expose specifics (crossfade, KEF sources, Sonos
+	// queues) that don't generalise. See docs/MEDIA-PROTOCOL.md.
+	api.HandleFunc("/media/endpoints", s.requireAdmin(s.mediaEndpoints)).Methods("GET")
+	api.HandleFunc("/media/providers", s.requireAdmin(s.mediaProviders)).Methods("GET")
+	api.HandleFunc("/media/search", s.requireAdmin(s.mediaSearch)).Methods("GET")
+	api.HandleFunc("/media/zones", s.requireAdmin(s.mediaZones)).Methods("GET")
+	api.HandleFunc("/media/zones", s.requireAdmin(s.mediaCreateZone)).Methods("POST")
+	api.HandleFunc("/media/zones/{id}", s.requireAdmin(s.mediaUpdateZone)).Methods("PUT")
+	api.HandleFunc("/media/zones/{id}", s.requireAdmin(s.mediaDeleteZone)).Methods("DELETE")
+	api.HandleFunc("/media/zones/{id}/routes", s.requireAdmin(s.mediaZoneRoutes)).Methods("GET")
+	api.HandleFunc("/media/zones/{id}/play", s.requireAdmin(s.mediaZonePlay)).Methods("POST")
+	api.HandleFunc("/media/zones/{id}/stop", s.requireAdmin(s.mediaZoneStop)).Methods("POST")
+	api.HandleFunc("/media/zones/{id}/resume",
+		s.requireAdmin(s.mediaZoneTransport(media.TransportPlay))).Methods("POST")
+	api.HandleFunc("/media/zones/{id}/pause",
+		s.requireAdmin(s.mediaZoneTransport(media.TransportPause))).Methods("POST")
+	api.HandleFunc("/media/zones/{id}/next",
+		s.requireAdmin(s.mediaZoneTransport(media.TransportNext))).Methods("POST")
+	api.HandleFunc("/media/zones/{id}/previous",
+		s.requireAdmin(s.mediaZoneTransport(media.TransportPrevious))).Methods("POST")
+	api.HandleFunc("/media/zones/{id}/volume", s.requireAdmin(s.mediaZoneVolume)).Methods("PUT")
+	api.HandleFunc("/media/zones/{id}/mute", s.requireAdmin(s.mediaZoneMute)).Methods("PUT")
+
 	// Spotify search/browse for the Music view. OAuth is the user's own
 	// account (PKCE); Sonos playback stays local via the play-item route
 	// above, while KEF's goes back out through Connect.
@@ -368,6 +409,14 @@ func (s *Server) Handler() http.Handler {
 	// handleSonosEvent. Bound to NOTIFY only, so a browser hitting the same
 	// path still falls through to the SPA.
 	r.HandleFunc(sonosEventPath+"/{token}", s.handleSonosEvent).Methods("NOTIFY")
+
+	// The audio stream speakers pull from on the cross-vendor route. Outside
+	// /api and unauthenticated for the same reason as the Sonos callback
+	// above: the clients are speakers, and speakers have no credentials.
+	// Guarded instead by the stream id — 128 bits of randomness, minted per
+	// playback and invalid the moment it ends. GET and HEAD only, since
+	// speakers probe with HEAD before committing to play.
+	r.PathPrefix(streamPath+"/").Handler(s.streamHandler()).Methods("GET", "HEAD")
 
 	r.PathPrefix("/").Handler(spaHandler(s.SPADir))
 

@@ -328,6 +328,10 @@ func main() {
 		log.Println("sonos: timed out releasing event subscriptions")
 	}
 	mqttClient.Close()
+	// Release any live zone playback. The stream route runs a decoder that
+	// holds the account's Spotify session, and leaving it behind would keep
+	// the user's Spotify pointed at a HomeHub that has stopped.
+	server.CloseMedia()
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := httpSrv.Shutdown(shutdownCtx); err != nil {
