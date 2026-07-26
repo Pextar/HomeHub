@@ -202,12 +202,35 @@
     let kef = $state<KEFStatus | null>(null);
     let kefSeq = 0;
 
+    // "Transport is optimistic" (DESIGN.md §15) is a rule about the whole
+    // module, not about Sonos — this is playOverride's twin for the second
+    // bridge. Without it a tapped KEF play/pause sat unchanged until the next
+    // read landed, which on a KEF is up to a poll away, and the card, its icon
+    // and the zone chip all disagreed with the finger that just pressed them.
+    let kefPlayOverride = $state<Record<string, { playing: boolean; at: number }>>({});
+
+    /** The one place "is this KEF speaker playing?" is answered. */
+    function kefIsPlaying(sp: KEFSpeakerView): boolean {
+        const ov = kefPlayOverride[sp.id];
+        return ov ? ov.playing : !!sp.state?.playing;
+    }
+
     async function refreshKEF() {
         const seq = ++kefSeq;
         try {
             const st = await api.kefStatus();
             if (seq !== kefSeq) return;
             kef = st;
+            // Retire an optimistic flip once the speaker agrees with it — or
+            // after 6s, so a command it quietly ignored can't leave a card
+            // claiming to play forever. Same contract as the Sonos poll's.
+            const now = Date.now();
+            for (const [id, ov] of Object.entries(kefPlayOverride)) {
+                const sp = st.speakers.find((s) => s.id === id);
+                if (!sp || !!sp.state?.playing === ov.playing || now - ov.at > 6000) {
+                    delete kefPlayOverride[id];
+                }
+            }
         } catch {
             // A home with no KEF speakers must not see an error every poll;
             // an empty list is indistinguishable from a failed one here, and
@@ -226,7 +249,7 @@
         return list;
     });
     const kefReachable = $derived(kefSpeakers.filter((s) => s.reachable));
-    const kefPlaying = $derived(kefSpeakers.filter((s) => s.state?.playing));
+    const kefPlaying = $derived(kefSpeakers.filter((s) => kefIsPlaying(s)));
     /** Speakers that answered, across both bridges — "ready" on the Home head. */
     const readyCount = $derived(reachable.length + kefReachable.length);
     /** Every registered speaker across both bridges — what "is this view empty" means. */
@@ -244,12 +267,16 @@
     }
     /** How far through the track, 0–1. Sources with no duration get no line. */
     function kefProgress(sp: KEFSpeakerView): number {
+        void tick; // re-derive once a second, exactly as posOf does for Sonos
         const total = sp.state?.duration_ms ?? 0;
         if (total <= 0) return 0;
         // Extrapolated from when the reading was taken, like the Sonos
         // scrubber, so the line advances between polls instead of stepping.
+        // Without the tick above this only recomputed when a poll replaced
+        // the object — every 20s once Sonos push is up — so the hairline sat
+        // dead beside a Sonos one creeping every second.
         const base = sp.state?.position_ms ?? 0;
-        const since = sp.read_at ? Date.now() - sp.read_at : 0;
+        const since = kefIsPlaying(sp) && sp.read_at ? Date.now() - sp.read_at : 0;
         return Math.max(0, Math.min(1, (base + since) / total));
     }
 
@@ -258,7 +285,7 @@
         tick; // re-read every second so the clock counts rather than jumps
         const total = sp.state?.duration_ms ?? 0;
         const base = sp.state?.position_ms ?? 0;
-        const since = sp.state?.playing && sp.read_at ? Date.now() - sp.read_at : 0;
+        const since = kefIsPlaying(sp) && sp.read_at ? Date.now() - sp.read_at : 0;
         return total > 0 ? Math.min(total, base + since) : base + since;
     }
 
@@ -266,11 +293,13 @@
         const key = "kefplay:" + sp.id;
         if (busy[key]) return;
         busy[key] = true;
-        const next = !sp.state?.playing;
+        const next = !kefIsPlaying(sp);
+        kefPlayOverride[sp.id] = { playing: next, at: Date.now() };
         try {
             await (next ? api.kefPlay(sp.id) : api.kefPause(sp.id));
             await refreshKEF();
         } catch (e) {
+            delete kefPlayOverride[sp.id];
             toasts.error(next ? "Couldn't start playback" : "Couldn't pause", (e as Error).message);
         } finally {
             busy[key] = false;
@@ -372,6 +401,8 @@
         clearInterval(pollTimer);
         stopLive?.();
         clearTimeout(announceTimer);
+        for (const t of followUps) clearTimeout(t);
+        followUps.clear();
         endPuckDrag(); // takes the document-level touchmove block with it
         // The body-scroll lock is the sheet effect's, and its teardown runs on
         // unmount — releasing it here as well would decrement it twice.
@@ -515,12 +546,31 @@
         try {
             await fn();
             await (bridge === "kef" ? refreshKEF() : refresh());
+            // A KEF play answers as soon as *Spotify* accepted it — the audio
+            // then goes out to the cloud and comes back to the speaker, so the
+            // read above still says "stopped" and the toast promised music no
+            // card was showing yet. The backend re-reads at 0.6s and 3s and
+            // publishes `music` when it finds the change; these are the
+            // backstop for an install where that push isn't getting through.
+            if (bridge === "kef") {
+                for (const ms of [1200, 4000]) followUp(ms, refreshKEF);
+            }
             toasts.success("Playing", [what, where].filter(Boolean).join(" · "));
         } catch (e) {
             toasts.error("Couldn't play", (e as Error).message);
         } finally {
             busy[key] = false;
         }
+    }
+
+    /** A delayed re-read that doesn't outlive the view. */
+    let followUps = new Set<ReturnType<typeof setTimeout>>();
+    function followUp(ms: number, fn: () => void) {
+        const t = setTimeout(() => {
+            followUps.delete(t);
+            fn();
+        }, ms);
+        followUps.add(t);
     }
 
     // Favorites play on the chip-selected destination, except inside the
@@ -1532,7 +1582,11 @@
     // something is actually moving.
     let tick = $state(0);
     $effect(() => {
-        if (!playerOpen && playingCount === 0) return;
+        // Both bridges, or a house with only KEF speakers never started the
+        // clock at all: `playingCount` is the Sonos count, so a KEF card's
+        // progress hairline stood still unless a Sonos zone happened to be
+        // playing beside it.
+        if (!playerOpen && playingCount === 0 && kefPlaying.length === 0) return;
         const t = setInterval(() => tick++, 1000);
         return () => clearInterval(t);
     });
@@ -2361,11 +2415,11 @@
                         <div class="card-transport">
                             <button
                                 class="mini-btn on"
-                                aria-label={sp.state?.playing ? "Pause" : "Play"}
+                                aria-label={kefIsPlaying(sp) ? "Pause" : "Play"}
                                 disabled={busy["kefplay:" + sp.id]}
                                 onclick={() => kefTogglePlay(sp)}
                             >
-                                <Icon name={sp.state?.playing ? "pause" : "play"} size={16} />
+                                <Icon name={kefIsPlaying(sp) ? "pause" : "play"} size={16} />
                             </button>
                         </div>
                         {#if p > 0}
@@ -2451,10 +2505,10 @@
             {#each kefReachable as sp (sp.id)}
                 <button
                     class="room-chip"
-                    class:on={sp.state?.playing}
+                    class:on={kefIsPlaying(sp)}
                     onclick={() => openKEFPlayer(sp)}
                 >
-                    {#if sp.state?.playing}
+                    {#if kefIsPlaying(sp)}
                         {@render wave()}
                     {:else}
                         <Icon name="speaker" size={14} />
@@ -2604,7 +2658,7 @@
                             {/if}
                         </span>
                     </span>
-                    {#if sp.state?.playing}
+                    {#if kefIsPlaying(sp)}
                         {@render wave()}
                     {/if}
                     <span class="sp-chev" aria-hidden="true"><Icon name="chevronDown" size={18} /></span>
@@ -3355,10 +3409,10 @@
                     disabled={busy["kefprevious:" + sp.id]} onclick={() => kefSkip(sp, "previous")}>
                     <Icon name="skipPrev" size={22} />
                 </button>
-                <button class="p-play" class:playing={st?.playing}
-                    aria-label={st?.playing ? "Pause" : "Play"} title="Play / pause (space)"
+                <button class="p-play" class:playing={kefIsPlaying(sp)}
+                    aria-label={kefIsPlaying(sp) ? "Pause" : "Play"} title="Play / pause (space)"
                     disabled={busy["kefplay:" + sp.id]} onclick={() => kefTogglePlay(sp)}>
-                    <Icon name={st?.playing ? "pause" : "play"} size={26} />
+                    <Icon name={kefIsPlaying(sp) ? "pause" : "play"} size={26} />
                 </button>
                 <button class="icon-btn t-btn" aria-label="Next track"
                     disabled={busy["kefnext:" + sp.id]} onclick={() => kefSkip(sp, "next")}>
