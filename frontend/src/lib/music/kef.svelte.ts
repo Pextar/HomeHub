@@ -62,9 +62,12 @@ export function createKEFBridge(busy: Busy): KEFBridge {
    */
   const playOverride = $state<Record<string, { playing: boolean; at: number }>>({});
 
-  // The drag value and when it was committed, keyed by speaker.
+  // The volume the user last set locally, and when — keyed by speaker. Both
+  // dragging and committing stamp the time: the window is "this value is the
+  // user's, not the poll's", and a finger on the slider is exactly that.
   const vol = $state<Record<string, number>>({});
   const volAt: Record<string, number> = {};
+  const VOL_HOLD_MS = 4000;
 
   const speakers = $derived.by(() => {
     const list = [...(s.status?.speakers ?? [])];
@@ -164,7 +167,7 @@ export function createKEFBridge(busy: Busy): KEFBridge {
 
     shownVolume(sp) {
       const ov = vol[sp.id];
-      const fresh = ov !== undefined && Date.now() - (volAt[sp.id] ?? 0) < 4000;
+      const fresh = ov !== undefined && Date.now() - (volAt[sp.id] ?? 0) < VOL_HOLD_MS;
       return fresh ? ov : (sp.state?.volume ?? 0);
     },
 
@@ -195,6 +198,9 @@ export function createKEFBridge(busy: Busy): KEFBridge {
 
     dragVolume(sp, v) {
       vol[sp.id] = v;
+      // Stamped, or `shownVolume` would read the finger's own value as stale
+      // and hand the slider back the polled one mid-drag.
+      volAt[sp.id] = Date.now();
     },
 
     setVolume(sp, v) {
