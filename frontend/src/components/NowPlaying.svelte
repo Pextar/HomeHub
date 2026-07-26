@@ -1,6 +1,7 @@
 <script lang="ts">
     import Icon from "./Icon.svelte";
     import LiveStatusChip from "./LiveStatusChip.svelte";
+    import Waveform from "./music/Waveform.svelte";
     import { api } from "../lib/api";
     import { route, session, toasts } from "../lib/stores.svelte";
     import { onLive } from "../lib/live";
@@ -174,12 +175,6 @@
     }
 </script>
 
-<!-- The §6.8 waveform — "audio is moving", the Music module's stand-in for a
-     status dot. This card is Music's surface on Home, so it comes along. -->
-{#snippet wave()}
-    <span class="wave" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
-{/snippet}
-
 {#if !hidden}
     <section class="home-section">
         <div class="section-head">
@@ -230,7 +225,7 @@
                             {/if}
                             <span class="np-meta">
                                 <span class="np-where">
-                                    {@render wave()}
+                                    <Waveform />
                                     <span class="np-room">{groupTitle(g)}</span>
                                 </span>
                                 <span class="np-title">{track?.title ?? "Playing"}</span>
@@ -277,7 +272,7 @@
                             {/if}
                             <span class="np-meta">
                                 <span class="np-where">
-                                    {@render wave()}
+                                    <Waveform />
                                     <span class="np-room">{sp.name}</span>
                                 </span>
                                 <span class="np-title">{kefLine(sp)}</span>
@@ -474,22 +469,4 @@
         .np-btn { width: 44px; height: 44px; }
     }
 
-    /* ── Waveform (§6.8) ────────────────────────────────────────────── */
-    .wave { display: flex; align-items: flex-end; gap: 2.5px; height: 13px; flex-shrink: 0; }
-    .wave i {
-        display: block;
-        width: 2.5px;
-        border-radius: 1px;
-        background: var(--on);
-        height: 4px;
-        animation: wv 950ms ease-in-out infinite;
-    }
-    .wave i:nth-child(1) { animation-delay: 0s; }
-    .wave i:nth-child(2) { animation-delay: 0.15s; }
-    .wave i:nth-child(3) { animation-delay: 0.3s; }
-    .wave i:nth-child(4) { animation-delay: 0.1s; }
-    @keyframes wv { 0%, 100% { height: 3px; } 50% { height: 13px; } }
-    @media (prefers-reduced-motion: reduce) {
-        .wave i { animation: none; height: 8px; }
-    }
 </style>

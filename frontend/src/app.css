@@ -662,6 +662,23 @@ textarea[aria-invalid="true"]:focus-visible {
 /* soft separator */
 .sep { height: 1px; background: var(--hairline); }
 
+/* Section scaffolding. Global because the Music module's surfaces are now a
+   folder of components and every one of them frames its content this way —
+   scoped copies in a dozen files would be the same rule twelve times, with
+   twelve chances to drift. */
+.block { display: flex; flex-direction: column; gap: var(--space-3); }
+.block-head {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: var(--space-3); flex-wrap: wrap;
+}
+/* Mono uppercase micro-label above a section (DESIGN.md §4). */
+.eyrow {
+    font-family: var(--font-mono);
+    font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase;
+    color: var(--on);
+}
+.hint { font-size: 12px; color: var(--text-mute); }
+
 /* horizontal scroll row */
 .h-scroll {
     display: flex;
