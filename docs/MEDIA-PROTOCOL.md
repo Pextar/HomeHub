@@ -214,19 +214,38 @@ URL with `PlayURI`.
 Spotify cloud
      │ Connect session ("HomeHub Multiroom" — one active device, as the rules require)
      ▼
-librespot ──PCM──> internal/stream ──HTTP──┬──> Sonos  (SetAVTransportURI)
-                    encode + fan-out       └──> KEF    (UPnP AVTransport)
+librespot ──PCM──> internal/stream ──HTTP (WAV)──┬──> Sonos  (SetAVTransportURI)
+                    frame + fan-out              └──> KEF    (UPnP AVTransport)
 ```
+
+While a mixed zone plays, **HomeHub is the account's active Spotify device**.
+Starting Spotify on a phone takes the session away and the zone stops — the
+same single-session rule that makes this route necessary, seen from the other
+side.
+
+The stream URL carries a fresh 128-bit random id per playback and is served
+without the admin session middleware, because the clients are speakers and
+speakers have no cookies. The id is the capability: unguessable, and invalid
+the moment playback stops.
 
 - **Applies when** every endpoint has `CapPlayURI` and the provider implements
   `StreamProvider`. It is the fallback, never the first choice.
 - **Sync**: buffer-level, not sample-level. Each speaker has its own jitter
-  buffer and starts when it has filled it. Measured skew is a few hundred ms;
-  the transport applies a per-vendor start offset to compensate, and it is
-  stable once playing because both are pulling from the same source at the same
-  rate. **This is not Roon-grade sync and the doc must not imply it is.**
-- **Quality**: transcoded once (librespot decodes Ogg/Vorbis → PCM → we serve
-  FLAC where the endpoint accepts it, MP3 otherwise). No gapless across tracks.
+  buffer and starts when it has filled it, so they land within a few hundred
+  milliseconds of each other and stay there — both are pulling from one source
+  at the same rate, so they don't drift apart once running. The transport can
+  space out the start commands per vendor (`Config.StartDelays`) to close some
+  of that gap. **It ships with no delays configured**: the right values depend
+  on the speakers, the network and the firmware, and inventing numbers nobody
+  measured would be worse than leaving them at zero for someone who can
+  actually hear the result to tune. **This is not Roon-grade sync and this doc
+  must not imply it is.**
+- **Quality**: no re-encode. librespot decodes to PCM and HomeHub serves that
+  PCM as WAV, so the only lossy step is the one Spotify already performed.
+  A 44-byte header is the entire conversion, which means no dependency on lame
+  or ffmpeg and no second transcode of already-lossy audio. It costs 1.4 Mbit/s
+  per stream, which is nothing on a LAN and is why this trade is worth making.
+  No gapless across tracks.
 - **Metadata**: pushed as ICY headers and DIDL, so the speaker shows title and
   artist. It will still present as a stream, because it is one.
 - **Dependency**: a `librespot` binary on the host, and Spotify Premium. When
