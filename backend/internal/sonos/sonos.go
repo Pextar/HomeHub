@@ -13,12 +13,13 @@ import (
 	"fmt"
 	"html"
 	"io"
-	"net"
 	"net/http"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
+
+	"homehub/internal/lanhost"
 )
 
 // DefaultTimeout caps how long we wait for a speaker to respond.
@@ -28,34 +29,10 @@ const DefaultTimeout = 5 * time.Second
 const Port = 1400
 
 // ValidateHost checks that host is a bare hostname or IP that is safe to
-// interpolate into http://<host>:1400/... . Mirrors tasmota.ValidateHost:
-// it rejects values that could redirect the server-side request away from
-// the intended device and IP literals that point at sensitive targets.
-// Sonos speakers live on the LAN, so private ranges are intentionally allowed.
+// interpolate into http://<host>:1400/... . No port is accepted — Sonos is
+// always :1400. See package lanhost for what is rejected and why.
 func ValidateHost(host string) error {
-	h := strings.TrimSpace(host)
-	if h == "" {
-		return errors.New("speaker address is empty")
-	}
-	if strings.ContainsAny(h, "/?#@\\ \t\r\n:") {
-		// Unlike Tasmota no port is accepted — Sonos is always :1400.
-		return fmt.Errorf("invalid speaker address %q", host)
-	}
-	if parsed := net.ParseIP(h); parsed != nil {
-		if parsed.IsLoopback() || parsed.IsLinkLocalUnicast() ||
-			parsed.IsLinkLocalMulticast() || parsed.IsUnspecified() || parsed.IsMulticast() {
-			return fmt.Errorf("speaker address %q is not an allowed address", host)
-		}
-		return nil
-	}
-	for _, c := range h {
-		ok := (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
-			(c >= '0' && c <= '9') || c == '-' || c == '.'
-		if !ok {
-			return fmt.Errorf("invalid speaker address %q", host)
-		}
-	}
-	return nil
+	return lanhost.Policy{Noun: "speaker address"}.Validate(host)
 }
 
 // ── SOAP plumbing ────────────────────────────────────────────────────────
