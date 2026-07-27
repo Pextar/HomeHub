@@ -18,7 +18,6 @@ package api
 import (
 	cryptorand "crypto/rand"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"math/rand"
 	"net/http"
@@ -154,8 +153,7 @@ func (s *Server) createUser(w http.ResponseWriter, r *http.Request) {
 		Kid       bool     `json:"kid"`
 		SocketIDs []string `json:"socket_ids"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+	if !decodeBody(w, r, &body) {
 		return
 	}
 	username := strings.TrimSpace(body.Username)
@@ -206,9 +204,7 @@ func (s *Server) createUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.Store.Users[user.ID] = user
-	if err := s.Store.Save(); err != nil {
-		delete(s.Store.Users, user.ID)
-		writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
+	if !s.saveStoreOr(w, func() { delete(s.Store.Users, user.ID) }) {
 		return
 	}
 
@@ -233,8 +229,7 @@ func (s *Server) updateUser(w http.ResponseWriter, r *http.Request) {
 		SocketIDs      *[]string `json:"socket_ids"`
 		RegenerateCode bool      `json:"regenerate_code"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+	if !decodeBody(w, r, &body) {
 		return
 	}
 
@@ -322,8 +317,7 @@ func (s *Server) updateUser(w http.ResponseWriter, r *http.Request) {
 		user.TokenVersion++
 	}
 
-	if err := s.Store.Save(); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
+	if !s.saveStore(w) {
 		return
 	}
 	writeJSON(w, http.StatusOK, toUserView(user))
@@ -349,9 +343,7 @@ func (s *Server) deleteUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	delete(s.Store.Users, id)
-	if err := s.Store.Save(); err != nil {
-		s.Store.Users[id] = user
-		writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
+	if !s.saveStoreOr(w, func() { s.Store.Users[id] = user }) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -386,8 +378,7 @@ func (s *Server) acceptInvite(w http.ResponseWriter, r *http.Request) {
 		Token    string `json:"token"`
 		Password string `json:"password"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+	if !decodeBody(w, r, &body) {
 		return
 	}
 	token := strings.TrimSpace(body.Token)
@@ -421,8 +412,7 @@ func (s *Server) acceptInvite(w http.ResponseWriter, r *http.Request) {
 	user.InviteExpiry = time.Time{}
 	user.TokenVersion++ // invalidate any stale tokens (shouldn't be any, but defensive)
 
-	if err := s.Store.Save(); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
+	if !s.saveStore(w) {
 		return
 	}
 

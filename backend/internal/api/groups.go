@@ -54,8 +54,7 @@ func (s *Server) getGroup(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) createGroup(w http.ResponseWriter, r *http.Request) {
 	var g store.Group
-	if err := json.NewDecoder(r.Body).Decode(&g); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+	if !decodeBody(w, r, &g) {
 		return
 	}
 
@@ -74,9 +73,7 @@ func (s *Server) createGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.Store.Groups[g.ID] = &g
-	if err := s.Store.Save(); err != nil {
-		delete(s.Store.Groups, g.ID)
-		writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
+	if !s.saveStoreOr(w, func() { delete(s.Store.Groups, g.ID) }) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, g)
@@ -86,8 +83,7 @@ func (s *Server) updateGroup(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
 
 	var updates store.Group
-	if err := json.NewDecoder(r.Body).Decode(&updates); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+	if !decodeBody(w, r, &updates) {
 		return
 	}
 
@@ -111,8 +107,7 @@ func (s *Server) updateGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	*existing = merged
-	if err := s.Store.Save(); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
+	if !s.saveStore(w) {
 		return
 	}
 	writeJSON(w, http.StatusOK, existing)

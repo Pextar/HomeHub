@@ -87,8 +87,7 @@ func (req *timerRequest) toTimer() (*store.Timer, error) {
 
 func (s *Server) createTimer(w http.ResponseWriter, r *http.Request) {
 	var req timerRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+	if !decodeBody(w, r, &req) {
 		return
 	}
 	t, err := req.toTimer()
@@ -105,9 +104,7 @@ func (s *Server) createTimer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.Store.Timers[t.ID] = t
-	if err := s.Store.Save(); err != nil {
-		delete(s.Store.Timers, t.ID)
-		writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
+	if !s.saveStoreOr(w, func() { delete(s.Store.Timers, t.ID) }) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, t)
@@ -123,8 +120,7 @@ func (s *Server) createSocketTimer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req timerRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+	if !decodeBody(w, r, &req) {
 		return
 	}
 	req.TargetType = "socket"
@@ -144,9 +140,7 @@ func (s *Server) createSocketTimer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.Store.Timers[t.ID] = t
-	if err := s.Store.Save(); err != nil {
-		delete(s.Store.Timers, t.ID)
-		writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
+	if !s.saveStoreOr(w, func() { delete(s.Store.Timers, t.ID) }) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, t)

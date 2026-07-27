@@ -79,8 +79,7 @@ func (s *Server) assistantChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body assistantChatRequest
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+	if !decodeBody(w, r, &body) {
 		return
 	}
 	user := currentUser(r)
@@ -102,8 +101,7 @@ func (s *Server) assistantConfirm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body assistantConfirmRequest
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+	if !decodeBody(w, r, &body) {
 		return
 	}
 	user := currentUser(r)

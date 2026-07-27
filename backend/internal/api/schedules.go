@@ -87,8 +87,7 @@ func (s *Server) getSchedules(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) createSchedule(w http.ResponseWriter, r *http.Request) {
 	var schedule store.Schedule
-	if err := json.NewDecoder(r.Body).Decode(&schedule); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+	if !decodeBody(w, r, &schedule) {
 		return
 	}
 
@@ -126,9 +125,7 @@ func (s *Server) createSchedule(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.Store.Schedules[schedule.ID] = &schedule
-	if err := s.Store.Save(); err != nil {
-		delete(s.Store.Schedules, schedule.ID)
-		writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
+	if !s.saveStoreOr(w, func() { delete(s.Store.Schedules, schedule.ID) }) {
 		return
 	}
 
@@ -147,8 +144,7 @@ func (s *Server) updateSchedule(w http.ResponseWriter, r *http.Request) {
 		RandomOffsetMinutes *int  `json:"random_offset_minutes"`
 		SolarOffsetMinutes  *int  `json:"solar_offset_minutes"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&updates); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+	if !decodeBody(w, r, &updates) {
 		return
 	}
 
@@ -222,8 +218,7 @@ func (s *Server) updateSchedule(w http.ResponseWriter, r *http.Request) {
 	}
 
 	*existing = merged
-	if err := s.Store.Save(); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
+	if !s.saveStore(w) {
 		return
 	}
 	writeJSON(w, http.StatusOK, existing)

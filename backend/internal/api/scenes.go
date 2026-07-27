@@ -54,8 +54,7 @@ func (s *Server) getScene(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) createScene(w http.ResponseWriter, r *http.Request) {
 	var sc store.Scene
-	if err := json.NewDecoder(r.Body).Decode(&sc); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+	if !decodeBody(w, r, &sc) {
 		return
 	}
 
@@ -74,9 +73,7 @@ func (s *Server) createScene(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.Store.Scenes[sc.ID] = &sc
-	if err := s.Store.Save(); err != nil {
-		delete(s.Store.Scenes, sc.ID)
-		writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
+	if !s.saveStoreOr(w, func() { delete(s.Store.Scenes, sc.ID) }) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, sc)
@@ -86,8 +83,7 @@ func (s *Server) updateScene(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
 
 	var updates store.Scene
-	if err := json.NewDecoder(r.Body).Decode(&updates); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+	if !decodeBody(w, r, &updates) {
 		return
 	}
 
@@ -118,8 +114,7 @@ func (s *Server) updateScene(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	*existing = merged
-	if err := s.Store.Save(); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
+	if !s.saveStore(w) {
 		return
 	}
 	writeJSON(w, http.StatusOK, existing)

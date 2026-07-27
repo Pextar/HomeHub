@@ -66,8 +66,7 @@ func (s *Server) getAutomations(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) createAutomation(w http.ResponseWriter, r *http.Request) {
 	var a store.Automation
-	if err := json.NewDecoder(r.Body).Decode(&a); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+	if !decodeBody(w, r, &a) {
 		return
 	}
 
@@ -86,9 +85,7 @@ func (s *Server) createAutomation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.Store.Automations[a.ID] = &a
-	if err := s.Store.Save(); err != nil {
-		delete(s.Store.Automations, a.ID)
-		writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
+	if !s.saveStoreOr(w, func() { delete(s.Store.Automations, a.ID) }) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, a)
@@ -98,8 +95,7 @@ func (s *Server) updateAutomation(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
 
 	var updated store.Automation
-	if err := json.NewDecoder(r.Body).Decode(&updated); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+	if !decodeBody(w, r, &updated) {
 		return
 	}
 
@@ -122,8 +118,7 @@ func (s *Server) updateAutomation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	*existing = updated
-	if err := s.Store.Save(); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
+	if !s.saveStore(w) {
 		return
 	}
 	writeJSON(w, http.StatusOK, existing)

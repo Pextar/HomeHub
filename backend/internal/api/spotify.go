@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"os"
 	"strconv"
@@ -81,8 +80,7 @@ func (s *Server) spotifySetConfig(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		ClientID string `json:"client_id"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+	if !decodeBody(w, r, &body) {
 		return
 	}
 	if strings.TrimSpace(body.ClientID) == "" {
@@ -147,8 +145,7 @@ func (s *Server) spotifyExchange(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		URL string `json:"url"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+	if !decodeBody(w, r, &body) {
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), spotifyTimeout)

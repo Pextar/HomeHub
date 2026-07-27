@@ -46,8 +46,7 @@ func (s *Server) getSockets(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) createSocket(w http.ResponseWriter, r *http.Request) {
 	var socket store.Socket
-	if err := json.NewDecoder(r.Body).Decode(&socket); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+	if !decodeBody(w, r, &socket) {
 		return
 	}
 
@@ -109,8 +108,7 @@ func (s *Server) updateSocket(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
 
 	var updates store.Socket
-	if err := json.NewDecoder(r.Body).Decode(&updates); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+	if !decodeBody(w, r, &updates) {
 		return
 	}
 
@@ -145,8 +143,7 @@ func (s *Server) updateSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.Store.Save(); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
+	if !s.saveStore(w) {
 		return
 	}
 	writeJSON(w, http.StatusOK, socket)
@@ -168,8 +165,7 @@ func (s *Server) toggleFavorite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	socket.Favorite = !socket.Favorite
-	if err := s.Store.Save(); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
+	if !s.saveStore(w) {
 		return
 	}
 	writeJSON(w, http.StatusOK, socket)
@@ -229,8 +225,7 @@ func (s *Server) setSocketState(w http.ResponseWriter, r *http.Request, target *
 		writeError(w, http.StatusInternalServerError, "failed to send RF command: "+err.Error())
 		return
 	}
-	if err := s.Store.Save(); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
+	if !s.saveStore(w) {
 		return
 	}
 	writeJSON(w, http.StatusOK, socket)
