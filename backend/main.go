@@ -298,6 +298,11 @@ func main() {
 	// on the scheduler's context.
 	go server.RunKEFEvents(schedCtx)
 
+	// "Continue play similar": tops up a group's queue with similar tracks
+	// once autoplay is on for it and it reaches the last queued track. Same
+	// reasoning as the KEF poller — nothing here needs a clean release.
+	go server.RunAutoplay(schedCtx)
+
 	go func() {
 		log.Printf("HomeHub listening on http://:%s", port)
 		if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {

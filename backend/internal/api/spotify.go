@@ -209,6 +209,50 @@ func (s *Server) spotifyPlaylists(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, items)
 }
 
+// spotifyArtist handles GET /api/spotify/artist?uri=spotify:artist:… — an
+// artist's page: top tracks and albums, for the screen behind a search
+// result (DESIGN.md §15).
+func (s *Server) spotifyArtist(w http.ResponseWriter, r *http.Request) {
+	if !s.requireSpotify(w) {
+		return
+	}
+	uri := strings.TrimSpace(r.URL.Query().Get("uri"))
+	if uri == "" {
+		writeError(w, http.StatusBadRequest, "uri is required")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), spotifyTimeout)
+	defer cancel()
+	det, err := s.Spotify.Artist(ctx, uri)
+	if err != nil {
+		writeError(w, spotifyErrStatus(err), err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, det)
+}
+
+// spotifyContext handles GET /api/spotify/context?uri=spotify:playlist:…
+// or spotify:album:… — the tracks inside a playlist or album, for the
+// screen behind a favorite that turns out to be a list rather than one song.
+func (s *Server) spotifyContext(w http.ResponseWriter, r *http.Request) {
+	if !s.requireSpotify(w) {
+		return
+	}
+	uri := strings.TrimSpace(r.URL.Query().Get("uri"))
+	if uri == "" {
+		writeError(w, http.StatusBadRequest, "uri is required")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), spotifyTimeout)
+	defer cancel()
+	det, err := s.Spotify.Context(ctx, uri)
+	if err != nil {
+		writeError(w, spotifyErrStatus(err), err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, det)
+}
+
 // spotifyErrStatus maps "not connected" to 409 so the frontend can prompt
 // re-auth, everything else to bad-gateway.
 func spotifyErrStatus(err error) int {

@@ -227,6 +227,20 @@
                 >
                     Crossfade
                 </button>
+                <!-- "Continue play similar": once the queue runs out, keep
+                     going with similar tracks rather than falling silent —
+                     Sonos has no such concept, so this is a HomeHub
+                     preference, the same "chip, not a switch" shape as
+                     crossfade. -->
+                <button
+                    class="chip"
+                    class:on={!!c?.autoplay}
+                    aria-pressed={!!c?.autoplay}
+                    disabled={!c || busy.is("autoplay:" + c?.id)}
+                    onclick={() => sonos.toggleAutoplay(g)}
+                >
+                    Autoplay
+                </button>
                 {#if gs.queue_length > 0}
                     <button class="p-upnext" onclick={() => (queuePane = true)}>
                         <Icon name="queue" size={17} />

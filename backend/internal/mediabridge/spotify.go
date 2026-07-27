@@ -98,7 +98,7 @@ func (p *SpotifyProvider) Search(ctx context.Context, query string, limit int) (
 		Tracks:    p.items(res.Tracks, media.KindTrack),
 		Albums:    p.items(res.Albums, media.KindAlbum),
 		Playlists: p.items(res.Playlists, media.KindPlaylist),
-		Artists:   []media.Item{},
+		Artists:   p.items(res.Artists, media.KindArtist),
 	}
 	return out, nil
 }

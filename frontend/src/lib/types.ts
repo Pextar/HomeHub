@@ -372,6 +372,11 @@ export interface SonosSpeakerView extends SonosSpeaker {
   reachable: boolean;
   state?: SonosState;
   group_state?: SonosGroupState;
+  /** HomeHub's own "continue with similar music once the queue runs out"
+   *  setting for this coordinator — a preference layered on top of what the
+   *  speaker reports, the same shape as crossfade. Only meaningful when
+   *  group_state is present. */
+  autoplay?: boolean;
 }
 
 /** One live zone group, expressed in registered speaker ids. */
@@ -528,6 +533,10 @@ export interface SonosFavorite {
   uri: string;
   metadata?: string;
   service?: string;
+  /** Set when this favorite is a Spotify playlist or album — a list with
+   *  songs inside it, worth browsing rather than only playing outright.
+   *  Absent for a single track or a favorite from another service. */
+  spotify_uri?: string;
 }
 
 // ---- KEF (local HTTP control) ----
@@ -723,7 +732,7 @@ export interface KEFSpotifyView {
 }
 
 export interface SpotifyItem {
-  kind: "track" | "album" | "playlist";
+  kind: "track" | "album" | "playlist" | "artist";
   /** Canonical Spotify URI (spotify:track:…) — what the play endpoint takes. */
   uri: string;
   name: string;
@@ -735,6 +744,27 @@ export interface SpotifyResults {
   tracks: SpotifyItem[];
   albums: SpotifyItem[];
   playlists: SpotifyItem[];
+  artists: SpotifyItem[];
+}
+
+/** An artist's page: enough to browse from without typing. */
+export interface SpotifyArtistDetail {
+  uri: string;
+  name: string;
+  art_url?: string;
+  top_tracks: SpotifyItem[];
+  albums: SpotifyItem[];
+}
+
+/** A playlist or album's own track listing — the drill-in behind a favorite
+ *  that turns out to be a list rather than one song. */
+export interface SpotifyContextDetail {
+  kind: "playlist" | "album";
+  uri: string;
+  name: string;
+  sub?: string;
+  art_url?: string;
+  tracks: SpotifyItem[];
 }
 
 // ---- Assistant (local LLM) ----

@@ -39,6 +39,9 @@
         onDisconnect,
         onPlayItem,
         onEnqueue,
+        /** An artist row opens their page rather than playing outright — top
+         *  tracks and albums to pick from, not a single thing to start. */
+        onOpenArtist,
         targetRow,
         scrollEl = $bindable<HTMLElement | null>(null),
     }: {
@@ -52,6 +55,7 @@
         onDisconnect: () => void;
         onPlayItem: (item: SpotifyItem) => void;
         onEnqueue: (item: SpotifyItem, next: boolean) => void;
+        onOpenArtist: (uri: string) => void;
         targetRow: Snippet;
         scrollEl?: HTMLElement | null;
     } = $props();
@@ -272,6 +276,7 @@
                         <button class="chip" class:active={spotify.kindFilter === "tracks"} onclick={() => (spotify.kindFilter = "tracks")}>Songs</button>
                         <button class="chip" class:active={spotify.kindFilter === "albums"} onclick={() => (spotify.kindFilter = "albums")}>Albums</button>
                         <button class="chip" class:active={spotify.kindFilter === "playlists"} onclick={() => (spotify.kindFilter = "playlists")}>Playlists</button>
+                        <button class="chip" class:active={spotify.kindFilter === "artists"} onclick={() => (spotify.kindFilter = "artists")}>Artists</button>
                     {:else if spotify.myPlaylists.length > 0}
                         <span class="sp-browse-label">Your playlists</span>
                     {/if}
@@ -311,26 +316,38 @@
                     <!-- No query and no playlists to browse — say what this
                          box does rather than leaving a blank panel. -->
                     <div class="sp-none">
-                        Search Spotify for a song, album or playlist. Tapping a result
+                        Search Spotify for a song, album, playlist or artist. Tapping a result
                         plays it on the room shown above{#if destination.sonosTarget}; the row's
                         overflow menu queues it without interrupting{/if}.
                     </div>
                 {:else}
                     <div class="sp-results">
                         {#each spotify.shownItems as item (item.uri)}
+                            {@const isArtist = item.kind === "artist"}
                             <div class="sp-row">
-                                <button class="sp-open" disabled={busy.is("item:" + item.uri) || !destination.current}
-                                    onclick={() => onPlayItem(item)}>
+                                <!-- An artist row opens their page — top tracks and
+                                     albums to pick from — rather than playing
+                                     outright, so it needs no destination and
+                                     carries no queue overflow. -->
+                                <button class="sp-open"
+                                    disabled={isArtist ? false : (busy.is("item:" + item.uri) || !destination.current)}
+                                    onclick={() => (isArtist ? onOpenArtist(item.uri) : onPlayItem(item))}>
                                     {#if item.art_url}
-                                        <img class="sp-art" src={item.art_url} alt="" loading="lazy" />
+                                        <img class="sp-art" class:sp-art-round={isArtist} src={item.art_url} alt="" loading="lazy" />
                                     {:else}
-                                        <div class="sp-art placeholder">[ art ]</div>
+                                        <div class="sp-art placeholder" class:sp-art-round={isArtist}>[ art ]</div>
                                     {/if}
                                     <span class="sp-meta">
                                         <span class="sp-name">{item.name}</span>
                                         {#if item.sub}<span class="sp-sub">{item.sub}</span>{/if}
                                     </span>
-                                    <span class="sp-play"><Icon name="play" size={16} /></span>
+                                    <span class="sp-play">
+                                        {#if isArtist}
+                                            <span class="sp-caret" aria-hidden="true"><Icon name="chevronLeft" size={16} /></span>
+                                        {:else}
+                                            <Icon name="play" size={16} />
+                                        {/if}
+                                    </span>
                                 </button>
                                 <!-- Tapping the row plays now; queueing without
                                      interrupting lives behind the overflow —
@@ -338,7 +355,7 @@
                                      the queue is a Sonos group's. A KEF
                                      speaker has none, so the control that
                                      would be refused isn't there at all. -->
-                                {#if destination.sonosTarget}
+                                {#if !isArtist && destination.sonosTarget}
                                     <button class="icon-btn sp-more" aria-label="More for {item.name}"
                                         aria-haspopup="menu" aria-expanded={menuFor === item.uri}
                                         disabled={busy.is("q:" + item.uri)}
@@ -346,7 +363,7 @@
                                         <Icon name="more" size={16} />
                                     </button>
                                 {/if}
-                                {#if menuFor === item.uri}
+                                {#if !isArtist && menuFor === item.uri}
                                     <div class="overflow-menu" role="menu" use:menuNav
                                         in:scale={{ start: 0.95, duration: dur(140), easing: cubicOut, opacity: 0 }}
                                         out:scale={{ start: 0.95, duration: dur(100), easing: cubicOut, opacity: 0 }}>
@@ -518,6 +535,9 @@
         border: 1px solid var(--hairline); flex-shrink: 0;
     }
     div.sp-art { display: grid; place-items: center; font-size: 8px; color: var(--text-dim); }
+    /* An artist's picture reads as a portrait, not album art. */
+    .sp-art-round { border-radius: 50%; }
+    .sp-caret { display: flex; transform: rotate(180deg); }
     .sp-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
     .sp-name {
         font-size: 13.5px; font-weight: 500;

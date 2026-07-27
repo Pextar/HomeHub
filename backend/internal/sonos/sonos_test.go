@@ -166,6 +166,36 @@ func TestIsContainerURI(t *testing.T) {
 	}
 }
 
+func TestSpotifyContainerURI(t *testing.T) {
+	cases := []struct {
+		name, uri, want string
+	}{
+		{
+			"encoded playlist",
+			"x-rincon-cpcontainer:0006206cspotify%3aplaylist%3a37i9dQZF1DXcBWIGoYBM5M?sid=9&flags=8300&sn=1",
+			"spotify:playlist:37i9dQZF1DXcBWIGoYBM5M",
+		},
+		{
+			"encoded album",
+			"x-rincon-cpcontainer:0004206cspotify%3aalbum%3a1DFixLWuPkv3KT3TnV35m3?sid=9&flags=8300&sn=1",
+			"spotify:album:1DFixLWuPkv3KT3TnV35m3",
+		},
+		{"radio stream", "x-sonosapi-stream:s24860?sid=254", ""},
+		{
+			"spotify track, not a container",
+			"x-sonos-spotify:spotify%3atrack%3a4uLU6hMCjMI75M1A2tKUQC?sid=9&flags=8224&sn=1",
+			"",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := spotifyContainerURI(c.uri); got != c.want {
+				t.Errorf("spotifyContainerURI(%q) = %q, want %q", c.uri, got, c.want)
+			}
+		})
+	}
+}
+
 func TestParseSSDPLocation(t *testing.T) {
 	resp := "HTTP/1.1 200 OK\r\n" +
 		"CACHE-CONTROL: max-age = 1800\r\n" +

@@ -12,7 +12,7 @@ import type { SpotifyStatus, SpotifyItem, SpotifyResults } from "../types";
  * And **focus** — putting the caret in the box — stays with the component that
  * owns the input, since only it has the element.
  */
-export type SpotifyKind = "tracks" | "albums" | "playlists";
+export type SpotifyKind = "tracks" | "albums" | "playlists" | "artists";
 
 export interface SpotifyStore {
   /** Null when the integration is unavailable — the whole card hides. */

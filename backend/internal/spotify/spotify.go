@@ -446,9 +446,9 @@ func apiError(status int, raw []byte) error {
 
 // Item is one playable search/browse result, flattened for the frontend.
 // URI is the canonical Spotify URI (spotify:track:… / spotify:album:… /
-// spotify:playlist:…) that the Sonos mapping consumes.
+// spotify:playlist:… / spotify:artist:…) that the Sonos mapping consumes.
 type Item struct {
-	Kind   string `json:"kind"` // track | album | playlist
+	Kind   string `json:"kind"` // track | album | playlist | artist
 	URI    string `json:"uri"`
 	Name   string `json:"name"`
 	Sub    string `json:"sub,omitempty"`     // artist / owner line
@@ -460,6 +460,7 @@ type Results struct {
 	Tracks    []Item `json:"tracks"`
 	Albums    []Item `json:"albums"`
 	Playlists []Item `json:"playlists"`
+	Artists   []Item `json:"artists"`
 }
 
 // Raw wire shapes — only what we read.
@@ -468,6 +469,11 @@ type wireImage struct {
 }
 type wireArtist struct {
 	Name string `json:"name"`
+}
+type wireArtistFull struct {
+	URI    string      `json:"uri"`
+	Name   string      `json:"name"`
+	Images []wireImage `json:"images"`
 }
 type wireTrack struct {
 	URI     string       `json:"uri"`
@@ -510,7 +516,7 @@ func artistLine(artists []wireArtist) string {
 	return strings.Join(names, ", ")
 }
 
-// Search queries the catalog for tracks, albums and playlists.
+// Search queries the catalog for tracks, albums, playlists and artists.
 func (c *Client) Search(ctx context.Context, query string, limit int) (*Results, error) {
 	if limit <= 0 || limit > 20 {
 		limit = 10
@@ -525,16 +531,19 @@ func (c *Client) Search(ctx context.Context, query string, limit int) (*Results,
 		Playlists struct {
 			Items []*wirePlaylist `json:"items"` // entries can be null
 		} `json:"playlists"`
+		Artists struct {
+			Items []wireArtistFull `json:"items"`
+		} `json:"artists"`
 	}
 	err := c.apiGet(ctx, "/search", url.Values{
 		"q":     {query},
-		"type":  {"track,album,playlist"},
+		"type":  {"track,album,playlist,artist"},
 		"limit": {fmt.Sprint(limit)},
 	}, &raw)
 	if err != nil {
 		return nil, err
 	}
-	res := &Results{Tracks: []Item{}, Albums: []Item{}, Playlists: []Item{}}
+	res := &Results{Tracks: []Item{}, Albums: []Item{}, Playlists: []Item{}, Artists: []Item{}}
 	for _, t := range raw.Tracks.Items {
 		res.Tracks = append(res.Tracks, Item{
 			Kind: "track", URI: t.URI, Name: t.Name,
@@ -556,7 +565,247 @@ func (c *Client) Search(ctx context.Context, query string, limit int) (*Results,
 			Sub: p.Owner.DisplayName, ArtURL: artOf(p.Images),
 		})
 	}
+	for _, a := range raw.Artists.Items {
+		res.Artists = append(res.Artists, Item{
+			Kind: "artist", URI: a.URI, Name: a.Name, ArtURL: artOf(a.Images),
+		})
+	}
 	return res, nil
+}
+
+// artistIDFromURI pulls the bare id out of a canonical artist URI.
+func artistIDFromURI(uri string) (string, error) {
+	const prefix = "spotify:artist:"
+	if !strings.HasPrefix(uri, prefix) {
+		return "", fmt.Errorf("spotify: %q is not an artist URI", uri)
+	}
+	return strings.TrimPrefix(uri, prefix), nil
+}
+
+// ArtistDetail is an artist's page: enough to browse from without typing —
+// their most-played tracks and their discography.
+type ArtistDetail struct {
+	URI       string `json:"uri"`
+	Name      string `json:"name"`
+	ArtURL    string `json:"art_url,omitempty"`
+	TopTracks []Item `json:"top_tracks"`
+	Albums    []Item `json:"albums"`
+}
+
+// Artist fetches one artist's page. Top tracks and albums degrade
+// independently — an artist with no answer for one still has a name and a
+// picture worth showing, the same "render only what the service answered
+// for" discipline the Sonos side follows for its own capability probes.
+func (c *Client) Artist(ctx context.Context, uri string) (*ArtistDetail, error) {
+	id, err := artistIDFromURI(uri)
+	if err != nil {
+		return nil, err
+	}
+	var raw struct {
+		Name   string      `json:"name"`
+		Images []wireImage `json:"images"`
+	}
+	if err := c.apiGet(ctx, "/artists/"+url.PathEscape(id), nil, &raw); err != nil {
+		return nil, err
+	}
+	det := &ArtistDetail{URI: uri, Name: raw.Name, ArtURL: artOf(raw.Images), TopTracks: []Item{}, Albums: []Item{}}
+	if tt, err := c.artistTopTracks(ctx, id); err == nil {
+		det.TopTracks = tt
+	}
+	if al, err := c.artistAlbums(ctx, id); err == nil {
+		det.Albums = al
+	}
+	return det, nil
+}
+
+func (c *Client) artistTopTracks(ctx context.Context, id string) ([]Item, error) {
+	var raw struct {
+		Tracks []wireTrack `json:"tracks"`
+	}
+	if err := c.apiGet(ctx, "/artists/"+url.PathEscape(id)+"/top-tracks", nil, &raw); err != nil {
+		return nil, err
+	}
+	out := make([]Item, 0, len(raw.Tracks))
+	for _, t := range raw.Tracks {
+		out = append(out, Item{
+			Kind: "track", URI: t.URI, Name: t.Name,
+			Sub: artistLine(t.Artists), ArtURL: artOf(t.Album.Images),
+		})
+	}
+	return out, nil
+}
+
+// artistAlbums lists the artist's albums and singles. Spotify lists regional
+// re-releases as separate entries with the same name; one is enough, so
+// later duplicates by name are dropped.
+func (c *Client) artistAlbums(ctx context.Context, id string) ([]Item, error) {
+	var raw struct {
+		Items []wireAlbum `json:"items"`
+	}
+	err := c.apiGet(ctx, "/artists/"+url.PathEscape(id)+"/albums", url.Values{
+		"include_groups": {"album,single"},
+		"limit":          {"30"},
+	}, &raw)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Item, 0, len(raw.Items))
+	seen := make(map[string]bool, len(raw.Items))
+	for _, a := range raw.Items {
+		key := strings.ToLower(strings.TrimSpace(a.Name))
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, Item{
+			Kind: "album", URI: a.URI, Name: a.Name,
+			Sub: artistLine(a.Artists), ArtURL: artOf(a.Images),
+		})
+	}
+	return out, nil
+}
+
+// SimilarTracks finds tracks to continue with once a group's queue runs out
+// — same-artist top tracks, seeded from whatever is currently playing.
+// Spotify retired the recommendations and related-artists endpoints for apps
+// created after November 2024, so this integration can't assume access to
+// either; same-artist top tracks stay available to every app and are an
+// honest (if narrower) answer to "more like this". exclude drops URIs
+// queued recently, so a short discography doesn't loop the same handful of
+// songs every time the queue runs out.
+func (c *Client) SimilarTracks(ctx context.Context, artistName string, exclude map[string]bool, limit int) ([]Item, error) {
+	artistName = strings.TrimSpace(artistName)
+	if artistName == "" {
+		return nil, errors.New("spotify: no artist to seed similar tracks from")
+	}
+	id, err := c.searchArtistID(ctx, artistName)
+	if err != nil {
+		return nil, err
+	}
+	tracks, err := c.artistTopTracks(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Item, 0, limit)
+	for _, t := range tracks {
+		if exclude[t.URI] {
+			continue
+		}
+		out = append(out, t)
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out, nil
+}
+
+func (c *Client) searchArtistID(ctx context.Context, name string) (string, error) {
+	var raw struct {
+		Artists struct {
+			Items []struct {
+				URI string `json:"uri"`
+			} `json:"items"`
+		} `json:"artists"`
+	}
+	err := c.apiGet(ctx, "/search", url.Values{
+		"q": {name}, "type": {"artist"}, "limit": {"1"},
+	}, &raw)
+	if err != nil {
+		return "", err
+	}
+	if len(raw.Artists.Items) == 0 {
+		return "", fmt.Errorf("spotify: no artist matched %q", name)
+	}
+	return artistIDFromURI(raw.Artists.Items[0].URI)
+}
+
+// ContextDetail is a playlist or album's own track listing — the drill-in
+// behind a favorite that turns out to be a list rather than one song
+// (DESIGN.md §15).
+type ContextDetail struct {
+	Kind   string `json:"kind"` // playlist | album
+	URI    string `json:"uri"`
+	Name   string `json:"name"`
+	Sub    string `json:"sub,omitempty"`
+	ArtURL string `json:"art_url,omitempty"`
+	Tracks []Item `json:"tracks"`
+}
+
+// Context browses a playlist or album's tracks.
+func (c *Client) Context(ctx context.Context, uri string) (*ContextDetail, error) {
+	switch {
+	case strings.HasPrefix(uri, "spotify:playlist:"):
+		return c.playlistContext(ctx, uri)
+	case strings.HasPrefix(uri, "spotify:album:"):
+		return c.albumContext(ctx, uri)
+	default:
+		return nil, fmt.Errorf("spotify: %q is not a playlist or album URI", uri)
+	}
+}
+
+func (c *Client) playlistContext(ctx context.Context, uri string) (*ContextDetail, error) {
+	id := strings.TrimPrefix(uri, "spotify:playlist:")
+	var raw struct {
+		Name   string      `json:"name"`
+		Images []wireImage `json:"images"`
+		Owner  struct {
+			DisplayName string `json:"display_name"`
+		} `json:"owner"`
+		Tracks struct {
+			Items []struct {
+				Track *wireTrack `json:"track"` // null for a removed or local track
+			} `json:"items"`
+		} `json:"tracks"`
+	}
+	err := c.apiGet(ctx, "/playlists/"+url.PathEscape(id), url.Values{
+		"fields": {"name,images,owner.display_name,tracks.items(track(uri,name,artists,album(name,images)))"},
+	}, &raw)
+	if err != nil {
+		return nil, err
+	}
+	det := &ContextDetail{
+		Kind: "playlist", URI: uri, Name: raw.Name,
+		Sub: raw.Owner.DisplayName, ArtURL: artOf(raw.Images), Tracks: []Item{},
+	}
+	for _, it := range raw.Tracks.Items {
+		if it.Track == nil || it.Track.URI == "" {
+			continue
+		}
+		det.Tracks = append(det.Tracks, Item{
+			Kind: "track", URI: it.Track.URI, Name: it.Track.Name,
+			Sub: artistLine(it.Track.Artists), ArtURL: artOf(it.Track.Album.Images),
+		})
+	}
+	return det, nil
+}
+
+func (c *Client) albumContext(ctx context.Context, uri string) (*ContextDetail, error) {
+	id := strings.TrimPrefix(uri, "spotify:album:")
+	var raw struct {
+		Name    string       `json:"name"`
+		Images  []wireImage  `json:"images"`
+		Artists []wireArtist `json:"artists"`
+		Tracks  struct {
+			Items []wireTrack `json:"items"`
+		} `json:"tracks"`
+	}
+	if err := c.apiGet(ctx, "/albums/"+url.PathEscape(id), nil, &raw); err != nil {
+		return nil, err
+	}
+	det := &ContextDetail{
+		Kind: "album", URI: uri, Name: raw.Name,
+		Sub: artistLine(raw.Artists), ArtURL: artOf(raw.Images), Tracks: []Item{},
+	}
+	for _, t := range raw.Tracks.Items {
+		if t.URI == "" {
+			continue
+		}
+		det.Tracks = append(det.Tracks, Item{
+			Kind: "track", URI: t.URI, Name: t.Name,
+			Sub: artistLine(t.Artists), ArtURL: artOf(raw.Images),
+		})
+	}
+	return det, nil
 }
 
 // MyPlaylists lists the connected account's playlists.

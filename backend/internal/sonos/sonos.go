@@ -15,6 +15,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -561,6 +562,32 @@ type Favorite struct {
 	URI      string `json:"uri"`
 	Metadata string `json:"metadata,omitempty"`
 	Service  string `json:"service,omitempty"` // human label, e.g. "TuneIn"
+	// SpotifyURI is set when this favorite is a Spotify playlist or album —
+	// a container with songs inside it, worth browsing rather than only
+	// playing outright. Empty for a single track or a favorite from another
+	// service (TuneIn, a local library item): the backend has no general
+	// browsing beyond favorites (DESIGN.md §15), so those still just play on
+	// tap.
+	SpotifyURI string `json:"spotify_uri,omitempty"`
+}
+
+// spotifyContainerRe pulls a Spotify playlist/album URI out of a favorite's
+// Sonos resource string. Sonos favorites for Spotify containers embed the
+// canonical URI, percent-encoded, inside an x-rincon-cpcontainer resource
+// (e.g. "x-rincon-cpcontainer:0006206cspotify%3aplaylist%3a37i9dQ...?sid=...");
+// matching loosely on both the encoded and literal forms is cheaper than
+// modelling every Sonos container id scheme.
+var spotifyContainerRe = regexp.MustCompile(`spotify(?:%3[aA]|:)(playlist|album)(?:%3[aA]|:)([A-Za-z0-9]+)`)
+
+// spotifyContainerURI returns the canonical "spotify:playlist:…" /
+// "spotify:album:…" URI embedded in a favorite's resource string, or "" when
+// there isn't one.
+func spotifyContainerURI(uri string) string {
+	m := spotifyContainerRe.FindStringSubmatch(uri)
+	if m == nil {
+		return ""
+	}
+	return "spotify:" + strings.ToLower(m[1]) + ":" + m[2]
 }
 
 // ListFavorites browses the household's Sonos favorites ("My Sonos").
@@ -596,12 +623,13 @@ func ParseFavorites(result string) ([]Favorite, error) {
 			continue
 		}
 		favs = append(favs, Favorite{
-			ID:       it.ID,
-			Title:    it.Title,
-			ArtURI:   it.AlbumArtURI,
-			URI:      it.Res,
-			Metadata: it.ResMD,
-			Service:  it.Description,
+			ID:         it.ID,
+			Title:      it.Title,
+			ArtURI:     it.AlbumArtURI,
+			URI:        it.Res,
+			Metadata:   it.ResMD,
+			Service:    it.Description,
+			SpotifyURI: spotifyContainerURI(it.Res),
 		})
 	}
 	return favs, nil

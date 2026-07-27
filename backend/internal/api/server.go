@@ -83,6 +83,19 @@ type Server struct {
 	sonosMonMu sync.Mutex
 	sonosMon   *sonos.Monitor
 
+	// autoplay is HomeHub's own "continue with similar music" setting, on
+	// top of what the speakers themselves report (DESIGN.md's "Continue play
+	// similar" note) — Sonos has no such concept, so the household doesn't
+	// either; it's ours to keep, keyed by the coordinator's registered
+	// speaker id, and only for as long as this process runs. autoplayAttempt
+	// throttles retries when finding similar tracks keeps failing, and
+	// autoplayRecent remembers what a coordinator was just topped up with so
+	// a short discography doesn't loop the same handful of songs.
+	autoplayMu      sync.Mutex
+	autoplay        map[string]bool
+	autoplayAttempt map[string]time.Time
+	autoplayRecent  map[string][]string
+
 	// kefMon polls the KEF speakers once for the whole process and caches
 	// what they report (see internal/kef/monitor.go). KEF's local API has no
 	// change notifications to subscribe to, so this is the closest thing to
@@ -310,6 +323,7 @@ func (s *Server) Handler() http.Handler {
 	api.HandleFunc("/sonos/{id}/seek", s.requireAdmin(s.sonosSeek)).Methods("PUT")
 	api.HandleFunc("/sonos/{id}/playmode", s.requireAdmin(s.sonosSetPlayMode)).Methods("PUT")
 	api.HandleFunc("/sonos/{id}/crossfade", s.requireAdmin(s.sonosSetCrossfade)).Methods("PUT")
+	api.HandleFunc("/sonos/{id}/autoplay", s.requireAdmin(s.sonosSetAutoplay)).Methods("PUT")
 	api.HandleFunc("/sonos/{id}/queue", s.requireAdmin(s.sonosQueue)).Methods("GET")
 	api.HandleFunc("/sonos/{id}/queue", s.requireAdmin(s.sonosQueueAdd)).Methods("POST")
 	api.HandleFunc("/sonos/{id}/queue", s.requireAdmin(s.sonosQueueClear)).Methods("DELETE")
@@ -376,6 +390,8 @@ func (s *Server) Handler() http.Handler {
 	api.HandleFunc("/spotify/disconnect", s.requireAdmin(s.spotifyDisconnect)).Methods("POST")
 	api.HandleFunc("/spotify/search", s.requireAdmin(s.spotifySearch)).Methods("GET")
 	api.HandleFunc("/spotify/playlists", s.requireAdmin(s.spotifyPlaylists)).Methods("GET")
+	api.HandleFunc("/spotify/artist", s.requireAdmin(s.spotifyArtist)).Methods("GET")
+	api.HandleFunc("/spotify/context", s.requireAdmin(s.spotifyContext)).Methods("GET")
 
 	api.HandleFunc("/matter/transport", s.requireAdmin(s.matterTransport)).Methods("GET")
 	api.HandleFunc("/matter/devices", s.requireAdmin(s.matterListDevices)).Methods("GET")

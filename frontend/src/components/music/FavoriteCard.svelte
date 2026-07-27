@@ -23,17 +23,28 @@
         target: string | null;
         playBusy?: boolean;
         queueBusy?: boolean;
+        /** Plays the favorite outright, or — when it's a Spotify list — opens
+         *  it to show the songs inside. Which one is the caller's call. */
         onPlay: () => void;
         onQueue: () => void;
     } = $props();
+
+    /** A Spotify playlist/album favorite opens rather than plays outright —
+     *  the corner mark says so before the tap, the same honesty the queue's
+     *  "+" already carries. */
+    const browsable = $derived(!!f.spotify_uri);
 </script>
 
 <div class="fav">
-    <button class="fav-play" disabled={playBusy || !target} onclick={onPlay}>
+    <button class="fav-play" disabled={playBusy || !target} onclick={onPlay}
+        aria-label={browsable ? `Open ${f.title}` : `Play ${f.title}`}>
         {#if f.art_uri}
             <img class="fav-art" src={f.art_uri} alt="" loading="lazy" />
         {:else}
             <div class="fav-art placeholder">[ art ]</div>
+        {/if}
+        {#if browsable}
+            <span class="fav-list" aria-hidden="true"><Icon name="chevronLeft" size={12} /></span>
         {/if}
         <span class="fav-title">{f.title}</span>
         {#if f.service}<span class="fav-sub mono">{f.service}</span>{/if}
@@ -81,6 +92,18 @@
     .fav-add:disabled { opacity: 0.4; }
     @media (pointer: coarse) {
         .fav-add { width: 44px; height: 44px; }
+    }
+    /* "There's a list inside — tap to open it", parked on the art's bottom
+       corner opposite the queue "+" so the two marks never collide. `top`
+       rather than `bottom`, measured off the art's own fixed 112px height —
+       `bottom` would drift with the title/subtitle text below it. */
+    .fav-list {
+        position: absolute; top: 84px; left: 6px;
+        width: 22px; height: 22px; border-radius: 50%;
+        display: grid; place-items: center; transform: rotate(180deg);
+        background: var(--bg-bar); border: 1px solid var(--hairline);
+        color: var(--text-mute);
+        backdrop-filter: blur(6px);
     }
     @media (prefers-reduced-motion: reduce) {
         .fav-art { transition-duration: 0.001ms; }

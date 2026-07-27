@@ -48,6 +48,8 @@ import type {
   SpotifyStatus,
   SpotifyItem,
   SpotifyResults,
+  SpotifyArtistDetail,
+  SpotifyContextDetail,
   MediaEndpoint,
   MediaProvider,
   MediaResults,
@@ -354,6 +356,11 @@ export const api = {
   sonosSetCrossfade(id: string, enabled: boolean) {
     return req<void>(`/sonos/${encodeURIComponent(id)}/crossfade`, { method: "PUT", body: json({ enabled }) });
   },
+  // "Continue play similar" — see DESIGN.md's autoplay note. Group-level,
+  // like every other transport extra: {id} must be the coordinator.
+  sonosSetAutoplay(id: string, enabled: boolean) {
+    return req<void>(`/sonos/${encodeURIComponent(id)}/autoplay`, { method: "PUT", body: json({ enabled }) });
+  },
 
   // Group queue. Adding never disturbs what is playing — pass next: true to
   // drop the item in after the current track instead of at the end.
@@ -456,6 +463,15 @@ export const api = {
     return req<SpotifyResults>(`/spotify/search?q=${encodeURIComponent(q)}&limit=${limit}`);
   },
   spotifyMyPlaylists() { return req<SpotifyItem[]>("/spotify/playlists"); },
+  // An artist's page — top tracks and albums, behind a search result.
+  spotifyArtist(uri: string) {
+    return req<SpotifyArtistDetail>(`/spotify/artist?uri=${encodeURIComponent(uri)}`);
+  },
+  // A playlist or album's own tracks — behind a favorite that turns out to
+  // be a list rather than one song.
+  spotifyContext(uri: string) {
+    return req<SpotifyContextDetail>(`/spotify/context?uri=${encodeURIComponent(uri)}`);
+  },
 
   // Push notifications
   getPushVapidKey() {
