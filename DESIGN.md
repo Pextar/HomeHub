@@ -611,17 +611,22 @@ patterns on top. Keep these consistent if you extend it.
     hero card when there is one, otherwise the first row — the one query-box
     keybinding this screen adds to the module's otherwise-scoped "/" and
     Escape (§15, below).
-  - **Leaving Search from the player comes back to the player.** Reaching
-    Search from a room's open player (its "/" binding, or the idle prompt's
-    "search Spotify") still stands that player's sheet down first — a sheet
-    must never open under a screen either — but the room it was playing to
-    is remembered (`searchReturn` in `views/Music.svelte`) and handed back to
-    on the way out, rather than dropping to Home like every other path into
-    Search does. The destination was already set to that room when the
-    player opened, so this is about not losing your place in it, not about
-    where a result plays. Going anywhere deeper than Search — an artist, a
-    favorite's tracks — forgets that room the same way the old sheet swap
-    forgot its `under` once something opened over it.
+  - **Leaving Search — or anything opened from it — from the player comes
+    back to the player.** Reaching Search from a room's open player (its "/"
+    binding, or the idle prompt's "search Spotify") still stands that
+    player's sheet down first — a sheet must never open under a screen
+    either — but `pushScreen` (`views/Music.svelte`) notices a player sheet
+    is open at the moment of the push and remembers the room in
+    `playerReturn`, handed back to on the way out instead of dropping to
+    Home like every other path into Search does. The destination was already
+    set to that room when the player opened, so this is about not losing
+    your place in it, not about where a result plays. Unlike the sheet swap
+    it replaces, this note **survives going deeper**: opening an artist page
+    from a player-fed Search still comes back to the room, not to Home,
+    however many screens the trip goes through — `playerReturn` clears only
+    once `leaveScreen` actually reopens the player, so nothing short of that
+    forgets it. The same mechanism, not a Search-specific one, is what sends
+    a favorite tapped in the player's own idle prompt back to that player too.
 - **Zones is zones; Speakers is devices.** They read as adjacent and are not,
   and "Zones" is the renamed version of what used to be called "Rooms" here —
   the app-level nav already owns that word for the whole house, and reusing

@@ -304,22 +304,42 @@
     let homeScrollY = 0;
 
     /**
-     * The room Search should hand back to on the way out, when it was opened
-     * from that room's open player — the same "come back to where you were"
-     * promise the sheet swap kept back when Search was itself a sheet. Only
-     * `searchFromPlayer` sets it; going anywhere deeper than Search (an
-     * artist, a favorite) forgets it the same way the old sheet swap forgot
-     * its `under` once something opened over it.
+     * The room to hand back to on the way out of a screen that was reached
+     * from that room's open player — Search (its "/" binding), or a favorite
+     * tapped in the player's own idle prompt — the same "come back to where
+     * you were" promise the sheet swap kept back when Search was itself a
+     * sheet. `pushScreen` notes it itself, from whether a player sheet is
+     * open at the moment of the push, so it takes no per-caller wiring and,
+     * once noted, it *survives* going deeper — tapping an artist from a
+     * Search reached this way still comes back to the room, not to Home,
+     * however many screens deep the trip goes. It only clears on the way
+     * home: consumed by `leaveScreen` once it reopens the player, or (rarely)
+     * left stale if the room disappeared in the meantime, in which case
+     * `leaveScreen` drops it anyway rather than retrying forever.
      */
-    type SearchReturn = { kind: "sonos" | "kef" | "zone"; id: string };
-    let searchReturn: SearchReturn | null = null;
+    type PlayerReturn = { kind: "sonos" | "kef" | "zone"; id: string };
+    let playerReturn: PlayerReturn | null = null;
 
     /** Raise any non-Home screen: a sheet stands down rather than stacking
      *  under it, Home's scroll offset is kept, and the screen starts at the top. */
     function pushScreen(s: Exclude<Screen, "home">) {
+        // Note which player to come back to — before hideSheet() clears the
+        // ids below. A push that finds no player sheet open leaves whatever
+        // was already noted alone, which is what lets it survive a screen
+        // opening another (Search into an artist page, say) rather than
+        // only the first hop.
+        if (sheets.open === "player") {
+            playerReturn =
+                playerGroupId !== null
+                    ? { kind: "sonos", id: playerGroupId }
+                    : playerKefId !== null
+                      ? { kind: "kef", id: playerKefId }
+                      : playerZoneId !== null
+                        ? { kind: "zone", id: playerZoneId }
+                        : null;
+        }
         hideSheet();
         if (screen === "home") homeScrollY = window.scrollY;
-        if (s !== "search") searchReturn = null;
         screen = s;
         toTop();
     }
@@ -327,12 +347,13 @@
         pushScreen("speakers");
     }
     /** Back to Home from whichever screen is up — one function for all of
-     *  them, since "up one" always means the same thing here — except Search,
-     *  which hands back to the room it was opened from when there is one. */
+     *  them, since "up one" always means the same thing here — except when a
+     *  player noted a room to come back to, which wins over Home however
+     *  many screens deep it is. */
     function leaveScreen() {
-        if (screen === "search" && searchReturn) {
-            const ret = searchReturn;
-            searchReturn = null;
+        if (playerReturn) {
+            const ret = playerReturn;
+            playerReturn = null;
             screen = "home";
             if (ret.kind === "sonos") {
                 const g = sonos.groupById(ret.id);
@@ -344,10 +365,9 @@
                 const z = zones.byId(ret.id);
                 if (z) return openZonePlayer(z);
             }
-            // The room disappeared while Search was open (regrouped, removed)
-            // — fall through to Home like any other missing target.
+            // The room disappeared in the meantime (regrouped, removed) —
+            // fall through to Home like any other missing target.
         }
-        searchReturn = null;
         screen = "home";
         detailId = null;
         kefDetailId = null;
@@ -691,12 +711,13 @@
     /**
      * Search from inside the player. Search is a screen now, so reaching it
      * stands the player down the same way opening Speakers or an artist page
-     * does — but unlike those, closing Search here has to come back to the
-     * room you started from, not to Home: that room is already the
-     * destination, set when the player opened, so a result plays where you
-     * were looking, and losing your way back to the player it fed would read
-     * as the app forgetting what you were doing. `searchReturn` is the note
-     * that survives the trip; `leaveScreen` reads it on the way out.
+     * does — but unlike those, closing Search (or anything opened from it)
+     * has to come back to the room you started from, not to Home: that room
+     * is already the destination, set when the player opened, so a result
+     * plays where you were looking, and losing your way back to the player
+     * it fed would read as the app forgetting what you were doing.
+     * `pushScreen` notes that room itself (`playerReturn`), so this function
+     * doesn't have to.
      *
      * Without this the player was a dead end for the one thing it kept
      * pointing at: both idle prompts say "or search Spotify", and a KEF
@@ -747,18 +768,10 @@
     }
 
     function searchFromPlayer(q?: string) {
-        // Captured before the screen push clears the player state — that's
-        // the room `leaveScreen` hands back to.
-        searchReturn = playerGroupId !== null
-            ? { kind: "sonos", id: playerGroupId }
-            : playerKefId !== null
-              ? { kind: "kef", id: playerKefId }
-              : playerZoneId !== null
-                ? { kind: "zone", id: playerZoneId }
-                : null;
         // A recent search is a request to *run* it, so it runs — and the caret
         // stays out of the way, keyboard and all, since the results are what
-        // was asked for.
+        // was asked for. `pushScreen` notes the room to come back to on its
+        // own, from the player sheet still being open at this point.
         searchWantsFocus = !q;
         pushScreen("search");
         if (q) spotify.runQuery(q);
