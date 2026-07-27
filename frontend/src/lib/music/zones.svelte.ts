@@ -41,6 +41,10 @@ export interface ZonesBridge {
   readonly playing: MediaZone[];
   /** Every speaker the media layer knows, for the membership picker. */
   readonly endpoints: MediaEndpoint[];
+  /** False until the first endpoints read answers. The editor needs this
+   *  to tell "nothing registered yet" from "hasn't asked yet" — the same
+   *  distinction `loaded` draws for the zone list. */
+  readonly endpointsLoaded: boolean;
 
   refresh(): Promise<void>;
   /** Endpoints alone — the picker needs them before any zone exists. */
@@ -110,6 +114,7 @@ export function createZonesBridge(busy: Busy): ZonesBridge {
     zones: [] as MediaZone[],
     endpoints: [] as MediaEndpoint[],
     loaded: false,
+    endpointsLoaded: false,
   });
   let seq = 0;
 
@@ -209,6 +214,8 @@ export function createZonesBridge(busy: Busy): ZonesBridge {
       s.endpoints = await api.mediaEndpoints();
     } catch {
       s.endpoints = [];
+    } finally {
+      s.endpointsLoaded = true;
     }
   }
 
@@ -224,6 +231,9 @@ export function createZonesBridge(busy: Busy): ZonesBridge {
     },
     get endpoints() {
       return endpoints;
+    },
+    get endpointsLoaded() {
+      return s.endpointsLoaded;
     },
     get playingSonosIds() {
       return playingIds.sonos;

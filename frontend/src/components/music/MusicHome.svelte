@@ -190,6 +190,8 @@
                     playing
                     progress={kef.progress(sp)}
                     onOpen={() => onOpenKEFPlayer(sp)}
+                    isDock={dockKey === "kef:" + sp.id}
+                    {onDockVisible}
                 >
                     {#snippet transport()}
                         <!-- Play/pause only, like the Sonos card below

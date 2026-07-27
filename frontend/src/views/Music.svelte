@@ -591,6 +591,20 @@
         return z && !!zones.leadOf(z)?.state?.track?.title ? z : undefined;
     });
 
+    // …and for a KEF speaker: the dock is as much its fallback as it is a
+    // Sonos room's or a zone's (DESIGN.md §15, "a peer, not a lesser
+    // citizen") — without this, playing only a KEF speaker and scrolling its
+    // "Playing now" card away left no transport on screen at all.
+    let lastLiveKefId = $state<string | null>(null);
+    $effect(() => {
+        const sp = kef.playing[0];
+        if (sp) lastLiveKefId = sp.id;
+    });
+    const pausedKef = $derived.by(() => {
+        const sp = kef.byId(lastLiveKefId);
+        return sp && sp.state?.powered_on && !!sp.state?.track?.title ? sp : undefined;
+    });
+
     /**
      * What the dock is holding. A zone wins over a room inside it — the dock
      * must never be the second name for a sound already on screen under
@@ -599,7 +613,8 @@
      */
     type DockTarget =
         | { kind: "zone"; key: string; zone: MediaZone }
-        | { kind: "sonos"; key: string; group: SonosGroupView };
+        | { kind: "sonos"; key: string; group: SonosGroupView }
+        | { kind: "kef"; key: string; speaker: KEFSpeakerView };
 
     /** A Sonos group a playing zone is already driving. */
     function inPlayingZone(g: SonosGroupView): boolean {
@@ -613,11 +628,19 @@
             key: "sonos:" + g.coordinator_id,
             group: g,
         });
+        const kefTarget = (sp: KEFSpeakerView): DockTarget => ({
+            kind: "kef",
+            key: "kef:" + sp.id,
+            speaker: sp,
+        });
         if (zones.playing[0]) return zone(zones.playing[0]);
         const liveGroup = sonos.playingGroups.find((g) => !inPlayingZone(g));
         if (liveGroup) return group(liveGroup);
+        const liveKef = kef.playing.find((sp) => !zones.playingKefIds.has(sp.id));
+        if (liveKef) return kefTarget(liveKef);
         if (pausedZone) return zone(pausedZone);
         if (pausedGroup && !inPlayingZone(pausedGroup)) return group(pausedGroup);
+        if (pausedKef && !zones.playingKefIds.has(pausedKef.id)) return kefTarget(pausedKef);
         return undefined;
     });
 
@@ -1274,6 +1297,27 @@
                     playing={zones.isPlaying(z)}
                     onToggle={() => zones.togglePlay(z)}
                     toggleBusy={busy.is("zplay:" + z.id)}
+                />
+            {/snippet}
+        </MiniPlayer>
+    {:else if showDock && dock?.kind === "kef"}
+        <!-- A KEF speaker in the dock, play/pause only — the same split its
+             "Playing now" card keeps: the sheet is where the skips are. -->
+        {@const sp = dock.speaker}
+        <MiniPlayer
+            title={sp.state?.track?.title ?? "Playing"}
+            sub={[kef.subLine(sp), sp.name].filter(Boolean).join(" · ")}
+            artUri={sp.state?.track?.art_uri}
+            playing={kef.isPlaying(sp)}
+            progress={kef.progress(sp)}
+            {overSheet}
+            onOpen={() => openKEFPlayer(sp)}
+        >
+            {#snippet transport()}
+                <CardTransport
+                    playing={kef.isPlaying(sp)}
+                    onToggle={() => kef.togglePlay(sp)}
+                    toggleBusy={busy.is("kefplay:" + sp.id)}
                 />
             {/snippet}
         </MiniPlayer>

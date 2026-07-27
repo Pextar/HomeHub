@@ -149,12 +149,17 @@
         <div class="field">
             <span class="field-label">Speakers</span>
             {#if zones.endpoints.length === 0}
-                <QuietCard
-                    title="No speakers to add"
-                    action={{ label: "Speakers", onClick: onOpenSpeakers }}
-                >
-                    Register a Sonos or KEF speaker and it can join a zone.
-                </QuietCard>
+                <!-- Nothing until the first read answers: claiming "no
+                     speakers" on a slow network is the same false claim
+                     Zones itself avoids for "no zones yet". -->
+                {#if zones.endpointsLoaded}
+                    <QuietCard
+                        title="No speakers to add"
+                        action={{ label: "Speakers", onClick: onOpenSpeakers }}
+                    >
+                        Register a Sonos or KEF speaker and it can join a zone.
+                    </QuietCard>
+                {/if}
             {:else}
                 {#each VENDORS as v (v.id)}
                     {@const list = byVendor.get(v.id) ?? []}

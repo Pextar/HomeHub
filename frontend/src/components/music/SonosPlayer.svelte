@@ -196,6 +196,7 @@
             prevBusy={!c || busy.is("previous:" + c?.id)}
             onNext={() => sonos.skip(g, "next")}
             nextBusy={!c || busy.is("next:" + c?.id)}
+            seekable={durationSec > 0}
             modes={gs
                 ? {
                       shuffle: gs.shuffle,
@@ -211,7 +212,7 @@
         <!-- The keys are only worth advertising where there is a keyboard;
              phones get the swipe gesture instead. -->
         <p class="p-keys mono" aria-hidden="true">
-            space play · ← → seek · ↑ ↓ volume · q queue
+            space play · ← → seek · shift ← → track · ↑ ↓ volume · m mute · s shuffle · r repeat · q queue
         </p>
 
         {#if gs}

@@ -45,7 +45,7 @@
     art={artist?.art_url}
     artRound
     title={artist?.name ?? "Artist"}
-    backLabel="Back to search"
+    backLabel="Back to Music"
     onBack={onBack}
     {destination}
     {busy}

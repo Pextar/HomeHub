@@ -103,15 +103,19 @@ export function createPuckDrag(opts: PuckDragOptions) {
         if (!s.drag) return;
         const under = document.elementFromPoint(x, y);
         const hit = under?.closest?.(".puck, .group-wrap") as HTMLElement | null;
+        // A room already sharing the dragged one's zone can't be dropped onto
+        // — the same "already together" case the enclosure check below has
+        // always excluded. Without this a puck inside your own group still
+        // rang as a valid target, and dropping there silently did nothing.
+        const mine = opts.zoneOf(s.drag.id);
         const speaker = hit?.dataset.speaker ?? null;
         if (speaker) {
-            s.dropId = speaker !== s.drag.id ? speaker : null;
+            s.dropId = speaker !== s.drag.id && opts.zoneOf(speaker) !== mine ? speaker : null;
             s.dropZone = null;
             return;
         }
         const zone = hit?.dataset.zone ?? null;
         // A room already in this zone can't be dropped into it again.
-        const mine = opts.zoneOf(s.drag.id);
         s.dropZone = zone && zone !== mine ? zone : null;
         s.dropId = null;
     }
@@ -201,7 +205,17 @@ export function createPuckDrag(opts: PuckDragOptions) {
     function dropGrab(sp: SonosSpeakerView) {
         const src = s.grabId;
         s.grabId = null;
-        if (src) opts.group(src, sp.id);
+        if (!src) return;
+        // Same check the pointer path's ring already draws: a room already
+        // sharing this one's zone can't be dropped onto it again. Without
+        // this a keyboard drop here just went silent — no toast, no
+        // live-region message, nothing the pointer's ring wasn't already
+        // steering people away from.
+        if (src !== sp.id && opts.zoneOf(src) === opts.zoneOf(sp.id)) {
+            opts.announce(`${sp.name} is already grouped with that room.`);
+            return;
+        }
+        opts.group(src, sp.id);
     }
 
     return {
