@@ -98,38 +98,38 @@ func (l SensorListener) Run(ctx context.Context, st *store.Store) {
 // desiredTopics returns the set of topic filters the listener should be
 // subscribed to, derived from the current MQTT sensors.
 func desiredTopics(st *store.Store) map[string]bool {
-	st.Mu.RLock()
-	defer st.Mu.RUnlock()
-	out := make(map[string]bool)
-	for _, sensor := range st.Sensors {
-		if strings.EqualFold(sensor.Protocol, "mqtt") && sensor.Code != "" {
-			out[sensor.Code] = true
+	return store.ViewValue(st, func() map[string]bool {
+		out := make(map[string]bool)
+		for _, sensor := range st.Sensors {
+			if strings.EqualFold(sensor.Protocol, "mqtt") && sensor.Code != "" {
+				out[sensor.Code] = true
+			}
 		}
-	}
-	return out
+		return out
+	})
 }
 
 // dispatch matches an incoming message against MQTT sensors and records a
 // reading for each one whose topic filter matches and whose value parses.
 func dispatch(st *store.Store, topic string, payload []byte) {
-	st.Mu.Lock()
-	defer st.Mu.Unlock()
-	for _, sensor := range st.Sensors {
-		if !strings.EqualFold(sensor.Protocol, "mqtt") {
-			continue
+	st.Mutate(func() {
+		for _, sensor := range st.Sensors {
+			if !strings.EqualFold(sensor.Protocol, "mqtt") {
+				continue
+			}
+			if !topicMatches(sensor.Code, topic) {
+				continue
+			}
+			value, ok := extractValue(payload, sensor.Field)
+			if !ok {
+				continue
+			}
+			reading := store.SensorReading{Time: time.Now().UTC(), Value: value}
+			if err := st.AppendReading(sensor.ID, reading); err != nil {
+				log.Printf("mqtt: append reading for %s: %v", sensor.ID, err)
+			}
 		}
-		if !topicMatches(sensor.Code, topic) {
-			continue
-		}
-		value, ok := extractValue(payload, sensor.Field)
-		if !ok {
-			continue
-		}
-		reading := store.SensorReading{Time: time.Now().UTC(), Value: value}
-		if err := st.AppendReading(sensor.ID, reading); err != nil {
-			log.Printf("mqtt: append reading for %s: %v", sensor.ID, err)
-		}
-	}
+	})
 }
 
 // topicMatches reports whether an MQTT topic matches a subscription filter,

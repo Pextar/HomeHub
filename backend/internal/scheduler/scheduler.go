@@ -53,51 +53,51 @@ func Run(ctx context.Context, st *store.Store, pushSvc *push.Service) {
 		var dueSchedules []store.Schedule
 		var toEnqueue []store.Schedule
 		var dueTimers []store.Timer
-		st.Mu.RLock()
-		for _, s := range st.Schedules {
-			if !s.Enabled {
-				continue
-			}
-			// If this schedule has a pending random-offset fire, check it.
-			if pf, ok := pending[s.ID]; ok {
-				maxAge := time.Duration(s.RandomOffsetMinutes)*time.Minute + 30*time.Second
-				if time.Since(pf.enqueued) > maxAge {
-					// Stale entry (e.g. schedule updated, or carried over from
-					// a previous day). Drop it and fall through to re-check.
-					delete(pending, s.ID)
-				} else if !now.Before(pf.fireAt) {
+		st.View(func() {
+			for _, s := range st.Schedules {
+				if !s.Enabled {
+					continue
+				}
+				// If this schedule has a pending random-offset fire, check it.
+				if pf, ok := pending[s.ID]; ok {
+					maxAge := time.Duration(s.RandomOffsetMinutes)*time.Minute + 30*time.Second
+					if time.Since(pf.enqueued) > maxAge {
+						// Stale entry (e.g. schedule updated, or carried over from
+						// a previous day). Drop it and fall through to re-check.
+						delete(pending, s.ID)
+					} else if !now.Before(pf.fireAt) {
+						dueSchedules = append(dueSchedules, *s)
+					}
+					// Either way, skip the base-time check this tick.
+					continue
+				}
+				if !scheduleMatchesNow(s, prevTick, now, st.Settings, lastFired[s.ID], stamp) {
+					continue
+				}
+				if s.RandomOffsetMinutes > 0 {
+					toEnqueue = append(toEnqueue, *s)
+				} else {
 					dueSchedules = append(dueSchedules, *s)
 				}
-				// Either way, skip the base-time check this tick.
-				continue
 			}
-			if !scheduleMatchesNow(s, prevTick, now, st.Settings, lastFired[s.ID], stamp) {
-				continue
+			for _, t := range st.Timers {
+				if !now.Before(t.FiresAt) {
+					dueTimers = append(dueTimers, *t)
+				}
 			}
-			if s.RandomOffsetMinutes > 0 {
-				toEnqueue = append(toEnqueue, *s)
-			} else {
-				dueSchedules = append(dueSchedules, *s)
+			// Drop bookkeeping for schedules that no longer exist — without this
+			// the maps grow forever on a long-running install.
+			for id := range lastFired {
+				if _, ok := st.Schedules[id]; !ok {
+					delete(lastFired, id)
+				}
 			}
-		}
-		for _, t := range st.Timers {
-			if !now.Before(t.FiresAt) {
-				dueTimers = append(dueTimers, *t)
+			for id := range pending {
+				if _, ok := st.Schedules[id]; !ok {
+					delete(pending, id)
+				}
 			}
-		}
-		// Drop bookkeeping for schedules that no longer exist — without this
-		// the maps grow forever on a long-running install.
-		for id := range lastFired {
-			if _, ok := st.Schedules[id]; !ok {
-				delete(lastFired, id)
-			}
-		}
-		for id := range pending {
-			if _, ok := st.Schedules[id]; !ok {
-				delete(pending, id)
-			}
-		}
-		st.Mu.RUnlock()
+		})
 
 		// Register random-offset schedules into the pending map.
 		for _, s := range toEnqueue {

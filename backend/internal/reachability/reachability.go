@@ -67,14 +67,14 @@ func sweep(
 	failures map[string]int,
 	offline map[string]bool,
 ) {
-	st.Mu.RLock()
 	var devices []checkable
-	for _, sock := range st.Sockets {
-		if isCheckable(sock.Protocol, matterClient) {
-			devices = append(devices, checkable{sock.ID, sock.Name, sock.Code, sock.Protocol})
+	st.View(func() {
+		for _, sock := range st.Sockets {
+			if isCheckable(sock.Protocol, matterClient) {
+				devices = append(devices, checkable{sock.ID, sock.Name, sock.Code, sock.Protocol})
+			}
 		}
-	}
-	st.Mu.RUnlock()
+	})
 
 	// Drop tracking state for devices that no longer exist or stopped being
 	// checkable, so a re-added device starts clean.

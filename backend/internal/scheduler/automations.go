@@ -49,23 +49,27 @@ func (e *autoEngine) tick(st *store.Store, prev, now time.Time, pushSvc *push.Se
 	stamp := now.Format("2006-01-02 15:04")
 
 	// Snapshot the state we need under a read lock, then evaluate without it.
-	st.Mu.RLock()
-	automations := make([]store.Automation, 0, len(st.Automations))
-	for _, a := range st.Automations {
-		automations = append(automations, *a)
-	}
-	curSocket := make(map[string]bool, len(st.Sockets))
-	for id, s := range st.Sockets {
-		curSocket[id] = s.State
-	}
-	sensorVal := make(map[string]float64)
-	for id, s := range st.Sensors {
-		if s.LastValue != nil {
-			sensorVal[id] = *s.LastValue
+	var automations []store.Automation
+	var curSocket map[string]bool
+	var sensorVal map[string]float64
+	var settings store.Settings
+	st.View(func() {
+		automations = make([]store.Automation, 0, len(st.Automations))
+		for _, a := range st.Automations {
+			automations = append(automations, *a)
 		}
-	}
-	settings := *st.Settings
-	st.Mu.RUnlock()
+		curSocket = make(map[string]bool, len(st.Sockets))
+		for id, s := range st.Sockets {
+			curSocket[id] = s.State
+		}
+		sensorVal = make(map[string]float64)
+		for id, s := range st.Sensors {
+			if s.LastValue != nil {
+				sensorVal[id] = *s.LastValue
+			}
+		}
+		settings = *st.Settings
+	})
 
 	// Drop edge-tracking state for rules that no longer exist so the maps
 	// don't grow forever on a long-running install. Keys are per rule.

@@ -3,11 +3,19 @@
 // business operations (apply state, execute action, validators) that
 // callers need under a single lock.
 //
-// Locking convention: Mu is exposed directly. Callers acquire it for the
-// duration of multi-step operations and pass through methods whose
-// docstring says "caller must hold Mu". Self-locking helpers are
-// avoided so cross-package code (api, scheduler) can compose atomic
-// reads + writes without giving up the lock between them.
+// Locking convention: callers wrap their work in View, ViewValue, Update,
+// UpdateOr or Mutate (see tx.go). The closure is the unit of composition —
+// several reads and writes inside one call are atomic, which is what the
+// older "acquire Mu yourself" convention existed to allow — but the lock is
+// taken and released in one place and Update pairs a mutation with its
+// Save. Methods documented "caller must hold Mu" are meant to be called
+// from inside one of those closures.
+//
+// Mu stays exported for the one case a closure cannot express: the staged
+// device flow, which has to release the lock to transmit and reacquire it
+// to record the result. Outside this package that is the only remaining
+// direct use, in the scheduler's timer/schedule execution and the API's
+// runStaged. Everything else should go through the transaction helpers.
 package store
 
 import (
