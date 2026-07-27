@@ -12,7 +12,7 @@ import type { SpotifyStatus, SpotifyItem, SpotifyResults } from "../types";
  * And **focus** — putting the caret in the box — stays with the component that
  * owns the input, since only it has the element.
  */
-export type SpotifyKind = "tracks" | "albums" | "playlists" | "artists";
+export type SpotifyKind = "all" | "tracks" | "albums" | "playlists" | "artists";
 
 export interface SpotifyStore {
   /** Null when the integration is unavailable — the whole card hides. */
@@ -20,6 +20,10 @@ export interface SpotifyStore {
   readonly connected: boolean;
   /** What the results list shows: matches, or the account's own playlists. */
   readonly shownItems: SpotifyItem[];
+  /** The single best match across all four kinds, for the "Top result" card —
+   *  an artist whose name matches the query outright, otherwise the top
+   *  track, falling back down the kind order. Null with no results. */
+  readonly topResult: SpotifyItem | null;
   readonly results: SpotifyResults | null;
   readonly searching: boolean;
   readonly myPlaylists: SpotifyItem[];
@@ -65,7 +69,7 @@ export function createSpotify(remember: (q: string) => void): SpotifyStore {
     query: "",
     searching: false,
     results: null as SpotifyResults | null,
-    kindFilter: "tracks" as SpotifyKind,
+    kindFilter: "all" as SpotifyKind,
     myPlaylists: [] as SpotifyItem[],
     setupOpen: false,
     clientId: "",
@@ -99,6 +103,10 @@ export function createSpotify(remember: (q: string) => void): SpotifyStore {
       s.searching = false;
       return;
     }
+    // A freshly submitted query always opens on the broad overview — a
+    // kind filter left over from the previous search would otherwise hide
+    // whichever section answers this one best.
+    s.kindFilter = "all";
     s.searching = true;
     try {
       const r = await api.spotifySearch(q, 8);
@@ -129,9 +137,24 @@ export function createSpotify(remember: (q: string) => void): SpotifyStore {
       return s.myPlaylists;
     },
     // With no query the list browses the account's playlists instead of
-    // sitting empty.
+    // sitting empty. "all" has no array of its own — it's every kind at
+    // once, which is also what an empty-results check needs to see.
     get shownItems() {
-      return s.results ? s.results[s.kindFilter] : s.myPlaylists;
+      if (!s.results) return s.myPlaylists;
+      if (s.kindFilter === "all") {
+        return [...s.results.tracks, ...s.results.albums, ...s.results.playlists, ...s.results.artists];
+      }
+      return s.results[s.kindFilter];
+    },
+    get topResult() {
+      if (!s.results) return null;
+      const { tracks, artists, albums, playlists } = s.results;
+      const q = s.query.trim().toLowerCase();
+      // An artist whose name is the query outright is what a search for a
+      // name is almost always after — otherwise the top track wins, since
+      // playing a song is the most common reason to search at all.
+      if (artists[0] && artists[0].name.toLowerCase() === q) return artists[0];
+      return tracks[0] ?? artists[0] ?? albums[0] ?? playlists[0] ?? null;
     },
     get query() {
       return s.query;

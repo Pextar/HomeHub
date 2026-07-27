@@ -13,7 +13,7 @@
     import ZonePlayer from "../components/music/ZonePlayer.svelte";
     import ZoneEditor from "../components/music/ZoneEditor.svelte";
     import RoomPuck from "../components/music/RoomPuck.svelte";
-    import SearchSheet from "../components/music/SearchSheet.svelte";
+    import SearchScreen from "../components/music/SearchScreen.svelte";
     import SpeakersScreen from "../components/music/SpeakersScreen.svelte";
     import ArtistScreen from "../components/music/ArtistScreen.svelte";
     import FavoriteBrowseScreen from "../components/music/FavoriteBrowseScreen.svelte";
@@ -282,15 +282,17 @@
     // now behaves like every other header in HomeHub, with nothing riding
     // below it but content (DESIGN.md §15).
     //
-    // Search and Zones open as sheets over Home, the same gesture as the
-    // player. Speakers can't — its rows open a speaker's settings one level
-    // further, and a sheet must never open another sheet — so it is a real
-    // screen with a back chip.
+    // Zones opens as a sheet over Home, the same gesture as the player.
+    // Speakers, Search, and the catalog drill-ins can't — Speakers' rows open
+    // a speaker's settings one level further, and Search's grouped overview
+    // is a browsing surface in its own right rather than a quick lookup — and
+    // a sheet must never open another sheet, so all four are real screens
+    // with a back chip.
     //
     // Zones and Speakers look adjacent but answer different questions: Zones
     // is about zones (what plays together), Speakers is about the devices
     // (what each one is and how it is configured).
-    type Screen = "home" | "speakers" | "artist" | "favorite";
+    type Screen = "home" | "speakers" | "artist" | "favorite" | "search";
     let screen = $state<Screen>("home");
 
     /**
@@ -301,9 +303,41 @@
      */
     let homeScrollY = 0;
 
+    /**
+     * The room to hand back to on the way out of a screen that was reached
+     * from that room's open player — Search (its "/" binding), or a favorite
+     * tapped in the player's own idle prompt — the same "come back to where
+     * you were" promise the sheet swap kept back when Search was itself a
+     * sheet. `pushScreen` notes it itself, from whether a player sheet is
+     * open at the moment of the push, so it takes no per-caller wiring and,
+     * once noted, it *survives* going deeper — tapping an artist from a
+     * Search reached this way still comes back to the room, not to Home,
+     * however many screens deep the trip goes. It only clears on the way
+     * home: consumed by `leaveScreen` once it reopens the player, or (rarely)
+     * left stale if the room disappeared in the meantime, in which case
+     * `leaveScreen` drops it anyway rather than retrying forever.
+     */
+    type PlayerReturn = { kind: "sonos" | "kef" | "zone"; id: string };
+    let playerReturn: PlayerReturn | null = null;
+
     /** Raise any non-Home screen: a sheet stands down rather than stacking
      *  under it, Home's scroll offset is kept, and the screen starts at the top. */
     function pushScreen(s: Exclude<Screen, "home">) {
+        // Note which player to come back to — before hideSheet() clears the
+        // ids below. A push that finds no player sheet open leaves whatever
+        // was already noted alone, which is what lets it survive a screen
+        // opening another (Search into an artist page, say) rather than
+        // only the first hop.
+        if (sheets.open === "player") {
+            playerReturn =
+                playerGroupId !== null
+                    ? { kind: "sonos", id: playerGroupId }
+                    : playerKefId !== null
+                      ? { kind: "kef", id: playerKefId }
+                      : playerZoneId !== null
+                        ? { kind: "zone", id: playerZoneId }
+                        : null;
+        }
         hideSheet();
         if (screen === "home") homeScrollY = window.scrollY;
         screen = s;
@@ -313,8 +347,27 @@
         pushScreen("speakers");
     }
     /** Back to Home from whichever screen is up — one function for all of
-     *  them, since "up one" always means the same thing here. */
+     *  them, since "up one" always means the same thing here — except when a
+     *  player noted a room to come back to, which wins over Home however
+     *  many screens deep it is. */
     function leaveScreen() {
+        if (playerReturn) {
+            const ret = playerReturn;
+            playerReturn = null;
+            screen = "home";
+            if (ret.kind === "sonos") {
+                const g = sonos.groupById(ret.id);
+                if (g) return openPlayer(g);
+            } else if (ret.kind === "kef") {
+                const sp = kef.speakers.find((s) => s.id === ret.id);
+                if (sp) return openKEFPlayer(sp);
+            } else {
+                const z = zones.byId(ret.id);
+                if (z) return openZonePlayer(z);
+            }
+            // The room disappeared in the meantime (regrouped, removed) —
+            // fall through to Home like any other missing target.
+        }
         screen = "home";
         detailId = null;
         kefDetailId = null;
@@ -328,11 +381,10 @@
     // there is only ever one scrim, one Escape, one thing to swipe away. The
     // rule and its invariants live in `lib/sheet-run.ts`, with tests, because
     // the swap is subtle enough to break by accident from in here.
-    type Sheet = "player" | "search" | "zones" | "zone-edit";
+    type Sheet = "player" | "zones" | "zone-edit";
     let sheets = $state<SheetRun<Sheet>>(sheetRun.closed());
 
     const openSheet = $derived(sheets.open);
-    const searchOpen = $derived(sheets.open === "search");
     const zonesOpen = $derived(sheets.open === "zones");
     const editorOpen = $derived(sheets.open === "zone-edit");
     const sheetUp = $derived(sheetRun.isUp(sheets));
@@ -440,7 +492,7 @@
 
     function openSearch() {
         searchWantsFocus = true; // you came here to type
-        showSheet("search");
+        pushScreen("search");
     }
     function openZones() {
         showSheet("zones");
@@ -573,15 +625,18 @@
     // The dock and the Home screen's "Playing now" card carry the same track
     // and the same play/pause, so showing both stacks one control on top of
     // its own duplicate. The dock is the *fallback*: it appears only once the
-    // card it repeats has left the screen — which is always over the Zones and
-    // Search sheets, and on Speakers, where no such card exists.
+    // card it repeats has left the screen — which is always over the Zones
+    // sheet, and on Speakers, Search and the catalog screens, where no such
+    // card exists.
     //
-    // It rides *over* the Zones and Search sheets rather than under them: the
-    // transport persists across Home, Zones and Search (DESIGN.md §15), and
-    // Search's whole job is to feed it. Tapping it there swaps that sheet for
-    // the player rather than stacking one sheet on another.
+    // It rides *over* the Zones sheet rather than under it: the transport
+    // persists across Home and Zones (DESIGN.md §15). Search is a screen now,
+    // not a sheet, so it gets the same answer Speakers already does — the
+    // dock renders inline, in flow, right after whichever screen is up, and
+    // sits there as a plain `position: sticky` element rather than floating
+    // fixed above a scrim.
     let dockCardOnScreen = $state(false);
-    const overSheet = $derived(searchOpen || zonesOpen);
+    const overSheet = $derived(zonesOpen);
     // The editor is the one sheet the dock stands down for as firmly as the
     // player does: it is a form with a sticky footer, and a floating transport
     // over it would land on top of Save.
@@ -604,7 +659,7 @@
     let sonosPlayer = $state<SonosPlayer | null>(null);
     let kefPlayer = $state<KEFPlayer | null>(null);
     let zonePlayer = $state<ZonePlayer | null>(null);
-    let searchSheet = $state<SearchSheet | null>(null);
+    let searchScreen = $state<SearchScreen | null>(null);
     let speakersScreen = $state<SpeakersScreen | null>(null);
     // Set by the open sheet while a drag-down rides out. The art swipe stands
     // down for those 220ms; raising a sheet clears it, since the flag belongs
@@ -654,14 +709,19 @@
     }
 
     /**
-     * Search from inside the player. The sheet *hands over* rather than
-     * opening one over another, so closing Search comes back to the room you
-     * started from — and that room is already the destination, set when the
-     * player opened, so a result plays where you were looking.
+     * Search from inside the player. Search is a screen now, so reaching it
+     * stands the player down the same way opening Speakers or an artist page
+     * does — but unlike those, closing Search (or anything opened from it)
+     * has to come back to the room you started from, not to Home: that room
+     * is already the destination, set when the player opened, so a result
+     * plays where you were looking, and losing your way back to the player
+     * it fed would read as the app forgetting what you were doing.
+     * `pushScreen` notes that room itself (`playerReturn`), so this function
+     * doesn't have to.
      *
      * Without this the player was a dead end for the one thing it kept
-     * pointing at: both sheets' idle copy says "or search Spotify", and a
-     * KEF speaker has no favorites to offer instead, so its idle player named
+     * pointing at: both idle prompts say "or search Spotify", and a KEF
+     * speaker has no favorites to offer instead, so its idle player named
      * the only way to start music and then didn't offer it.
      */
     // ── Zone membership ──────────────────────────────────────────────────
@@ -708,14 +768,12 @@
     }
 
     function searchFromPlayer(q?: string) {
-        rememberSheetScroll();
         // A recent search is a request to *run* it, so it runs — and the caret
         // stays out of the way, keyboard and all, since the results are what
-        // was asked for.
+        // was asked for. `pushScreen` notes the room to come back to on its
+        // own, from the player sheet still being open at this point.
         searchWantsFocus = !q;
-        sheets = sheetRun.swapTo(sheets, "search");
-        sheetScroll.search = 0;
-        sheetDismissing = false;
+        pushScreen("search");
         if (q) spotify.runQuery(q);
     }
 
@@ -744,7 +802,7 @@
             // Escape always leaves the player outright rather than stepping
             // back through the queue pane — the sheet covers the nav, so one
             // press must always be enough to get out (DESIGN.md §15).
-            if (searchSheet?.closeMenu()) return;
+            if (searchScreen?.closeMenu()) return;
             if (drag.drag || drag.grabId) {
                 // Put a held room back before leaving the sheet it was held in.
                 const name =
@@ -757,8 +815,9 @@
             // Escape backs out of a speaker's settings the same way its back
             // chip does — a drill-down owes the user the key that leaves it.
             else if (speakersScreen?.closeDetail()) return;
-            // …and out of whichever screen is up — Speakers, an artist page,
-            // or a favorite's tracks — all of which are screens, not sheets.
+            // …and out of whichever screen is up — Speakers, Search, an
+            // artist page, or a favorite's tracks — all of which are
+            // screens, not sheets.
             else if (screen !== "home") leaveScreen();
             return;
         }
@@ -1144,14 +1203,32 @@
         playAllBusy={busy.is("fav:" + browseFavorite.id)}
         onPick={playItem}
     />
+    {:else if screen === "search"}
+    <SearchScreen
+        {spotify}
+        {recents}
+        {destination}
+        {busy}
+        autofocus={searchWantsFocus}
+        onBack={leaveScreen}
+        onDisconnect={disconnectSpotify}
+        onPlayItem={playItem}
+        onEnqueue={(item, next) =>
+            enqueue({ service: "Spotify", uri: item.uri, title: item.name }, next)}
+        onOpenArtist={openArtist}
+        {targetRow}
+        bind:this={searchScreen}
+    />
     {/if}
 
     <!-- ── Docked mini-player ──────────────────────────────────────────
-         Present everywhere — including over the Zones and Search sheets,
-         which is where the transport would otherwise disappear — but stands
-         down while the Home card it would duplicate is on screen. It also
-         survives a pause: that is where a paused zone stays reachable once
-         "Playing now" (which means playing, literally) has let go of it. -->
+         Present everywhere — floating over the Zones sheet, and rendered
+         in flow right here for every other screen, including Speakers,
+         Search and the catalog screens, which is where the transport would
+         otherwise disappear — but stands down while the Home card it would
+         duplicate is on screen. It also survives a pause: that is where a
+         paused zone stays reachable once "Playing now" (which means
+         playing, literally) has let go of it. -->
     {#if showDock && dock?.kind === "sonos"}
         {@const g = dock.group}
         {@const c = sonos.coordinatorOf(g)}
@@ -1263,29 +1340,6 @@
      anchored to that rather than to the viewport. -->
 {#if drag.drag}
     <RoomPuck ghost={drag.drag} />
-{/if}
-
-<!-- ── Search sheet ─────────────────────────────────────────────────
-     Behind a plain search icon in Home's header, opening the same way
-     everything else in Music opens. -->
-{#if searchOpen}
-    <SearchSheet
-        {spotify}
-        {recents}
-        {destination}
-        {busy}
-        autofocus={searchWantsFocus}
-        docked={showDock}
-        onDismiss={dropSheet}
-        onDisconnect={disconnectSpotify}
-        onPlayItem={playItem}
-        onEnqueue={(item, next) =>
-            enqueue({ service: "Spotify", uri: item.uri, title: item.name }, next)}
-        onOpenArtist={openArtist}
-        {targetRow}
-        bind:this={searchSheet}
-        bind:scrollEl
-    />
 {/if}
 
 <!-- ── The players ──────────────────────────────────────────────────

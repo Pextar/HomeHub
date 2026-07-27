@@ -1,9 +1,12 @@
 <script lang="ts">
     /**
-     * The bottom sheet all of Music's surfaces wear: Zones, Search, and both
-     * players.
+     * The bottom sheet Music's remaining sheet surfaces wear: Zones, the zone
+     * editor, and all three players. Search left this group when its grouped
+     * overview outgrew a sheet's 82vh and became a screen instead
+     * (`SearchScreen.svelte`) — a browsing surface earns the same real
+     * estate Speakers and the catalog drill-ins get, not a quick lookup's.
      *
-     * It exists because those four had a copy each of the same forty lines of
+     * It exists because those five had a copy each of the same forty lines of
      * scrim, sheet, sticky head and drag wiring, plus one shared copy of the
      * gesture state in the view. That state is per-sheet by nature — a swap
      * must not inherit the previous sheet's half-finished drag — so keeping it

@@ -514,12 +514,14 @@ patterns on top. Keep these consistent if you extend it.
   header now behaves like every other header in HomeHub: nothing rides below
   it but content. **Search** lives behind a plain search icon in Home's
   header. **Zones** (renamed from "Rooms" — see below) opens from a "Manage"
-  link next to the room chips. Both open as sheets over Home, the same
-  gesture as the player.
+  link next to the room chips. Zones opens as a sheet over Home, the same
+  gesture as the player; Search opens as a screen — see its own entry below
+  for why it left the sheet group.
   - **A sheet must never open another sheet.** This is the reason Speakers
     is *not* on this list: its rows open a speaker's settings one level
     further, so it has to be a real screen (§11 detail shape, back chip),
-    reached from a plain row on Home — see its own entry below.
+    reached from a plain row on Home — see its own entry below. Search left
+    the same way, for a different reason (its own entry, below).
   - **Sheets swap; they never stack.** Tapping a room inside Zones has to
     open that room's player, which would be a sheet over a sheet — so the
     player *replaces* Zones and puts it back on the way out. One scrim, one
@@ -552,12 +554,16 @@ patterns on top. Keep these consistent if you extend it.
   Screen contents: **Home** = Playing now + Favorites + room chips ("Manage"
   opens Zones) + a row through to Speakers. **Zones** = the grouping puck
   grid, as a sheet. **Speakers** = the device inventory and its settings, as
-  its own screen — reached from that row. **Search** = Spotify, as a sheet.
-  The mini-player and the full-player sheet persist across Home, Zones and
-  Search: over the two sheets the dock leaves the page flow and floats above
-  them, because that is exactly where the transport would otherwise
-  disappear, and Search's whole job is to feed it. Tapping it there swaps
-  that sheet for the player rather than stacking one on the other.
+  its own screen — reached from that row. **Search** = Spotify, also its own
+  screen — see below. The mini-player persists everywhere: over the Zones
+  sheet the dock leaves the page flow and floats above it, because that is
+  exactly where the transport would otherwise disappear, and tapping it there
+  swaps the sheet for the player rather than stacking one on the other. Over
+  every screen — Speakers, Search, an artist page, a favorite's tracks — it
+  instead renders inline, right after the screen's own content, as a plain
+  `position: sticky` element; nothing floats fixed above a screen the way it
+  does above a sheet, because a screen already owns the page's scroll and the
+  dock can simply take its place in that flow.
 - **Home's header carries Search and nothing else.** Registering a speaker
   moved to Speakers, where the rest of device management already lives — a
   third action in that row left the subtitle a two-word stub on a phone, and
@@ -576,6 +582,51 @@ patterns on top. Keep these consistent if you extend it.
     either way and reads "Set up Spotify" until it is. The people who most
     need the pointer are exactly the ones a `connected` gate would hide it
     from.
+- **Search is a screen (`SearchScreen.svelte`), not a sheet.** It started as
+  one, like Zones — but a plain filtered list grew into a grouped overview
+  (a "Top result" card, then a Songs list and Artists/Albums/Playlists
+  carousels, one section per kind that actually matched), and that is a
+  browsing surface in its own right, not a quick lookup. 82% of the viewport
+  with a grabber and a close-X eating into it read as exactly the wrong
+  promise for content that wants room to breathe, so it takes the same §11
+  shape Speakers and the catalog drill-ins do instead: back chip, centered
+  title, plain page scroll.
+  - **The overview is the default; a kind chip narrows it.** Filter chips
+    read All / Songs / Albums / Playlists / Artists, All first and active by
+    default. Songs shows its top four with a "See all N" into the full
+    filtered list (the same list a kind chip always showed); Artists,
+    Albums and Playlists show as horizontal carousels, since the backend's
+    eight-per-kind cap already fits inside one without a "see all". A
+    section with no matches doesn't render at all. Every freshly submitted
+    query resets to All, so a filter left over from the last search never
+    hides what the new one is about.
+  - **The top result is a guess, not a rank Spotify hands back.** The search
+    endpoint returns each kind pre-sorted by Spotify's own relevance but
+    carries no cross-kind score, so the hero card picks the artist when its
+    name matches the query outright (searching a name is almost always
+    after that artist's page) and otherwise the top track (playing a song is
+    the most common reason to search at all), falling back down to the top
+    album or playlist when neither answered.
+  - **ArrowDown from the search box hands off to the first result** — the
+    hero card when there is one, otherwise the first row — the one query-box
+    keybinding this screen adds to the module's otherwise-scoped "/" and
+    Escape (§15, below).
+  - **Leaving Search — or anything opened from it — from the player comes
+    back to the player.** Reaching Search from a room's open player (its "/"
+    binding, or the idle prompt's "search Spotify") still stands that
+    player's sheet down first — a sheet must never open under a screen
+    either — but `pushScreen` (`views/Music.svelte`) notices a player sheet
+    is open at the moment of the push and remembers the room in
+    `playerReturn`, handed back to on the way out instead of dropping to
+    Home like every other path into Search does. The destination was already
+    set to that room when the player opened, so this is about not losing
+    your place in it, not about where a result plays. Unlike the sheet swap
+    it replaces, this note **survives going deeper**: opening an artist page
+    from a player-fed Search still comes back to the room, not to Home,
+    however many screens the trip goes through — `playerReturn` clears only
+    once `leaveScreen` actually reopens the player, so nothing short of that
+    forgets it. The same mechanism, not a Search-specific one, is what sends
+    a favorite tapped in the player's own idle prompt back to that player too.
 - **Zones is zones; Speakers is devices.** They read as adjacent and are not,
   and "Zones" is the renamed version of what used to be called "Rooms" here —
   the app-level nav already owns that word for the whole house, and reusing
