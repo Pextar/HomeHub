@@ -264,9 +264,13 @@
             const det = await api.spotifyContext(uri);
             if (browseFavorite?.spotify_uri !== uri) return; // superseded
             favoriteContext = det;
-        } catch (e) {
+        } catch {
             if (browseFavorite?.spotify_uri !== uri) return;
-            toasts.error("Couldn't load favorite", (e as Error).message);
+            // Spotify's own error text ("Resource not found", raw HTTP
+            // status, …) means nothing to someone tapping a favorite — some
+            // of Spotify's own algorithmic playlists 404 on this lookup even
+            // though Sonos can play them fine. Point at the working path.
+            toasts.error("Can't preview this playlist", "Try playing it instead.");
             leaveScreen();
         } finally {
             if (browseFavorite?.spotify_uri === uri) favoriteLoading = false;
