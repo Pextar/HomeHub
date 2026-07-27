@@ -253,10 +253,10 @@ func (s *Server) deleteSchedule(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
 
 	s.Store.Mu.Lock()
+	defer s.Store.Mu.Unlock()
 
 	sch, ok := s.Store.Schedules[id]
 	if !ok {
-		s.Store.Mu.Unlock()
 		writeError(w, http.StatusNotFound, "schedule not found")
 		return
 	}
@@ -265,19 +265,15 @@ func (s *Server) deleteSchedule(w http.ResponseWriter, r *http.Request) {
 	if !isAdmin(user) {
 		sockID := scheduleSocketID(sch)
 		if !user.CanAccessSocket(sockID) {
-			s.Store.Mu.Unlock()
 			writeError(w, http.StatusForbidden, "you don't own that schedule")
 			return
 		}
 	}
 
 	delete(s.Store.Schedules, id)
-	if err := s.Store.Save(); err != nil {
-		s.Store.Mu.Unlock()
-		writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
+	if !s.saveStore(w) {
 		return
 	}
-	s.Store.Mu.Unlock()
 
 	w.WriteHeader(http.StatusNoContent)
 }

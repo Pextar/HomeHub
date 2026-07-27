@@ -237,23 +237,25 @@ func (s *Server) sonosUpdateSpeaker(w http.ResponseWriter, r *http.Request) {
 // sonosDeleteSpeaker handles DELETE /api/sonos/speakers/{id}.
 func (s *Server) sonosDeleteSpeaker(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
-	s.Store.Mu.Lock()
-	if _, ok := s.Store.Sonos[id]; !ok {
-		s.Store.Mu.Unlock()
-		writeError(w, http.StatusNotFound, "speaker not found")
+	// The monitor is nudged after the lock is released: it must not be
+	// poked while Mu is held.
+	deleted := func() bool {
+		s.Store.Mu.Lock()
+		defer s.Store.Mu.Unlock()
+		if _, ok := s.Store.Sonos[id]; !ok {
+			writeError(w, http.StatusNotFound, "speaker not found")
+			return false
+		}
+		delete(s.Store.Sonos, id)
+		// Drop it from any zone that held it, or the next unrelated edit to that
+		// zone fails validation with "no such speaker" for a change the user
+		// didn't make.
+		s.Store.CascadeDeleteSpeaker(store.QualifySonos(id))
+		return s.saveStore(w)
+	}()
+	if !deleted {
 		return
 	}
-	delete(s.Store.Sonos, id)
-	// Drop it from any zone that held it, or the next unrelated edit to that
-	// zone fails validation with "no such speaker" for a change the user
-	// didn't make.
-	s.Store.CascadeDeleteSpeaker(store.QualifySonos(id))
-	if err := s.Store.Save(); err != nil {
-		s.Store.Mu.Unlock()
-		writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
-		return
-	}
-	s.Store.Mu.Unlock()
 	s.sonosEvents().Nudge() // release its subscriptions
 	w.WriteHeader(http.StatusNoContent)
 }

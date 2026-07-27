@@ -205,21 +205,23 @@ func (s *Server) kefUpdateSpeaker(w http.ResponseWriter, r *http.Request) {
 // kefDeleteSpeaker handles DELETE /api/kef/speakers/{id}.
 func (s *Server) kefDeleteSpeaker(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
-	s.Store.Mu.Lock()
-	if _, ok := s.Store.KEF[id]; !ok {
-		s.Store.Mu.Unlock()
-		writeError(w, http.StatusNotFound, "speaker not found")
+	// The monitor is nudged after the lock is released: it must not be
+	// poked while Mu is held.
+	deleted := func() bool {
+		s.Store.Mu.Lock()
+		defer s.Store.Mu.Unlock()
+		if _, ok := s.Store.KEF[id]; !ok {
+			writeError(w, http.StatusNotFound, "speaker not found")
+			return false
+		}
+		delete(s.Store.KEF, id)
+		// Drop it from any zone that held it — see sonosDeleteSpeaker.
+		s.Store.CascadeDeleteSpeaker(store.QualifyKEF(id))
+		return s.saveStore(w)
+	}()
+	if !deleted {
 		return
 	}
-	delete(s.Store.KEF, id)
-	// Drop it from any zone that held it — see sonosDeleteSpeaker.
-	s.Store.CascadeDeleteSpeaker(store.QualifyKEF(id))
-	if err := s.Store.Save(); err != nil {
-		s.Store.Mu.Unlock()
-		writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
-		return
-	}
-	s.Store.Mu.Unlock()
 	s.kefEvents().Nudge() // stop polling it
 	w.WriteHeader(http.StatusNoContent)
 }

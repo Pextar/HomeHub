@@ -117,8 +117,8 @@ func (s *Server) deleteGroup(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
 
 	s.Store.Mu.Lock()
+	defer s.Store.Mu.Unlock()
 	if _, ok := s.Store.Groups[id]; !ok {
-		s.Store.Mu.Unlock()
 		writeError(w, http.StatusNotFound, "group not found")
 		return
 	}
@@ -134,12 +134,9 @@ func (s *Server) deleteGroup(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	s.Store.PruneAutomationsForTarget("group", id)
-	if err := s.Store.Save(); err != nil {
-		s.Store.Mu.Unlock()
-		writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
+	if !s.saveStore(w) {
 		return
 	}
-	s.Store.Mu.Unlock()
 	w.WriteHeader(http.StatusNoContent)
 }
 

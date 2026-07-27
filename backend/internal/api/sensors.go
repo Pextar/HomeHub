@@ -117,20 +117,17 @@ func (s *Server) deleteSensor(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
 
 	s.Store.Mu.Lock()
+	defer s.Store.Mu.Unlock()
 	if _, ok := s.Store.Sensors[id]; !ok {
-		s.Store.Mu.Unlock()
 		writeError(w, http.StatusNotFound, "sensor not found")
 		return
 	}
 	delete(s.Store.Sensors, id)
 	delete(s.Store.Readings, id)
 	s.Store.PruneAutomationsForSensor(id)
-	if err := s.Store.Save(); err != nil {
-		s.Store.Mu.Unlock()
-		writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
+	if !s.saveStore(w) {
 		return
 	}
-	s.Store.Mu.Unlock()
 
 	w.WriteHeader(http.StatusNoContent)
 }

@@ -61,20 +61,17 @@ func (s *Server) createSocket(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.Store.Mu.Lock()
+	defer s.Store.Mu.Unlock()
+
 	if _, exists := s.Store.Sockets[socket.ID]; exists && hadID {
 		// A client-supplied ID must not silently replace an existing record.
-		s.Store.Mu.Unlock()
 		writeError(w, http.StatusConflict, "a socket with that id already exists")
 		return
 	}
 	s.Store.Sockets[socket.ID] = &socket
-	if err := s.Store.Save(); err != nil {
-		delete(s.Store.Sockets, socket.ID)
-		s.Store.Mu.Unlock()
-		writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
+	if !s.saveStoreOr(w, func() { delete(s.Store.Sockets, socket.ID) }) {
 		return
 	}
-	s.Store.Mu.Unlock()
 
 	writeJSON(w, http.StatusCreated, socket)
 }
@@ -175,19 +172,16 @@ func (s *Server) deleteSocket(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
 
 	s.Store.Mu.Lock()
+	defer s.Store.Mu.Unlock()
 	if _, ok := s.Store.Sockets[id]; !ok {
-		s.Store.Mu.Unlock()
 		writeError(w, http.StatusNotFound, "socket not found")
 		return
 	}
 	delete(s.Store.Sockets, id)
 	s.Store.CascadeDeleteSocket(id)
-	if err := s.Store.Save(); err != nil {
-		s.Store.Mu.Unlock()
-		writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
+	if !s.saveStore(w) {
 		return
 	}
-	s.Store.Mu.Unlock()
 
 	w.WriteHeader(http.StatusNoContent)
 }

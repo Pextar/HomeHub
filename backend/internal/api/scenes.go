@@ -124,8 +124,8 @@ func (s *Server) deleteScene(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
 
 	s.Store.Mu.Lock()
+	defer s.Store.Mu.Unlock()
 	if _, ok := s.Store.Scenes[id]; !ok {
-		s.Store.Mu.Unlock()
 		writeError(w, http.StatusNotFound, "scene not found")
 		return
 	}
@@ -142,12 +142,9 @@ func (s *Server) deleteScene(w http.ResponseWriter, r *http.Request) {
 	}
 	s.Store.PruneAutomationsForTarget("scene", id)
 	s.Store.DeleteAutomationsOwnedByScene(id)
-	if err := s.Store.Save(); err != nil {
-		s.Store.Mu.Unlock()
-		writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
+	if !s.saveStore(w) {
 		return
 	}
-	s.Store.Mu.Unlock()
 	w.WriteHeader(http.StatusNoContent)
 }
 

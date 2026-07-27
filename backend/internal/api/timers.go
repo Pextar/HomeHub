@@ -150,17 +150,14 @@ func (s *Server) deleteTimer(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
 
 	s.Store.Mu.Lock()
+	defer s.Store.Mu.Unlock()
 	if _, ok := s.Store.Timers[id]; !ok {
-		s.Store.Mu.Unlock()
 		writeError(w, http.StatusNotFound, "timer not found")
 		return
 	}
 	delete(s.Store.Timers, id)
-	if err := s.Store.Save(); err != nil {
-		s.Store.Mu.Unlock()
-		writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
+	if !s.saveStore(w) {
 		return
 	}
-	s.Store.Mu.Unlock()
 	w.WriteHeader(http.StatusNoContent)
 }
