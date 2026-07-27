@@ -148,6 +148,11 @@
         nextBusy={busy.is("kefnext:" + sp.id)}
     />
 
+    <!-- The keys are only worth advertising where there is a keyboard;
+         phones get the swipe gesture instead. KEF has no seek, no queue and
+         no play modes, so the line only names what actually answers. -->
+    <p class="p-keys mono" aria-hidden="true">space play · ← → track · ↑ ↓ volume · m mute</p>
+
     <!-- Spotify Connect is the only road content takes to a KEF speaker, so
          this row is the whole of "play something else" here — and it sits
          above the input selector, which answers the same question for the
@@ -221,6 +226,15 @@
     .p-speakers .hint { margin-top: var(--space-2); }
     .src-row { display: flex; flex-wrap: wrap; gap: var(--space-2); }
     .src-row .chip { flex-shrink: 0; }
+
+    .p-keys { display: none; }
+    @media (hover: hover) and (pointer: fine) {
+        .p-keys {
+            display: block; text-align: center;
+            font-size: 10px; letter-spacing: 0.06em;
+            color: var(--text-dim);
+        }
+    }
 
     @media (prefers-reduced-motion: reduce) {
         .kef-rail i { transition-duration: 0.001ms; }

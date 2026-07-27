@@ -25,6 +25,11 @@
         prevBusy = false,
         onNext = undefined,
         nextBusy = false,
+        /** True only where a bare arrow key seeks instead of skipping, so the
+         *  track shortcut needs shift to tell the two apart. KEF and a zone
+         *  have no seek at all, and a Sonos live stream has nothing to seek
+         *  either — in all three, a bare arrow already skips. */
+        seekable = false,
         /** Absent for a source with no play modes. */
         modes = undefined,
     }: {
@@ -35,6 +40,7 @@
         prevBusy?: boolean;
         onNext?: () => void;
         nextBusy?: boolean;
+        seekable?: boolean;
         modes?: {
             shuffle: boolean;
             repeat: SonosRepeat;
@@ -65,7 +71,7 @@
         <button
             class="icon-btn t-btn"
             aria-label="Previous track"
-            title="Previous (shift ←)"
+            title={seekable ? "Previous (shift ←)" : "Previous (←)"}
             disabled={prevBusy}
             onclick={onPrev}
         >
@@ -86,7 +92,7 @@
         <button
             class="icon-btn t-btn"
             aria-label="Next track"
-            title="Next (shift →)"
+            title={seekable ? "Next (shift →)" : "Next (→)"}
             disabled={nextBusy}
             onclick={onNext}
         >

@@ -65,9 +65,11 @@
         scrollEl?: HTMLElement | null;
     } = $props();
 
-    /** A zone worth offering a transport: something is on it to resume. */
+    /** A zone worth offering a transport: something is on it to resume, or
+     *  actively playing with no track metadata to name (radio, line-in) —
+     *  `nowLine` calls that case "Live audio", and it still needs a pause. */
     function hasTrack(z: MediaZone): boolean {
-        return !!zones.leadOf(z)?.state?.track?.title;
+        return !!zones.leadOf(z)?.state?.track?.title || zones.isPlaying(z);
     }
 
     const nameOf = (id: string) => sonos.speakerById.get(id)?.name;
@@ -218,7 +220,9 @@
         lifted={drag.drag?.id === sp.id}
         held={drag.grabId === sp.id}
         dropping={drag.dropId === sp.id}
-        aiming={drag.grabId !== null && drag.grabId !== sp.id}
+        aiming={drag.grabId !== null &&
+            drag.grabId !== sp.id &&
+            sonos.groupOfSpeaker(drag.grabId)?.coordinator_id !== g?.coordinator_id}
         {grabbedName}
         onOpen={() => g && onOpenRoom(g)}
         onPointerDown={(e) => drag.onPointerDown(e, sp)}
@@ -278,6 +282,9 @@
     }
     .ungroup:hover { color: var(--text); }
     .ungroup:disabled { opacity: 0.5; }
+    @media (pointer: coarse) {
+        .ungroup { min-width: 44px; min-height: 44px; }
+    }
 
     /* Said once, at the foot of the sheet — the gesture is the affordance,
        this is the footnote for the keyboard. */
