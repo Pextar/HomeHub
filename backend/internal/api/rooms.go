@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"sort"
@@ -66,8 +65,7 @@ func (s *Server) getRooms(w http.ResponseWriter, r *http.Request) {
 // createRoom creates a new named room.
 func (s *Server) createRoom(w http.ResponseWriter, r *http.Request) {
 	var rm store.Room
-	if err := json.NewDecoder(r.Body).Decode(&rm); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+	if !decodeBody(w, r, &rm) {
 		return
 	}
 
@@ -86,9 +84,7 @@ func (s *Server) createRoom(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.Store.Rooms[rm.ID] = &rm
-	if err := s.Store.Save(); err != nil {
-		delete(s.Store.Rooms, rm.ID)
-		writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
+	if !s.saveStoreOr(w, func() { delete(s.Store.Rooms, rm.ID) }) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, roomSummary{ID: rm.ID, Name: rm.Name})
@@ -99,8 +95,7 @@ func (s *Server) updateRoom(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
 
 	var updates store.Room
-	if err := json.NewDecoder(r.Body).Decode(&updates); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+	if !decodeBody(w, r, &updates) {
 		return
 	}
 
@@ -144,8 +139,7 @@ func (s *Server) updateRoom(w http.ResponseWriter, r *http.Request) {
 	}
 
 	*existing = merged
-	if err := s.Store.Save(); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
+	if !s.saveStore(w) {
 		return
 	}
 	writeJSON(w, http.StatusOK, roomSummary{ID: existing.ID, Name: existing.Name})
@@ -187,9 +181,8 @@ func (s *Server) deleteRoom(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := s.Store.Save(); err != nil {
-		s.Store.Rooms[id] = existing // restore on failure
-		writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
+	// Restore the room if the write failed, so memory matches disk.
+	if !s.saveStoreOr(w, func() { s.Store.Rooms[id] = existing }) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -229,39 +222,22 @@ func (s *Server) doRoomSetState(user *store.User, room string, target bool) (ok 
 	if target {
 		action = "on"
 	}
-
-	s.Store.Mu.Lock()
-	var staged []store.StagedSend
-	for _, sock := range s.Store.Sockets {
-		if !strings.EqualFold(sock.Room, room) || !canAccess(user, sock.ID) {
-			continue
-		}
-		staged = append(staged, s.Store.StageSocketSend(sock.ID, action))
-	}
-	s.Store.Mu.Unlock()
-	if len(staged) == 0 {
-		return 0, nil, false, nil
-	}
-
-	s.Store.SendStaged(staged)
-
-	s.Store.Mu.Lock()
-	// Suppress per-socket push notifications; we send one summary below.
-	s.Store.SuppressStateChange = true
-	_ = s.Store.ApplyStaged(staged)
-	s.Store.SuppressStateChange = false
-	ok, failures = stagedFailures(staged)
-	entry := store.ActivityEntry{Kind: "room", Source: "manual", Action: action, Label: room}
-	if len(failures) > 0 {
-		entry.Status = "error"
-		entry.Error = fmt.Sprintf("%d of %d failed", len(failures), ok+len(failures))
-	}
-	s.Store.Activity.Add(entry)
-	err = s.Store.Save()
-	s.Store.Mu.Unlock()
-	if err != nil {
-		return ok, failures, true, err
-	}
-	s.notifyBulkState(fmt.Sprintf("%s turned %s", room, action), ok)
-	return ok, failures, true, nil
+	_, ok, failures, found, err = s.runStaged(stagedAction{
+		Kind: "room", Action: action, Source: "manual",
+		Stage: func() (string, []store.StagedSend, bool) {
+			var staged []store.StagedSend
+			for _, sock := range s.Store.Sockets {
+				if !strings.EqualFold(sock.Room, room) || !canAccess(user, sock.ID) {
+					continue
+				}
+				staged = append(staged, s.Store.StageSocketSend(sock.ID, action))
+			}
+			// An empty room is a 404 rather than a no-op success.
+			return room, staged, len(staged) > 0
+		},
+		Notify: func(label string, _ int) string {
+			return fmt.Sprintf("%s turned %s", label, action)
+		},
+	})
+	return ok, failures, found, err
 }

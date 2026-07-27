@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -129,8 +128,7 @@ func (s *Server) kefDiscover(w http.ResponseWriter, r *http.Request) {
 // fields the user shouldn't have to type.
 func (s *Server) kefCreateSpeaker(w http.ResponseWriter, r *http.Request) {
 	var sp store.KEFSpeaker
-	if err := json.NewDecoder(r.Body).Decode(&sp); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+	if !decodeBody(w, r, &sp) {
 		return
 	}
 	if err := kef.ValidateHost(sp.IP); err != nil {
@@ -159,9 +157,7 @@ func (s *Server) kefCreateSpeaker(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.Store.KEF[sp.ID] = &sp
-	if err := s.Store.Save(); err != nil {
-		delete(s.Store.KEF, sp.ID)
-		writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
+	if !s.saveStoreOr(w, func() { delete(s.Store.KEF, sp.ID) }) {
 		return
 	}
 	s.kefEvents().Nudge() // start watching it now, not at the next reconcile
@@ -173,8 +169,7 @@ func (s *Server) kefCreateSpeaker(w http.ResponseWriter, r *http.Request) {
 func (s *Server) kefUpdateSpeaker(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
 	var updates store.KEFSpeaker
-	if err := json.NewDecoder(r.Body).Decode(&updates); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+	if !decodeBody(w, r, &updates) {
 		return
 	}
 
@@ -198,8 +193,7 @@ func (s *Server) kefUpdateSpeaker(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	*existing = merged
-	if err := s.Store.Save(); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
+	if !s.saveStore(w) {
 		return
 	}
 	// A re-addressed speaker needs its poller repointed; the old one is
@@ -211,21 +205,23 @@ func (s *Server) kefUpdateSpeaker(w http.ResponseWriter, r *http.Request) {
 // kefDeleteSpeaker handles DELETE /api/kef/speakers/{id}.
 func (s *Server) kefDeleteSpeaker(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
-	s.Store.Mu.Lock()
-	if _, ok := s.Store.KEF[id]; !ok {
-		s.Store.Mu.Unlock()
-		writeError(w, http.StatusNotFound, "speaker not found")
+	// The monitor is nudged after the lock is released: it must not be
+	// poked while Mu is held.
+	deleted := func() bool {
+		s.Store.Mu.Lock()
+		defer s.Store.Mu.Unlock()
+		if _, ok := s.Store.KEF[id]; !ok {
+			writeError(w, http.StatusNotFound, "speaker not found")
+			return false
+		}
+		delete(s.Store.KEF, id)
+		// Drop it from any zone that held it — see sonosDeleteSpeaker.
+		s.Store.CascadeDeleteSpeaker(store.QualifyKEF(id))
+		return s.saveStore(w)
+	}()
+	if !deleted {
 		return
 	}
-	delete(s.Store.KEF, id)
-	// Drop it from any zone that held it — see sonosDeleteSpeaker.
-	s.Store.CascadeDeleteSpeaker(store.QualifyKEF(id))
-	if err := s.Store.Save(); err != nil {
-		s.Store.Mu.Unlock()
-		writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
-		return
-	}
-	s.Store.Mu.Unlock()
 	s.kefEvents().Nudge() // stop polling it
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -278,8 +274,7 @@ func (s *Server) kefSetVolume(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Level int `json:"level"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+	if !decodeBody(w, r, &body) {
 		return
 	}
 	if body.Level < 0 || body.Level > 100 {
@@ -305,8 +300,7 @@ func (s *Server) kefSetMute(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Muted bool `json:"muted"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+	if !decodeBody(w, r, &body) {
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), kef.DefaultTimeout)
@@ -331,8 +325,7 @@ func (s *Server) kefSetSource(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Source string `json:"source"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+	if !decodeBody(w, r, &body) {
 		return
 	}
 	if !kef.ValidSource(body.Source) {
@@ -360,8 +353,7 @@ func (s *Server) kefSetPower(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		On bool `json:"on"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+	if !decodeBody(w, r, &body) {
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), kef.DefaultTimeout)
@@ -402,8 +394,7 @@ func (s *Server) kefUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var patch kef.SettingsPatch
-	if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+	if !decodeBody(w, r, &patch) {
 		return
 	}
 	if patch.Empty() {

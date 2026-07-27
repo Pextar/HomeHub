@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -158,8 +157,7 @@ func (s *Server) sonosDiscover(w http.ResponseWriter, r *http.Request) {
 // the user shouldn't have to type.
 func (s *Server) sonosCreateSpeaker(w http.ResponseWriter, r *http.Request) {
 	var sp store.SonosSpeaker
-	if err := json.NewDecoder(r.Body).Decode(&sp); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+	if !decodeBody(w, r, &sp) {
 		return
 	}
 	if err := sonos.ValidateHost(sp.IP); err != nil {
@@ -191,9 +189,7 @@ func (s *Server) sonosCreateSpeaker(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.Store.Sonos[sp.ID] = &sp
-	if err := s.Store.Save(); err != nil {
-		delete(s.Store.Sonos, sp.ID)
-		writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
+	if !s.saveStoreOr(w, func() { delete(s.Store.Sonos, sp.ID) }) {
 		return
 	}
 	s.sonosEvents().Nudge() // start watching it now, not at the next reconcile
@@ -205,8 +201,7 @@ func (s *Server) sonosCreateSpeaker(w http.ResponseWriter, r *http.Request) {
 func (s *Server) sonosUpdateSpeaker(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
 	var updates store.SonosSpeaker
-	if err := json.NewDecoder(r.Body).Decode(&updates); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+	if !decodeBody(w, r, &updates) {
 		return
 	}
 
@@ -230,8 +225,7 @@ func (s *Server) sonosUpdateSpeaker(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	*existing = merged
-	if err := s.Store.Save(); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
+	if !s.saveStore(w) {
 		return
 	}
 	// A re-addressed speaker needs its subscriptions rebuilt against the
@@ -243,23 +237,25 @@ func (s *Server) sonosUpdateSpeaker(w http.ResponseWriter, r *http.Request) {
 // sonosDeleteSpeaker handles DELETE /api/sonos/speakers/{id}.
 func (s *Server) sonosDeleteSpeaker(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
-	s.Store.Mu.Lock()
-	if _, ok := s.Store.Sonos[id]; !ok {
-		s.Store.Mu.Unlock()
-		writeError(w, http.StatusNotFound, "speaker not found")
+	// The monitor is nudged after the lock is released: it must not be
+	// poked while Mu is held.
+	deleted := func() bool {
+		s.Store.Mu.Lock()
+		defer s.Store.Mu.Unlock()
+		if _, ok := s.Store.Sonos[id]; !ok {
+			writeError(w, http.StatusNotFound, "speaker not found")
+			return false
+		}
+		delete(s.Store.Sonos, id)
+		// Drop it from any zone that held it, or the next unrelated edit to that
+		// zone fails validation with "no such speaker" for a change the user
+		// didn't make.
+		s.Store.CascadeDeleteSpeaker(store.QualifySonos(id))
+		return s.saveStore(w)
+	}()
+	if !deleted {
 		return
 	}
-	delete(s.Store.Sonos, id)
-	// Drop it from any zone that held it, or the next unrelated edit to that
-	// zone fails validation with "no such speaker" for a change the user
-	// didn't make.
-	s.Store.CascadeDeleteSpeaker(store.QualifySonos(id))
-	if err := s.Store.Save(); err != nil {
-		s.Store.Mu.Unlock()
-		writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
-		return
-	}
-	s.Store.Mu.Unlock()
 	s.sonosEvents().Nudge() // release its subscriptions
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -312,8 +308,7 @@ func (s *Server) sonosSetVolume(w http.ResponseWriter, r *http.Request) {
 		Level int  `json:"level"`
 		Group bool `json:"group"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+	if !decodeBody(w, r, &body) {
 		return
 	}
 	if body.Level < 0 || body.Level > 100 {
@@ -344,8 +339,7 @@ func (s *Server) sonosSetMute(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Muted bool `json:"muted"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+	if !decodeBody(w, r, &body) {
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), sonos.DefaultTimeout)
@@ -371,8 +365,7 @@ func (s *Server) sonosSeek(w http.ResponseWriter, r *http.Request) {
 		Position string `json:"position"`
 		Track    int    `json:"track"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+	if !decodeBody(w, r, &body) {
 		return
 	}
 	if body.Position == "" && body.Track == 0 {
@@ -405,8 +398,7 @@ func (s *Server) sonosSetPlayMode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var mode sonos.PlayMode
-	if err := json.NewDecoder(r.Body).Decode(&mode); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+	if !decodeBody(w, r, &mode) {
 		return
 	}
 	if mode.Repeat == "" {
@@ -435,8 +427,7 @@ func (s *Server) sonosSetCrossfade(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Enabled bool `json:"enabled"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+	if !decodeBody(w, r, &body) {
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), sonos.DefaultTimeout)
@@ -485,8 +476,7 @@ func (s *Server) sonosQueueAdd(w http.ResponseWriter, r *http.Request) {
 		Metadata string `json:"metadata"`
 		Next     bool   `json:"next"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+	if !decodeBody(w, r, &body) {
 		return
 	}
 	if strings.TrimSpace(body.URI) == "" {
@@ -573,8 +563,7 @@ func (s *Server) sonosJoin(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		TargetID string `json:"target_id"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+	if !decodeBody(w, r, &body) {
 		return
 	}
 	s.Store.Mu.RLock()
@@ -630,8 +619,7 @@ func (s *Server) sonosPlayFavorite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var fav sonos.Favorite
-	if err := json.NewDecoder(r.Body).Decode(&fav); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+	if !decodeBody(w, r, &fav) {
 		return
 	}
 	if strings.TrimSpace(fav.URI) == "" {
@@ -664,8 +652,7 @@ func (s *Server) sonosPlayItem(w http.ResponseWriter, r *http.Request) {
 		URI     string `json:"uri"`
 		Title   string `json:"title"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+	if !decodeBody(w, r, &body) {
 		return
 	}
 	if body.Service == "" {

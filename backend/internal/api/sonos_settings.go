@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -77,8 +76,7 @@ func (s *Server) sonosUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var patch sonosSettingsPatch
-	if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+	if !decodeBody(w, r, &patch) {
 		return
 	}
 

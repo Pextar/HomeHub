@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/json"
 	"net/http"
 
 	"homehub/internal/push"
@@ -51,8 +50,7 @@ func (s *Server) subscribePush(w http.ResponseWriter, r *http.Request) {
 		Endpoint string       `json:"endpoint"`
 		Keys     push.SubKeys `json:"keys"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+	if !decodeBody(w, r, &body) {
 		return
 	}
 	if body.Endpoint == "" || body.Keys.P256dh == "" || body.Keys.Auth == "" {
@@ -101,8 +99,7 @@ func (s *Server) unsubscribePush(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Endpoint string `json:"endpoint"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+	if !decodeBody(w, r, &body) {
 		return
 	}
 	if body.Endpoint == "" {
@@ -149,8 +146,7 @@ func (s *Server) updatePushPrefs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body store.NotifPrefs
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+	if !decodeBody(w, r, &body) {
 		return
 	}
 

@@ -71,8 +71,7 @@ func (s *Server) exportConfig(w http.ResponseWriter, _ *http.Request) {
 // untouched.
 func (s *Server) importConfig(w http.ResponseWriter, r *http.Request) {
 	var bundle configBundle
-	if err := json.NewDecoder(r.Body).Decode(&bundle); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+	if !decodeBody(w, r, &bundle) {
 		return
 	}
 
@@ -112,8 +111,7 @@ func (s *Server) importConfig(w http.ResponseWriter, r *http.Request) {
 		s.Store.Settings = bundle.Settings
 	}
 
-	if err := s.Store.Save(); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
+	if !s.saveStore(w) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{

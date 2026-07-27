@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 
 	"github.com/gorilla/mux"
@@ -37,8 +36,7 @@ func (s *Server) tasmotaSetState(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var update tasmota.StateUpdate
-	if err := json.NewDecoder(r.Body).Decode(&update); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+	if !decodeBody(w, r, &update) {
 		return
 	}
 

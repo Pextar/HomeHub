@@ -337,7 +337,7 @@
         display: grid; place-items: center;
         border-radius: 50%;
         background: var(--on);
-        color: #1a1813;
+        color: var(--primary-fg);
         border: 1px solid var(--on);
         cursor: pointer;
         touch-action: manipulation;

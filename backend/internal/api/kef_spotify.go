@@ -33,7 +33,6 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -61,8 +60,7 @@ func (s *Server) kefPlayItem(w http.ResponseWriter, r *http.Request) {
 		URI     string `json:"uri"`
 		Title   string `json:"title"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+	if !decodeBody(w, r, &body) {
 		return
 	}
 	if body.Service == "" {
@@ -183,8 +181,7 @@ func (s *Server) kefSetSpotifyDevice(w http.ResponseWriter, r *http.Request) {
 		DeviceID   string `json:"device_id"`
 		DeviceName string `json:"device_name"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+	if !decodeBody(w, r, &body) {
 		return
 	}
 
@@ -203,8 +200,7 @@ func (s *Server) kefSetSpotifyDevice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	*existing = merged
-	if err := s.Store.Save(); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
+	if !s.saveStore(w) {
 		return
 	}
 	writeJSON(w, http.StatusOK, existing)

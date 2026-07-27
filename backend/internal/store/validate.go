@@ -403,6 +403,35 @@ func (s *Store) ValidateSensor(sn *Sensor) error {
 	return nil
 }
 
+// speakerIdentity is the part of a registered speaker the uniqueness check
+// looks at. Sonos identifies a device by its RINCON uuid and KEF by its MAC,
+// but the rule and its wording are the same for both, so they share one
+// implementation rather than two loops that have to be kept in step.
+type speakerIdentity struct {
+	ID       string
+	Name     string
+	IP       string
+	DeviceID string // uuid for Sonos, normalised MAC for KEF
+}
+
+// uniqueSpeaker reports a conflict when a different registered speaker
+// already holds this address or device id. Caller must hold Mu.
+func uniqueSpeaker[T any](registry map[string]*T, self speakerIdentity, identify func(*T) speakerIdentity) error {
+	for _, entry := range registry {
+		other := identify(entry)
+		if other.ID == self.ID {
+			continue
+		}
+		if other.IP == self.IP {
+			return fmt.Errorf("speaker %q already uses address %s", other.Name, self.IP)
+		}
+		if self.DeviceID != "" && other.DeviceID == self.DeviceID {
+			return fmt.Errorf("speaker %q is already registered (same device id)", other.Name)
+		}
+	}
+	return nil
+}
+
 // ValidateSonosSpeaker normalizes and validates a Sonos speaker. Caller
 // must hold Mu so IP/UUID uniqueness can be checked against the registry.
 func (s *Store) ValidateSonosSpeaker(sp *SonosSpeaker) error {
@@ -421,18 +450,11 @@ func (s *Store) ValidateSonosSpeaker(sp *SonosSpeaker) error {
 	if sp.UUID != "" && !strings.HasPrefix(sp.UUID, "RINCON_") {
 		return errors.New("uuid must be a Sonos RINCON_… identifier")
 	}
-	for _, other := range s.Sonos {
-		if other.ID == sp.ID {
-			continue
-		}
-		if other.IP == sp.IP {
-			return fmt.Errorf("speaker %q already uses address %s", other.Name, sp.IP)
-		}
-		if sp.UUID != "" && other.UUID == sp.UUID {
-			return fmt.Errorf("speaker %q is already registered (same device id)", other.Name)
-		}
-	}
-	return nil
+	return uniqueSpeaker(s.Sonos,
+		speakerIdentity{ID: sp.ID, Name: sp.Name, IP: sp.IP, DeviceID: sp.UUID},
+		func(o *SonosSpeaker) speakerIdentity {
+			return speakerIdentity{ID: o.ID, Name: o.Name, IP: o.IP, DeviceID: o.UUID}
+		})
 }
 
 // ValidateKEFSpeaker normalizes and validates a KEF speaker. Caller must
@@ -459,18 +481,11 @@ func (s *Store) ValidateKEFSpeaker(sp *KEFSpeaker) error {
 	if err := kef.ValidateHost(sp.IP); err != nil {
 		return err
 	}
-	for _, other := range s.KEF {
-		if other.ID == sp.ID {
-			continue
-		}
-		if other.IP == sp.IP {
-			return fmt.Errorf("speaker %q already uses address %s", other.Name, sp.IP)
-		}
-		if sp.MAC != "" && other.MAC == sp.MAC {
-			return fmt.Errorf("speaker %q is already registered (same device id)", other.Name)
-		}
-	}
-	return nil
+	return uniqueSpeaker(s.KEF,
+		speakerIdentity{ID: sp.ID, Name: sp.Name, IP: sp.IP, DeviceID: sp.MAC},
+		func(o *KEFSpeaker) speakerIdentity {
+			return speakerIdentity{ID: o.ID, Name: o.Name, IP: o.IP, DeviceID: o.MAC}
+		})
 }
 
 // sceneAccents is the allow-list of scene tile accent presets. Each key maps

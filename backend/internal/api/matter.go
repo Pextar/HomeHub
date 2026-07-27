@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"log"
 	"net/http"
 	"os"
@@ -52,8 +51,7 @@ func (s *Server) matterCommission(w http.ResponseWriter, r *http.Request) {
 		PairingCode string `json:"pairing_code"`
 		Transport   string `json:"transport"` // "wifi" | "thread" | "" (auto)
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+	if !decodeBody(w, r, &body) {
 		return
 	}
 	if body.PairingCode == "" {
@@ -125,8 +123,7 @@ func (s *Server) matterSetState(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var update matter.StateUpdate
-	if err := json.NewDecoder(r.Body).Decode(&update); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+	if !decodeBody(w, r, &update) {
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), matter.DefaultTimeout)

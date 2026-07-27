@@ -38,8 +38,7 @@ func (s *Server) getSensors(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) createSensor(w http.ResponseWriter, r *http.Request) {
 	var sn store.Sensor
-	if err := json.NewDecoder(r.Body).Decode(&sn); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+	if !decodeBody(w, r, &sn) {
 		return
 	}
 
@@ -58,9 +57,7 @@ func (s *Server) createSensor(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.Store.Sensors[sn.ID] = &sn
-	if err := s.Store.Save(); err != nil {
-		delete(s.Store.Sensors, sn.ID)
-		writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
+	if !s.saveStoreOr(w, func() { delete(s.Store.Sensors, sn.ID) }) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, sn)
@@ -69,8 +66,7 @@ func (s *Server) createSensor(w http.ResponseWriter, r *http.Request) {
 func (s *Server) updateSensor(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
 	var updates store.Sensor
-	if err := json.NewDecoder(r.Body).Decode(&updates); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+	if !decodeBody(w, r, &updates) {
 		return
 	}
 
@@ -111,8 +107,7 @@ func (s *Server) updateSensor(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	*existing = merged
-	if err := s.Store.Save(); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
+	if !s.saveStore(w) {
 		return
 	}
 	writeJSON(w, http.StatusOK, existing)
@@ -122,20 +117,17 @@ func (s *Server) deleteSensor(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
 
 	s.Store.Mu.Lock()
+	defer s.Store.Mu.Unlock()
 	if _, ok := s.Store.Sensors[id]; !ok {
-		s.Store.Mu.Unlock()
 		writeError(w, http.StatusNotFound, "sensor not found")
 		return
 	}
 	delete(s.Store.Sensors, id)
 	delete(s.Store.Readings, id)
 	s.Store.PruneAutomationsForSensor(id)
-	if err := s.Store.Save(); err != nil {
-		s.Store.Mu.Unlock()
-		writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
+	if !s.saveStore(w) {
 		return
 	}
-	s.Store.Mu.Unlock()
 
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -233,8 +225,7 @@ func (s *Server) postSensorReading(w http.ResponseWriter, r *http.Request) {
 		Value float64    `json:"value"`
 		Time  *time.Time `json:"time,omitempty"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+	if !decodeBody(w, r, &body) {
 		return
 	}
 	t := time.Now().UTC()

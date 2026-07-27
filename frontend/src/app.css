@@ -94,9 +94,29 @@
     --kid-purple:       #b15dff;
     --kid-green:        #3ddc97;
     --kid-orange:       #ff8c42;
+    --kid-fg:           #fff;                             /* text on a saturated kid hue */
+
+    /* Control knobs — the movable part of a switch or range slider.
+       Physical hardware rather than themed surface: the knob looks the
+       same in both themes, so it sits here. Defined once because the
+       thumb styling repeats across Switch, SocketCard, the music Slider
+       and both speaker detail views. */
+    --knob:      #fff;                  /* knob in its active/ON position */
+    --knob-off:  #b5b1a8;               /* knob in its inactive position */
+    --knob-edge: rgba(0, 0, 0, 0.35);   /* rim keeping it legible on any track */
+
+    /* The deepest surface in the app, below --bg. Console-only per
+       DESIGN.md §2 — nothing else may use it. */
+    --console-bg: #0a0907;
 }
 
-[data-theme="dark"] {
+/* `.force-dark` pins this palette on a subtree whatever the active theme.
+   Console is the one user: it is always a dark terminal, so it needs the
+   warm-dark values even in light mode. Sharing the selector instead of
+   restating the palette there stops the two drifting — Console used to
+   carry its own copy of 17 of these. */
+[data-theme="dark"],
+.force-dark {
     /* Warm dark — incandescent amber accent */
     --bg: #14130f;
     --bg-elevated: #1f1d17;

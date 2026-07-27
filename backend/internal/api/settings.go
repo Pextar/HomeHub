@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/json"
 	"net/http"
 
 	"homehub/internal/store"
@@ -16,8 +15,7 @@ func (s *Server) getSettings(w http.ResponseWriter, _ *http.Request) {
 
 func (s *Server) updateSettings(w http.ResponseWriter, r *http.Request) {
 	var incoming store.Settings
-	if err := json.NewDecoder(r.Body).Decode(&incoming); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+	if !decodeBody(w, r, &incoming) {
 		return
 	}
 
@@ -30,9 +28,7 @@ func (s *Server) updateSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	previous := *s.Store.Settings
 	*s.Store.Settings = incoming
-	if err := s.Store.Save(); err != nil {
-		*s.Store.Settings = previous
-		writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
+	if !s.saveStoreOr(w, func() { *s.Store.Settings = previous }) {
 		return
 	}
 	writeJSON(w, http.StatusOK, s.Store.Settings)

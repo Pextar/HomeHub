@@ -54,8 +54,7 @@ func (s *Server) getGroup(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) createGroup(w http.ResponseWriter, r *http.Request) {
 	var g store.Group
-	if err := json.NewDecoder(r.Body).Decode(&g); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+	if !decodeBody(w, r, &g) {
 		return
 	}
 
@@ -74,9 +73,7 @@ func (s *Server) createGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.Store.Groups[g.ID] = &g
-	if err := s.Store.Save(); err != nil {
-		delete(s.Store.Groups, g.ID)
-		writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
+	if !s.saveStoreOr(w, func() { delete(s.Store.Groups, g.ID) }) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, g)
@@ -86,8 +83,7 @@ func (s *Server) updateGroup(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
 
 	var updates store.Group
-	if err := json.NewDecoder(r.Body).Decode(&updates); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+	if !decodeBody(w, r, &updates) {
 		return
 	}
 
@@ -111,8 +107,7 @@ func (s *Server) updateGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	*existing = merged
-	if err := s.Store.Save(); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
+	if !s.saveStore(w) {
 		return
 	}
 	writeJSON(w, http.StatusOK, existing)
@@ -122,8 +117,8 @@ func (s *Server) deleteGroup(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
 
 	s.Store.Mu.Lock()
+	defer s.Store.Mu.Unlock()
 	if _, ok := s.Store.Groups[id]; !ok {
-		s.Store.Mu.Unlock()
 		writeError(w, http.StatusNotFound, "group not found")
 		return
 	}
@@ -139,12 +134,9 @@ func (s *Server) deleteGroup(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	s.Store.PruneAutomationsForTarget("group", id)
-	if err := s.Store.Save(); err != nil {
-		s.Store.Mu.Unlock()
-		writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
+	if !s.saveStore(w) {
 		return
 	}
-	s.Store.Mu.Unlock()
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -174,37 +166,18 @@ func (s *Server) groupAction(action string) http.HandlerFunc {
 // REST handler and the assistant's control_group tool. found is false when no
 // group has the given id. Caller must NOT hold Mu.
 func (s *Server) doGroupAction(id, action string) (name string, ok int, failures []map[string]string, found bool, err error) {
-	s.Store.Mu.Lock()
-	g, exists := s.Store.Groups[id]
-	var staged []store.StagedSend
-	if exists {
-		name = g.Name
-		staged, _ = s.Store.StageAction("group", id, action)
-	}
-	s.Store.Mu.Unlock()
-	if !exists {
-		return "", 0, nil, false, nil
-	}
-
-	s.Store.SendStaged(staged)
-
-	s.Store.Mu.Lock()
-	// Suppress per-socket push notifications; we send one summary below.
-	s.Store.SuppressStateChange = true
-	_ = s.Store.ApplyStaged(staged)
-	s.Store.SuppressStateChange = false
-	ok, failures = stagedFailures(staged)
-	entry := store.ActivityEntry{Kind: "group", Source: "manual", Action: action, Label: name}
-	if len(failures) > 0 {
-		entry.Status = "error"
-		entry.Error = fmt.Sprintf("%d of %d failed", len(failures), ok+len(failures))
-	}
-	s.Store.Activity.Add(entry)
-	err = s.Store.Save()
-	s.Store.Mu.Unlock()
-	if err != nil {
-		return name, ok, failures, true, err
-	}
-	s.notifyBulkState(fmt.Sprintf("%s turned %s", name, action), ok)
-	return name, ok, failures, true, nil
+	return s.runStaged(stagedAction{
+		Kind: "group", Action: action, Source: "manual",
+		Stage: func() (string, []store.StagedSend, bool) {
+			g, exists := s.Store.Groups[id]
+			if !exists {
+				return "", nil, false
+			}
+			staged, _ := s.Store.StageAction("group", id, action)
+			return g.Name, staged, true
+		},
+		Notify: func(label string, _ int) string {
+			return fmt.Sprintf("%s turned %s", label, action)
+		},
+	})
 }

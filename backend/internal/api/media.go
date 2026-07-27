@@ -19,7 +19,6 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -233,8 +232,7 @@ func memberOf(d media.Descriptor) string {
 // mediaCreateZone handles POST /api/media/zones.
 func (s *Server) mediaCreateZone(w http.ResponseWriter, r *http.Request) {
 	var z store.Zone
-	if err := json.NewDecoder(r.Body).Decode(&z); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+	if !decodeBody(w, r, &z) {
 		return
 	}
 	z.ID = fmt.Sprintf("zone_%d", time.Now().UnixNano())
@@ -246,8 +244,7 @@ func (s *Server) mediaCreateZone(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.Store.Zones[z.ID] = &z
-	if err := s.Store.Save(); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
+	if !s.saveStore(w) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, z)
@@ -257,8 +254,7 @@ func (s *Server) mediaCreateZone(w http.ResponseWriter, r *http.Request) {
 func (s *Server) mediaUpdateZone(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
 	var updates store.Zone
-	if err := json.NewDecoder(r.Body).Decode(&updates); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+	if !decodeBody(w, r, &updates) {
 		return
 	}
 
@@ -284,8 +280,7 @@ func (s *Server) mediaUpdateZone(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	*existing = merged
-	if err := s.Store.Save(); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
+	if !s.saveStore(w) {
 		return
 	}
 	writeJSON(w, http.StatusOK, existing)
@@ -301,8 +296,7 @@ func (s *Server) mediaDeleteZone(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	delete(s.Store.Zones, id)
-	if err := s.Store.Save(); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
+	if !s.saveStore(w) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -356,8 +350,7 @@ func (s *Server) mediaZonePlay(w http.ResponseWriter, r *http.Request) {
 		Title    string `json:"title"`
 		Kind     string `json:"kind"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+	if !decodeBody(w, r, &body) {
 		return
 	}
 	if strings.TrimSpace(body.URI) == "" {
@@ -485,8 +478,7 @@ func (s *Server) mediaZoneVolume(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Level *int `json:"level"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+	if !decodeBody(w, r, &body) {
 		return
 	}
 	if body.Level == nil {
@@ -512,8 +504,7 @@ func (s *Server) mediaZoneMute(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Muted bool `json:"muted"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+	if !decodeBody(w, r, &body) {
 		return
 	}
 	members, _, ok := s.resolveZone(w, r)
