@@ -14,16 +14,19 @@ import (
 )
 
 func (s *Server) getGroups(w http.ResponseWriter, r *http.Request) {
-	s.Store.Mu.RLock()
-	out := make([]*store.Group, 0, len(s.Store.Groups))
-	for _, g := range s.Store.Groups {
-		out = append(out, g)
-	}
-	sort.Slice(out, func(i, j int) bool {
-		return strings.ToLower(out[i].Name) < strings.ToLower(out[j].Name)
+	var b []byte
+	var err error
+	s.Store.View(func() {
+		out := make([]*store.Group, 0, len(s.Store.Groups))
+		for _, g := range s.Store.Groups {
+			out = append(out, g)
+		}
+		sort.Slice(out, func(i, j int) bool {
+			return strings.ToLower(out[i].Name) < strings.ToLower(out[j].Name)
+		})
+		// Marshalled inside the lock because out holds live pointers.
+		b, err = json.Marshal(out)
 	})
-	b, err := json.Marshal(out)
-	s.Store.Mu.RUnlock()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to encode response")
 		return
@@ -33,14 +36,15 @@ func (s *Server) getGroups(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) getGroup(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
-	s.Store.Mu.RLock()
-	g, ok := s.Store.Groups[id]
 	var b []byte
 	var err error
-	if ok {
-		b, err = json.Marshal(g)
-	}
-	s.Store.Mu.RUnlock()
+	var ok bool
+	s.Store.View(func() {
+		var g *store.Group
+		if g, ok = s.Store.Groups[id]; ok {
+			b, err = json.Marshal(g)
+		}
+	})
 	if !ok {
 		writeError(w, http.StatusNotFound, "group not found")
 		return
@@ -58,22 +62,21 @@ func (s *Server) createGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.Store.Mu.Lock()
-	defer s.Store.Mu.Unlock()
-
-	if err := s.Store.ValidateGroup(&g); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	if g.ID == "" {
-		g.ID = fmt.Sprintf("group_%d", time.Now().UnixNano())
-	} else if _, exists := s.Store.Groups[g.ID]; exists {
-		// A client-supplied ID must not silently replace an existing record.
-		writeError(w, http.StatusConflict, "a group with that id already exists")
-		return
-	}
-	s.Store.Groups[g.ID] = &g
-	if !s.saveStoreOr(w, func() { delete(s.Store.Groups, g.ID) }) {
+	// Validation runs before the id check, so a body that is both invalid
+	// and colliding reports the validation problem.
+	if !s.updateOr(w, func() { delete(s.Store.Groups, g.ID) }, func() error {
+		if err := s.Store.ValidateGroup(&g); err != nil {
+			return errInvalid(err)
+		}
+		if g.ID == "" {
+			g.ID = fmt.Sprintf("group_%d", time.Now().UnixNano())
+		} else if _, exists := s.Store.Groups[g.ID]; exists {
+			// A client-supplied ID must not silently replace an existing record.
+			return errConflict("group")
+		}
+		s.Store.Groups[g.ID] = &g
+		return nil
+	}) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, g)
@@ -87,27 +90,28 @@ func (s *Server) updateGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.Store.Mu.Lock()
-	defer s.Store.Mu.Unlock()
-
-	existing, ok := s.Store.Groups[id]
-	if !ok {
-		writeError(w, http.StatusNotFound, "group not found")
-		return
-	}
-	merged := *existing
-	if name := strings.TrimSpace(updates.Name); name != "" {
-		merged.Name = name
-	}
-	if updates.SocketIDs != nil {
-		merged.SocketIDs = updates.SocketIDs
-	}
-	if err := s.Store.ValidateGroup(&merged); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	*existing = merged
-	if !s.saveStore(w) {
+	var existing *store.Group
+	if !s.update(w, func() error {
+		var ok bool
+		existing, ok = s.Store.Groups[id]
+		if !ok {
+			return errNotFound("group")
+		}
+		// Merge into a copy and validate that, so a rejected edit leaves the
+		// stored group untouched.
+		merged := *existing
+		if name := strings.TrimSpace(updates.Name); name != "" {
+			merged.Name = name
+		}
+		if updates.SocketIDs != nil {
+			merged.SocketIDs = updates.SocketIDs
+		}
+		if err := s.Store.ValidateGroup(&merged); err != nil {
+			return errInvalid(err)
+		}
+		*existing = merged
+		return nil
+	}) {
 		return
 	}
 	writeJSON(w, http.StatusOK, existing)
@@ -116,25 +120,24 @@ func (s *Server) updateGroup(w http.ResponseWriter, r *http.Request) {
 func (s *Server) deleteGroup(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
 
-	s.Store.Mu.Lock()
-	defer s.Store.Mu.Unlock()
-	if _, ok := s.Store.Groups[id]; !ok {
-		writeError(w, http.StatusNotFound, "group not found")
-		return
-	}
-	delete(s.Store.Groups, id)
-	for sid, sch := range s.Store.Schedules {
-		if sch.TargetType == "group" && sch.TargetID == id {
-			delete(s.Store.Schedules, sid)
+	if !s.update(w, func() error {
+		if _, ok := s.Store.Groups[id]; !ok {
+			return errNotFound("group")
 		}
-	}
-	for tid, t := range s.Store.Timers {
-		if t.TargetType == "group" && t.TargetID == id {
-			delete(s.Store.Timers, tid)
+		delete(s.Store.Groups, id)
+		for sid, sch := range s.Store.Schedules {
+			if sch.TargetType == "group" && sch.TargetID == id {
+				delete(s.Store.Schedules, sid)
+			}
 		}
-	}
-	s.Store.PruneAutomationsForTarget("group", id)
-	if !s.saveStore(w) {
+		for tid, t := range s.Store.Timers {
+			if t.TargetType == "group" && t.TargetID == id {
+				delete(s.Store.Timers, tid)
+			}
+		}
+		s.Store.PruneAutomationsForTarget("group", id)
+		return nil
+	}) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
