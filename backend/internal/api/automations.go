@@ -141,17 +141,18 @@ func (s *Server) deleteAutomation(w http.ResponseWriter, r *http.Request) {
 func (s *Server) runAutomation(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
 
-	s.Store.Mu.RLock()
-	a, ok := s.Store.Automations[id]
+	var ok bool
 	var name string
 	var actions []store.AutomationAction
-	if ok {
-		name = a.Name
-		for _, rl := range a.Rules {
-			actions = append(actions, rl.Actions...)
+	s.Store.View(func() {
+		var a *store.Automation
+		if a, ok = s.Store.Automations[id]; ok {
+			name = a.Name
+			for _, rl := range a.Rules {
+				actions = append(actions, rl.Actions...)
+			}
 		}
-	}
-	s.Store.Mu.RUnlock()
+	})
 	if !ok {
 		writeError(w, http.StatusNotFound, "automation not found")
 		return
@@ -170,17 +171,17 @@ func (s *Server) runAutomationRule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.Store.Mu.RLock()
-	a, ok := s.Store.Automations[id]
+	var ok bool
 	var name string
 	var actions []store.AutomationAction
-	if ok && idx < len(a.Rules) {
-		name = a.Name
-		actions = append(actions, a.Rules[idx].Actions...)
-	} else {
-		ok = false
-	}
-	s.Store.Mu.RUnlock()
+	s.Store.View(func() {
+		a, found := s.Store.Automations[id]
+		if found && idx < len(a.Rules) {
+			ok = true
+			name = a.Name
+			actions = append(actions, a.Rules[idx].Actions...)
+		}
+	})
 	if !ok {
 		writeError(w, http.StatusNotFound, "automation or rule not found")
 		return

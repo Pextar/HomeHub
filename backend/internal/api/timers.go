@@ -15,14 +15,16 @@ import (
 )
 
 func (s *Server) getTimers(w http.ResponseWriter, r *http.Request) {
-	s.Store.Mu.RLock()
-	out := make([]*store.Timer, 0, len(s.Store.Timers))
-	for _, t := range s.Store.Timers {
-		out = append(out, t)
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].FiresAt.Before(out[j].FiresAt) })
-	b, err := json.Marshal(out)
-	s.Store.Mu.RUnlock()
+	var b []byte
+	var err error
+	s.Store.View(func() {
+		out := make([]*store.Timer, 0, len(s.Store.Timers))
+		for _, t := range s.Store.Timers {
+			out = append(out, t)
+		}
+		sort.Slice(out, func(i, j int) bool { return out[i].FiresAt.Before(out[j].FiresAt) })
+		b, err = json.Marshal(out)
+	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to encode response")
 		return

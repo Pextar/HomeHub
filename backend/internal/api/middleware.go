@@ -71,9 +71,10 @@ func (s *Server) lookupUser(id string) *store.User {
 // so the response timing doesn't leak which usernames exist. A user with
 // no password (a code-only profile) can never match this path.
 func (s *Server) verifyCredentials(username, password string) *store.User {
-	s.Store.Mu.RLock()
-	u := s.Store.UserByUsername(username)
-	s.Store.Mu.RUnlock()
+	var u *store.User
+	s.Store.View(func() {
+		u = s.Store.UserByUsername(username)
+	})
 	hash := []byte("$2a$10$invalidinvalidinvalidinvalidinvalidinvalidinvalidinvali")
 	if u != nil && u.PasswordHash != "" {
 		hash = []byte(u.PasswordHash)

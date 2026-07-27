@@ -7,9 +7,8 @@ import (
 )
 
 func (s *Server) getSettings(w http.ResponseWriter, _ *http.Request) {
-	s.Store.Mu.RLock()
-	out := *s.Store.Settings
-	s.Store.Mu.RUnlock()
+	var out store.Settings
+	s.Store.View(func() { out = *s.Store.Settings })
 	writeJSON(w, http.StatusOK, out)
 }
 

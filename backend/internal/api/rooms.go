@@ -22,39 +22,39 @@ type roomSummary struct {
 // getRooms returns all rooms with their socket counts and on-counts.
 func (s *Server) getRooms(w http.ResponseWriter, r *http.Request) {
 	user := currentUser(r)
-	s.Store.Mu.RLock()
+	var out []*roomSummary
+	s.Store.View(func() {
+		// Count sockets per room name (case-insensitive key → canonical name from Room entity).
+		type counts struct{ total, on int }
+		byName := make(map[string]*counts)
+		for _, sock := range s.Store.Sockets {
+			if !canAccess(user, sock.ID) {
+				continue
+			}
+			key := strings.ToLower(strings.TrimSpace(sock.Room))
+			if key == "" {
+				continue
+			}
+			if byName[key] == nil {
+				byName[key] = &counts{}
+			}
+			byName[key].total++
+			if sock.State {
+				byName[key].on++
+			}
+		}
 
-	// Count sockets per room name (case-insensitive key → canonical name from Room entity).
-	type counts struct{ total, on int }
-	byName := make(map[string]*counts)
-	for _, sock := range s.Store.Sockets {
-		if !canAccess(user, sock.ID) {
-			continue
+		out = make([]*roomSummary, 0, len(s.Store.Rooms))
+		for _, rm := range s.Store.Rooms {
+			c := byName[strings.ToLower(rm.Name)]
+			rs := &roomSummary{ID: rm.ID, Name: rm.Name}
+			if c != nil {
+				rs.Sockets = c.total
+				rs.On = c.on
+			}
+			out = append(out, rs)
 		}
-		key := strings.ToLower(strings.TrimSpace(sock.Room))
-		if key == "" {
-			continue
-		}
-		if byName[key] == nil {
-			byName[key] = &counts{}
-		}
-		byName[key].total++
-		if sock.State {
-			byName[key].on++
-		}
-	}
-
-	out := make([]*roomSummary, 0, len(s.Store.Rooms))
-	for _, rm := range s.Store.Rooms {
-		c := byName[strings.ToLower(rm.Name)]
-		rs := &roomSummary{ID: rm.ID, Name: rm.Name}
-		if c != nil {
-			rs.Sockets = c.total
-			rs.On = c.on
-		}
-		out = append(out, rs)
-	}
-	s.Store.Mu.RUnlock()
+	})
 
 	sort.Slice(out, func(i, j int) bool {
 		return strings.ToLower(out[i].Name) < strings.ToLower(out[j].Name)

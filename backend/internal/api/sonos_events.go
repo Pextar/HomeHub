@@ -161,12 +161,13 @@ type sonosEventHealthView struct {
 func (s *Server) sonosEventHealth(w http.ResponseWriter, r *http.Request) {
 	health := s.sonosEvents().Health()
 
-	s.Store.Mu.RLock()
-	names := make(map[string]*store.SonosSpeaker, len(s.Store.Sonos))
-	for _, sp := range s.Store.Sonos {
-		names[sp.ID] = sp
-	}
-	s.Store.Mu.RUnlock()
+	var names map[string]*store.SonosSpeaker
+	s.Store.View(func() {
+		names = make(map[string]*store.SonosSpeaker, len(s.Store.Sonos))
+		for _, sp := range s.Store.Sonos {
+			names[sp.ID] = sp
+		}
+	})
 
 	out := sonosEventHealthView{
 		Live:       health.Live,

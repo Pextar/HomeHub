@@ -11,6 +11,7 @@ import (
 	"github.com/gorilla/mux"
 
 	"homehub/internal/matter"
+	"homehub/internal/store"
 )
 
 // matterListDevices handles GET /api/matter/devices — returns every node
@@ -174,13 +175,14 @@ func (s *Server) matterNodeID(w http.ResponseWriter, r *http.Request) (string, b
 	if !s.requireSocketAccess(w, r, id) {
 		return "", false
 	}
-	s.Store.Mu.RLock()
-	sock, ok := s.Store.Sockets[id]
 	var code string
-	if ok {
-		code = sock.Code
-	}
-	s.Store.Mu.RUnlock()
+	var ok bool
+	s.Store.View(func() {
+		var sock *store.Socket
+		if sock, ok = s.Store.Sockets[id]; ok {
+			code = sock.Code
+		}
+	})
 
 	if !ok {
 		writeError(w, http.StatusNotFound, "socket not found")

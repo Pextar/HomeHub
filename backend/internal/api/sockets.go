@@ -80,14 +80,15 @@ func (s *Server) getSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.Store.Mu.RLock()
-	socket, ok := s.Store.Sockets[id]
 	var b []byte
 	var err error
-	if ok {
-		b, err = json.Marshal(socket)
-	}
-	s.Store.Mu.RUnlock()
+	var ok bool
+	s.Store.View(func() {
+		var socket *store.Socket
+		if socket, ok = s.Store.Sockets[id]; ok {
+			b, err = json.Marshal(socket)
+		}
+	})
 	if !ok {
 		writeError(w, http.StatusNotFound, "socket not found")
 		return

@@ -33,14 +33,15 @@ func (s *Server) getScenes(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) getScene(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
-	s.Store.Mu.RLock()
-	sc, ok := s.Store.Scenes[id]
 	var b []byte
 	var err error
-	if ok {
-		b, err = json.Marshal(sc)
-	}
-	s.Store.Mu.RUnlock()
+	var ok bool
+	s.Store.View(func() {
+		var sc *store.Scene
+		if sc, ok = s.Store.Scenes[id]; ok {
+			b, err = json.Marshal(sc)
+		}
+	})
 	if !ok {
 		writeError(w, http.StatusNotFound, "scene not found")
 		return

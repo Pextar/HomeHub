@@ -161,9 +161,12 @@ func (s *Server) startSensorPair(w http.ResponseWriter, r *http.Request) {
 // whether it's still open, when it closes, and every unknown emitter
 // heard so far (with sample numeric fields).
 func (s *Server) listDiscoveryCandidates(w http.ResponseWriter, _ *http.Request) {
-	s.Store.Mu.RLock()
-	active, until, candidates := s.Store.DiscoverySnapshot()
-	s.Store.Mu.RUnlock()
+	var active bool
+	var until time.Time
+	var candidates []*store.DiscoveryCandidate
+	s.Store.View(func() {
+		active, until, candidates = s.Store.DiscoverySnapshot()
+	})
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"active":     active,

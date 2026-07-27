@@ -30,23 +30,25 @@ type configBundle struct {
 // bundle. Sensor readings, timers and users are omitted — readings are
 // transient, timers are one-shot, and users carry credentials.
 func (s *Server) exportConfig(w http.ResponseWriter, _ *http.Request) {
-	s.Store.Mu.RLock()
-	settings := *s.Store.Settings
-	bundle := configBundle{
-		Version:     1,
-		ExportedAt:  time.Now().UTC(),
-		Sockets:     s.Store.Sockets,
-		Schedules:   s.Store.Schedules,
-		Groups:      s.Store.Groups,
-		Scenes:      s.Store.Scenes,
-		Automations: s.Store.Automations,
-		Sensors:     s.Store.Sensors,
-		Sonos:       s.Store.Sonos,
-		KEF:         s.Store.KEF,
-		Settings:    &settings,
-	}
-	body, err := json.MarshalIndent(bundle, "", "  ")
-	s.Store.Mu.RUnlock()
+	var body []byte
+	var err error
+	s.Store.View(func() {
+		settings := *s.Store.Settings
+		bundle := configBundle{
+			Version:     1,
+			ExportedAt:  time.Now().UTC(),
+			Sockets:     s.Store.Sockets,
+			Schedules:   s.Store.Schedules,
+			Groups:      s.Store.Groups,
+			Scenes:      s.Store.Scenes,
+			Automations: s.Store.Automations,
+			Sensors:     s.Store.Sensors,
+			Sonos:       s.Store.Sonos,
+			KEF:         s.Store.KEF,
+			Settings:    &settings,
+		}
+		body, err = json.MarshalIndent(bundle, "", "  ")
+	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to encode export: "+err.Error())
 		return

@@ -177,9 +177,8 @@ func (s *Server) Handler() http.Handler {
 	r.Use(maxBodyBytes(maxRequestBody))
 	r.Use(csrfMiddleware)
 
-	s.Store.Mu.RLock()
-	authEnabled := len(s.Store.Users) > 0
-	s.Store.Mu.RUnlock()
+	var authEnabled bool
+	s.Store.View(func() { authEnabled = len(s.Store.Users) > 0 })
 	if authEnabled {
 		log.Printf("HTTP auth enabled (cookie session + basic fallback)")
 	} else {
@@ -332,9 +331,8 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.Store.Mu.RLock()
-	authEnabled := len(s.Store.Users) > 0
-	s.Store.Mu.RUnlock()
+	var authEnabled bool
+	s.Store.View(func() { authEnabled = len(s.Store.Users) > 0 })
 
 	if authEnabled {
 		ip := clientIP(r)
@@ -413,13 +411,14 @@ func (s *Server) getActivity(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) getHealth(w http.ResponseWriter, r *http.Request) {
-	s.Store.Mu.RLock()
-	socketCount := len(s.Store.Sockets)
-	scheduleCount := len(s.Store.Schedules)
-	groupCount := len(s.Store.Groups)
-	sceneCount := len(s.Store.Scenes)
-	timerCount := len(s.Store.Timers)
-	s.Store.Mu.RUnlock()
+	var socketCount, scheduleCount, groupCount, sceneCount, timerCount int
+	s.Store.View(func() {
+		socketCount = len(s.Store.Sockets)
+		scheduleCount = len(s.Store.Schedules)
+		groupCount = len(s.Store.Groups)
+		sceneCount = len(s.Store.Scenes)
+		timerCount = len(s.Store.Timers)
+	})
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"status":    "ok",
 		"sockets":   socketCount,

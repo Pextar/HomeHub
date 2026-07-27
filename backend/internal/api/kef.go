@@ -81,12 +81,13 @@ func (s *Server) kefStatus(w http.ResponseWriter, r *http.Request) {
 
 // kefStoredSpeakers returns every registered speaker, sorted by name.
 func (s *Server) kefStoredSpeakers() []store.KEFSpeaker {
-	s.Store.Mu.RLock()
-	out := make([]store.KEFSpeaker, 0, len(s.Store.KEF))
-	for _, sp := range s.Store.KEF {
-		out = append(out, *sp)
-	}
-	s.Store.Mu.RUnlock()
+	var out []store.KEFSpeaker
+	s.Store.View(func() {
+		out = make([]store.KEFSpeaker, 0, len(s.Store.KEF))
+		for _, sp := range s.Store.KEF {
+			out = append(out, *sp)
+		}
+	})
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
 }
@@ -104,12 +105,13 @@ func (s *Server) kefDiscover(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Mark devices that are already registered so the UI can filter them.
-	s.Store.Mu.RLock()
-	known := make(map[string]bool, len(s.Store.KEF))
-	for _, sp := range s.Store.KEF {
-		known[sp.MAC] = true
-	}
-	s.Store.Mu.RUnlock()
+	var known map[string]bool
+	s.Store.View(func() {
+		known = make(map[string]bool, len(s.Store.KEF))
+		for _, sp := range s.Store.KEF {
+			known[sp.MAC] = true
+		}
+	})
 
 	type candidate struct {
 		kef.Device
@@ -230,13 +232,14 @@ func (s *Server) kefDeleteSpeaker(w http.ResponseWriter, r *http.Request) {
 // to use off-lock). Writes the error response itself on failure.
 func (s *Server) kefSpeaker(w http.ResponseWriter, r *http.Request) (store.KEFSpeaker, bool) {
 	id := mux.Vars(r)["id"]
-	s.Store.Mu.RLock()
-	sp, ok := s.Store.KEF[id]
 	var cp store.KEFSpeaker
-	if ok {
-		cp = *sp
-	}
-	s.Store.Mu.RUnlock()
+	var ok bool
+	s.Store.View(func() {
+		var sp *store.KEFSpeaker
+		if sp, ok = s.Store.KEF[id]; ok {
+			cp = *sp
+		}
+	})
 	if !ok {
 		writeError(w, http.StatusNotFound, "speaker not found")
 		return store.KEFSpeaker{}, false

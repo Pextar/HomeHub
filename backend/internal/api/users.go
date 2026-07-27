@@ -136,12 +136,13 @@ func (s *Server) getMe(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) listUsers(w http.ResponseWriter, _ *http.Request) {
-	s.Store.Mu.RLock()
-	out := make([]userView, 0, len(s.Store.Users))
-	for _, u := range s.Store.Users {
-		out = append(out, toUserView(u))
-	}
-	s.Store.Mu.RUnlock()
+	var out []userView
+	s.Store.View(func() {
+		out = make([]userView, 0, len(s.Store.Users))
+		for _, u := range s.Store.Users {
+			out = append(out, toUserView(u))
+		}
+	})
 	sortUserViews(out)
 	writeJSON(w, http.StatusOK, out)
 }
@@ -359,9 +360,8 @@ func (s *Server) lookupInvite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.Store.Mu.RLock()
-	user := s.Store.UserByInviteToken(token)
-	s.Store.Mu.RUnlock()
+	var user *store.User
+	s.Store.View(func() { user = s.Store.UserByInviteToken(token) })
 
 	if user == nil || user.InviteExpiry.Before(time.Now()) {
 		writeError(w, http.StatusNotFound, "invite link is invalid or has expired")

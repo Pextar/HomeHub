@@ -58,12 +58,13 @@ type sonosGroupView struct {
 // used to do on every single request. "live" tells the frontend which of the
 // two it got, so it can pick a polling interval to match.
 func (s *Server) sonosStatus(w http.ResponseWriter, r *http.Request) {
-	s.Store.Mu.RLock()
-	speakers := make([]store.SonosSpeaker, 0, len(s.Store.Sonos))
-	for _, sp := range s.Store.Sonos {
-		speakers = append(speakers, *sp)
-	}
-	s.Store.Mu.RUnlock()
+	var speakers []store.SonosSpeaker
+	s.Store.View(func() {
+		speakers = make([]store.SonosSpeaker, 0, len(s.Store.Sonos))
+		for _, sp := range s.Store.Sonos {
+			speakers = append(speakers, *sp)
+		}
+	})
 	sort.Slice(speakers, func(i, j int) bool { return speakers[i].Name < speakers[j].Name })
 
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
@@ -133,12 +134,13 @@ func (s *Server) sonosDiscover(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Mark devices that are already registered so the UI can filter them.
-	s.Store.Mu.RLock()
-	known := make(map[string]bool, len(s.Store.Sonos))
-	for _, sp := range s.Store.Sonos {
-		known[sp.UUID] = true
-	}
-	s.Store.Mu.RUnlock()
+	var known map[string]bool
+	s.Store.View(func() {
+		known = make(map[string]bool, len(s.Store.Sonos))
+		for _, sp := range s.Store.Sonos {
+			known[sp.UUID] = true
+		}
+	})
 
 	type candidate struct {
 		sonos.Device
@@ -264,13 +266,14 @@ func (s *Server) sonosDeleteSpeaker(w http.ResponseWriter, r *http.Request) {
 // safe to use off-lock). Writes the error response itself on failure.
 func (s *Server) sonosSpeaker(w http.ResponseWriter, r *http.Request) (store.SonosSpeaker, bool) {
 	id := mux.Vars(r)["id"]
-	s.Store.Mu.RLock()
-	sp, ok := s.Store.Sonos[id]
 	var cp store.SonosSpeaker
-	if ok {
-		cp = *sp
-	}
-	s.Store.Mu.RUnlock()
+	var ok bool
+	s.Store.View(func() {
+		var sp *store.SonosSpeaker
+		if sp, ok = s.Store.Sonos[id]; ok {
+			cp = *sp
+		}
+	})
 	if !ok {
 		writeError(w, http.StatusNotFound, "speaker not found")
 		return store.SonosSpeaker{}, false
@@ -566,14 +569,15 @@ func (s *Server) sonosJoin(w http.ResponseWriter, r *http.Request) {
 	if !decodeBody(w, r, &body) {
 		return
 	}
-	s.Store.Mu.RLock()
-	target, ok := s.Store.Sonos[body.TargetID]
 	var targetUUID string
-	if ok {
-		targetUUID = target.UUID
-	}
-	s.Store.Mu.RUnlock()
-	if !ok {
+	var found bool
+	s.Store.View(func() {
+		var target *store.SonosSpeaker
+		if target, found = s.Store.Sonos[body.TargetID]; found {
+			targetUUID = target.UUID
+		}
+	})
+	if !found {
 		writeError(w, http.StatusNotFound, "target speaker not found")
 		return
 	}
