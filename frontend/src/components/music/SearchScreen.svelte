@@ -1,7 +1,13 @@
 <script lang="ts">
     /**
      * Search — Spotify's catalog, and the one-time account setup in front of
-     * it. A sheet over Home, behind the plain search icon in its header.
+     * it. A screen, not a sheet: the grouped overview (a "Top result" card
+     * plus one section per kind that matched) is a browsing surface in its
+     * own right, closer in scope to Speakers than to a quick lookup, and 82%
+     * of the viewport with a grabber and close-X eating into it read as
+     * exactly that — a quick lookup — for content that wants the room to
+     * breathe. It takes the same §11 shape Speakers and the catalog drill-ins
+     * do: back chip, centered title, plain scrolling content.
      *
      * The box behaves like a search box: typing debounces, Enter runs the
      * query immediately, a clear X appears once there is something to clear
@@ -16,10 +22,9 @@
      */
     import type { Snippet } from "svelte";
     import { tick as flushDOM } from "svelte";
-    import { scale } from "svelte/transition";
+    import { scale, fly } from "svelte/transition";
     import { cubicOut } from "svelte/easing";
     import Icon from "../Icon.svelte";
-    import MusicSheet from "./MusicSheet.svelte";
     import { dur } from "../../lib/motion";
     import type { SpotifyStore } from "../../lib/music/spotify.svelte";
     import type { SearchHistory } from "../../lib/music/history.svelte";
@@ -32,10 +37,9 @@
         recents,
         destination,
         busy,
-        /** True when the sheet was opened to type in, rather than to read. */
+        /** True when the screen was opened to type in, rather than to read. */
         autofocus = false,
-        docked = false,
-        onDismiss,
+        onBack,
         onDisconnect,
         onPlayItem,
         onEnqueue,
@@ -43,21 +47,18 @@
          *  tracks and albums to pick from, not a single thing to start. */
         onOpenArtist,
         targetRow,
-        scrollEl = $bindable<HTMLElement | null>(null),
     }: {
         spotify: SpotifyStore;
         recents: SearchHistory;
         destination: Destination;
         busy: Busy;
         autofocus?: boolean;
-        docked?: boolean;
-        onDismiss: () => void;
+        onBack: () => void;
         onDisconnect: () => void;
         onPlayItem: (item: SpotifyItem) => void;
         onEnqueue: (item: SpotifyItem, next: boolean) => void;
         onOpenArtist: (uri: string) => void;
         targetRow: Snippet;
-        scrollEl?: HTMLElement | null;
     } = $props();
 
     let searchEl = $state<HTMLInputElement | null>(null);
@@ -131,8 +132,8 @@
     }
 
     /**
-     * Escape closes an open row menu before it closes the sheet, so the shell
-     * asks here first. Answers whether it consumed the key.
+     * Escape closes an open row menu before it closes the screen, so the
+     * shell asks here first. Answers whether it consumed the key.
      */
     export function closeMenu(): boolean {
         if (!menuFor) return false;
@@ -141,16 +142,18 @@
     }
 </script>
 
-<MusicSheet
-    label="Search"
-    title="Search"
-    sub={spotify.connected ? "Spotify" : ""}
-    backLabel="Close Search"
-    onBack={onDismiss}
-    {onDismiss}
-    {docked}
-    bind:scrollEl
->
+<div class="screen-head">
+    <button class="icon-btn" aria-label="Back to Music" onclick={onBack}>
+        <Icon name="chevronLeft" size={18} />
+    </button>
+    <div class="screen-title">
+        <h1>Search</h1>
+        {#if spotify.connected}<span class="screen-sub">Spotify</span>{/if}
+    </div>
+    <span class="head-spacer" aria-hidden="true"></span>
+</div>
+
+<div class="search-body" in:fly={{ y: 10, duration: dur(240), easing: cubicOut }}>
     <!-- ── Spotify search ──────────────────────────────────────────── -->
     {#if spotify.status}
         <section class="card">
@@ -509,9 +512,34 @@
             {/if}
         </section>
     {/if}
-</MusicSheet>
+</div>
 
 <style>
+    /* ── Screen head — the §11 shape, matching Speakers ── */
+    .screen-head { display: flex; align-items: center; gap: var(--space-3); }
+    .screen-title {
+        flex: 1; min-width: 0;
+        display: flex; flex-direction: column; gap: 2px;
+        text-align: center;
+    }
+    .screen-title h1 {
+        font-family: var(--font-sans);
+        font-size: 20px; font-weight: 600; letter-spacing: -0.02em;
+        color: var(--text);
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .screen-sub {
+        font-size: 12px; color: var(--text-mute);
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    /* Balances the back chip so the title stays centred with nothing on the right. */
+    .head-spacer { width: 32px; height: 32px; flex-shrink: 0; }
+
+    .search-body {
+        display: flex; flex-direction: column; gap: var(--space-5);
+        margin-top: var(--space-4);
+    }
+
     /* ── Spotify search ── */
     .sp-help { font-size: 12.5px; color: var(--text-mute); line-height: 1.5; }
     .sp-steps {
