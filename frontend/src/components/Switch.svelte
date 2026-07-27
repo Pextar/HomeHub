@@ -56,14 +56,14 @@
         content: "";
         position: absolute;
         width: 20px; height: 20px;
-        background: #b5b1a8;
+        background: var(--knob-off);
         border-radius: 50%;
         top: 3px; left: 3px;
         transition: transform 0.22s var(--spring), background var(--t-fast);
         box-shadow: 0 1px 3px rgba(0,0,0,0.25);
     }
     .switch input:checked + .track { background: var(--on); }
-    .switch input:checked + .track::after { transform: translateX(18px); background: #fff; }
+    .switch input:checked + .track::after { transform: translateX(18px); background: var(--knob); }
     .switch input:focus-visible + .track { box-shadow: var(--focus-ring); }
     .switch input:disabled + .track { opacity: 0.5; cursor: not-allowed; }
     .switch:active .track { box-shadow: 0 0 0 4px var(--primary-glow); }

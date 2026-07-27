@@ -291,11 +291,11 @@
         top: 3px; left: 3px;
         width: 20px; height: 20px;
         border-radius: 50%;
-        background: #b5b1a8;
+        background: var(--knob-off);
         transition: transform 220ms var(--spring), background 150ms ease;
     }
     .sw.on { background: var(--on); }
-    .sw.on::after { transform: translateX(18px); background: #fff; }
+    .sw.on::after { transform: translateX(18px); background: var(--knob); }
 
     /* Placeholder occupies the same slot as .sw so the layout is unchanged. */
     .sw-placeholder {

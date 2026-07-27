@@ -570,7 +570,7 @@
     }
 </script>
 
-<div class="console">
+<div class="console force-dark">
     <header class="head">
         <button class="chip back" onclick={() => route.go("settings")} aria-label="Back to settings">
             <Icon name="chevronLeft" size={16} />
@@ -688,34 +688,16 @@
 
 <style>
     /* Console is the one screen allowed the deepest surface (DESIGN.md §2).
-       It is always a dark terminal, so the warm-dark palette is pinned here
-       as scoped variables — child styles (and the .chip primitive) then
-       render correctly even when the app is in light theme. */
+       It is always a dark terminal, so it carries `.force-dark` (app.css)
+       to pin the warm-dark palette — child styles and the .chip primitive
+       then render correctly even when the app is in light theme. */
     .console {
         --con-line: rgba(245, 189, 110, 0.2);
-        --text: #eceae4;
-        --text-mute: #9c988e;
-        --text-dim: #66635c;
-        --on: #f5bd6e;
-        --on-soft: rgba(245, 189, 110, 0.14);
-        --good: #9cc28a;
-        --bad: #e08a7a;
-        --cool: #84acc4;
-        --card: #1f1d17;
-        --card-2: #26231c;
-        --card-3: #2e2a22;
-        --hairline: #2a2720;
-        --surface: rgba(245, 240, 228, 0.04);
-        --surface-hover: rgba(245, 240, 228, 0.08);
-        --p-rf: #f5a06e;
-        --p-wifi: #9cc28a;
-        --p-matter: #c4a4e0;
-        --p-mqtt: #e0c47a;
         display: flex;
         flex-direction: column;
         min-height: calc(100vh - var(--space-7) * 2);
         margin: calc(var(--space-7) * -1) -36px;
-        background: #0a0907;
+        background: var(--console-bg);
         font-family: var(--font-mono);
         color: var(--text);
     }
@@ -829,7 +811,7 @@
 
     .cmdbar {
         border-top: 1px solid rgba(245, 189, 110, 0.25);
-        background: #0a0907;
+        background: var(--console-bg);
         padding: 10px 16px calc(14px + env(safe-area-inset-bottom));
     }
     .quick { margin-bottom: 10px; }

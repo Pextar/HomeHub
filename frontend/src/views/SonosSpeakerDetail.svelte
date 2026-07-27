@@ -633,12 +633,12 @@
     input[type="range"]::-webkit-slider-thumb {
         appearance: none;
         width: 18px; height: 18px; border-radius: 50%;
-        background: #fff; border: 2px solid rgba(0, 0, 0, 0.35);
+        background: var(--knob); border: 2px solid var(--knob-edge);
         cursor: pointer; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
     }
     input[type="range"]::-moz-range-thumb {
         width: 18px; height: 18px; border-radius: 50%;
-        background: #fff; border: 2px solid rgba(0, 0, 0, 0.35);
+        background: var(--knob); border: 2px solid var(--knob-edge);
         cursor: pointer; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
     }
     input[type="range"]:focus-visible { box-shadow: 0 0 0 2px var(--on-soft); }

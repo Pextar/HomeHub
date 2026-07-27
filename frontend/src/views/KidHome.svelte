@@ -599,7 +599,7 @@
     .sched-del.pending {
         background: var(--kid-pink);
         border-color: var(--kid-pink);
-        color: #fff;
+        color: var(--kid-fg);
         animation: shake 0.35s ease;
     }
 

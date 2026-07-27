@@ -716,7 +716,7 @@
         transition: background var(--t-fast), color var(--t-fast), box-shadow var(--t-fast);
     }
     .row-bulb.bulb-on {
-        background: var(--on); color: #1d180f;
+        background: var(--on); color: var(--primary-fg);
         box-shadow: 0 0 0 1px var(--on), 0 0 14px 2px var(--on-glow);
     }
     .row-bulb.bulb-off { background: var(--bg-elevated); color: var(--text-dim); }

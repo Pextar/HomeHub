@@ -13,18 +13,24 @@
     interface Props { scene: Scene; manage?: boolean; }
     let { scene, manage = false }: Props = $props();
 
-    // Stable per-scene hue from a name hash, matching the mockup's palette.
-    const PALETTE = ["var(--on)", "var(--cool)", "#a96bd9", "#d97a45", "#ffd066", "var(--text-mute)"];
-    function nameHash(s: string): number {
-        let h = 5381;
-        for (let i = 0; i < s.length; i++) h = ((h << 5) + h) ^ s.charCodeAt(i);
-        return Math.abs(h);
-    }
     // Accent presets map to design tokens; fall back to the name-hash hue.
     const ACCENTS: Record<string, string> = {
         amber: "var(--on)", cool: "var(--cool)", violet: "var(--p-matter)",
         orange: "var(--p-rf)", green: "var(--good)", gold: "var(--p-mqtt)",
     };
+    // Stable per-scene hue from a name hash, for scenes with no accent set.
+    // Same six slots in the same order as before, but drawn from the accent
+    // tokens instead of literals so the auto hues follow the theme — the
+    // literals here rendered as dark-on-dark in light mode.
+    const PALETTE = [
+        ACCENTS.amber, ACCENTS.cool, ACCENTS.violet,
+        ACCENTS.orange, ACCENTS.gold, "var(--text-mute)",
+    ];
+    function nameHash(s: string): number {
+        let h = 5381;
+        for (let i = 0; i < s.length; i++) h = ((h << 5) + h) ^ s.charCodeAt(i);
+        return Math.abs(h);
+    }
     const hue = $derived(
         scene.color && ACCENTS[scene.color] ? ACCENTS[scene.color] : PALETTE[nameHash(scene.name) % PALETTE.length],
     );
