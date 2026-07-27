@@ -27,15 +27,15 @@ var socketIDFields = map[string]string{
 	"AutomationTrigger.SocketID":   "the rule is dropped: it could never fire again",
 	"AutomationCondition.SocketID": "the condition is dropped, the rule survives",
 
-	"Schedule.SocketID": "legacy field. Load migrates it into TargetType/TargetID, " +
-		"and the schedule is then deleted by target, so the stale copy goes with " +
-		"the record rather than being cleared in place",
+	// Not stale data: scheduleSocketID, the scheduler and three frontend
+	// components still read this as the fallback for a schedule saved before
+	// target_type existed. Clearing it would break them.
+	"Schedule.SocketID": "live compatibility field. Load mirrors it into " +
+		"TargetType/TargetID, and the schedule is deleted by target, so the " +
+		"record goes as a whole rather than the field being cleared in place",
 
-	// Known gap, recorded rather than fixed as part of a refactor.
-	"NotifPrefs.MutedSocketIDs": "NOT cleared. A deleted socket's id stays in a " +
-		"user's mute list forever. Harmless in effect — the id simply never " +
-		"matches again — but it is a dangling reference, and it is the exact " +
-		"thing this test exists to surface. See TestMutedSocketIDsAreNotCascaded",
+	"NotifPrefs.MutedSocketIDs": "cleared — the per-user notification mute list " +
+		"holds ids of the same devices as the allow-list",
 }
 
 // looksLikeSocketID reports whether a field name denotes a socket id.
@@ -99,28 +99,46 @@ func TestSocketIDFieldsAreAllAccountedFor(t *testing.T) {
 	}
 }
 
-// The gap named above, pinned so it cannot change silently in either
-// direction: if someone fixes it, this test fails and gets deleted along
-// with the note.
-func TestMutedSocketIDsAreNotCascaded(t *testing.T) {
-	s := New(t.TempDir(), noopRF{})
-	s.Sockets["sk"] = &Socket{ID: "sk", Name: "Doomed", Code: "1:1", Protocol: "nexa"}
-	s.Users["u"] = &User{
-		ID: "u", Username: "kid",
-		SocketIDs:  []string{"sk"},
-		NotifPrefs: NotifPrefs{MutedSocketIDs: []string{"sk", "other"}},
-	}
+// Both halves of a user's notification preferences hold device ids, and both
+// are cleared. The mute list was missed originally: a deleted device's id
+// stayed there indefinitely.
+func TestDeletingADeviceClearsItsMuteEntry(t *testing.T) {
+	t.Run("socket", func(t *testing.T) {
+		s := New(t.TempDir(), noopRF{})
+		s.Users["u"] = &User{
+			ID: "u", Username: "kid",
+			SocketIDs:  []string{"sk", "keep"},
+			NotifPrefs: NotifPrefs{MutedSocketIDs: []string{"sk", "keep"}},
+		}
+		s.CascadeDeleteSocket("sk")
 
-	delete(s.Sockets, "sk")
-	s.CascadeDeleteSocket("sk")
+		if got := s.Users["u"].SocketIDs; len(got) != 1 || got[0] != "keep" {
+			t.Errorf("allow-list = %v", got)
+		}
+		if got := s.Users["u"].NotifPrefs.MutedSocketIDs; len(got) != 1 || got[0] != "keep" {
+			t.Errorf("muted sockets = %v, want the deleted id dropped", got)
+		}
+	})
 
-	if got := s.Users["u"].SocketIDs; len(got) != 0 {
-		t.Errorf("allow-list = %v, want the socket cleared", got)
-	}
-	if got := s.Users["u"].NotifPrefs.MutedSocketIDs; len(got) != 2 {
-		t.Errorf("muted ids = %v; this test records that they are NOT cleared. "+
-			"If that has been fixed, delete this test and update socketIDFields", got)
-	}
+	t.Run("sensor", func(t *testing.T) {
+		s := New(t.TempDir(), noopRF{})
+		s.Users["u"] = &User{
+			ID: "u", Username: "kid",
+			NotifPrefs: NotifPrefs{MutedSensorIDs: []string{"sn", "keep"}},
+		}
+		s.Automations["a"] = &Automation{ID: "a", Name: "A", Rules: []AutomationRule{{
+			Trigger: AutomationTrigger{Type: "sensor", SensorID: "sn"},
+			Actions: []AutomationAction{{TargetType: "socket", TargetID: "x", Action: "on"}},
+		}}}
+		s.CascadeDeleteSensor("sn")
+
+		if got := s.Users["u"].NotifPrefs.MutedSensorIDs; len(got) != 1 || got[0] != "keep" {
+			t.Errorf("muted sensors = %v, want the deleted id dropped", got)
+		}
+		if _, ok := s.Automations["a"]; ok {
+			t.Error("an automation left with no rules survived")
+		}
+	})
 }
 
 // CascadeDeleteTarget is the shared half of every target cascade, so it is

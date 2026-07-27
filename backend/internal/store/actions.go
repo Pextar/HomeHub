@@ -244,9 +244,11 @@ func (s *Store) CascadeDeleteSocket(socketID string) {
 	for _, g := range s.Groups {
 		g.SocketIDs = filterStrings(g.SocketIDs, socketID)
 	}
-	// User.SocketIDs — a limited profile's allow-list.
+	// User.SocketIDs — a limited profile's allow-list — and the per-user
+	// notification mute list, which holds ids of the same devices.
 	for _, u := range s.Users {
 		u.SocketIDs = filterStrings(u.SocketIDs, socketID)
+		u.NotifPrefs.MutedSocketIDs = filterStrings(u.NotifPrefs.MutedSocketIDs, socketID)
 	}
 	// SceneAction.SocketID, inside every step of every scene.
 	for _, sc := range s.Scenes {
@@ -262,6 +264,19 @@ func (s *Store) CascadeDeleteSocket(socketID string) {
 	}
 	// AutomationTrigger.SocketID and AutomationCondition.SocketID.
 	s.pruneAutomationsForSocket(socketID)
+}
+
+// CascadeDeleteSensor clears every reference to a deleted sensor: the
+// automation rules that watch it, and the per-user notification mute list.
+//
+// Sensors are not a schedulable target — schedules and timers can only aim at
+// a socket, group, room or scene — so there is no CascadeDeleteTarget call
+// here. Caller must hold Mu.
+func (s *Store) CascadeDeleteSensor(sensorID string) {
+	s.PruneAutomationsForSensor(sensorID)
+	for _, u := range s.Users {
+		u.NotifPrefs.MutedSensorIDs = filterStrings(u.NotifPrefs.MutedSensorIDs, sensorID)
+	}
 }
 
 // CascadeDeleteRoom removes schedules and timers that target a deleted room

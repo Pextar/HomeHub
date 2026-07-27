@@ -120,7 +120,7 @@ func (s *Server) deleteSensor(w http.ResponseWriter, r *http.Request) {
 		}
 		delete(s.Store.Sensors, id)
 		delete(s.Store.Readings, id)
-		s.Store.PruneAutomationsForSensor(id)
+		s.Store.CascadeDeleteSensor(id)
 		return nil
 	}) {
 		return
