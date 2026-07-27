@@ -2,6 +2,7 @@ package spotify
 
 import (
 	"context"
+	"net/http"
 	"strings"
 	"testing"
 )
@@ -59,4 +60,38 @@ func TestSetClientIDClearsTokensOnChange(t *testing.T) {
 	if !c.Status().Connected {
 		t.Error("re-saving the same client id must keep tokens")
 	}
+}
+
+// TestMarketBackfillsFromMe covers the bug where an artist page came back
+// with a name and picture but no top tracks or albums: those endpoints
+// silently answer with an empty list (not an error) when the request
+// carries no market, so a login stored before Country was recorded needs
+// ensureCountry to backfill it from /me before those calls go out.
+func TestMarketBackfillsFromMe(t *testing.T) {
+	c := connected(t, "", roundTripFunc(func(r *http.Request) *http.Response {
+		if !strings.HasSuffix(r.URL.Path, "/me") {
+			t.Fatalf("unexpected request to %s", r.URL.Path)
+		}
+		return jsonResponse(http.StatusOK, `{"country":"SE"}`)
+	}))
+
+	if m := c.market(); m != nil {
+		t.Errorf("market() before backfill should be nil, got %v", m)
+	}
+
+	c.ensureCountry(context.Background())
+
+	if got := c.market().Get("market"); got != "SE" {
+		t.Errorf("market() after backfill = %q, want SE", got)
+	}
+	if c.p.Country != "SE" {
+		t.Errorf("Country not persisted, got %q", c.p.Country)
+	}
+
+	// Already-known country must not trigger another /me round trip.
+	c.HTTP = &http.Client{Transport: roundTripFunc(func(r *http.Request) *http.Response {
+		t.Fatal("ensureCountry should be a no-op once Country is known")
+		return nil
+	})}
+	c.ensureCountry(context.Background())
 }

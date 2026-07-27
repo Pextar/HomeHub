@@ -78,6 +78,12 @@ type persisted struct {
 	// predates the player scopes entirely, which is worth saying out loud
 	// rather than discovering as a 403 mid-tap.
 	Scope string `json:"scope,omitempty"`
+	// Country is the account's Spotify market, read from /me at connect
+	// time. Several catalog endpoints (artist top tracks, artist albums)
+	// silently return an empty list rather than an error when a request
+	// carries no market — passing this is the difference between an
+	// artist page with content and one that's mysteriously empty.
+	Country string `json:"country,omitempty"`
 }
 
 // pendingAuth is one in-flight PKCE authorization, keyed by state. The
@@ -278,6 +284,7 @@ func (c *Client) HandleCallback(ctx context.Context, code, state string) error {
 	var me struct {
 		DisplayName string `json:"display_name"`
 		ID          string `json:"id"`
+		Country     string `json:"country"`
 	}
 	if err := c.apiGet(ctx, "/me", nil, &me); err == nil {
 		c.mu.Lock()
@@ -285,6 +292,7 @@ func (c *Client) HandleCallback(ctx context.Context, code, state string) error {
 		if c.p.DisplayName == "" {
 			c.p.DisplayName = me.ID
 		}
+		c.p.Country = me.Country
 		_ = c.save()
 		c.mu.Unlock()
 	}
@@ -399,6 +407,45 @@ func (c *Client) accessToken(ctx context.Context) (string, error) {
 	token := c.p.AccessToken
 	c.mu.Unlock()
 	return token, nil
+}
+
+// ensureCountry backfills c.p.Country for a login stored before it was
+// recorded (HandleCallback now captures it up front, but an account
+// connected by an older build never ran that code). Best-effort: a
+// failure just leaves market lookups empty, same as before this existed.
+func (c *Client) ensureCountry(ctx context.Context) {
+	c.mu.Lock()
+	known := c.p.Country != ""
+	c.mu.Unlock()
+	if known {
+		return
+	}
+	var me struct {
+		Country string `json:"country"`
+	}
+	if err := c.apiGet(ctx, "/me", nil, &me); err != nil || me.Country == "" {
+		return
+	}
+	c.mu.Lock()
+	c.p.Country = me.Country
+	_ = c.save()
+	c.mu.Unlock()
+}
+
+// market returns a "market" query value for the connected account's
+// country, or nil if it isn't known yet (a login stored by an older
+// build, before this was recorded). Several catalog endpoints treat a
+// request with no market as scoped to no market at all and answer with
+// an empty list rather than an error, so this is worth sending whenever
+// we have it even though Spotify's docs call the parameter optional.
+func (c *Client) market() url.Values {
+	c.mu.Lock()
+	country := c.p.Country
+	c.mu.Unlock()
+	if country == "" {
+		return nil
+	}
+	return url.Values{"market": {country}}
 }
 
 // apiGet performs an authenticated GET against the Web API.
@@ -608,6 +655,7 @@ func (c *Client) Artist(ctx context.Context, uri string) (*ArtistDetail, error) 
 	if err := c.apiGet(ctx, "/artists/"+url.PathEscape(id), nil, &raw); err != nil {
 		return nil, err
 	}
+	c.ensureCountry(ctx)
 	det := &ArtistDetail{URI: uri, Name: raw.Name, ArtURL: artOf(raw.Images), TopTracks: []Item{}, Albums: []Item{}}
 	if tt, err := c.artistTopTracks(ctx, id); err == nil {
 		det.TopTracks = tt
@@ -622,7 +670,7 @@ func (c *Client) artistTopTracks(ctx context.Context, id string) ([]Item, error)
 	var raw struct {
 		Tracks []wireTrack `json:"tracks"`
 	}
-	if err := c.apiGet(ctx, "/artists/"+url.PathEscape(id)+"/top-tracks", nil, &raw); err != nil {
+	if err := c.apiGet(ctx, "/artists/"+url.PathEscape(id)+"/top-tracks", c.market(), &raw); err != nil {
 		return nil, err
 	}
 	out := make([]Item, 0, len(raw.Tracks))
@@ -642,10 +690,14 @@ func (c *Client) artistAlbums(ctx context.Context, id string) ([]Item, error) {
 	var raw struct {
 		Items []wireAlbum `json:"items"`
 	}
-	err := c.apiGet(ctx, "/artists/"+url.PathEscape(id)+"/albums", url.Values{
+	q := url.Values{
 		"include_groups": {"album,single"},
 		"limit":          {"30"},
-	}, &raw)
+	}
+	if m := c.market(); m != nil {
+		q.Set("market", m.Get("market"))
+	}
+	err := c.apiGet(ctx, "/artists/"+url.PathEscape(id)+"/albums", q, &raw)
 	if err != nil {
 		return nil, err
 	}
