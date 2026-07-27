@@ -86,30 +86,27 @@ func main() {
 		if err := st.Load(); err != nil {
 			log.Fatalf("failed to load data: %v", err)
 		}
-		st.Mu.Lock()
 		var admin *store.User
-		for _, u := range st.Users {
-			if u.Admin {
-				admin = u
-				break
+		if err := st.Update(func() error {
+			for _, u := range st.Users {
+				if u.Admin {
+					admin = u
+					break
+				}
 			}
+			if admin == nil {
+				return errors.New("no admin user found — delete data/users.json and restart to re-seed from AUTH_USER/AUTH_PASS")
+			}
+			hash, err := bcrypt.GenerateFromPassword([]byte(newPass), bcrypt.DefaultCost)
+			if err != nil {
+				return fmt.Errorf("failed to hash password: %w", err)
+			}
+			admin.PasswordHash = string(hash)
+			admin.TokenVersion++ // invalidate any sessions minted with the old password
+			return nil
+		}); err != nil {
+			log.Fatal(err)
 		}
-		if admin == nil {
-			st.Mu.Unlock()
-			log.Fatal("no admin user found — delete data/users.json and restart to re-seed from AUTH_USER/AUTH_PASS")
-		}
-		hash, err := bcrypt.GenerateFromPassword([]byte(newPass), bcrypt.DefaultCost)
-		if err != nil {
-			st.Mu.Unlock()
-			log.Fatalf("failed to hash password: %v", err)
-		}
-		admin.PasswordHash = string(hash)
-		admin.TokenVersion++ // invalidate any sessions minted with the old password
-		if err := st.Save(); err != nil {
-			st.Mu.Unlock()
-			log.Fatalf("failed to save: %v", err)
-		}
-		st.Mu.Unlock()
 		fmt.Printf("Password reset for admin %q — you can now log in with the new AUTH_PASS.\n", admin.Username)
 		return
 	}
@@ -171,30 +168,30 @@ func main() {
 		// GetUserPrefs reads user prefs under a read lock so it is safe to
 		// call from goroutines spawned by the push callbacks.
 		GetUserPrefs: func() []push.UserPrefs {
-			st.Mu.RLock()
-			defer st.Mu.RUnlock()
-			out := make([]push.UserPrefs, 0, len(st.Users))
-			for _, u := range st.Users {
-				muted := make(map[string]bool, len(u.NotifPrefs.MutedSocketIDs)+len(u.NotifPrefs.MutedSensorIDs))
-				for _, id := range u.NotifPrefs.MutedSocketIDs {
-					muted[id] = true
+			return store.ViewValue(st, func() []push.UserPrefs {
+				out := make([]push.UserPrefs, 0, len(st.Users))
+				for _, u := range st.Users {
+					muted := make(map[string]bool, len(u.NotifPrefs.MutedSocketIDs)+len(u.NotifPrefs.MutedSensorIDs))
+					for _, id := range u.NotifPrefs.MutedSocketIDs {
+						muted[id] = true
+					}
+					for _, id := range u.NotifPrefs.MutedSensorIDs {
+						muted[id] = true
+					}
+					out = append(out, push.UserPrefs{
+						ID:            u.ID,
+						SensorAlerts:  u.NotifPrefs.SensorAlerts,
+						StateChanges:  u.NotifPrefs.StateChanges,
+						ScheduleFired: u.NotifPrefs.ScheduleFired,
+						DeviceOffline: u.NotifPrefs.DeviceOffline,
+						QuietHours:    u.NotifPrefs.QuietHours,
+						QuietStart:    u.NotifPrefs.QuietStart,
+						QuietEnd:      u.NotifPrefs.QuietEnd,
+						MutedIDs:      muted,
+					})
 				}
-				for _, id := range u.NotifPrefs.MutedSensorIDs {
-					muted[id] = true
-				}
-				out = append(out, push.UserPrefs{
-					ID:            u.ID,
-					SensorAlerts:  u.NotifPrefs.SensorAlerts,
-					StateChanges:  u.NotifPrefs.StateChanges,
-					ScheduleFired: u.NotifPrefs.ScheduleFired,
-					DeviceOffline: u.NotifPrefs.DeviceOffline,
-					QuietHours:    u.NotifPrefs.QuietHours,
-					QuietStart:    u.NotifPrefs.QuietStart,
-					QuietEnd:      u.NotifPrefs.QuietEnd,
-					MutedIDs:      muted,
-				})
-			}
-			return out
+				return out
+			})
 		},
 	}
 	log.Printf("Web Push notifications enabled (VAPID public key: %s...)", vapidKeys.PublicKey[:min(12, len(vapidKeys.PublicKey))])

@@ -14,16 +14,18 @@ import (
 )
 
 func (s *Server) getScenes(w http.ResponseWriter, r *http.Request) {
-	s.Store.Mu.RLock()
-	out := make([]*store.Scene, 0, len(s.Store.Scenes))
-	for _, sc := range s.Store.Scenes {
-		out = append(out, sc)
-	}
-	sort.Slice(out, func(i, j int) bool {
-		return strings.ToLower(out[i].Name) < strings.ToLower(out[j].Name)
+	var b []byte
+	var err error
+	s.Store.View(func() {
+		out := make([]*store.Scene, 0, len(s.Store.Scenes))
+		for _, sc := range s.Store.Scenes {
+			out = append(out, sc)
+		}
+		sort.Slice(out, func(i, j int) bool {
+			return strings.ToLower(out[i].Name) < strings.ToLower(out[j].Name)
+		})
+		b, err = json.Marshal(out)
 	})
-	b, err := json.Marshal(out)
-	s.Store.Mu.RUnlock()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to encode response")
 		return
@@ -33,14 +35,15 @@ func (s *Server) getScenes(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) getScene(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
-	s.Store.Mu.RLock()
-	sc, ok := s.Store.Scenes[id]
 	var b []byte
 	var err error
-	if ok {
-		b, err = json.Marshal(sc)
-	}
-	s.Store.Mu.RUnlock()
+	var ok bool
+	s.Store.View(func() {
+		var sc *store.Scene
+		if sc, ok = s.Store.Scenes[id]; ok {
+			b, err = json.Marshal(sc)
+		}
+	})
 	if !ok {
 		writeError(w, http.StatusNotFound, "scene not found")
 		return
@@ -58,22 +61,19 @@ func (s *Server) createScene(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.Store.Mu.Lock()
-	defer s.Store.Mu.Unlock()
-
-	if err := s.Store.ValidateScene(&sc); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	if sc.ID == "" {
-		sc.ID = fmt.Sprintf("scene_%d", time.Now().UnixNano())
-	} else if _, exists := s.Store.Scenes[sc.ID]; exists {
-		// A client-supplied ID must not silently replace an existing record.
-		writeError(w, http.StatusConflict, "a scene with that id already exists")
-		return
-	}
-	s.Store.Scenes[sc.ID] = &sc
-	if !s.saveStoreOr(w, func() { delete(s.Store.Scenes, sc.ID) }) {
+	if !s.updateOr(w, func() { delete(s.Store.Scenes, sc.ID) }, func() error {
+		if err := s.Store.ValidateScene(&sc); err != nil {
+			return errInvalid(err)
+		}
+		if sc.ID == "" {
+			sc.ID = fmt.Sprintf("scene_%d", time.Now().UnixNano())
+		} else if _, exists := s.Store.Scenes[sc.ID]; exists {
+			// A client-supplied ID must not silently replace an existing record.
+			return errStatus(http.StatusConflict, "a scene with that id already exists")
+		}
+		s.Store.Scenes[sc.ID] = &sc
+		return nil
+	}) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, sc)
@@ -87,34 +87,33 @@ func (s *Server) updateScene(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.Store.Mu.Lock()
-	defer s.Store.Mu.Unlock()
-
-	existing, ok := s.Store.Scenes[id]
-	if !ok {
-		writeError(w, http.StatusNotFound, "scene not found")
-		return
-	}
-	merged := *existing
-	if name := strings.TrimSpace(updates.Name); name != "" {
-		merged.Name = name
-	}
-	merged.Room = strings.TrimSpace(updates.Room)
-	merged.Icon = strings.TrimSpace(updates.Icon)
-	merged.Color = strings.TrimSpace(updates.Color)
-	if updates.Steps != nil {
-		merged.Steps = updates.Steps
-		merged.Actions = nil // clear legacy field when steps are provided
-	} else if updates.Actions != nil {
-		// Legacy clients that still send flat Actions; let ValidateScene migrate.
-		merged.Actions = updates.Actions
-	}
-	if err := s.Store.ValidateScene(&merged); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	*existing = merged
-	if !s.saveStore(w) {
+	var existing *store.Scene
+	if !s.update(w, func() error {
+		var ok bool
+		existing, ok = s.Store.Scenes[id]
+		if !ok {
+			return errStatus(http.StatusNotFound, "scene not found")
+		}
+		merged := *existing
+		if name := strings.TrimSpace(updates.Name); name != "" {
+			merged.Name = name
+		}
+		merged.Room = strings.TrimSpace(updates.Room)
+		merged.Icon = strings.TrimSpace(updates.Icon)
+		merged.Color = strings.TrimSpace(updates.Color)
+		if updates.Steps != nil {
+			merged.Steps = updates.Steps
+			merged.Actions = nil // clear legacy field when steps are provided
+		} else if updates.Actions != nil {
+			// Legacy clients that still send flat Actions; let ValidateScene migrate.
+			merged.Actions = updates.Actions
+		}
+		if err := s.Store.ValidateScene(&merged); err != nil {
+			return errInvalid(err)
+		}
+		*existing = merged
+		return nil
+	}) {
 		return
 	}
 	writeJSON(w, http.StatusOK, existing)
@@ -123,26 +122,17 @@ func (s *Server) updateScene(w http.ResponseWriter, r *http.Request) {
 func (s *Server) deleteScene(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
 
-	s.Store.Mu.Lock()
-	defer s.Store.Mu.Unlock()
-	if _, ok := s.Store.Scenes[id]; !ok {
-		writeError(w, http.StatusNotFound, "scene not found")
-		return
-	}
-	delete(s.Store.Scenes, id)
-	for sid, sch := range s.Store.Schedules {
-		if sch.TargetType == "scene" && sch.TargetID == id {
-			delete(s.Store.Schedules, sid)
+	if !s.update(w, func() error {
+		if _, ok := s.Store.Scenes[id]; !ok {
+			return errStatus(http.StatusNotFound, "scene not found")
 		}
-	}
-	for tid, t := range s.Store.Timers {
-		if t.TargetType == "scene" && t.TargetID == id {
-			delete(s.Store.Timers, tid)
-		}
-	}
-	s.Store.PruneAutomationsForTarget("scene", id)
-	s.Store.DeleteAutomationsOwnedByScene(id)
-	if !s.saveStore(w) {
+		delete(s.Store.Scenes, id)
+		s.Store.CascadeDeleteTarget("scene", id)
+		// Beyond the shared cascade: a scene created by the scene wizard
+		// owns its automations outright, so they go with it.
+		s.Store.DeleteAutomationsOwnedByScene(id)
+		return nil
+	}) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

@@ -116,32 +116,32 @@ func (l Listener) dispatch(st *store.Store, packet map[string]interface{}) {
 		composed = model + ":" + id
 	}
 
-	st.Mu.Lock()
-	defer st.Mu.Unlock()
+	st.Mutate(func() {
 
-	matched := false
-	for _, sensor := range st.Sensors {
-		if !codeMatches(sensor.Code, composed, model, id) {
-			continue
+		matched := false
+		for _, sensor := range st.Sensors {
+			if !codeMatches(sensor.Code, composed, model, id) {
+				continue
+			}
+			if sensor.Protocol != "" && !strings.EqualFold(sensor.Protocol, model) &&
+				!strings.EqualFold(sensor.Protocol, "rtl_433") {
+				continue
+			}
+			matched = true
+			value, ok := extractValue(packet, sensor.Field)
+			if !ok {
+				continue
+			}
+			reading := store.SensorReading{Time: time.Now().UTC(), Value: value}
+			if err := st.AppendReading(sensor.ID, reading); err != nil {
+				log.Printf("rx: append reading for %s: %v", sensor.ID, err)
+			}
 		}
-		if sensor.Protocol != "" && !strings.EqualFold(sensor.Protocol, model) &&
-			!strings.EqualFold(sensor.Protocol, "rtl_433") {
-			continue
-		}
-		matched = true
-		value, ok := extractValue(packet, sensor.Field)
-		if !ok {
-			continue
-		}
-		reading := store.SensorReading{Time: time.Now().UTC(), Value: value}
-		if err := st.AppendReading(sensor.ID, reading); err != nil {
-			log.Printf("rx: append reading for %s: %v", sensor.ID, err)
-		}
-	}
 
-	if !matched && composed != "" && st.DiscoveryActive() {
-		st.RecordCandidate(model, composed, numericFields(packet))
-	}
+		if !matched && composed != "" && st.DiscoveryActive() {
+			st.RecordCandidate(model, composed, numericFields(packet))
+		}
+	})
 }
 
 // numericFields returns every JSON key that decodes to a number,

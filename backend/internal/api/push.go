@@ -72,17 +72,17 @@ func (s *Server) subscribePush(w http.ResponseWriter, r *http.Request) {
 	// the first time (all-false zero value → upgrade to all-true).
 	prefs := user.NotifPrefs
 	if !prefs.SensorAlerts && !prefs.StateChanges && !prefs.ScheduleFired && !prefs.DeviceOffline {
-		s.Store.Mu.Lock()
-		if u := s.Store.Users[user.ID]; u != nil {
-			u.NotifPrefs = store.NotifPrefs{
-				SensorAlerts:  true,
-				StateChanges:  true,
-				ScheduleFired: true,
-				DeviceOffline: true,
+		_ = s.Store.Update(func() error {
+			if u := s.Store.Users[user.ID]; u != nil {
+				u.NotifPrefs = store.NotifPrefs{
+					SensorAlerts:  true,
+					StateChanges:  true,
+					ScheduleFired: true,
+					DeviceOffline: true,
+				}
 			}
-			_ = s.Store.Save()
-		}
-		s.Store.Mu.Unlock()
+			return nil
+		})
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "subscribed"})
@@ -150,16 +150,14 @@ func (s *Server) updatePushPrefs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.Store.Mu.Lock()
-	defer s.Store.Mu.Unlock()
-	u := s.Store.Users[user.ID]
-	if u == nil {
-		writeError(w, http.StatusNotFound, "user not found")
-		return
-	}
-	u.NotifPrefs = body
-	if err := s.Store.Save(); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to save: "+err.Error())
+	var u *store.User
+	if !s.update(w, func() error {
+		if u = s.Store.Users[user.ID]; u == nil {
+			return errNotFound("user")
+		}
+		u.NotifPrefs = body
+		return nil
+	}) {
 		return
 	}
 	writeJSON(w, http.StatusOK, u.NotifPrefs)

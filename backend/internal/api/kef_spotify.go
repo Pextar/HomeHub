@@ -185,22 +185,22 @@ func (s *Server) kefSetSpotifyDevice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.Store.Mu.Lock()
-	defer s.Store.Mu.Unlock()
-	existing, ok := s.Store.KEF[id]
-	if !ok {
-		writeError(w, http.StatusNotFound, "speaker not found")
-		return
-	}
-	merged := *existing
-	merged.SpotifyDeviceID = body.DeviceID
-	merged.SpotifyDeviceName = body.DeviceName
-	if err := s.Store.ValidateKEFSpeaker(&merged); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	*existing = merged
-	if !s.saveStore(w) {
+	var existing *store.KEFSpeaker
+	if !s.update(w, func() error {
+		var ok bool
+		existing, ok = s.Store.KEF[id]
+		if !ok {
+			return errStatus(http.StatusNotFound, "speaker not found")
+		}
+		merged := *existing
+		merged.SpotifyDeviceID = body.DeviceID
+		merged.SpotifyDeviceName = body.DeviceName
+		if err := s.Store.ValidateKEFSpeaker(&merged); err != nil {
+			return errInvalid(err)
+		}
+		*existing = merged
+		return nil
+	}) {
 		return
 	}
 	writeJSON(w, http.StatusOK, existing)

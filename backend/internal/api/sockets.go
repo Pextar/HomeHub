@@ -17,25 +17,27 @@ import (
 
 func (s *Server) getSockets(w http.ResponseWriter, r *http.Request) {
 	user := currentUser(r)
-	s.Store.Mu.RLock()
-	result := make([]*store.Socket, 0, len(s.Store.Sockets))
-	for _, sock := range s.Store.Sockets {
-		if !canAccess(user, sock.ID) {
-			continue
+	var b []byte
+	var err error
+	s.Store.View(func() {
+		result := make([]*store.Socket, 0, len(s.Store.Sockets))
+		for _, sock := range s.Store.Sockets {
+			if !canAccess(user, sock.ID) {
+				continue
+			}
+			result = append(result, sock)
 		}
-		result = append(result, sock)
-	}
-	sort.Slice(result, func(i, j int) bool {
-		if result[i].Room != result[j].Room {
-			return strings.ToLower(result[i].Room) < strings.ToLower(result[j].Room)
-		}
-		return strings.ToLower(result[i].Name) < strings.ToLower(result[j].Name)
+		sort.Slice(result, func(i, j int) bool {
+			if result[i].Room != result[j].Room {
+				return strings.ToLower(result[i].Room) < strings.ToLower(result[j].Room)
+			}
+			return strings.ToLower(result[i].Name) < strings.ToLower(result[j].Name)
+		})
+		// Marshal under the lock so we snapshot the sockets consistently rather
+		// than handing live *store.Socket pointers to the encoder after unlocking
+		// (writers mutate those structs in place).
+		b, err = json.Marshal(result)
 	})
-	// Marshal under the lock so we snapshot the sockets consistently rather
-	// than handing live *store.Socket pointers to the encoder after unlocking
-	// (writers mutate those structs in place).
-	b, err := json.Marshal(result)
-	s.Store.Mu.RUnlock()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to encode response")
 		return
@@ -60,16 +62,14 @@ func (s *Server) createSocket(w http.ResponseWriter, r *http.Request) {
 		socket.ID = fmt.Sprintf("socket_%d", time.Now().UnixNano())
 	}
 
-	s.Store.Mu.Lock()
-	defer s.Store.Mu.Unlock()
-
-	if _, exists := s.Store.Sockets[socket.ID]; exists && hadID {
-		// A client-supplied ID must not silently replace an existing record.
-		writeError(w, http.StatusConflict, "a socket with that id already exists")
-		return
-	}
-	s.Store.Sockets[socket.ID] = &socket
-	if !s.saveStoreOr(w, func() { delete(s.Store.Sockets, socket.ID) }) {
+	if !s.updateOr(w, func() { delete(s.Store.Sockets, socket.ID) }, func() error {
+		if _, exists := s.Store.Sockets[socket.ID]; exists && hadID {
+			// A client-supplied ID must not silently replace an existing record.
+			return errStatus(http.StatusConflict, "a socket with that id already exists")
+		}
+		s.Store.Sockets[socket.ID] = &socket
+		return nil
+	}) {
 		return
 	}
 
@@ -82,14 +82,15 @@ func (s *Server) getSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.Store.Mu.RLock()
-	socket, ok := s.Store.Sockets[id]
 	var b []byte
 	var err error
-	if ok {
-		b, err = json.Marshal(socket)
-	}
-	s.Store.Mu.RUnlock()
+	var ok bool
+	s.Store.View(func() {
+		var socket *store.Socket
+		if socket, ok = s.Store.Sockets[id]; ok {
+			b, err = json.Marshal(socket)
+		}
+	})
 	if !ok {
 		writeError(w, http.StatusNotFound, "socket not found")
 		return
@@ -109,38 +110,36 @@ func (s *Server) updateSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.Store.Mu.Lock()
-	defer s.Store.Mu.Unlock()
+	var socket *store.Socket
+	if !s.update(w, func() error {
+		var ok bool
+		socket, ok = s.Store.Sockets[id]
+		if !ok {
+			return errStatus(http.StatusNotFound, "socket not found")
+		}
 
-	socket, ok := s.Store.Sockets[id]
-	if !ok {
-		writeError(w, http.StatusNotFound, "socket not found")
-		return
-	}
+		if name := strings.TrimSpace(updates.Name); name != "" {
+			socket.Name = name
+		}
+		if code := strings.TrimSpace(updates.Code); code != "" {
+			socket.Code = code
+		}
+		if protocol := strings.TrimSpace(updates.Protocol); protocol != "" {
+			socket.Protocol = protocol
+		}
+		if room := strings.TrimSpace(updates.Room); room != "" {
+			socket.Room = room
+		}
+		// Emoji is set unconditionally so an admin can also clear it.
+		socket.Emoji = strings.TrimSpace(updates.Emoji)
 
-	if name := strings.TrimSpace(updates.Name); name != "" {
-		socket.Name = name
-	}
-	if code := strings.TrimSpace(updates.Code); code != "" {
-		socket.Code = code
-	}
-	if protocol := strings.TrimSpace(updates.Protocol); protocol != "" {
-		socket.Protocol = protocol
-	}
-	if room := strings.TrimSpace(updates.Room); room != "" {
-		socket.Room = room
-	}
-	// Emoji is set unconditionally so an admin can also clear it.
-	socket.Emoji = strings.TrimSpace(updates.Emoji)
-
-	// Re-validate after applying updates; catches e.g. switching an existing
-	// socket to the Nexa protocol with a code that isn't in houseID:unit form.
-	if err := s.Store.ValidateSocket(socket); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-
-	if !s.saveStore(w) {
+		// Re-validate after applying updates; catches e.g. switching an existing
+		// socket to the Nexa protocol with a code that isn't in houseID:unit form.
+		if err := s.Store.ValidateSocket(socket); err != nil {
+			return errInvalid(err)
+		}
+		return nil
+	}) {
 		return
 	}
 	writeJSON(w, http.StatusOK, socket)
@@ -154,15 +153,16 @@ func (s *Server) toggleFavorite(w http.ResponseWriter, r *http.Request) {
 	if !s.requireSocketAccess(w, r, id) {
 		return
 	}
-	s.Store.Mu.Lock()
-	defer s.Store.Mu.Unlock()
-	socket, ok := s.Store.Sockets[id]
-	if !ok {
-		writeError(w, http.StatusNotFound, "socket not found")
-		return
-	}
-	socket.Favorite = !socket.Favorite
-	if !s.saveStore(w) {
+	var socket *store.Socket
+	if !s.update(w, func() error {
+		var ok bool
+		socket, ok = s.Store.Sockets[id]
+		if !ok {
+			return errStatus(http.StatusNotFound, "socket not found")
+		}
+		socket.Favorite = !socket.Favorite
+		return nil
+	}) {
 		return
 	}
 	writeJSON(w, http.StatusOK, socket)
@@ -171,15 +171,14 @@ func (s *Server) toggleFavorite(w http.ResponseWriter, r *http.Request) {
 func (s *Server) deleteSocket(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
 
-	s.Store.Mu.Lock()
-	defer s.Store.Mu.Unlock()
-	if _, ok := s.Store.Sockets[id]; !ok {
-		writeError(w, http.StatusNotFound, "socket not found")
-		return
-	}
-	delete(s.Store.Sockets, id)
-	s.Store.CascadeDeleteSocket(id)
-	if !s.saveStore(w) {
+	if !s.update(w, func() error {
+		if _, ok := s.Store.Sockets[id]; !ok {
+			return errStatus(http.StatusNotFound, "socket not found")
+		}
+		delete(s.Store.Sockets, id)
+		s.Store.CascadeDeleteSocket(id)
+		return nil
+	}) {
 		return
 	}
 
@@ -192,34 +191,33 @@ func (s *Server) setSocketState(w http.ResponseWriter, r *http.Request, target *
 		return
 	}
 
-	s.Store.Mu.Lock()
-	defer s.Store.Mu.Unlock()
-
-	socket, ok := s.Store.Sockets[id]
-	if !ok {
-		writeError(w, http.StatusNotFound, "socket not found")
-		return
-	}
-	action := "toggle"
-	if target != nil {
-		if *target {
-			action = "on"
-		} else {
-			action = "off"
+	var socket *store.Socket
+	if !s.update(w, func() error {
+		var ok bool
+		socket, ok = s.Store.Sockets[id]
+		if !ok {
+			return errStatus(http.StatusNotFound, "socket not found")
 		}
-	}
-	err := s.Store.ApplyState(socket, target)
-	entry := store.ActivityEntry{Kind: "socket", Source: "manual", Action: action, Label: socket.Name}
-	if err != nil {
-		entry.Status = "error"
-		entry.Error = err.Error()
-	}
-	s.Store.Activity.Add(entry)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to send RF command: "+err.Error())
-		return
-	}
-	if !s.saveStore(w) {
+		action := "toggle"
+		if target != nil {
+			if *target {
+				action = "on"
+			} else {
+				action = "off"
+			}
+		}
+		err := s.Store.ApplyState(socket, target)
+		entry := store.ActivityEntry{Kind: "socket", Source: "manual", Action: action, Label: socket.Name}
+		if err != nil {
+			entry.Status = "error"
+			entry.Error = err.Error()
+		}
+		s.Store.Activity.Add(entry)
+		if err != nil {
+			return errStatus(http.StatusInternalServerError, "failed to send RF command: %s", err)
+		}
+		return nil
+	}) {
 		return
 	}
 	writeJSON(w, http.StatusOK, socket)
@@ -244,26 +242,35 @@ func (s *Server) doControlSocket(id, action string) (sock store.Socket, found bo
 		return store.Socket{}, true, fmt.Errorf("unsupported action %q (use on, off, or toggle)", action)
 	}
 
-	s.Store.Mu.Lock()
-	defer s.Store.Mu.Unlock()
-	socket, ok := s.Store.Sockets[id]
-	if !ok {
+	var applyErr error
+	saveErr := s.Store.Update(func() error {
+		socket, ok := s.Store.Sockets[id]
+		if !ok {
+			return store.ErrNoChange
+		}
+		found = true
+		applyErr = s.Store.ApplyState(socket, target)
+		entry := store.ActivityEntry{Kind: "socket", Source: "assistant", Action: action, Label: socket.Name}
+		if applyErr != nil {
+			entry.Status = "error"
+			entry.Error = applyErr.Error()
+		}
+		s.Store.Activity.Add(entry)
+		sock = *socket
+		if applyErr != nil {
+			// The transmit failed, so there is no new state to persist. The
+			// activity entry above still records the attempt.
+			return store.ErrNoChange
+		}
+		return nil
+	})
+	if !found {
 		return store.Socket{}, false, nil
 	}
-	applyErr := s.Store.ApplyState(socket, target)
-	entry := store.ActivityEntry{Kind: "socket", Source: "assistant", Action: action, Label: socket.Name}
 	if applyErr != nil {
-		entry.Status = "error"
-		entry.Error = applyErr.Error()
+		return sock, true, applyErr
 	}
-	s.Store.Activity.Add(entry)
-	if applyErr != nil {
-		return *socket, true, applyErr
-	}
-	if err := s.Store.Save(); err != nil {
-		return *socket, true, err
-	}
-	return *socket, true, nil
+	return sock, true, saveErr
 }
 
 // learnSocket picks a random unused code and broadcasts an ON signal so
@@ -311,12 +318,13 @@ func (s *Server) learnSocket(w http.ResponseWriter, r *http.Request) {
 		code = existing
 	} else {
 		// Generate a fresh unused code.
-		s.Store.Mu.RLock()
-		used := make(map[string]bool, len(s.Store.Sockets))
-		for _, sock := range s.Store.Sockets {
-			used[sock.Code] = true
-		}
-		s.Store.Mu.RUnlock()
+		var used map[string]bool
+		s.Store.View(func() {
+			used = make(map[string]bool, len(s.Store.Sockets))
+			for _, sock := range s.Store.Sockets {
+				used[sock.Code] = true
+			}
+		})
 
 		// 32 attempts is plenty given how wide both code spaces are.
 		for i := 0; i < 32; i++ {

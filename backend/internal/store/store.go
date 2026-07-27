@@ -3,11 +3,19 @@
 // business operations (apply state, execute action, validators) that
 // callers need under a single lock.
 //
-// Locking convention: Mu is exposed directly. Callers acquire it for the
-// duration of multi-step operations and pass through methods whose
-// docstring says "caller must hold Mu". Self-locking helpers are
-// avoided so cross-package code (api, scheduler) can compose atomic
-// reads + writes without giving up the lock between them.
+// Locking convention: callers wrap their work in View, ViewValue, Update,
+// UpdateOr or Mutate (see tx.go). The closure is the unit of composition —
+// several reads and writes inside one call are atomic, which is what the
+// older "acquire Mu yourself" convention existed to allow — but the lock is
+// taken and released in one place and Update pairs a mutation with its
+// Save. Methods documented "caller must hold Mu" are meant to be called
+// from inside one of those closures.
+//
+// Mu stays exported for the one case a closure cannot express: the staged
+// device flow, which has to release the lock to transmit and reacquire it
+// to record the result. Outside this package that is the only remaining
+// direct use, in the scheduler's timer/schedule execution and the API's
+// runStaged. Everything else should go through the transaction helpers.
 package store
 
 import (
@@ -162,118 +170,14 @@ func New(dataDir string, rf RFSender) *Store {
 // simply means we are starting fresh. After loading, legacy schedules
 // (socket_id-only, no target_type) are normalized into the new shape.
 func (s *Store) Load() error {
-	if err := readJSON(filepath.Join(s.DataDir, socketsFile), &s.Sockets); err != nil {
-		return fmt.Errorf("loading sockets: %w", err)
-	}
-	if err := readJSON(filepath.Join(s.DataDir, schedulesFile), &s.Schedules); err != nil {
-		return fmt.Errorf("loading schedules: %w", err)
-	}
-	if err := readJSON(filepath.Join(s.DataDir, groupsFile), &s.Groups); err != nil {
-		return fmt.Errorf("loading groups: %w", err)
-	}
-	if err := readJSON(filepath.Join(s.DataDir, scenesFile), &s.Scenes); err != nil {
-		return fmt.Errorf("loading scenes: %w", err)
-	}
-	if err := readJSON(filepath.Join(s.DataDir, timersFile), &s.Timers); err != nil {
-		return fmt.Errorf("loading timers: %w", err)
-	}
-	if err := readJSON(filepath.Join(s.DataDir, automationsFile), &s.Automations); err != nil {
-		return fmt.Errorf("loading automations: %w", err)
-	}
-	if err := readJSON(filepath.Join(s.DataDir, sensorsFile), &s.Sensors); err != nil {
-		return fmt.Errorf("loading sensors: %w", err)
-	}
-	if err := readJSON(filepath.Join(s.DataDir, readingsFile), &s.Readings); err != nil {
-		return fmt.Errorf("loading readings: %w", err)
-	}
-	if err := readJSON(filepath.Join(s.DataDir, settingsFile), &s.Settings); err != nil {
-		return fmt.Errorf("loading settings: %w", err)
-	}
-	if err := readJSON(filepath.Join(s.DataDir, usersFile), &s.Users); err != nil {
-		return fmt.Errorf("loading users: %w", err)
-	}
-	// Rooms: nil means rooms.json doesn't exist yet (first run).
-	// In that case derive Room entities from the room strings already on sockets
-	// and sensors so existing installations get a clean migration automatically.
-	if err := readJSON(filepath.Join(s.DataDir, roomsFile), &s.Rooms); err != nil {
-		return fmt.Errorf("loading rooms: %w", err)
-	}
-	if err := readJSON(filepath.Join(s.DataDir, sonosFile), &s.Sonos); err != nil {
-		return fmt.Errorf("loading sonos speakers: %w", err)
-	}
-	if err := readJSON(filepath.Join(s.DataDir, kefFile), &s.KEF); err != nil {
-		return fmt.Errorf("loading kef speakers: %w", err)
-	}
-	if err := readJSON(filepath.Join(s.DataDir, zonesFile), &s.Zones); err != nil {
-		return fmt.Errorf("loading zones: %w", err)
-	}
-	if s.Zones == nil {
-		// Absent file leaves the map from New() alone, but a file holding
-		// a literal null decodes over it. Callers index this map under Mu
-		// without checking, so it must never be nil after Load.
-		s.Zones = make(map[string]*Zone)
-	}
-	if s.Settings == nil {
-		s.Settings = &Settings{}
-	}
-	if s.Users == nil {
-		s.Users = make(map[string]*User)
-	}
-	if s.Sockets == nil {
-		s.Sockets = make(map[string]*Socket)
-	}
-	if s.Schedules == nil {
-		s.Schedules = make(map[string]*Schedule)
-	}
-	if s.Groups == nil {
-		s.Groups = make(map[string]*Group)
-	}
-	if s.Scenes == nil {
-		s.Scenes = make(map[string]*Scene)
-	}
-	if s.Timers == nil {
-		s.Timers = make(map[string]*Timer)
-	}
-	if s.Automations == nil {
-		s.Automations = make(map[string]*Automation)
-	}
-	if s.Sensors == nil {
-		s.Sensors = make(map[string]*Sensor)
-	}
-	if s.Readings == nil {
-		s.Readings = make(map[string][]SensorReading)
-	}
-	if s.Sonos == nil {
-		s.Sonos = make(map[string]*SonosSpeaker)
-	}
-	if s.KEF == nil {
-		s.KEF = make(map[string]*KEFSpeaker)
-	}
-	if s.Rooms == nil {
-		// First run: rooms.json absent — derive rooms from socket/sensor strings.
-		s.Rooms = make(map[string]*Room)
-		seen := make(map[string]bool)
-		counter := 1
-		for _, sock := range s.Sockets {
-			name := strings.TrimSpace(sock.Room)
-			if name != "" && !seen[strings.ToLower(name)] {
-				seen[strings.ToLower(name)] = true
-				id := fmt.Sprintf("room_%d", counter)
-				counter++
-				s.Rooms[id] = &Room{ID: id, Name: name}
-			}
-		}
-		for _, sn := range s.Sensors {
-			name := strings.TrimSpace(sn.Room)
-			if name != "" && !seen[strings.ToLower(name)] {
-				seen[strings.ToLower(name)] = true
-				id := fmt.Sprintf("room_%d", counter)
-				counter++
-				s.Rooms[id] = &Room{ID: id, Name: name}
-			}
-		}
+	if err := s.loadAll(); err != nil {
+		return err
 	}
 
+	s.ensureRoomsForNamedDevices()
+
+	// Legacy schedules carried a bare socket_id; normalise them to the
+	// target_type/target_id pair everything else uses.
 	for _, sch := range s.Schedules {
 		if sch.TargetType == "" && sch.SocketID != "" {
 			sch.TargetType = "socket"
@@ -296,46 +200,7 @@ func (s *Store) Load() error {
 
 // Save writes every file atomically. Caller must hold Mu.
 func (s *Store) Save() error {
-	if err := writeJSON(filepath.Join(s.DataDir, socketsFile), s.Sockets); err != nil {
-		return fmt.Errorf("saving sockets: %w", err)
-	}
-	if err := writeJSON(filepath.Join(s.DataDir, schedulesFile), s.Schedules); err != nil {
-		return fmt.Errorf("saving schedules: %w", err)
-	}
-	if err := writeJSON(filepath.Join(s.DataDir, groupsFile), s.Groups); err != nil {
-		return fmt.Errorf("saving groups: %w", err)
-	}
-	if err := writeJSON(filepath.Join(s.DataDir, scenesFile), s.Scenes); err != nil {
-		return fmt.Errorf("saving scenes: %w", err)
-	}
-	if err := writeJSON(filepath.Join(s.DataDir, timersFile), s.Timers); err != nil {
-		return fmt.Errorf("saving timers: %w", err)
-	}
-	if err := writeJSON(filepath.Join(s.DataDir, automationsFile), s.Automations); err != nil {
-		return fmt.Errorf("saving automations: %w", err)
-	}
-	if err := writeJSON(filepath.Join(s.DataDir, sensorsFile), s.Sensors); err != nil {
-		return fmt.Errorf("saving sensors: %w", err)
-	}
-	if err := writeJSON(filepath.Join(s.DataDir, settingsFile), s.Settings); err != nil {
-		return fmt.Errorf("saving settings: %w", err)
-	}
-	if err := writeJSON(filepath.Join(s.DataDir, usersFile), s.Users); err != nil {
-		return fmt.Errorf("saving users: %w", err)
-	}
-	if err := writeJSON(filepath.Join(s.DataDir, roomsFile), s.Rooms); err != nil {
-		return fmt.Errorf("saving rooms: %w", err)
-	}
-	if err := writeJSON(filepath.Join(s.DataDir, sonosFile), s.Sonos); err != nil {
-		return fmt.Errorf("saving sonos speakers: %w", err)
-	}
-	if err := writeJSON(filepath.Join(s.DataDir, kefFile), s.KEF); err != nil {
-		return fmt.Errorf("saving kef speakers: %w", err)
-	}
-	if err := writeJSON(filepath.Join(s.DataDir, zonesFile), s.Zones); err != nil {
-		return fmt.Errorf("saving zones: %w", err)
-	}
-	return nil
+	return s.saveAll()
 }
 
 // UserByID returns the user with the given ID, or nil. Caller must hold Mu.
@@ -403,13 +268,9 @@ func (s *Store) AdminCount() int {
 // the RX hot path so a steady stream of incoming readings doesn't rewrite
 // every JSON file on disk. Caller must hold Mu.
 func (s *Store) SaveSensors() error {
-	if err := writeJSON(filepath.Join(s.DataDir, sensorsFile), s.Sensors); err != nil {
-		return fmt.Errorf("saving sensors: %w", err)
-	}
-	if err := writeJSON(filepath.Join(s.DataDir, readingsFile), s.Readings); err != nil {
-		return fmt.Errorf("saving readings: %w", err)
-	}
-	return nil
+	return s.saveMatching(func(c collection) bool {
+		return c.label == "sensors" || c.label == "readings"
+	})
 }
 
 // AppendReading adds one reading to a sensor's rolling window, updates

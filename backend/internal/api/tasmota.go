@@ -6,6 +6,7 @@ import (
 
 	"github.com/gorilla/mux"
 
+	"homehub/internal/store"
 	"homehub/internal/tasmota"
 )
 
@@ -50,10 +51,10 @@ func (s *Server) tasmotaSetState(w http.ResponseWriter, r *http.Request) {
 	// Mirror the on/off back to the stored socket (like the Matter handler)
 	// so the dashboard reflects the truth without waiting for a refresh.
 	if update.On != nil {
-		s.Store.Mu.Lock()
-		s.Store.MirrorState(mux.Vars(r)["socketId"], *update.On)
-		_ = s.Store.Save()
-		s.Store.Mu.Unlock()
+		_ = s.Store.Update(func() error {
+			s.Store.MirrorState(mux.Vars(r)["socketId"], *update.On)
+			return nil
+		})
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -82,13 +83,14 @@ func (s *Server) tasmotaIP(w http.ResponseWriter, r *http.Request) (string, bool
 	if !s.requireSocketAccess(w, r, id) {
 		return "", false
 	}
-	s.Store.Mu.RLock()
-	sock, ok := s.Store.Sockets[id]
 	var ip string
-	if ok {
-		ip = sock.Code
-	}
-	s.Store.Mu.RUnlock()
+	var ok bool
+	s.Store.View(func() {
+		var sock *store.Socket
+		if sock, ok = s.Store.Sockets[id]; ok {
+			ip = sock.Code
+		}
+	})
 
 	if !ok {
 		writeError(w, http.StatusNotFound, "socket not found")

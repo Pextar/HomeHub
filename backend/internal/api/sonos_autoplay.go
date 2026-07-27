@@ -99,12 +99,13 @@ func (s *Server) autoplayTick(ctx context.Context) {
 		return
 	}
 
-	s.Store.Mu.RLock()
-	speakers := make(map[string]store.SonosSpeaker, len(s.Store.Sonos))
-	for id, sp := range s.Store.Sonos {
-		speakers[id] = *sp
-	}
-	s.Store.Mu.RUnlock()
+	var speakers map[string]store.SonosSpeaker
+	s.Store.View(func() {
+		speakers = make(map[string]store.SonosSpeaker, len(s.Store.Sonos))
+		for id, sp := range s.Store.Sonos {
+			speakers[id] = *sp
+		}
+	})
 
 	snapCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	snap := s.sonosEvents().Snapshot(snapCtx)

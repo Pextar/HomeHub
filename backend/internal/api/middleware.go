@@ -61,9 +61,9 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 // A copy (not the live pointer) is returned because the result is stashed in
 // the request context and read concurrently with user-mutating handlers.
 func (s *Server) lookupUser(id string) *store.User {
-	s.Store.Mu.RLock()
-	defer s.Store.Mu.RUnlock()
-	return s.Store.UserByID(id).Clone()
+	return store.ViewValue(s.Store, func() *store.User {
+		return s.Store.UserByID(id).Clone()
+	})
 }
 
 // verifyCredentials returns the user if username/password match a stored
@@ -71,9 +71,10 @@ func (s *Server) lookupUser(id string) *store.User {
 // so the response timing doesn't leak which usernames exist. A user with
 // no password (a code-only profile) can never match this path.
 func (s *Server) verifyCredentials(username, password string) *store.User {
-	s.Store.Mu.RLock()
-	u := s.Store.UserByUsername(username)
-	s.Store.Mu.RUnlock()
+	var u *store.User
+	s.Store.View(func() {
+		u = s.Store.UserByUsername(username)
+	})
 	hash := []byte("$2a$10$invalidinvalidinvalidinvalidinvalidinvalidinvalidinvali")
 	if u != nil && u.PasswordHash != "" {
 		hash = []byte(u.PasswordHash)
@@ -86,9 +87,9 @@ func (s *Server) verifyCredentials(username, password string) *store.User {
 
 // verifyLoginCode returns the user whose login code matches, else nil.
 func (s *Server) verifyLoginCode(code string) *store.User {
-	s.Store.Mu.RLock()
-	defer s.Store.Mu.RUnlock()
-	return s.Store.UserByLoginCode(strings.TrimSpace(code))
+	return store.ViewValue(s.Store, func() *store.User {
+		return s.Store.UserByLoginCode(strings.TrimSpace(code))
+	})
 }
 
 func withUser(ctx context.Context, u *store.User) context.Context {

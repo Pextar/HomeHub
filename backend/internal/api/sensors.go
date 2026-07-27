@@ -15,19 +15,21 @@ import (
 )
 
 func (s *Server) getSensors(w http.ResponseWriter, r *http.Request) {
-	s.Store.Mu.RLock()
-	result := make([]*store.Sensor, 0, len(s.Store.Sensors))
-	for _, sn := range s.Store.Sensors {
-		result = append(result, sn)
-	}
-	sort.Slice(result, func(i, j int) bool {
-		if result[i].Room != result[j].Room {
-			return result[i].Room < result[j].Room
+	var b []byte
+	var err error
+	s.Store.View(func() {
+		result := make([]*store.Sensor, 0, len(s.Store.Sensors))
+		for _, sn := range s.Store.Sensors {
+			result = append(result, sn)
 		}
-		return result[i].Name < result[j].Name
+		sort.Slice(result, func(i, j int) bool {
+			if result[i].Room != result[j].Room {
+				return result[i].Room < result[j].Room
+			}
+			return result[i].Name < result[j].Name
+		})
+		b, err = json.Marshal(result)
 	})
-	b, err := json.Marshal(result)
-	s.Store.Mu.RUnlock()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to encode response")
 		return
@@ -42,22 +44,19 @@ func (s *Server) createSensor(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.Store.Mu.Lock()
-	defer s.Store.Mu.Unlock()
-
-	if err := s.Store.ValidateSensor(&sn); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	if sn.ID == "" {
-		sn.ID = fmt.Sprintf("sensor_%d", time.Now().UnixNano())
-	} else if _, exists := s.Store.Sensors[sn.ID]; exists {
-		// A client-supplied ID must not silently replace an existing record.
-		writeError(w, http.StatusConflict, "a sensor with that id already exists")
-		return
-	}
-	s.Store.Sensors[sn.ID] = &sn
-	if !s.saveStoreOr(w, func() { delete(s.Store.Sensors, sn.ID) }) {
+	if !s.updateOr(w, func() { delete(s.Store.Sensors, sn.ID) }, func() error {
+		if err := s.Store.ValidateSensor(&sn); err != nil {
+			return errInvalid(err)
+		}
+		if sn.ID == "" {
+			sn.ID = fmt.Sprintf("sensor_%d", time.Now().UnixNano())
+		} else if _, exists := s.Store.Sensors[sn.ID]; exists {
+			// A client-supplied ID must not silently replace an existing record.
+			return errStatus(http.StatusConflict, "a sensor with that id already exists")
+		}
+		s.Store.Sensors[sn.ID] = &sn
+		return nil
+	}) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, sn)
@@ -70,44 +69,43 @@ func (s *Server) updateSensor(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.Store.Mu.Lock()
-	defer s.Store.Mu.Unlock()
+	var existing *store.Sensor
+	if !s.update(w, func() error {
+		var ok bool
+		existing, ok = s.Store.Sensors[id]
+		if !ok {
+			return errStatus(http.StatusNotFound, "sensor not found")
+		}
 
-	existing, ok := s.Store.Sensors[id]
-	if !ok {
-		writeError(w, http.StatusNotFound, "sensor not found")
-		return
-	}
+		merged := *existing
+		if v := strings.TrimSpace(updates.Name); v != "" {
+			merged.Name = v
+		}
+		if v := strings.TrimSpace(updates.Kind); v != "" {
+			merged.Kind = v
+		}
+		if v := strings.TrimSpace(updates.Unit); v != "" {
+			merged.Unit = v
+		}
+		if v := strings.TrimSpace(updates.Code); v != "" {
+			merged.Code = v
+		}
+		if v := strings.TrimSpace(updates.Protocol); v != "" {
+			merged.Protocol = v
+		}
+		// Field and Room are allowed to be cleared, so always overwrite.
+		merged.Field = strings.TrimSpace(updates.Field)
+		merged.Room = strings.TrimSpace(updates.Room)
+		// Thresholds are pointers — nil means "clear it", so always overwrite.
+		merged.AlertMin = updates.AlertMin
+		merged.AlertMax = updates.AlertMax
 
-	merged := *existing
-	if v := strings.TrimSpace(updates.Name); v != "" {
-		merged.Name = v
-	}
-	if v := strings.TrimSpace(updates.Kind); v != "" {
-		merged.Kind = v
-	}
-	if v := strings.TrimSpace(updates.Unit); v != "" {
-		merged.Unit = v
-	}
-	if v := strings.TrimSpace(updates.Code); v != "" {
-		merged.Code = v
-	}
-	if v := strings.TrimSpace(updates.Protocol); v != "" {
-		merged.Protocol = v
-	}
-	// Field and Room are allowed to be cleared, so always overwrite.
-	merged.Field = strings.TrimSpace(updates.Field)
-	merged.Room = strings.TrimSpace(updates.Room)
-	// Thresholds are pointers — nil means "clear it", so always overwrite.
-	merged.AlertMin = updates.AlertMin
-	merged.AlertMax = updates.AlertMax
-
-	if err := s.Store.ValidateSensor(&merged); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	*existing = merged
-	if !s.saveStore(w) {
+		if err := s.Store.ValidateSensor(&merged); err != nil {
+			return errInvalid(err)
+		}
+		*existing = merged
+		return nil
+	}) {
 		return
 	}
 	writeJSON(w, http.StatusOK, existing)
@@ -116,16 +114,15 @@ func (s *Server) updateSensor(w http.ResponseWriter, r *http.Request) {
 func (s *Server) deleteSensor(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
 
-	s.Store.Mu.Lock()
-	defer s.Store.Mu.Unlock()
-	if _, ok := s.Store.Sensors[id]; !ok {
-		writeError(w, http.StatusNotFound, "sensor not found")
-		return
-	}
-	delete(s.Store.Sensors, id)
-	delete(s.Store.Readings, id)
-	s.Store.PruneAutomationsForSensor(id)
-	if !s.saveStore(w) {
+	if !s.update(w, func() error {
+		if _, ok := s.Store.Sensors[id]; !ok {
+			return errStatus(http.StatusNotFound, "sensor not found")
+		}
+		delete(s.Store.Sensors, id)
+		delete(s.Store.Readings, id)
+		s.Store.CascadeDeleteSensor(id)
+		return nil
+	}) {
 		return
 	}
 
@@ -151,9 +148,8 @@ func (s *Server) startSensorPair(w http.ResponseWriter, r *http.Request) {
 		secs = 300
 	}
 
-	s.Store.Mu.Lock()
-	until := s.Store.StartDiscovery(time.Duration(secs) * time.Second)
-	s.Store.Mu.Unlock()
+	var until time.Time
+	s.Store.Mutate(func() { until = s.Store.StartDiscovery(time.Duration(secs) * time.Second) })
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"active":  true,
@@ -166,9 +162,12 @@ func (s *Server) startSensorPair(w http.ResponseWriter, r *http.Request) {
 // whether it's still open, when it closes, and every unknown emitter
 // heard so far (with sample numeric fields).
 func (s *Server) listDiscoveryCandidates(w http.ResponseWriter, _ *http.Request) {
-	s.Store.Mu.RLock()
-	active, until, candidates := s.Store.DiscoverySnapshot()
-	s.Store.Mu.RUnlock()
+	var active bool
+	var until time.Time
+	var candidates []*store.DiscoveryCandidate
+	s.Store.View(func() {
+		active, until, candidates = s.Store.DiscoverySnapshot()
+	})
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"active":     active,
@@ -185,16 +184,21 @@ func (s *Server) getSensorReadings(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
 	q := r.URL.Query()
 
-	s.Store.Mu.RLock()
-	if _, ok := s.Store.Sensors[id]; !ok {
-		s.Store.Mu.RUnlock()
+	// Copied out under the read lock so the filtering below runs unlocked.
+	var readings []store.SensorReading
+	var found bool
+	s.Store.View(func() {
+		if _, found = s.Store.Sensors[id]; !found {
+			return
+		}
+		src := s.Store.Readings[id]
+		readings = make([]store.SensorReading, len(src))
+		copy(readings, src)
+	})
+	if !found {
 		writeError(w, http.StatusNotFound, "sensor not found")
 		return
 	}
-	src := s.Store.Readings[id]
-	readings := make([]store.SensorReading, len(src))
-	copy(readings, src)
-	s.Store.Mu.RUnlock()
 
 	if v := q.Get("since_minutes"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
@@ -233,14 +237,18 @@ func (s *Server) postSensorReading(w http.ResponseWriter, r *http.Request) {
 		t = body.Time.UTC()
 	}
 
-	s.Store.Mu.Lock()
-	defer s.Store.Mu.Unlock()
-
-	if err := s.Store.AppendReading(id, store.SensorReading{Time: t, Value: body.Value}); err != nil {
-		if strings.Contains(err.Error(), "not found") {
-			writeError(w, http.StatusNotFound, err.Error())
+	// Mutate, not Update: AppendReading arms a debounced sensor-only save of
+	// its own, so a full Save here would rewrite every store file on every
+	// incoming reading.
+	var appendErr error
+	s.Store.Mutate(func() {
+		appendErr = s.Store.AppendReading(id, store.SensorReading{Time: t, Value: body.Value})
+	})
+	if appendErr != nil {
+		if strings.Contains(appendErr.Error(), "not found") {
+			writeError(w, http.StatusNotFound, appendErr.Error())
 		} else {
-			writeError(w, http.StatusInternalServerError, err.Error())
+			writeError(w, http.StatusInternalServerError, appendErr.Error())
 		}
 		return
 	}

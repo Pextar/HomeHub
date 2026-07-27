@@ -58,12 +58,13 @@ type sonosGroupView struct {
 // used to do on every single request. "live" tells the frontend which of the
 // two it got, so it can pick a polling interval to match.
 func (s *Server) sonosStatus(w http.ResponseWriter, r *http.Request) {
-	s.Store.Mu.RLock()
-	speakers := make([]store.SonosSpeaker, 0, len(s.Store.Sonos))
-	for _, sp := range s.Store.Sonos {
-		speakers = append(speakers, *sp)
-	}
-	s.Store.Mu.RUnlock()
+	var speakers []store.SonosSpeaker
+	s.Store.View(func() {
+		speakers = make([]store.SonosSpeaker, 0, len(s.Store.Sonos))
+		for _, sp := range s.Store.Sonos {
+			speakers = append(speakers, *sp)
+		}
+	})
 	sort.Slice(speakers, func(i, j int) bool { return speakers[i].Name < speakers[j].Name })
 
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
@@ -133,12 +134,13 @@ func (s *Server) sonosDiscover(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Mark devices that are already registered so the UI can filter them.
-	s.Store.Mu.RLock()
-	known := make(map[string]bool, len(s.Store.Sonos))
-	for _, sp := range s.Store.Sonos {
-		known[sp.UUID] = true
-	}
-	s.Store.Mu.RUnlock()
+	var known map[string]bool
+	s.Store.View(func() {
+		known = make(map[string]bool, len(s.Store.Sonos))
+		for _, sp := range s.Store.Sonos {
+			known[sp.UUID] = true
+		}
+	})
 
 	type candidate struct {
 		sonos.Device
@@ -181,15 +183,14 @@ func (s *Server) sonosCreateSpeaker(w http.ResponseWriter, r *http.Request) {
 		sp.Room = dev.Room
 	}
 
-	s.Store.Mu.Lock()
-	defer s.Store.Mu.Unlock()
-	sp.ID = fmt.Sprintf("sonos_%d", time.Now().UnixNano())
-	if err := s.Store.ValidateSonosSpeaker(&sp); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	s.Store.Sonos[sp.ID] = &sp
-	if !s.saveStoreOr(w, func() { delete(s.Store.Sonos, sp.ID) }) {
+	if !s.updateOr(w, func() { delete(s.Store.Sonos, sp.ID) }, func() error {
+		sp.ID = fmt.Sprintf("sonos_%d", time.Now().UnixNano())
+		if err := s.Store.ValidateSonosSpeaker(&sp); err != nil {
+			return errInvalid(err)
+		}
+		s.Store.Sonos[sp.ID] = &sp
+		return nil
+	}) {
 		return
 	}
 	s.sonosEvents().Nudge() // start watching it now, not at the next reconcile
@@ -205,27 +206,27 @@ func (s *Server) sonosUpdateSpeaker(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.Store.Mu.Lock()
-	defer s.Store.Mu.Unlock()
-	existing, ok := s.Store.Sonos[id]
-	if !ok {
-		writeError(w, http.StatusNotFound, "speaker not found")
-		return
-	}
-	merged := *existing
-	if v := strings.TrimSpace(updates.Name); v != "" {
-		merged.Name = v
-	}
-	if v := strings.TrimSpace(updates.IP); v != "" {
-		merged.IP = v
-	}
-	merged.Room = strings.TrimSpace(updates.Room)
-	if err := s.Store.ValidateSonosSpeaker(&merged); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	*existing = merged
-	if !s.saveStore(w) {
+	var existing *store.SonosSpeaker
+	if !s.update(w, func() error {
+		var ok bool
+		existing, ok = s.Store.Sonos[id]
+		if !ok {
+			return errStatus(http.StatusNotFound, "speaker not found")
+		}
+		merged := *existing
+		if v := strings.TrimSpace(updates.Name); v != "" {
+			merged.Name = v
+		}
+		if v := strings.TrimSpace(updates.IP); v != "" {
+			merged.IP = v
+		}
+		merged.Room = strings.TrimSpace(updates.Room)
+		if err := s.Store.ValidateSonosSpeaker(&merged); err != nil {
+			return errInvalid(err)
+		}
+		*existing = merged
+		return nil
+	}) {
 		return
 	}
 	// A re-addressed speaker needs its subscriptions rebuilt against the
@@ -237,23 +238,19 @@ func (s *Server) sonosUpdateSpeaker(w http.ResponseWriter, r *http.Request) {
 // sonosDeleteSpeaker handles DELETE /api/sonos/speakers/{id}.
 func (s *Server) sonosDeleteSpeaker(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
-	// The monitor is nudged after the lock is released: it must not be
-	// poked while Mu is held.
-	deleted := func() bool {
-		s.Store.Mu.Lock()
-		defer s.Store.Mu.Unlock()
+	// s.update releases the lock before returning, so the monitor is nudged
+	// off-lock.
+	if !s.update(w, func() error {
 		if _, ok := s.Store.Sonos[id]; !ok {
-			writeError(w, http.StatusNotFound, "speaker not found")
-			return false
+			return errNotFound("speaker")
 		}
 		delete(s.Store.Sonos, id)
 		// Drop it from any zone that held it, or the next unrelated edit to that
 		// zone fails validation with "no such speaker" for a change the user
 		// didn't make.
 		s.Store.CascadeDeleteSpeaker(store.QualifySonos(id))
-		return s.saveStore(w)
-	}()
-	if !deleted {
+		return nil
+	}) {
 		return
 	}
 	s.sonosEvents().Nudge() // release its subscriptions
@@ -264,13 +261,14 @@ func (s *Server) sonosDeleteSpeaker(w http.ResponseWriter, r *http.Request) {
 // safe to use off-lock). Writes the error response itself on failure.
 func (s *Server) sonosSpeaker(w http.ResponseWriter, r *http.Request) (store.SonosSpeaker, bool) {
 	id := mux.Vars(r)["id"]
-	s.Store.Mu.RLock()
-	sp, ok := s.Store.Sonos[id]
 	var cp store.SonosSpeaker
-	if ok {
-		cp = *sp
-	}
-	s.Store.Mu.RUnlock()
+	var ok bool
+	s.Store.View(func() {
+		var sp *store.SonosSpeaker
+		if sp, ok = s.Store.Sonos[id]; ok {
+			cp = *sp
+		}
+	})
 	if !ok {
 		writeError(w, http.StatusNotFound, "speaker not found")
 		return store.SonosSpeaker{}, false
@@ -566,14 +564,15 @@ func (s *Server) sonosJoin(w http.ResponseWriter, r *http.Request) {
 	if !decodeBody(w, r, &body) {
 		return
 	}
-	s.Store.Mu.RLock()
-	target, ok := s.Store.Sonos[body.TargetID]
 	var targetUUID string
-	if ok {
-		targetUUID = target.UUID
-	}
-	s.Store.Mu.RUnlock()
-	if !ok {
+	var found bool
+	s.Store.View(func() {
+		var target *store.SonosSpeaker
+		if target, found = s.Store.Sonos[body.TargetID]; found {
+			targetUUID = target.UUID
+		}
+	})
+	if !found {
 		writeError(w, http.StatusNotFound, "target speaker not found")
 		return
 	}

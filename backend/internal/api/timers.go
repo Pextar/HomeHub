@@ -15,14 +15,16 @@ import (
 )
 
 func (s *Server) getTimers(w http.ResponseWriter, r *http.Request) {
-	s.Store.Mu.RLock()
-	out := make([]*store.Timer, 0, len(s.Store.Timers))
-	for _, t := range s.Store.Timers {
-		out = append(out, t)
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].FiresAt.Before(out[j].FiresAt) })
-	b, err := json.Marshal(out)
-	s.Store.Mu.RUnlock()
+	var b []byte
+	var err error
+	s.Store.View(func() {
+		out := make([]*store.Timer, 0, len(s.Store.Timers))
+		for _, t := range s.Store.Timers {
+			out = append(out, t)
+		}
+		sort.Slice(out, func(i, j int) bool { return out[i].FiresAt.Before(out[j].FiresAt) })
+		b, err = json.Marshal(out)
+	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to encode response")
 		return
@@ -96,15 +98,13 @@ func (s *Server) createTimer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.Store.Mu.Lock()
-	defer s.Store.Mu.Unlock()
-
-	if err := s.Store.VerifyTarget(t.TargetType, t.TargetID); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	s.Store.Timers[t.ID] = t
-	if !s.saveStoreOr(w, func() { delete(s.Store.Timers, t.ID) }) {
+	if !s.updateOr(w, func() { delete(s.Store.Timers, t.ID) }, func() error {
+		if err := s.Store.VerifyTarget(t.TargetType, t.TargetID); err != nil {
+			return errInvalid(err)
+		}
+		s.Store.Timers[t.ID] = t
+		return nil
+	}) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, t)
@@ -132,15 +132,13 @@ func (s *Server) createSocketTimer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.Store.Mu.Lock()
-	defer s.Store.Mu.Unlock()
-
-	if _, ok := s.Store.Sockets[id]; !ok {
-		writeError(w, http.StatusNotFound, "socket not found")
-		return
-	}
-	s.Store.Timers[t.ID] = t
-	if !s.saveStoreOr(w, func() { delete(s.Store.Timers, t.ID) }) {
+	if !s.updateOr(w, func() { delete(s.Store.Timers, t.ID) }, func() error {
+		if _, ok := s.Store.Sockets[id]; !ok {
+			return errStatus(http.StatusNotFound, "socket not found")
+		}
+		s.Store.Timers[t.ID] = t
+		return nil
+	}) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, t)
@@ -149,14 +147,13 @@ func (s *Server) createSocketTimer(w http.ResponseWriter, r *http.Request) {
 func (s *Server) deleteTimer(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
 
-	s.Store.Mu.Lock()
-	defer s.Store.Mu.Unlock()
-	if _, ok := s.Store.Timers[id]; !ok {
-		writeError(w, http.StatusNotFound, "timer not found")
-		return
-	}
-	delete(s.Store.Timers, id)
-	if !s.saveStore(w) {
+	if !s.update(w, func() error {
+		if _, ok := s.Store.Timers[id]; !ok {
+			return errStatus(http.StatusNotFound, "timer not found")
+		}
+		delete(s.Store.Timers, id)
+		return nil
+	}) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

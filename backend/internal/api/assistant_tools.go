@@ -139,26 +139,27 @@ func (s *Server) toolGetSensorReadings(user *store.User, args map[string]any) st
 	since := time.Duration(argInt(args, "since_minutes", 60)) * time.Minute
 	cutoff := time.Now().Add(-since)
 
-	s.Store.Mu.RLock()
-	all := s.Store.Readings[id]
 	type point struct {
 		Time  time.Time
 		Value float64
 	}
-	out := make([]point, 0, len(all))
-	for _, rd := range all {
-		if rd.Time.After(cutoff) {
-			out = append(out, point{Time: rd.Time, Value: rd.Value})
-		}
-	}
-	sn := s.Store.Sensors[id]
-	unit := ""
+	// Copied out under the read lock; everything below works on the copy.
+	var out []point
+	var unit string
 	var last *float64
-	if sn != nil {
-		unit = sn.Unit
-		last = sn.LastValue
-	}
-	s.Store.Mu.RUnlock()
+	s.Store.View(func() {
+		all := s.Store.Readings[id]
+		out = make([]point, 0, len(all))
+		for _, rd := range all {
+			if rd.Time.After(cutoff) {
+				out = append(out, point{Time: rd.Time, Value: rd.Value})
+			}
+		}
+		if sn := s.Store.Sensors[id]; sn != nil {
+			unit = sn.Unit
+			last = sn.LastValue
+		}
+	})
 
 	result := map[string]any{
 		"sensor": name,

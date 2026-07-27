@@ -24,6 +24,7 @@ import (
 
 	"homehub/internal/media"
 	"homehub/internal/mediabridge"
+	"homehub/internal/store"
 	"homehub/internal/stream"
 )
 
@@ -179,19 +180,19 @@ func (s *Server) streamBaseURL() string {
 // anySpeakerIP returns the address of some registered speaker, for working
 // out which of our interfaces faces the LAN.
 func (s *Server) anySpeakerIP() string {
-	s.Store.Mu.RLock()
-	defer s.Store.Mu.RUnlock()
-	for _, sp := range s.Store.Sonos {
-		if sp.IP != "" {
-			return sp.IP
+	return store.ViewValue(s.Store, func() string {
+		for _, sp := range s.Store.Sonos {
+			if sp.IP != "" {
+				return sp.IP
+			}
 		}
-	}
-	for _, sp := range s.Store.KEF {
-		if sp.IP != "" {
-			return sp.IP
+		for _, sp := range s.Store.KEF {
+			if sp.IP != "" {
+				return sp.IP
+			}
 		}
-	}
-	return ""
+		return ""
+	})
 }
 
 // streamStartDelays reads per-vendor start compensation from the environment.

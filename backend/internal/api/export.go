@@ -30,23 +30,25 @@ type configBundle struct {
 // bundle. Sensor readings, timers and users are omitted — readings are
 // transient, timers are one-shot, and users carry credentials.
 func (s *Server) exportConfig(w http.ResponseWriter, _ *http.Request) {
-	s.Store.Mu.RLock()
-	settings := *s.Store.Settings
-	bundle := configBundle{
-		Version:     1,
-		ExportedAt:  time.Now().UTC(),
-		Sockets:     s.Store.Sockets,
-		Schedules:   s.Store.Schedules,
-		Groups:      s.Store.Groups,
-		Scenes:      s.Store.Scenes,
-		Automations: s.Store.Automations,
-		Sensors:     s.Store.Sensors,
-		Sonos:       s.Store.Sonos,
-		KEF:         s.Store.KEF,
-		Settings:    &settings,
-	}
-	body, err := json.MarshalIndent(bundle, "", "  ")
-	s.Store.Mu.RUnlock()
+	var body []byte
+	var err error
+	s.Store.View(func() {
+		settings := *s.Store.Settings
+		bundle := configBundle{
+			Version:     1,
+			ExportedAt:  time.Now().UTC(),
+			Sockets:     s.Store.Sockets,
+			Schedules:   s.Store.Schedules,
+			Groups:      s.Store.Groups,
+			Scenes:      s.Store.Scenes,
+			Automations: s.Store.Automations,
+			Sensors:     s.Store.Sensors,
+			Sonos:       s.Store.Sonos,
+			KEF:         s.Store.KEF,
+			Settings:    &settings,
+		}
+		body, err = json.MarshalIndent(bundle, "", "  ")
+	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to encode export: "+err.Error())
 		return
@@ -75,43 +77,40 @@ func (s *Server) importConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.Store.Mu.Lock()
-	defer s.Store.Mu.Unlock()
+	if !s.update(w, func() error {
+		if err := validateBundle(&bundle, s.Store); err != nil {
+			return errStatus(http.StatusBadRequest, "%s", "invalid bundle: "+err.Error())
+		}
 
-	if err := validateBundle(&bundle, s.Store); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid bundle: "+err.Error())
-		return
-	}
-
-	if bundle.Sockets != nil {
-		s.Store.Sockets = bundle.Sockets
-	}
-	if bundle.Schedules != nil {
-		s.Store.Schedules = bundle.Schedules
-	}
-	if bundle.Groups != nil {
-		s.Store.Groups = bundle.Groups
-	}
-	if bundle.Scenes != nil {
-		s.Store.Scenes = bundle.Scenes
-	}
-	if bundle.Automations != nil {
-		s.Store.Automations = bundle.Automations
-	}
-	if bundle.Sensors != nil {
-		s.Store.Sensors = bundle.Sensors
-	}
-	if bundle.Sonos != nil {
-		s.Store.Sonos = bundle.Sonos
-	}
-	if bundle.KEF != nil {
-		s.Store.KEF = bundle.KEF
-	}
-	if bundle.Settings != nil {
-		s.Store.Settings = bundle.Settings
-	}
-
-	if !s.saveStore(w) {
+		if bundle.Sockets != nil {
+			s.Store.Sockets = bundle.Sockets
+		}
+		if bundle.Schedules != nil {
+			s.Store.Schedules = bundle.Schedules
+		}
+		if bundle.Groups != nil {
+			s.Store.Groups = bundle.Groups
+		}
+		if bundle.Scenes != nil {
+			s.Store.Scenes = bundle.Scenes
+		}
+		if bundle.Automations != nil {
+			s.Store.Automations = bundle.Automations
+		}
+		if bundle.Sensors != nil {
+			s.Store.Sensors = bundle.Sensors
+		}
+		if bundle.Sonos != nil {
+			s.Store.Sonos = bundle.Sonos
+		}
+		if bundle.KEF != nil {
+			s.Store.KEF = bundle.KEF
+		}
+		if bundle.Settings != nil {
+			s.Store.Settings = bundle.Settings
+		}
+		return nil
+	}) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{

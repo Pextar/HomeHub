@@ -347,19 +347,19 @@ func (s *Server) confirmationSummary(user *store.User, tool string, args map[str
 // accessibleDeviceNames lists the names of devices the user can access,
 // optionally filtered to a room (case-insensitive). Caller must NOT hold Mu.
 func (s *Server) accessibleDeviceNames(user *store.User, room string) []string {
-	s.Store.Mu.RLock()
-	defer s.Store.Mu.RUnlock()
-	var names []string
-	for _, sock := range s.Store.Sockets {
-		if !canAccess(user, sock.ID) {
-			continue
+	return store.ViewValue(s.Store, func() []string {
+		var names []string
+		for _, sock := range s.Store.Sockets {
+			if !canAccess(user, sock.ID) {
+				continue
+			}
+			if room != "" && !strings.EqualFold(sock.Room, room) {
+				continue
+			}
+			names = append(names, sock.Name)
 		}
-		if room != "" && !strings.EqualFold(sock.Room, room) {
-			continue
-		}
-		names = append(names, sock.Name)
-	}
-	return names
+		return names
+	})
 }
 
 // groupDeviceNames lists the member device names of a group. Caller must NOT hold Mu.
@@ -368,19 +368,19 @@ func (s *Server) groupDeviceNames(ref string) []string {
 	if !ok {
 		return nil
 	}
-	s.Store.Mu.RLock()
-	defer s.Store.Mu.RUnlock()
-	g, found := s.Store.Groups[id]
-	if !found {
-		return nil
-	}
-	var names []string
-	for _, sid := range g.SocketIDs {
-		if sock, ok := s.Store.Sockets[sid]; ok {
-			names = append(names, sock.Name)
+	return store.ViewValue(s.Store, func() []string {
+		g, found := s.Store.Groups[id]
+		if !found {
+			return nil
 		}
-	}
-	return names
+		var names []string
+		for _, sid := range g.SocketIDs {
+			if sock, ok := s.Store.Sockets[sid]; ok {
+				names = append(names, sock.Name)
+			}
+		}
+		return names
+	})
 }
 
 func userID(u *store.User) string {
