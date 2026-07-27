@@ -1,0 +1,93 @@
+<script lang="ts">
+    /**
+     * What a zone's next tap will actually do, in the backend's own words.
+     *
+     * DESIGN.md §15: a streamed mixed zone is genuinely a different thing from
+     * a natively grouped one — it lands its speakers a few hundred
+     * milliseconds apart, shows on Sonos as a stream rather than as a track,
+     * and takes over the account's active Spotify device — so a zone whose
+     * route is `stream` **says so**, using the `reason` the backend already
+     * wrote, which names the speaker responsible. Nothing here infers a route
+     * from the makes it can see: the read carries `route`, `sync` and `reason`
+     * precisely so the UI never has to guess, and guessing is how an all-Sonos
+     * zone would end up wearing stream affordances it never takes.
+     *
+     * The corollary is the silence: a zone on `native` or `group` gets one
+     * quiet mono line about sync and no more, and a zone of one gets nothing
+     * at all — there is nothing to be honest about when there is nothing to
+     * keep in step.
+     */
+    import Icon from "../Icon.svelte";
+    import type { MediaRoute, MediaSync } from "../../lib/types";
+
+    let {
+        route = undefined,
+        sync = undefined,
+        reason = "",
+        /** Set instead of a route when nothing can serve the zone. */
+        problem = "",
+        /** A zone that a start here would stop, on the single Spotify session. */
+        interrupts = "",
+        /** `full` carries the reason sentence; `compact` is the label alone. */
+        variant = "full",
+    }: {
+        route?: MediaRoute;
+        sync?: MediaSync;
+        reason?: string;
+        problem?: string;
+        interrupts?: string;
+        variant?: "full" | "compact";
+    } = $props();
+
+    const streamed = $derived(route === "stream");
+</script>
+
+{#if problem}
+    <!-- Not a badge: the backend's message names which speaker blocked which
+         route, and that is the actionable part. -->
+    <p class="z-note bad">
+        <Icon name="info" size={13} />
+        <span>{problem}</span>
+    </p>
+{:else if streamed}
+    <p class="z-note cool">
+        <Icon name="radio" size={13} />
+        <span>
+            <span class="z-tag mono">HomeHub stream · {sync ?? "buffered"}</span>
+            {#if variant === "full" && reason}<span class="z-why">{reason}</span>{/if}
+        </span>
+    </p>
+{:else if sync === "exact"}
+    <p class="z-note quiet">
+        <span class="z-tag mono">In sync{route === "group" ? " · grouped" : ""}</span>
+    </p>
+{/if}
+
+{#if interrupts && !problem}
+    <!-- One Spotify account has one active session, so a second streamed or
+         Connect zone takes it from the first. Said before the tap, not
+         discovered as the other room going quiet. -->
+    <p class="z-note quiet">
+        <Icon name="info" size={13} />
+        <span>Starting this stops <strong>{interrupts}</strong> — one Spotify session at a time.</span>
+    </p>
+{/if}
+
+<style>
+    .z-note {
+        display: flex; align-items: flex-start; gap: 6px;
+        margin: 0; font-size: 12px; line-height: 1.4;
+        color: var(--text-mute);
+    }
+    .z-note :global(svg) { flex-shrink: 0; margin-top: 1px; }
+    .z-note.cool { color: var(--cool); }
+    .z-note.bad { color: var(--bad); }
+    .z-note.quiet { color: var(--text-dim); }
+    .z-tag {
+        font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase;
+    }
+    /* The reason follows the tag on the same line where there is room, and
+       wraps under it where there isn't. */
+    .z-why { color: var(--text-mute); margin-left: 6px; }
+    .z-note strong { color: var(--text); font-weight: 600; }
+</style>

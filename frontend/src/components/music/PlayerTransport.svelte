@@ -8,6 +8,11 @@
      * group-level, so they only render when the coordinator reported a
      * `group_state`; a follower's view never carries one, and a KEF speaker
      * has no play modes at all.
+     *
+     * The skips are optional for the same reason the modes are: a zone HomeHub
+     * is streaming to has no track to step to — the Spotify session that does
+     * is HomeHub's own — and a control the source would refuse is worse than
+     * one that isn't there (§15).
      */
     import Icon from "../Icon.svelte";
     import type { SonosRepeat } from "../../lib/types";
@@ -16,9 +21,9 @@
         playing,
         onToggle,
         toggleBusy = false,
-        onPrev,
+        onPrev = undefined,
         prevBusy = false,
-        onNext,
+        onNext = undefined,
         nextBusy = false,
         /** Absent for a source with no play modes. */
         modes = undefined,
@@ -26,9 +31,9 @@
         playing: boolean;
         onToggle: () => void;
         toggleBusy?: boolean;
-        onPrev: () => void;
+        onPrev?: () => void;
         prevBusy?: boolean;
-        onNext: () => void;
+        onNext?: () => void;
         nextBusy?: boolean;
         modes?: {
             shuffle: boolean;
@@ -56,15 +61,17 @@
             <Icon name="shuffle" size={18} />
         </button>
     {/if}
-    <button
-        class="icon-btn t-btn"
-        aria-label="Previous track"
-        title="Previous (shift ←)"
-        disabled={prevBusy}
-        onclick={onPrev}
-    >
-        <Icon name="skipPrev" size={22} />
-    </button>
+    {#if onPrev}
+        <button
+            class="icon-btn t-btn"
+            aria-label="Previous track"
+            title="Previous (shift ←)"
+            disabled={prevBusy}
+            onclick={onPrev}
+        >
+            <Icon name="skipPrev" size={22} />
+        </button>
+    {/if}
     <button
         class="p-play"
         class:playing
@@ -75,15 +82,17 @@
     >
         <Icon name={playing ? "pause" : "play"} size={26} />
     </button>
-    <button
-        class="icon-btn t-btn"
-        aria-label="Next track"
-        title="Next (shift →)"
-        disabled={nextBusy}
-        onclick={onNext}
-    >
-        <Icon name="skipNext" size={22} />
-    </button>
+    {#if onNext}
+        <button
+            class="icon-btn t-btn"
+            aria-label="Next track"
+            title="Next (shift →)"
+            disabled={nextBusy}
+            onclick={onNext}
+        >
+            <Icon name="skipNext" size={22} />
+        </button>
+    {/if}
     {#if modes}
         <button
             class="icon-btn t-mode"

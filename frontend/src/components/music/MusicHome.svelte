@@ -6,6 +6,12 @@
      * "Playing now" means playing. When nothing is, it collapses to a single
      * quiet row rather than one dead card per zone — idle zones stay one tap
      * away in the chips below, which is where "open a room" belongs.
+     *
+     * It lists three kinds of playing thing and **each sound is listed once**.
+     * A zone HomeHub is driving contains rooms and speakers that the vendor
+     * polls also report as playing, so a zone's card stands in for its members
+     * and theirs are dropped: three cards for one piece of music, under three
+     * different names, is the dishonesty this screen most has to avoid.
      */
     import type { Snippet } from "svelte";
     import Icon from "../Icon.svelte";
@@ -16,24 +22,32 @@
     import NavRow from "./NavRow.svelte";
     import type { SonosBridge } from "../../lib/music/sonos.svelte";
     import type { KEFBridge } from "../../lib/music/kef.svelte";
+    import type { ZonesBridge } from "../../lib/music/zones.svelte";
     import type { Busy } from "../../lib/music/busy.svelte";
     import type { Destination } from "../../lib/music/destination.svelte";
     import type { SpotifyStore } from "../../lib/music/spotify.svelte";
-    import type { SonosFavorite, SonosGroupView, KEFSpeakerView } from "../../lib/types";
+    import type {
+        SonosFavorite,
+        SonosGroupView,
+        KEFSpeakerView,
+        MediaZone,
+    } from "../../lib/types";
 
     let {
         sonos,
         kef,
+        zones,
         busy,
         destination,
         spotify,
         totalSpeakers,
         readyCount,
-        /** The zone the dock is holding, so its card can report visibility. */
-        dockCoordinator = undefined,
+        /** What the dock is holding, so that card can report its visibility. */
+        dockKey = undefined,
         onDockVisible,
         onOpenPlayer,
         onOpenKEFPlayer,
+        onOpenZonePlayer,
         onOpenSearch,
         onOpenZones,
         onOpenSpeakers,
@@ -42,21 +56,43 @@
     }: {
         sonos: SonosBridge;
         kef: KEFBridge;
+        zones: ZonesBridge;
         busy: Busy;
         destination: Destination;
         spotify: SpotifyStore;
         totalSpeakers: number;
         readyCount: number;
-        dockCoordinator?: string;
+        dockKey?: string;
         onDockVisible: (visible: boolean) => void;
         onOpenPlayer: (g: SonosGroupView) => void;
         onOpenKEFPlayer: (sp: KEFSpeakerView) => void;
+        onOpenZonePlayer: (z: MediaZone) => void;
         onOpenSearch: () => void;
         onOpenZones: () => void;
         onOpenSpeakers: () => void;
         targetRow: Snippet;
         favCard: Snippet<[SonosFavorite, string | null]>;
     } = $props();
+
+    /**
+     * Sonos groups playing on their own account — not the ones a playing zone
+     * is driving, which its own card already stands for.
+     */
+    const soloGroups = $derived(
+        sonos.playingGroups.filter(
+            (g) => !g.member_ids.some((id) => zones.playingSonosIds.has(id)),
+        ),
+    );
+    /** The same, for KEF speakers. */
+    const soloKEF = $derived(kef.playing.filter((sp) => !zones.playingKefIds.has(sp.id)));
+
+    /** Nothing playing anywhere, by any of the three routes in. */
+    const quiet = $derived(
+        zones.playing.length === 0 && soloGroups.length === 0 && soloKEF.length === 0,
+    );
+
+    /** Zones worth a chip: ones with speakers in them. */
+    const chipZones = $derived(zones.zones.filter((z) => zones.speakersOf(z).length > 0));
 </script>
 
 <!-- ── Playing now ─────────────────────────────────────────────────
@@ -65,7 +101,7 @@
      lie and bury the thing the user came for. -->
 <section class="block">
     <div class="eyrow">Playing now</div>
-    {#if sonos.playingGroups.length === 0 && kef.playing.length === 0}
+    {#if quiet}
         <QuietCard
             title="Nothing playing"
             action={spotify.status
@@ -82,13 +118,39 @@
         >
             <span class="mono">{readyCount}</span>
             speaker{readyCount === 1 ? "" : "s"} ready —
-            {sonos.favorites.length > 0 && !destination.kefSpeaker
+            {sonos.favorites.length > 0 && destination.sonosTarget
                 ? "start a favorite below"
-                : "pick a room to open it"}
+                : "pick a room or zone to open it"}
         </QuietCard>
     {:else}
         <div class="now-grid">
-            {#each sonos.playingGroups as g (g.coordinator_id)}
+            <!-- Zones first: a zone is the widest thing playing, and it stands
+                 in for every room inside it. -->
+            {#each zones.playing as z (z.id)}
+                <NowCard
+                    name={z.name}
+                    line={[zones.nowLine(z), zones.memberLine(z)].filter(Boolean).join(" · ")}
+                    artUri={zones.leadOf(z)?.state?.track?.art_uri}
+                    playing
+                    progress={zones.progress(z)}
+                    onOpen={() => onOpenZonePlayer(z)}
+                    isDock={dockKey === "zone:" + z.id}
+                    {onDockVisible}
+                >
+                    {#snippet transport()}
+                        <!-- Play/pause only: a streamed zone has no skip to
+                             give, and the player is where the ones that do
+                             keep theirs. -->
+                        <CardTransport
+                            playing={zones.isPlaying(z)}
+                            onToggle={() => zones.togglePlay(z)}
+                            toggleBusy={busy.is("zplay:" + z.id)}
+                        />
+                    {/snippet}
+                </NowCard>
+            {/each}
+
+            {#each soloGroups as g (g.coordinator_id)}
                 {@const c = sonos.coordinatorOf(g)}
                 {@const st = c?.state}
                 <NowCard
@@ -99,7 +161,7 @@
                     playing
                     progress={sonos.progressOf(g)}
                     onOpen={() => onOpenPlayer(g)}
-                    isDock={g.coordinator_id === dockCoordinator}
+                    isDock={dockKey === "sonos:" + g.coordinator_id}
                     {onDockVisible}
                 >
                     {#snippet transport()}
@@ -120,7 +182,7 @@
                  the same card. It is a way in to a player like every
                  other card here — the sheet it opens drops the queue and
                  the group, which KEF hasn't got, and keeps the rest. -->
-            {#each kef.playing as sp (sp.id)}
+            {#each soloKEF as sp (sp.id)}
                 <NowCard
                     name={sp.name}
                     line={[kef.nowLine(sp), kef.subLine(sp)].filter(Boolean).join(" · ")}
@@ -151,12 +213,13 @@
             <div class="eyrow">Favorites</div>
             {@render targetRow()}
         </div>
-        {#if destination.kefSpeaker}
-            <!-- "My Sonos" is a household list, and a KEF speaker has no
-                 way to play an entry from it. A rail of disabled cards
-                 would be a row of dead controls (§15), so the section
-                 says what it needs instead — and the fix is one tap on
-                 the destination row directly above. -->
+        {#if !destination.sonosTarget}
+            <!-- "My Sonos" is a household list, and only a Sonos room can be
+                 handed an entry from it: a KEF speaker has no way to take one,
+                 and a zone is played by a resolved route from a provider URI,
+                 which a favorite isn't. A rail of disabled cards would be a
+                 row of dead controls (§15), so the section says what it needs
+                 instead — and the fix is one tap on the row directly above. -->
             <QuietCard
                 title="Favorites need a Sonos room"
                 action={spotify.status
@@ -166,8 +229,8 @@
                       }
                     : undefined}
             >
-                They come out of your Sonos household, so {destination.kefSpeaker.name} can't
-                play one — pick a Sonos room above{#if spotify.connected}, or search to play
+                They come out of your Sonos household, so {destination.label || "this destination"}
+                can't play one — pick a Sonos room above{#if spotify.connected}, or search to play
                     there{/if}.
             </QuietCard>
         {:else}
@@ -183,13 +246,33 @@
 <!-- ── Zones at a glance (Home) ─────────────────────────────────
      "Zones", not "Rooms": the app-level nav already owns that word for
      the whole house, and reusing it here for speaker grouping was the
-     confusing part (DESIGN.md §15). -->
+     confusing part (DESIGN.md §15).
+
+     The zones the user built lead the row and carry their speaker count,
+     because a zone and a room can share a name — "Kitchen" the zone with
+     two speakers in it reads differently from "Kitchen" the speaker, and
+     the count is what tells them apart at a glance. -->
 <section class="block">
     <div class="block-head">
         <div class="eyrow">Zones</div>
         <button class="link-btn" onclick={onOpenZones}>Manage</button>
     </div>
     <div class="room-chips">
+        {#each chipZones as z (z.id)}
+            <button
+                class="room-chip"
+                class:on={zones.isPlaying(z)}
+                onclick={() => onOpenZonePlayer(z)}
+            >
+                {#if zones.isPlaying(z)}
+                    <Waveform />
+                {:else}
+                    <Icon name="groups" size={14} />
+                {/if}
+                <span>{z.name}</span>
+                <span class="chip-count mono">{zones.speakersOf(z).length}</span>
+            </button>
+        {/each}
         {#each sonos.reachable as sp (sp.id)}
             {@const g = sonos.groupOfSpeaker(sp.id)}
             <button
@@ -208,8 +291,8 @@
         {/each}
         <!-- KEF speakers are rooms that play too, so they belong in this
              row — and they open a player, like every chip beside them.
-             They are absent from Zones instead, which is honest: Zones
-             answers what plays together, and a KEF speaker never does. -->
+             What they still can't join is a *Sonos group*, which is why the
+             puck grid in the Zones sheet has no chip for them. -->
         {#each kef.reachable as sp (sp.id)}
             <button
                 class="room-chip"
@@ -260,6 +343,9 @@
         overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
     .room-chip.on { background: var(--on-soft); color: var(--on); border-color: transparent; }
+    /* How many speakers a zone chip stands for — mono, like every count. */
+    .chip-count { font-size: 10.5px; color: var(--text-dim); flex-shrink: 0; }
+    .room-chip.on .chip-count { color: var(--on); }
     .room-chip:disabled { opacity: 0.5; cursor: default; }
     @media (hover: hover) {
         .room-chip:not(:disabled):hover { border-color: var(--border-strong); color: var(--text); }

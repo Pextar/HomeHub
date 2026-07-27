@@ -6,31 +6,46 @@
      * hiding the answer entirely, because "where will this play" is a question
      * the user should never have to guess at.
      *
-     * The row spans both bridges, and the KEF speakers follow the Sonos zones
-     * behind a single `KEF` marker — one marker, not a badge per chip, because
-     * the only thing it has to solve is telling apart a name that exists on
-     * both sides.
+     * The row spans all three ways to start music, and each group of chips is
+     * introduced by a single marker rather than a badge per chip — the only
+     * thing a marker has to solve is telling apart a name that exists in more
+     * than one of them ("Kitchen" the Sonos room, "Kitchen" the KEF speaker,
+     * "Kitchen" the zone that holds both).
+     *
+     * The markers are derived from where the *kind* changes, not from an index
+     * the caller passes in: an index has to be kept in step with the order
+     * `destination.list` happens to build, and a third kind is exactly the
+     * kind of change that silently mislabels one.
      */
     import type { Destination, Dest } from "../../lib/music/destination.svelte";
 
-    let {
-        destination,
-        /** Where the KEF speakers begin, so the marker goes in once. */
-        kefStart,
-    }: {
-        destination: Destination;
-        kefStart: number;
-    } = $props();
+    let { destination }: { destination: Destination } = $props();
 
     const list = $derived(destination.list);
+
+    /** The marker above the first chip of each group. Rooms lead and need no
+     *  label — they are what "Play on" means by default. */
+    const MARKERS: Record<Dest["kind"], string> = {
+        sonos: "",
+        kef: "KEF",
+        zone: "Zones",
+    };
+
+    /** True on the first chip of a group that carries a marker. */
+    function marks(i: number): string {
+        const kind = list[i].kind;
+        if (i > 0 && list[i - 1].kind === kind) return "";
+        return MARKERS[kind];
+    }
 </script>
 
 {#if list.length > 1}
     <div class="fav-targets" role="radiogroup" aria-label="Play on">
         <span class="t-label">Play on</span>
         {#each list as d, i (d.kind + d.id)}
-            {#if i === kefStart && kefStart > 0}
-                <span class="t-label">KEF</span>
+            {@const mark = marks(i)}
+            {#if mark}
+                <span class="t-label">{mark}</span>
             {/if}
             {@const on = destination.is(d)}
             <button
@@ -38,7 +53,7 @@
                 class:on
                 role="radio"
                 aria-checked={on}
-                aria-label={`Play on ${destination.name(d)}${d.kind === "kef" ? " (KEF)" : ""}`}
+                aria-label={`Play on ${destination.name(d)}${MARKERS[d.kind] ? ` (${MARKERS[d.kind]})` : ""}`}
                 onclick={() => (destination.current = d as Dest)}
             >
                 {destination.name(d)}
