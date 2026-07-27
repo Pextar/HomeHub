@@ -15,6 +15,8 @@
     import RoomPuck from "../components/music/RoomPuck.svelte";
     import SearchSheet from "../components/music/SearchSheet.svelte";
     import SpeakersScreen from "../components/music/SpeakersScreen.svelte";
+    import ArtistScreen from "../components/music/ArtistScreen.svelte";
+    import FavoriteBrowseScreen from "../components/music/FavoriteBrowseScreen.svelte";
     import MiniPlayer from "../components/music/MiniPlayer.svelte";
     import MusicHome from "../components/music/MusicHome.svelte";
     import { createPuckDrag } from "../lib/music/puck-drag.svelte";
@@ -40,7 +42,7 @@
     import { createSpotify } from "../lib/music/spotify.svelte";
     import type {
         SonosSpeakerView, SonosGroupView, SonosFavorite,
-        KEFSpeakerView, SpotifyItem, MediaZone,
+        KEFSpeakerView, SpotifyItem, SpotifyArtistDetail, SpotifyContextDetail, MediaZone,
     } from "../lib/types";
 
     // Both vendor bridges, as state. They sit beside each other rather than
@@ -218,6 +220,59 @@
         );
     }
 
+    // ── Artist and favorite browsing ─────────────────────────────────────
+    // Two screens, not sheets: both are reached from a sheet's worth of
+    // navigation (Search, or the Home favorites shelf) or from the idle
+    // player, and a sheet must never open another one (DESIGN.md §15) — the
+    // same reasoning Speakers already follows.
+    let artistUri = $state<string | null>(null);
+    let artistDetail = $state<SpotifyArtistDetail | null>(null);
+    let artistLoading = $state(false);
+
+    async function openArtist(uri: string) {
+        pushScreen("artist");
+        artistUri = uri;
+        artistDetail = null;
+        artistLoading = true;
+        try {
+            const det = await api.spotifyArtist(uri);
+            if (artistUri !== uri) return; // superseded by another tap
+            artistDetail = det;
+        } catch (e) {
+            if (artistUri !== uri) return;
+            toasts.error("Couldn't load artist", (e as Error).message);
+            leaveScreen();
+        } finally {
+            if (artistUri === uri) artistLoading = false;
+        }
+    }
+
+    let browseFavorite = $state<SonosFavorite | null>(null);
+    let favoriteContext = $state<SpotifyContextDetail | null>(null);
+    let favoriteLoading = $state(false);
+
+    /** Tapping a favorite that's a Spotify playlist/album opens its tracks
+     *  instead of playing outright — the corner mark on the card said so. */
+    async function openFavoriteBrowse(f: SonosFavorite) {
+        if (!f.spotify_uri) return;
+        pushScreen("favorite");
+        browseFavorite = f;
+        favoriteContext = null;
+        favoriteLoading = true;
+        const uri = f.spotify_uri;
+        try {
+            const det = await api.spotifyContext(uri);
+            if (browseFavorite?.spotify_uri !== uri) return; // superseded
+            favoriteContext = det;
+        } catch (e) {
+            if (browseFavorite?.spotify_uri !== uri) return;
+            toasts.error("Couldn't load favorite", (e as Error).message);
+            leaveScreen();
+        } finally {
+            if (browseFavorite?.spotify_uri === uri) favoriteLoading = false;
+        }
+    }
+
     // ── Screens and sheets ───────────────────────────────────────────────
     // Home is the only fixed screen. The pill subnav is gone: Music's header
     // now behaves like every other header in HomeHub, with nothing riding
@@ -231,27 +286,38 @@
     // Zones and Speakers look adjacent but answer different questions: Zones
     // is about zones (what plays together), Speakers is about the devices
     // (what each one is and how it is configured).
-    type Screen = "home" | "speakers";
+    type Screen = "home" | "speakers" | "artist" | "favorite";
     let screen = $state<Screen>("home");
 
     /**
-     * Where Home was left. Pushing to Speakers is a navigation, so it starts
+     * Where Home was left. Pushing a screen is a navigation, so it starts
      * at the top — but coming *back* has to land where you were, or the row
      * you tapped (which lives at the bottom of Home) is off screen the moment
      * you return from it.
      */
     let homeScrollY = 0;
 
-    function openSpeakers() {
-        hideSheet(); // a screen replaces the sheet rather than stacking under it
+    /** Raise any non-Home screen: a sheet stands down rather than stacking
+     *  under it, Home's scroll offset is kept, and the screen starts at the top. */
+    function pushScreen(s: Exclude<Screen, "home">) {
+        hideSheet();
         if (screen === "home") homeScrollY = window.scrollY;
-        screen = "speakers";
+        screen = s;
         toTop();
     }
-    function leaveSpeakers() {
+    function openSpeakers() {
+        pushScreen("speakers");
+    }
+    /** Back to Home from whichever screen is up — one function for all of
+     *  them, since "up one" always means the same thing here. */
+    function leaveScreen() {
         screen = "home";
         detailId = null;
         kefDetailId = null;
+        artistUri = null;
+        artistDetail = null;
+        browseFavorite = null;
+        favoriteContext = null;
         restoreScroll(homeScrollY);
     }
     // Only ever one sheet at a time. Sheets *swap* — they never stack — so
@@ -280,7 +346,7 @@
     // the entry is handed straight back when the last level closes by any
     // other route.
     const navDepth = $derived(
-        (screen === "speakers" ? 1 : 0) + (sheets.open ? (sheets.under ? 2 : 1) : 0),
+        (screen !== "home" ? 1 : 0) + (sheets.open ? (sheets.under ? 2 : 1) : 0),
     );
     let holdsEntry = false;
 
@@ -302,7 +368,7 @@
         if (navDepth === 0) return; // not our entry — a real route change
         holdsEntry = false; // the browser consumed it; the effect re-takes it
         if (sheetUp) dropSheet();
-        else if (screen === "speakers") leaveSpeakers();
+        else if (screen !== "home") leaveScreen();
     }
 
     // The body-scroll lock keys on *whether* a sheet is up, never on which —
@@ -687,8 +753,9 @@
             // Escape backs out of a speaker's settings the same way its back
             // chip does — a drill-down owes the user the key that leaves it.
             else if (speakersScreen?.closeDetail()) return;
-            // …and out of Speakers itself, which is a screen, not a sheet.
-            else if (screen === "speakers") leaveSpeakers();
+            // …and out of whichever screen is up — Speakers, an artist page,
+            // or a favorite's tracks — all of which are screens, not sheets.
+            else if (screen !== "home") leaveScreen();
             return;
         }
         if (e.metaKey || e.ctrlKey || e.altKey) return;
@@ -1034,13 +1101,13 @@
         favCard={favShelf}
     />
 
-    {:else}
+    {:else if screen === "speakers"}
     <SpeakersScreen
         {sonos}
         {kef}
         {totalSpeakers}
         {readyCount}
-        onBack={leaveSpeakers}
+        onBack={leaveScreen}
         onAdd={() => openSpeakerModal()}
         onEditSonos={(sp) => void openSpeakerModal(sp)}
         onEditKEF={(sp) => void openKEFModal(sp)}
@@ -1049,6 +1116,29 @@
         bind:this={speakersScreen}
         bind:detailId
         bind:kefDetailId
+    />
+    {:else if screen === "artist"}
+    <ArtistScreen
+        artist={artistDetail}
+        loading={artistLoading}
+        {destination}
+        {busy}
+        {targetRow}
+        onBack={leaveScreen}
+        onPick={playItem}
+    />
+    {:else if screen === "favorite" && browseFavorite}
+    <FavoriteBrowseScreen
+        favorite={browseFavorite}
+        context={favoriteContext}
+        loading={favoriteLoading}
+        {destination}
+        {busy}
+        {targetRow}
+        onBack={leaveScreen}
+        onPlayAll={() => playFavorite(browseFavorite!)}
+        playAllBusy={busy.is("fav:" + browseFavorite.id)}
+        onPick={playItem}
     />
     {/if}
 
@@ -1124,7 +1214,7 @@
         {target}
         playBusy={busy.is("fav:" + f.id)}
         queueBusy={busy.is("q:" + f.uri)}
-        onPlay={() => playFavorite(f, target)}
+        onPlay={() => (f.spotify_uri ? openFavoriteBrowse(f) : playFavorite(f, target))}
         onQueue={() => enqueue({ uri: f.uri, title: f.title, metadata: f.metadata }, false, target)}
     />
 {/snippet}
@@ -1187,6 +1277,7 @@
         onPlayItem={playItem}
         onEnqueue={(item, next) =>
             enqueue({ service: "Spotify", uri: item.uri, title: item.name }, next)}
+        onOpenArtist={openArtist}
         {targetRow}
         bind:this={searchSheet}
         bind:scrollEl

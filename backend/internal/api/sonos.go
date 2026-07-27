@@ -33,6 +33,11 @@ type sonosSpeakerView struct {
 	Reachable  bool              `json:"reachable"`
 	State      *sonos.State      `json:"state,omitempty"`
 	GroupState *sonos.GroupState `json:"group_state,omitempty"`
+	// Autoplay is HomeHub's own "continue with similar music once the queue
+	// runs out" setting — see sonos_autoplay.go. It lives beside GroupState
+	// rather than inside it: GroupState is only ever what the speaker itself
+	// reports, and this is a HomeHub preference layered on top.
+	Autoplay bool `json:"autoplay,omitempty"`
 }
 
 // sonosGroupView is one live zone group mapped onto registered speaker IDs.
@@ -79,6 +84,7 @@ func (s *Server) sonosStatus(w http.ResponseWriter, r *http.Request) {
 			Reachable:    cached.Reachable,
 			State:        cached.State,
 			GroupState:   cached.GroupState,
+			Autoplay:     s.autoplayEnabled(sp.ID),
 		}
 	}
 

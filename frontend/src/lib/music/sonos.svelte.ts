@@ -107,6 +107,10 @@ export interface SonosBridge {
   clearSeek(): void;
   setPlayMode(g: SonosGroupView, patch: { shuffle?: boolean; repeat?: SonosRepeat }): void;
   toggleCrossfade(g: SonosGroupView): void;
+  /** "Continue play similar" — keep going with similar tracks once the
+   *  queue runs out. A preference, not a device state, the same shape as
+   *  crossfade. */
+  toggleAutoplay(g: SonosGroupView): void;
 
   join(speakerId: string, g: SonosGroupView): void;
   leave(speakerId: string): void;
@@ -501,6 +505,16 @@ export function createSonosBridge(busy: Busy): SonosBridge {
         "xfade:" + c.id,
         () => api.sonosSetCrossfade(c.id, !gs.crossfade),
         "Couldn't change crossfade",
+      );
+    },
+
+    toggleAutoplay(g) {
+      const c = coordinatorOf(g);
+      if (!c) return;
+      void run(
+        "autoplay:" + c.id,
+        () => api.sonosSetAutoplay(c.id, !c.autoplay),
+        "Couldn't change autoplay",
       );
     },
 
