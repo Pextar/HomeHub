@@ -1,50 +1,74 @@
 <script lang="ts">
     /**
-     * Zones: grouping, and only grouping — what plays together.
+     * Zones: what plays together, in the two shapes that actually exist.
      *
      * "Zones", not "Rooms": the app-level nav already owns that word for the
      * whole house, and reusing it here for speaker grouping was the confusing
      * part (DESIGN.md §15). It opens over Home the same way the player does,
-     * and swaps to the player when a room is tapped rather than stacking a
-     * second sheet on top of itself.
+     * and swaps to a player or the zone editor when one is tapped rather than
+     * stacking a second sheet on top of itself.
      *
-     * KEF speakers are absent, which is honest: Zones answers what plays
-     * together, and Sonos grouping is Sonos-only. Cross-vendor zones are built
-     * by membership, not by dragging one puck onto another, and the two must
-     * not be conflated in the same gesture.
+     * Two sections, and the split is the honest one:
+     *
+     *   **Zones** are HomeHub's own — a named set of speakers of any mix of
+     *   makes, built by ticking members, played by whatever route can serve
+     *   them all. This is the noun the media protocol added, and it is the only
+     *   way a KEF and a Sonos ever play together.
+     *
+     *   **Sonos grouping** is the puck grid, and it stays exactly what it was:
+     *   a gesture that drives Sonos' own grouping, which a KEF speaker cannot
+     *   join. Dragging one puck onto another must never look like it could
+     *   build a cross-vendor zone, so the two are not conflated in one gesture
+     *   and not merged into one grid.
      */
     import Icon from "../Icon.svelte";
     import MusicSheet from "./MusicSheet.svelte";
     import RoomPuck from "./RoomPuck.svelte";
     import QuietCard from "./QuietCard.svelte";
     import NavRow from "./NavRow.svelte";
+    import ZoneCard from "./ZoneCard.svelte";
+    import CardTransport from "./CardTransport.svelte";
     import type { SonosBridge } from "../../lib/music/sonos.svelte";
     import type { KEFBridge } from "../../lib/music/kef.svelte";
+    import type { ZonesBridge } from "../../lib/music/zones.svelte";
     import type { Busy } from "../../lib/music/busy.svelte";
     import type { createPuckDrag } from "../../lib/music/puck-drag.svelte";
-    import type { SonosGroupView } from "../../lib/types";
+    import type { MediaZone, SonosGroupView } from "../../lib/types";
 
     let {
         sonos,
         kef,
+        zones,
         busy,
         drag,
         docked = false,
         onDismiss,
         onOpenRoom,
+        onOpenZone,
+        onNewZone,
+        onEditZone,
         onOpenSpeakers,
         scrollEl = $bindable<HTMLElement | null>(null),
     }: {
         sonos: SonosBridge;
         kef: KEFBridge;
+        zones: ZonesBridge;
         busy: Busy;
         drag: ReturnType<typeof createPuckDrag>;
         docked?: boolean;
         onDismiss: () => void;
         onOpenRoom: (g: SonosGroupView) => void;
+        onOpenZone: (z: MediaZone) => void;
+        onNewZone: () => void;
+        onEditZone: (z: MediaZone) => void;
         onOpenSpeakers: () => void;
         scrollEl?: HTMLElement | null;
     } = $props();
+
+    /** A zone worth offering a transport: something is on it to resume. */
+    function hasTrack(z: MediaZone): boolean {
+        return !!zones.leadOf(z)?.state?.track?.title;
+    }
 
     const nameOf = (id: string) => sonos.speakerById.get(id)?.name;
     const grabbedName = $derived(drag.grabbedName(nameOf));
@@ -53,14 +77,54 @@
 <MusicSheet
     label="Zones"
     title="Zones"
-    sub="Tap a room to open it · drag one onto another to group"
+    sub="Speakers that play together, of any make"
     backLabel="Close Zones"
     onBack={onDismiss}
     {onDismiss}
     {docked}
     bind:scrollEl
 >
+    <!-- ── HomeHub zones ──────────────────────────────────────────────
+         The cross-vendor half. A zone is built by membership, so the way in is
+         a button, not a gesture — and the way to change one is the card's own
+         Edit, which swaps this sheet for the editor and gets it back after. -->
+    <div class="zone-list">
+        <div class="zl-head">
+            <div class="eyrow">Zones</div>
+            <button class="chip" onclick={onNewZone}>
+                <Icon name="plus" size={13} /> New zone
+            </button>
+        </div>
+
+        <!-- Nothing at all until the first read answers: "No zones yet" is a
+             claim, and claiming it before we know is how a sheet opened on a
+             slow network tells the user their zones are gone. -->
+        {#if zones.zones.length === 0}
+            {#if zones.loaded}
+                <QuietCard title="No zones yet">
+                    A zone is a set of speakers that play together — a Sonos and a KEF in one, if
+                    you like. HomeHub streams to whichever mix can't group natively.
+                </QuietCard>
+            {/if}
+        {:else}
+            {#each zones.zones as z (z.id)}
+                <ZoneCard
+                    zone={z}
+                    {zones}
+                    onOpen={() => onOpenZone(z)}
+                    onEdit={() => onEditZone(z)}
+                    transport={hasTrack(z) ? zoneTransport : undefined}
+                />
+            {/each}
+        {/if}
+    </div>
+
+    <!-- ── Sonos grouping ─────────────────────────────────────────────
+         Unchanged, and deliberately separate: this drives Sonos' own grouping,
+         which a KEF speaker cannot join. -->
     <div class="rooms">
+        <div class="eyrow">Sonos grouping</div>
+        <p class="hint">Tap a room to open it · drag one onto another to group</p>
         {#each sonos.multiGroups as g (g.coordinator_id)}
             <!-- The enclosure is a drop target in its own right: "drag a third
                  onto an existing group" reads as dropping on the group, so the
@@ -134,6 +198,16 @@
     speaker{sonos.offline.length === 1 ? "" : "s"} unreachable
 {/snippet}
 
+<!-- One transport for every zone card: play/pause only. Skips belong to the
+     zone's player, the same division the Sonos and KEF cards keep. -->
+{#snippet zoneTransport(z: MediaZone)}
+    <CardTransport
+        playing={zones.isPlaying(z)}
+        onToggle={() => zones.togglePlay(z)}
+        toggleBusy={busy.is("zplay:" + z.id)}
+    />
+{/snippet}
+
 {#snippet puck(sp: import("../../lib/types").SonosSpeakerView)}
     {@const g = sonos.groupOfSpeaker(sp.id)}
     <RoomPuck
@@ -157,7 +231,16 @@
 {/snippet}
 
 <style>
+    .zone-list { display: flex; flex-direction: column; gap: var(--space-3); }
+    .zl-head {
+        display: flex; align-items: center; justify-content: space-between;
+        gap: var(--space-3);
+    }
+    .zl-head .chip { flex-shrink: 0; }
+
     .rooms { display: flex; flex-direction: column; gap: var(--space-3); }
+    /* The grouping section's own caption, under its section head. */
+    .rooms > .hint { margin-top: calc(var(--space-2) * -1); }
     .puck-grid {
         display: grid;
         /* 140, not 160: inside the dashed group enclosure the extra padding

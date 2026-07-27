@@ -902,6 +902,52 @@ patterns on top. Keep these consistent if you extend it.
     whenever they fit, so an all-Sonos zone behaves exactly as it did before
     the protocol existed. If a Sonos-only zone ever renders as buffered, that
     is a bug in route selection, not a labelling choice.
+
+    Where that lands in the module, now that zones are built and played from
+    the UI:
+    - **The Zones sheet has two sections, and they are not the same thing.**
+      *Zones* are HomeHub's own — a named set of speakers of any mix of
+      makes, one card each (`ZoneCard`), carrying what is playing, a
+      play/pause, and the route note. *Sonos grouping* is the puck grid,
+      unchanged. Merging them into one grid would say a KEF can be dragged
+      into a Sonos group, which is the one thing that is still false.
+    - **The route note is the backend's sentence, never the UI's guess**
+      (`ZoneRoute`). `stream` gets a mono `HomeHub stream · buffered` tag
+      plus the `reason`; `exact` sync gets one quiet `In sync` line; a zone
+      of one gets nothing, because there is nothing to keep in step. A zone
+      nothing can serve shows its `problem` in `--bad` — those strings name
+      which speaker blocked which route, which is the actionable part, and a
+      generic "unavailable" would throw that away.
+    - **A zone's player is the third player, and drops what the route can't
+      back** (`ZonePlayer`): no queue (a streamed zone has no coordinator to
+      own one), no scrubber (there is no zone seek), and **no skips on the
+      stream route** — `next` sent to a speaker mid-stream is a call it
+      refuses, so the buttons are absent and a line says track changes come
+      from Spotify instead. Its action chip edits the zone's membership,
+      which is a zone's equivalent of a speaker's settings.
+    - **One sound is listed once.** A playing zone stands in for the rooms and
+      speakers inside it, on Home's "Playing now", in the dock, and in the
+      header count. Three cards for one piece of music under three names is
+      the dishonesty this module most has to avoid, so the zone's members are
+      filtered out of the vendor lists whenever their zone is playing.
+    - **"Play on" carries a third kind.** The destination row groups its chips
+      by kind — rooms unlabelled, then `KEF`, then `Zones` — and the markers
+      come from where the kind changes, not from an index a caller passes in.
+      Favorites stay Sonos-only and say so for *any* destination that can't
+      take one, not only a KEF speaker: a favorite is a household list entry,
+      and a zone is played from a provider URI.
+    - **One Spotify session, said before the tap.** The `stream` and `connect`
+      routes both hold the account's single active session, so starting one
+      stops the other. A zone whose route needs it, while another such zone is
+      playing, says which zone it will stop. The zone player also offers
+      **Stop**, distinct from pause, because that is what hands the session
+      back.
+    - **The editor is a form, so §11 gives it the sheet shape** — and it
+      *swaps* with whatever raised it (Zones, or a zone's player), so building
+      a zone from a player is still one sheet, one scrim, one Escape. It
+      claims nothing about routes: predicting one would be a second copy of
+      the route engine in the UI, drifting from the real one. The card the
+      user lands back on says what the zone will actually do.
   - **A KEF still isn't a Sonos puck, and still gets a player.** Grouping in
     the puck grid remains a Sonos-side gesture — it drives Sonos' own
     grouping, which a KEF cannot join. Cross-vendor zones are built by

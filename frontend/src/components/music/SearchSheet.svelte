@@ -290,6 +290,18 @@
                         </span>
                         <button class="chip" onclick={() => spotify.connect()}>Reconnect</button>
                     </div>
+                {:else if destination.zone?.problem}
+                    <!-- A zone that nothing can serve, said in the backend's own
+                         words — they name which speaker blocked which route,
+                         which is the part a user can act on. The same sentence
+                         is on the zone's card; this is it before the tap. -->
+                    <div class="sp-note">
+                        <Icon name="info" size={14} />
+                        <span>{destination.zone.problem}</span>
+                        {#if spotify.status && !spotify.status.playback}
+                            <button class="chip" onclick={() => spotify.connect()}>Reconnect</button>
+                        {/if}
+                    </div>
                 {/if}
                 {#if spotify.searching}
                     <div class="skeleton sp-skeleton"></div>
@@ -300,7 +312,7 @@
                          box does rather than leaving a blank panel. -->
                     <div class="sp-none">
                         Search Spotify for a song, album or playlist. Tapping a result
-                        plays it on the room shown above{#if !destination.kefSpeaker}; the row's
+                        plays it on the room shown above{#if destination.sonosTarget}; the row's
                         overflow menu queues it without interrupting{/if}.
                     </div>
                 {:else}

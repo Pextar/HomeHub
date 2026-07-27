@@ -10,6 +10,8 @@
     import SonosPlayer from "../components/music/SonosPlayer.svelte";
     import KEFPlayer from "../components/music/KEFPlayer.svelte";
     import ZonesSheet from "../components/music/ZonesSheet.svelte";
+    import ZonePlayer from "../components/music/ZonePlayer.svelte";
+    import ZoneEditor from "../components/music/ZoneEditor.svelte";
     import RoomPuck from "../components/music/RoomPuck.svelte";
     import SearchSheet from "../components/music/SearchSheet.svelte";
     import SpeakersScreen from "../components/music/SpeakersScreen.svelte";
@@ -32,29 +34,47 @@
     import { createBusy } from "../lib/music/busy.svelte";
     import { createSonosBridge } from "../lib/music/sonos.svelte";
     import { createKEFBridge } from "../lib/music/kef.svelte";
+    import { createZonesBridge } from "../lib/music/zones.svelte";
     import { createDestination } from "../lib/music/destination.svelte";
     import { createSearchHistory } from "../lib/music/history.svelte";
     import { createSpotify } from "../lib/music/spotify.svelte";
     import type {
         SonosSpeakerView, SonosGroupView, SonosFavorite,
-        KEFSpeakerView, SpotifyItem,
+        KEFSpeakerView, SpotifyItem, MediaZone,
     } from "../lib/types";
 
-    // Both bridges, as state. They sit beside each other rather than one
-    // folded into the other: a Sonos household is zones that group and share a
-    // queue, a KEF speaker is one standalone stereo pair with an input
+    // Both vendor bridges, as state. They sit beside each other rather than
+    // one folded into the other: a Sonos household is zones that group and
+    // share a queue, a KEF speaker is one standalone stereo pair with an input
     // selector, and DESIGN.md §15 is explicit that neither should have to
     // pretend to be the other. The busy map is shared, since the key namespace
     // is what keeps their controls from disabling each other.
     const busy = createBusy();
     const sonos = createSonosBridge(busy);
     const kef = createKEFBridge(busy);
+    // And the vendor-neutral layer above them: zones, which are the only way a
+    // KEF and a Sonos ever play together (docs/MEDIA-PROTOCOL.md). It does not
+    // replace either bridge — the per-speaker screens need vendor specifics
+    // that don't generalise — it adds the noun the two of them couldn't have.
+    const zones = createZonesBridge(busy);
 
     /** Speakers that answered, across both bridges — "ready" on the Home head. */
     const readyCount = $derived(sonos.reachable.length + kef.reachable.length);
     /** Every registered speaker across both bridges — what "is this view empty" means. */
     const totalSpeakers = $derived((sonos.status?.speakers.length ?? 0) + kef.speakers.length);
     const playingCount = $derived(sonos.playingGroups.length);
+    /**
+     * What the header counts as playing. A zone stands in for its members here
+     * for the same reason it does on Home: one piece of music is one thing
+     * playing, whatever the vendor polls say about the speakers under it.
+     */
+    const nowPlayingCount = $derived(
+        zones.playing.length +
+            sonos.playingGroups.filter(
+                (g) => !g.member_ids.some((id) => zones.playingSonosIds.has(id)),
+            ).length +
+            kef.playing.filter((sp) => !zones.playingKefIds.has(sp.id)).length,
+    );
 
     // ── Where playback lands ─────────────────────────────────────────────
     // One destination for the whole module (DESIGN.md §15, "one visible
@@ -63,12 +83,17 @@
     // queue; a KEF speaker through Spotify Connect, because its own API can
     // play and pause but has nothing to be handed. The two are not
     // interchangeable, which is exactly why the destination says which it is.
-    const destination = createDestination(sonos, kef);
+    const destination = createDestination(sonos, kef, zones);
     $effect(() => destination.settle());
 
     onMount(() => {
         void sonos.refresh();
         void kef.refresh();
+        void zones.refresh();
+        // The endpoint list is what the zone editor picks from, and it changes
+        // only when a speaker is registered or removed — so it is read once
+        // here and after a registration, never on the poll.
+        void zones.loadEndpoints();
         // Speaker changes arrive pushed — someone pressing play on the
         // speaker itself lands here in well under a second instead of
         // whenever the next poll happens to run.
@@ -77,6 +102,9 @@
             // The KEF poller publishes on the same topic when a speaker
             // actually changes, so this catches both bridges.
             void kef.refresh();
+            // Zones read their state from the same monitor caches, so the
+            // same push is the signal for them too.
+            void zones.refresh();
         });
     });
     onDestroy(() => {
@@ -107,6 +135,10 @@
                 // real change — so this is a backstop for both, not the
                 // mechanism, and rides the same interval.
                 void kef.refresh();
+                // Zones read the same caches both bridges do, so this costs
+                // no extra device traffic — one more HTTP read, not one more
+                // round of SOAP.
+                void zones.refresh();
             },
             sonos.livePush ? 20_000 : 5_000,
         );
@@ -116,29 +148,46 @@
     // Starting playback is invisible until the next poll lands, so every
     // "play this" path confirms in words — `where` names the room, which is
     // the one thing a tap can't show. The refresh is the destination's own
-    // bridge: a KEF play would never show up in the Sonos poll.
-    async function startPlayback(
+    // layer: a KEF play would never show up in the Sonos poll, and a zone play
+    // shows up in the zone read.
+    //
+    // `detail` is how a path that learns something at play time gets to say it:
+    // a zone play answers with the route it took, and a zone HomeHub is
+    // decoding for is a different promise from one the speakers stream
+    // themselves (DESIGN.md §15).
+    async function startPlayback<T>(
         key: string,
-        fn: () => Promise<unknown>,
+        fn: () => Promise<T>,
         what: string,
         where: string,
-        bridge: "sonos" | "kef" = "sonos",
+        bridge: "sonos" | "kef" | "zone" = "sonos",
+        detail?: (res: T) => string,
     ) {
         await busy.claim(key, async () => {
             try {
-                await fn();
-                await (bridge === "kef" ? kef.refresh() : sonos.refresh());
+                const res = await fn();
+                await (bridge === "kef"
+                    ? kef.refresh()
+                    : bridge === "zone"
+                      ? zones.refresh()
+                      : sonos.refresh());
                 // A KEF play answers as soon as *Spotify* accepted it — the
                 // audio then goes out to the cloud and comes back to the
                 // speaker, so the read above still says "stopped" and the
-                // toast promised music no card was showing yet. The backend
-                // re-reads at 0.6s and 3s and publishes `music` when it finds
-                // the change; these are the backstop for an install where that
-                // push isn't getting through.
-                if (bridge === "kef") {
-                    for (const ms of [1200, 4000]) followUp(ms, kef.refresh);
+                // toast promised music no card was showing yet. A streamed
+                // zone has the same gap for the same shape of reason: the
+                // decoder has to start and every speaker has to fill its own
+                // buffer. The backend re-reads and publishes `music` when it
+                // finds the change; these are the backstop for an install where
+                // that push isn't getting through.
+                if (bridge !== "sonos") {
+                    const again = bridge === "kef" ? kef.refresh : zones.refresh;
+                    for (const ms of [1200, 4000]) followUp(ms, again);
                 }
-                toasts.success("Playing", [what, where].filter(Boolean).join(" · "));
+                toasts.success(
+                    "Playing",
+                    [what, where, detail?.(res)].filter(Boolean).join(" · "),
+                );
             } catch (e) {
                 toasts.error("Couldn't play", (e as Error).message);
             }
@@ -209,12 +258,13 @@
     // there is only ever one scrim, one Escape, one thing to swipe away. The
     // rule and its invariants live in `lib/sheet-run.ts`, with tests, because
     // the swap is subtle enough to break by accident from in here.
-    type Sheet = "player" | "search" | "zones";
+    type Sheet = "player" | "search" | "zones" | "zone-edit";
     let sheets = $state<SheetRun<Sheet>>(sheetRun.closed());
 
     const openSheet = $derived(sheets.open);
     const searchOpen = $derived(sheets.open === "search");
     const zonesOpen = $derived(sheets.open === "zones");
+    const editorOpen = $derived(sheets.open === "zone-edit");
     const sheetUp = $derived(sheetRun.isUp(sheets));
 
     // ── Back closes one level ────────────────────────────────────────────
@@ -296,16 +346,23 @@
         const back = sheetRun.dismiss(sheets);
         sheets = back;
         if (back.open) restoreSheetScroll(back.open);
-        if (back.open !== "player") { playerGroupId = null; playerKefId = null; }
+        if (back.open !== "player") clearPlayer();
+        if (back.open !== "zone-edit") editingZone = null;
         drag.release();
     }
     /** Leave sheets entirely, whatever is up and whatever is under it. */
     function hideSheet() {
         if (!sheetUp) return;
         sheets = sheetRun.closeAll(sheets);
+        clearPlayer();
+        editingZone = null;
+        drag.release();
+    }
+    /** Let go of whichever player the sheet was bound to. */
+    function clearPlayer() {
         playerGroupId = null;
         playerKefId = null;
-        drag.release();
+        playerZoneId = null;
     }
 
     /** True when Search was opened to type in, rather than to read. */
@@ -366,16 +423,22 @@
     // artist, position, duration, volume, mute and an input, and answers
     // play/pause/next/previous. What it hasn't got is a queue and a group,
     // so its sheet drops those two sections and keeps the rest.
+    //
+    // Three players now, and the third is the one that isn't about a make of
+    // speaker: a zone's. Only ever one is bound at a time.
     let playerGroupId = $state<string | null>(null);
     let playerKefId = $state<string | null>(null);
+    let playerZoneId = $state<string | null>(null);
     const activeGroup = $derived(
         sonos.groups.find((g) => g.coordinator_id === playerGroupId),
     );
     const activeKef = $derived(
         playerKefId ? (kef.speakers.find((s) => s.id === playerKefId) ?? null) : null,
     );
+    const activeZone = $derived(zones.byId(playerZoneId));
     const playerOpen = $derived(
-        openSheet === "player" && (playerGroupId !== null || playerKefId !== null),
+        openSheet === "player" &&
+            (playerGroupId !== null || playerKefId !== null || playerZoneId !== null),
     );
     // The group the docked mini-player represents. Normally the first thing
     // playing — but a pause must not carry the transport off the screen with
@@ -394,7 +457,47 @@
             return !!st?.track?.title && st.transport_state !== "STOPPED";
         }),
     );
-    const dockGroup = $derived(sonos.playingGroups[0] ?? pausedGroup);
+
+    // The same "survives a pause" rule for zones, and the same reason for it.
+    let lastLiveZoneId = $state<string | null>(null);
+    $effect(() => {
+        const z = zones.playing[0];
+        if (z) lastLiveZoneId = z.id;
+    });
+    const pausedZone = $derived.by(() => {
+        const z = zones.byId(lastLiveZoneId);
+        return z && !!zones.leadOf(z)?.state?.track?.title ? z : undefined;
+    });
+
+    /**
+     * What the dock is holding. A zone wins over a room inside it — the dock
+     * must never be the second name for a sound already on screen under
+     * another one — and anything playing wins over anything paused, whichever
+     * kind it is.
+     */
+    type DockTarget =
+        | { kind: "zone"; key: string; zone: MediaZone }
+        | { kind: "sonos"; key: string; group: SonosGroupView };
+
+    /** A Sonos group a playing zone is already driving. */
+    function inPlayingZone(g: SonosGroupView): boolean {
+        return g.member_ids.some((id) => zones.playingSonosIds.has(id));
+    }
+
+    const dock = $derived.by<DockTarget | undefined>(() => {
+        const zone = (z: MediaZone): DockTarget => ({ kind: "zone", key: "zone:" + z.id, zone: z });
+        const group = (g: SonosGroupView): DockTarget => ({
+            kind: "sonos",
+            key: "sonos:" + g.coordinator_id,
+            group: g,
+        });
+        if (zones.playing[0]) return zone(zones.playing[0]);
+        const liveGroup = sonos.playingGroups.find((g) => !inPlayingZone(g));
+        if (liveGroup) return group(liveGroup);
+        if (pausedZone) return zone(pausedZone);
+        if (pausedGroup && !inPlayingZone(pausedGroup)) return group(pausedGroup);
+        return undefined;
+    });
 
     // ── Dock visibility ──────────────────────────────────────────────────
     // The dock and the Home screen's "Playing now" card carry the same track
@@ -409,8 +512,11 @@
     // the player rather than stacking one sheet on another.
     let dockCardOnScreen = $state(false);
     const overSheet = $derived(searchOpen || zonesOpen);
+    // The editor is the one sheet the dock stands down for as firmly as the
+    // player does: it is a form with a sticky footer, and a floating transport
+    // over it would land on top of Save.
     const showDock = $derived(
-        !!dockGroup && (overSheet || (!dockCardOnScreen && !playerOpen)),
+        !!dock && (overSheet || (!dockCardOnScreen && !playerOpen && !editorOpen)),
     );
 
     // The dock runs the full width of the band the assistant FAB floats in.
@@ -427,6 +533,7 @@
     // hand the transport keys to it.
     let sonosPlayer = $state<SonosPlayer | null>(null);
     let kefPlayer = $state<KEFPlayer | null>(null);
+    let zonePlayer = $state<ZonePlayer | null>(null);
     let searchSheet = $state<SearchSheet | null>(null);
     let speakersScreen = $state<SpeakersScreen | null>(null);
     // Set by the open sheet while a drag-down rides out. The art swipe stands
@@ -435,7 +542,7 @@
     let sheetDismissing = $state(false);
 
     function openPlayer(g: SonosGroupView) {
-        playerKefId = null; // one player at a time
+        clearPlayer(); // one player at a time
         playerGroupId = g.coordinator_id;
         raisePlayer();
         // The room you just opened is also where you'd expect the next
@@ -446,10 +553,20 @@
     /** The same gesture for a KEF room, so the chips beside it don't lie. */
     function openKEFPlayer(sp: KEFSpeakerView) {
         if (!sp.reachable) return void openKEFModal(sp); // fix the address instead
-        playerGroupId = null;
+        clearPlayer();
         playerKefId = sp.id;
         raisePlayer();
         destination.current = { kind: "kef", id: sp.id };
+    }
+    /** …and for a zone, which is the same gesture over more than one make. */
+    function openZonePlayer(z: MediaZone) {
+        // An empty zone has no player worth opening — it stores, but the media
+        // layer refuses to play to it. Editing it is the useful thing instead.
+        if (zones.speakersOf(z).length === 0) return void openZoneEditor(z);
+        clearPlayer();
+        playerZoneId = z.id;
+        raisePlayer();
+        destination.current = { kind: "zone", id: z.id };
     }
     function raisePlayer() {
         // Opened from Zones or Search, the player *replaces* that sheet and
@@ -477,6 +594,49 @@
      * KEF speaker has no favorites to offer instead, so its idle player named
      * the only way to start music and then didn't offer it.
      */
+    // ── Zone membership ──────────────────────────────────────────────────
+    // The editor is a form, so §11 gives it the sheet shape — and it reaches
+    // that shape by *swapping* with whatever raised it (Zones, or a zone's own
+    // player), which puts that sheet back on the way out. A sheet never opens
+    // another sheet.
+    /** The zone being edited, or null while creating one. */
+    let editingZone = $state<MediaZone | null>(null);
+
+    function openZoneEditor(z: MediaZone | null) {
+        editingZone = z;
+        rememberSheetScroll();
+        sheets = sheetRun.swapTo(sheets, "zone-edit");
+        sheetScroll["zone-edit"] = 0;
+        sheetDismissing = false;
+        // Registering or removing a speaker is the only thing that changes the
+        // picker's list, and it can have happened since the view mounted.
+        void zones.loadEndpoints();
+    }
+
+    /** Saved: back to whatever raised the editor, with the new state read in. */
+    function zoneSaved(z: MediaZone) {
+        toasts.success(editingZone ? "Zone saved" : "Zone created", z.name);
+        editingZone = null;
+        dropSheet();
+    }
+
+    async function deleteZone(z: MediaZone) {
+        const ok = await openModal<boolean>(ConfirmModal, {
+            title: `Delete ${z.name}?`,
+            message:
+                "The zone goes; the speakers stay exactly as they are. Anything playing on it keeps playing until you stop it.",
+            confirmLabel: "Delete zone",
+            danger: true,
+        });
+        if (!ok) return;
+        if (!(await zones.remove(z.id))) return;
+        toasts.success("Zone deleted", z.name);
+        // The player it was opened from is bound to a zone that no longer
+        // exists, so leave sheets entirely rather than swapping back into one.
+        editingZone = null;
+        hideSheet();
+    }
+
     function searchFromPlayer(q?: string) {
         rememberSheetScroll();
         // A recent search is a request to *run* it, so it runs — and the caret
@@ -558,6 +718,7 @@
         // no play modes — so the shell routes rather than deciding.
         kefPlayer?.handleKey(e, { slider, onControl });
         sonosPlayer?.handleKey(e, { slider, onControl });
+        zonePlayer?.handleKey(e, { slider, onControl });
     }
     // A regroup between polls can retire the coordinator the sheet is bound
     // to. Close instead of leaving an empty sheet — and, more importantly,
@@ -565,6 +726,9 @@
     $effect(() => {
         if (playerOpen && playerGroupId !== null && !activeGroup) closePlayer();
         if (playerOpen && playerKefId !== null && !activeKef) closePlayer();
+        // A zone deleted from another tab, or emptied of its speakers, leaves
+        // the same empty sheet behind.
+        if (playerOpen && playerZoneId !== null && !activeZone) closePlayer();
     });
     // Move focus into the sheet when it opens so keyboard users land there.
     $effect(() => {
@@ -582,11 +746,17 @@
     // actually moving — which is this view's judgement to make, not the
     // clock's.
     $effect(() => {
-        // Both bridges, or a house with only KEF speakers never started the
-        // clock at all: `playingCount` is the Sonos count, so a KEF card's
-        // progress hairline stood still unless a Sonos zone happened to be
-        // playing beside it.
-        if (!playerOpen && playingCount === 0 && kef.playing.length === 0) return;
+        // Every layer that can be playing, not just Sonos: `playingCount` is
+        // the Sonos count, and keying on it alone left a KEF card's — and now a
+        // zone card's — progress hairline standing still unless a Sonos zone
+        // happened to be playing beside it.
+        if (
+            !playerOpen &&
+            playingCount === 0 &&
+            kef.playing.length === 0 &&
+            zones.playing.length === 0
+        )
+            return;
         return clock.start();
     });
 
@@ -687,13 +857,31 @@
     }
 
     // A search result plays on whichever destination is selected. Same tap,
-    // same body, two roads: a Sonos group loads it into its queue and streams
-    // it with the household's linked account, while a KEF speaker is started
-    // through Spotify Connect — its own API has no way to be handed content.
+    // same body, three roads: a Sonos group loads it into its queue and streams
+    // it with the household's linked account; a KEF speaker is started through
+    // Spotify Connect, because its own API has no way to be handed content; a
+    // zone hands it to the media layer, which resolves a route across whatever
+    // makes are in it and answers with the one it chose.
     function playItem(item: SpotifyItem) {
         const d = destination.current;
         if (!d) return;
         const body = { service: "Spotify", uri: item.uri, title: item.name };
+        if (d.kind === "zone") {
+            const z = zones.byId(d.id);
+            if (!z) return;
+            void startPlayback(
+                "item:" + item.uri,
+                () => zones.play(z, { uri: item.uri, title: item.name }),
+                item.name,
+                z.name,
+                "zone",
+                // Said at the moment it becomes true: this zone is being
+                // decoded by HomeHub rather than streamed by the speakers, and
+                // the card carries the full sentence about why.
+                (res) => (res.route === "stream" ? "HomeHub stream" : ""),
+            );
+            return;
+        }
         void startPlayback(
             "item:" + item.uri,
             () => (d.kind === "kef" ? api.kefPlayItem(d.id, body) : api.sonosPlayItem(d.id, body)),
@@ -713,6 +901,11 @@
         if (changed) {
             void sonos.refresh();
             void kef.refresh();
+            // A new or removed speaker changes both what zones hold (the
+            // backend cascades a delete out of them) and what the picker can
+            // offer, so both reads are due.
+            void zones.refresh();
+            void zones.loadEndpoints();
         }
     }
 
@@ -726,6 +919,8 @@
             // no longer exists.
             if (kefDetailId === sp.id) kefDetailId = null;
             void kef.refresh();
+            void zones.refresh();
+            void zones.loadEndpoints();
         }
     }
 
@@ -766,7 +961,7 @@
     <Topbar
         title="Music"
         subtitle={sonos.status
-            ? `${totalSpeakers} speaker${totalSpeakers === 1 ? "" : "s"} · ${playingCount + kef.playing.length} playing`
+            ? `${totalSpeakers} speaker${totalSpeakers === 1 ? "" : "s"} · ${nowPlayingCount} playing`
             : "Sonos & KEF"}
     >
         {#snippet actions()}
@@ -821,15 +1016,17 @@
     <MusicHome
         {sonos}
         {kef}
+        {zones}
         {busy}
         {destination}
         {spotify}
         {totalSpeakers}
         {readyCount}
-        dockCoordinator={dockGroup?.coordinator_id}
+        dockKey={dock?.key}
         onDockVisible={(v) => (dockCardOnScreen = v)}
         onOpenPlayer={openPlayer}
         onOpenKEFPlayer={openKEFPlayer}
+        onOpenZonePlayer={openZonePlayer}
         onOpenSearch={openSearch}
         onOpenZones={openZones}
         onOpenSpeakers={openSpeakers}
@@ -861,28 +1058,51 @@
          down while the Home card it would duplicate is on screen. It also
          survives a pause: that is where a paused zone stays reachable once
          "Playing now" (which means playing, literally) has let go of it. -->
-    {#if showDock && dockGroup}
-        {@const c = sonos.coordinatorOf(dockGroup)}
+    {#if showDock && dock?.kind === "sonos"}
+        {@const g = dock.group}
+        {@const c = sonos.coordinatorOf(g)}
         {@const st = c?.state}
-        {@const dockPlaying = sonos.isPlaying(dockGroup)}
+        {@const dockPlaying = sonos.isPlaying(g)}
         <MiniPlayer
             title={st?.track?.title ?? "Playing"}
-            sub={[st?.track?.artist, sonos.groupTitle(dockGroup)].filter(Boolean).join(" · ")}
+            sub={[st?.track?.artist, sonos.groupTitle(g)].filter(Boolean).join(" · ")}
             artUri={st?.track?.art_uri}
             playing={dockPlaying}
-            progress={sonos.progressOf(dockGroup)}
+            progress={sonos.progressOf(g)}
             {overSheet}
-            onOpen={() => openPlayer(dockGroup)}
+            onOpen={() => openPlayer(g)}
         >
             {#snippet transport()}
                 <CardTransport
                     playing={dockPlaying}
-                    onToggle={() => sonos.togglePlay(dockGroup)}
+                    onToggle={() => sonos.togglePlay(g)}
                     toggleBusy={!c || busy.is("play:" + c?.id)}
-                    onPrev={() => sonos.skip(dockGroup, "previous")}
+                    onPrev={() => sonos.skip(g, "previous")}
                     prevBusy={!c || busy.is("previous:" + c?.id)}
-                    onNext={() => sonos.skip(dockGroup, "next")}
+                    onNext={() => sonos.skip(g, "next")}
                     nextBusy={!c || busy.is("next:" + c?.id)}
+                />
+            {/snippet}
+        </MiniPlayer>
+    {:else if showDock && dock?.kind === "zone"}
+        <!-- A zone in the dock, with the zone's own transport. No skips: on the
+             stream route there is nothing for a skip to step to, and the dock
+             must never be the richer control (§15). -->
+        {@const z = dock.zone}
+        <MiniPlayer
+            title={zones.nowLine(z)}
+            sub={[zones.subLine(z), z.name].filter(Boolean).join(" · ")}
+            artUri={zones.leadOf(z)?.state?.track?.art_uri}
+            playing={zones.isPlaying(z)}
+            progress={zones.progress(z)}
+            {overSheet}
+            onOpen={() => openZonePlayer(z)}
+        >
+            {#snippet transport()}
+                <CardTransport
+                    playing={zones.isPlaying(z)}
+                    onToggle={() => zones.togglePlay(z)}
+                    toggleBusy={busy.is("zplay:" + z.id)}
                 />
             {/snippet}
         </MiniPlayer>
@@ -893,7 +1113,7 @@
      results — point at the same destination row, so it is rendered through one
      snippet rather than placed twice. -->
 {#snippet targetRow()}
-    <DestinationRow {destination} kefStart={sonos.groups.length} />
+    <DestinationRow {destination} />
 {/snippet}
 
 <!-- Tap the art to play it on `target`, the corner + to queue it. Shared by
@@ -913,13 +1133,34 @@
     <ZonesSheet
         {sonos}
         {kef}
+        {zones}
         {busy}
         {drag}
         docked={showDock}
         onDismiss={dropSheet}
         onOpenRoom={openPlayer}
+        onOpenZone={openZonePlayer}
+        onNewZone={() => openZoneEditor(null)}
+        onEditZone={(z) => openZoneEditor(z)}
         onOpenSpeakers={openSpeakers}
         bind:scrollEl
+    />
+{/if}
+
+<!-- ── Zone editor ──────────────────────────────────────────────────
+     A form, so it takes §11's sheet shape — and it *swaps* with the sheet that
+     raised it, which is what keeps "build a zone from a zone's player" from
+     being a sheet over a sheet. -->
+{#if editorOpen}
+    <ZoneEditor
+        zone={editingZone}
+        {zones}
+        onCancel={dropSheet}
+        onSaved={zoneSaved}
+        onDelete={(z) => void deleteZone(z)}
+        onOpenSpeakers={openSpeakers}
+        bind:scrollEl
+        bind:dismissing={sheetDismissing}
     />
 {/if}
 
@@ -953,10 +1194,12 @@
 {/if}
 
 <!-- ── The players ──────────────────────────────────────────────────
-     Two sheets, not one: a Sonos zone has a queue, a group and play modes,
-     and a KEF speaker has an input selector instead. They share every section
-     that is genuinely the same object (art, meta, transport, volume rows,
-     "Start something"), and differ where the hardware does. -->
+     Three sheets, not one: a Sonos zone has a queue, a group and play modes; a
+     KEF speaker has an input selector instead; a HomeHub zone has neither, and
+     carries the route note plus the volumes of every speaker in it whatever
+     make they are. They share every section that is genuinely the same object
+     (art, meta, transport, volume rows, "Start something"), and differ where
+     the hardware — or the route — does. -->
 {#if playerOpen && activeKef}
     <KEFPlayer
         speaker={activeKef}
@@ -978,6 +1221,26 @@
             {@render startRow(null)}
         {/snippet}
     </KEFPlayer>
+{/if}
+
+{#if playerOpen && activeZone}
+    <ZonePlayer
+        zone={activeZone}
+        {zones}
+        {sonos}
+        {kef}
+        {busy}
+        onClose={closePlayer}
+        onEdit={() => activeZone && openZoneEditor(activeZone)}
+        bind:this={zonePlayer}
+        bind:scrollEl
+        bind:sheetEl={playerEl}
+        bind:dismissing={sheetDismissing}
+    >
+        {#snippet startSomething()}
+            {@render startRow(null)}
+        {/snippet}
+    </ZonePlayer>
 {/if}
 
 {#if playerOpen && activeGroup}
