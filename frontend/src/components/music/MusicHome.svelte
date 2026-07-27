@@ -1,371 +1,220 @@
 <script lang="ts">
     /**
-     * Music's home screen: what is playing, the favorites shelf, the zones at
-     * a glance, and the way through to Speakers.
+     * Music's home screen: one hero, one grid of rooms, one way through to the
+     * devices. That is the whole screen.
      *
-     * "Playing now" means playing. When nothing is, it collapses to a single
-     * quiet row rather than one dead card per zone — idle zones stay one tap
-     * away in the chips below, which is where "open a room" belongs.
+     * What it replaced was four stacked sections that each described the same
+     * speakers differently — a "Playing now" grid, a favorites rail with its
+     * own destination picker, a row of small chips mixing zones with rooms with
+     * lone speakers, and a "Zones" sheet one level down holding the grouping
+     * gesture. The same Sonos One could appear three times on this screen under
+     * three names, and the thing you most wanted to do to it (group it with
+     * another) was somewhere else entirely.
      *
-     * It lists three kinds of playing thing and **each sound is listed once**.
-     * A zone HomeHub is driving contains rooms and speakers that the vendor
-     * polls also report as playing, so a zone's card stands in for its members
-     * and theirs are dropped: three cards for one piece of music, under three
-     * different names, is the dishonesty this screen most has to avoid.
+     * So: the hero says what is playing and controls it. The grid says where
+     * else there is sound, focuses the hero when tapped, and is where grouping
+     * happens — you drag one room onto another, right here, on the rooms
+     * themselves. Everything to *start* something lives on Browse, because
+     * choosing music and choosing a room are different jobs and only one of
+     * them belongs on the screen you land on.
      */
-    import type { Snippet } from "svelte";
     import Icon from "../Icon.svelte";
-    import Waveform from "./Waveform.svelte";
-    import NowCard from "./NowCard.svelte";
-    import CardTransport from "./CardTransport.svelte";
-    import QuietCard from "./QuietCard.svelte";
+    import NowHero from "./NowHero.svelte";
+    import RoomCard from "./RoomCard.svelte";
     import NavRow from "./NavRow.svelte";
+    import QuietCard from "./QuietCard.svelte";
+    import type { Room, RoomsModel } from "../../lib/music/rooms.svelte";
+    import type { createRoomDrag } from "../../lib/music/room-drag.svelte";
     import type { SonosBridge } from "../../lib/music/sonos.svelte";
-    import type { KEFBridge } from "../../lib/music/kef.svelte";
-    import type { ZonesBridge } from "../../lib/music/zones.svelte";
-    import type { Busy } from "../../lib/music/busy.svelte";
     import type { Destination } from "../../lib/music/destination.svelte";
-    import type { SpotifyStore } from "../../lib/music/spotify.svelte";
-    import type {
-        SonosFavorite,
-        SonosGroupView,
-        KEFSpeakerView,
-        MediaZone,
-    } from "../../lib/types";
 
     let {
+        rooms,
         sonos,
-        kef,
-        zones,
-        busy,
         destination,
-        spotify,
+        drag,
         totalSpeakers,
         readyCount,
-        /** What the dock is holding, so that card can report its visibility. */
+        /** What the dock is holding, so the hero can report its own visibility. */
         dockKey = undefined,
         onDockVisible,
         onOpenPlayer,
-        onOpenKEFPlayer,
-        onOpenZonePlayer,
-        onOpenSearch,
-        onOpenZones,
+        onBrowse,
         onOpenSpeakers,
-        targetRow,
-        favCard,
+        onNewRoom,
     }: {
+        rooms: RoomsModel;
         sonos: SonosBridge;
-        kef: KEFBridge;
-        zones: ZonesBridge;
-        busy: Busy;
         destination: Destination;
-        spotify: SpotifyStore;
+        drag: ReturnType<typeof createRoomDrag>;
         totalSpeakers: number;
         readyCount: number;
         dockKey?: string;
         onDockVisible: (visible: boolean) => void;
-        onOpenPlayer: (g: SonosGroupView) => void;
-        onOpenKEFPlayer: (sp: KEFSpeakerView) => void;
-        onOpenZonePlayer: (z: MediaZone) => void;
-        onOpenSearch: () => void;
-        onOpenZones: () => void;
+        onOpenPlayer: (r: Room) => void;
+        onBrowse: () => void;
         onOpenSpeakers: () => void;
-        targetRow: Snippet;
-        favCard: Snippet<[SonosFavorite, string | null]>;
+        onNewRoom: () => void;
     } = $props();
 
+    const focused = $derived(destination.room);
+
     /**
-     * Sonos groups playing on their own account — not the ones a playing zone
-     * is driving, which its own card already stands for.
+     * Tap once to focus, tap the focused one again to open it. Two gestures on
+     * one target, and the second is only reachable once the first has told you
+     * what you are about to open — which is what makes it safe on a grid where
+     * a stray tap used to launch a whole sheet.
      */
-    const soloGroups = $derived(
-        sonos.playingGroups.filter(
-            (g) => !g.member_ids.some((id) => zones.playingSonosIds.has(id)),
-        ),
-    );
-    /** The same, for KEF speakers. */
-    const soloKEF = $derived(kef.playing.filter((sp) => !zones.playingKefIds.has(sp.id)));
+    function select(r: Room) {
+        if (destination.is(r)) onOpenPlayer(r);
+        else destination.focus(r);
+    }
 
-    /** Nothing playing anywhere, by any of the three routes in. */
-    const quiet = $derived(
-        zones.playing.length === 0 && soloGroups.length === 0 && soloKEF.length === 0,
-    );
-
-    /** Zones worth a chip: ones with speakers in them. */
-    const chipZones = $derived(zones.zones.filter((z) => zones.speakersOf(z).length > 0));
+    /**
+     * The dock is a fallback, never a duplicate: it appears only once the hero
+     * it repeats has left the screen. The bottom inset discounts the band the
+     * dock and the tab bar occupy — a hero sitting behind them counts as gone.
+     */
+    function heroAnchor(node: HTMLElement, on: boolean) {
+        let obs: IntersectionObserver | undefined;
+        let active = false;
+        function attach(next: boolean) {
+            obs?.disconnect();
+            obs = undefined;
+            if (active && !next) onDockVisible(false);
+            active = next;
+            if (!next) return;
+            obs = new IntersectionObserver(([entry]) => onDockVisible(entry.isIntersecting), {
+                threshold: 0.4,
+                rootMargin: "0px 0px -96px 0px",
+            });
+            obs.observe(node);
+        }
+        attach(on);
+        return {
+            update: attach,
+            destroy() {
+                obs?.disconnect();
+                if (active) onDockVisible(false);
+            },
+        };
+    }
 </script>
 
-<!-- ── Playing now ─────────────────────────────────────────────────
-     Only what is actually playing. Idle zones are one tap away in the
-     room chips below, so listing them here would just make the heading
-     lie and bury the thing the user came for. -->
+<div use:heroAnchor={!!focused && dockKey === focused.key}>
+    <NowHero
+        room={focused}
+        {rooms}
+        {sonos}
+        pager={rooms.playing}
+        onFocus={(r) => destination.focus(r)}
+        onOpen={() => focused && onOpenPlayer(focused)}
+        {onBrowse}
+    />
+</div>
+
 <section class="block">
-    <div class="eyrow">Playing now</div>
-    {#if quiet}
-        <QuietCard
-            title="Nothing playing"
-            action={spotify.status
-                ? {
-                      // Not gated on `connected`: the people who most need
-                      // a pointer at Spotify are the ones who haven't set
-                      // it up, and with the subnav gone this card and the
-                      // header icon are the only things that say the
-                      // module searches at all (DESIGN.md §15).
-                      label: spotify.connected ? "Search" : "Set up Spotify",
-                      onClick: onOpenSearch,
-                  }
-                : undefined}
-        >
-            <span class="mono">{readyCount}</span>
-            speaker{readyCount === 1 ? "" : "s"} ready —
-            {sonos.favorites.length > 0 && destination.sonosTarget
-                ? "start a favorite below"
-                : "pick a room or zone to open it"}
+    <div class="block-head">
+        <div class="eyrow">Rooms</div>
+        <div class="rooms-actions">
+            <!-- The gesture builds most of these; this is for the times you
+                 want to name one first, or pick speakers that aren't beside
+                 each other in the grid. -->
+            <span class="rooms-hint">
+                <Icon name="grip" size={12} />
+                drag one onto another to group
+            </span>
+            <button class="chip" onclick={onNewRoom}>
+                <Icon name="plus" size={13} /> New room
+            </button>
+        </div>
+    </div>
+
+    {#if rooms.list.length === 0}
+        <QuietCard title="No rooms answering">
+            <span class="mono">{totalSpeakers}</span>
+            speaker{totalSpeakers === 1 ? "" : "s"} registered, none reachable right now — check
+            their addresses under Speakers.
         </QuietCard>
     {:else}
-        <div class="now-grid">
-            <!-- Zones first: a zone is the widest thing playing, and it stands
-                 in for every room inside it. -->
-            {#each zones.playing as z (z.id)}
-                <NowCard
-                    name={z.name}
-                    line={[zones.nowLine(z), zones.memberLine(z)].filter(Boolean).join(" · ")}
-                    artUri={zones.leadOf(z)?.state?.track?.art_uri}
-                    playing
-                    progress={zones.progress(z)}
-                    onOpen={() => onOpenZonePlayer(z)}
-                    isDock={dockKey === "zone:" + z.id}
-                    {onDockVisible}
-                >
-                    {#snippet transport()}
-                        <!-- Play/pause only: a streamed zone has no skip to
-                             give, and the player is where the ones that do
-                             keep theirs. -->
-                        <CardTransport
-                            playing={zones.isPlaying(z)}
-                            onToggle={() => zones.togglePlay(z)}
-                            toggleBusy={busy.is("zplay:" + z.id)}
-                        />
-                    {/snippet}
-                </NowCard>
-            {/each}
-
-            {#each soloGroups as g (g.coordinator_id)}
-                {@const c = sonos.coordinatorOf(g)}
-                {@const st = c?.state}
-                <NowCard
-                    name={sonos.groupTitle(g)}
-                    line={[st?.track?.title, st?.track?.artist].filter(Boolean).join(" · ") ||
-                        "Live audio"}
-                    artUri={st?.track?.art_uri}
-                    playing
-                    progress={sonos.progressOf(g)}
-                    onOpen={() => onOpenPlayer(g)}
-                    isDock={dockKey === "sonos:" + g.coordinator_id}
-                    {onDockVisible}
-                >
-                    {#snippet transport()}
-                        <CardTransport
-                            playing={sonos.isPlaying(g)}
-                            onToggle={() => sonos.togglePlay(g)}
-                            toggleBusy={!c || busy.is("play:" + c?.id)}
-                            onPrev={() => sonos.skip(g, "previous")}
-                            prevBusy={!c || busy.is("previous:" + c?.id)}
-                            onNext={() => sonos.skip(g, "next")}
-                            nextBusy={!c || busy.is("next:" + c?.id)}
-                        />
-                    {/snippet}
-                </NowCard>
-            {/each}
-
-            <!-- KEF speakers that are playing, in the same grid and with
-                 the same card. It is a way in to a player like every
-                 other card here — the sheet it opens drops the queue and
-                 the group, which KEF hasn't got, and keeps the rest. -->
-            {#each soloKEF as sp (sp.id)}
-                <NowCard
-                    name={sp.name}
-                    line={[kef.nowLine(sp), kef.subLine(sp)].filter(Boolean).join(" · ")}
-                    artUri={sp.state?.track?.art_uri}
-                    playing
-                    progress={kef.progress(sp)}
-                    onOpen={() => onOpenKEFPlayer(sp)}
-                    isDock={dockKey === "kef:" + sp.id}
-                    {onDockVisible}
-                >
-                    {#snippet transport()}
-                        <!-- Play/pause only, like the Sonos card below
-                             430px: the sheet is where the skips live. -->
-                        <CardTransport
-                            playing={kef.isPlaying(sp)}
-                            onToggle={() => kef.togglePlay(sp)}
-                            toggleBusy={busy.is("kefplay:" + sp.id)}
-                        />
-                    {/snippet}
-                </NowCard>
+        <div class="room-grid">
+            {#each rooms.list as r (r.key)}
+                <RoomCard
+                    room={r}
+                    {rooms}
+                    focused={destination.is(r)}
+                    lifted={drag.drag?.key === r.key}
+                    held={drag.grabKey === r.key}
+                    dropping={drag.dropKey === r.key}
+                    aiming={drag.aiming(r)}
+                    grabbedName={drag.grabbedName}
+                    onSelect={() => select(r)}
+                    onToggle={() => rooms.togglePlay(r)}
+                    onPointerDown={(e) => drag.onPointerDown(e, r)}
+                    onPointerMove={drag.onPointerMove}
+                    onPointerUp={drag.onPointerUp}
+                    onPointerCancel={drag.end}
+                    onClickCapture={drag.onClickCapture}
+                    onKeyDown={(e) => drag.onKeyDown(e, r)}
+                />
             {/each}
         </div>
+        <p class="hint keys-note">
+            On a keyboard: press <kbd>G</kbd> on a room to pick it up, <kbd>Tab</kbd> to another
+            and <kbd>Enter</kbd> to play them together.
+        </p>
     {/if}
 </section>
 
-<!-- ── Favorites ───────────────────────────────────────────────── -->
-{#if sonos.favorites.length > 0}
-    <section class="block">
-        <div class="block-head">
-            <div class="eyrow">Favorites</div>
-            {@render targetRow()}
-        </div>
-        {#if !destination.sonosTarget}
-            <!-- "My Sonos" is a household list, and only a Sonos room can be
-                 handed an entry from it: a KEF speaker has no way to take one,
-                 and a zone is played by a resolved route from a provider URI,
-                 which a favorite isn't. A rail of disabled cards would be a
-                 row of dead controls (§15), so the section says what it needs
-                 instead — and the fix is one tap on the row directly above. -->
-            <QuietCard
-                title="Favorites need a Sonos room"
-                action={spotify.status
-                    ? {
-                          label: spotify.connected ? "Search" : "Set up Spotify",
-                          onClick: onOpenSearch,
-                      }
-                    : undefined}
-            >
-                They come out of your Sonos household, so {destination.label || "this destination"}
-                can't play one — pick a Sonos room above{#if spotify.connected}, or search to play
-                    there{/if}.
-            </QuietCard>
-        {:else}
-            <div class="favs h-scroll">
-                {#each sonos.favorites as f (f.id)}
-                    {@render favCard(f, destination.sonosTarget)}
-                {/each}
-            </div>
-        {/if}
-    </section>
+<!-- Speakers the topology never mentioned can't be a room, so Home only points
+     at them; fixing an address is device work, and device work is one screen
+     over. -->
+{#if rooms.offline.length > 0}
+    <NavRow icon="speaker" title={offlineTitle} onClick={onOpenSpeakers}>
+        {#snippet sub()}
+            Not answering — fix an address, or set one up
+        {/snippet}
+    </NavRow>
 {/if}
 
-<!-- ── Zones at a glance (Home) ─────────────────────────────────
-     "Zones", not "Rooms": the app-level nav already owns that word for
-     the whole house, and reusing it here for speaker grouping was the
-     confusing part (DESIGN.md §15).
-
-     The zones the user built lead the row and carry their speaker count,
-     because a zone and a room can share a name — "Kitchen" the zone with
-     two speakers in it reads differently from "Kitchen" the speaker, and
-     the count is what tells them apart at a glance. -->
-<section class="block">
-    <div class="block-head">
-        <div class="eyrow">Zones</div>
-        <button class="link-btn" onclick={onOpenZones}>Manage</button>
-    </div>
-    <div class="room-chips">
-        {#each chipZones as z (z.id)}
-            <button
-                class="room-chip"
-                class:on={zones.isPlaying(z)}
-                onclick={() => onOpenZonePlayer(z)}
-            >
-                {#if zones.isPlaying(z)}
-                    <Waveform />
-                {:else}
-                    <Icon name="groups" size={14} />
-                {/if}
-                <span>{z.name}</span>
-                <span class="chip-count mono">{zones.speakersOf(z).length}</span>
-            </button>
-        {/each}
-        {#each sonos.reachable as sp (sp.id)}
-            {@const g = sonos.groupOfSpeaker(sp.id)}
-            <button
-                class="room-chip"
-                class:on={sonos.speakerPlaying(sp.id)}
-                disabled={!g}
-                onclick={() => g && onOpenPlayer(g)}
-            >
-                {#if sonos.speakerPlaying(sp.id)}
-                    <Waveform />
-                {:else}
-                    <Icon name="speaker" size={14} />
-                {/if}
-                <span>{sp.name}</span>
-            </button>
-        {/each}
-        <!-- KEF speakers are rooms that play too, so they belong in this
-             row — and they open a player, like every chip beside them.
-             What they still can't join is a *Sonos group*, which is why the
-             puck grid in the Zones sheet has no chip for them. -->
-        {#each kef.reachable as sp (sp.id)}
-            <button
-                class="room-chip"
-                class:on={kef.isPlaying(sp)}
-                onclick={() => onOpenKEFPlayer(sp)}
-            >
-                {#if kef.isPlaying(sp)}
-                    <Waveform />
-                {:else}
-                    <Icon name="speaker" size={14} />
-                {/if}
-                <span>{sp.name}</span>
-            </button>
-        {/each}
-    </div>
-</section>
-
-<!-- The way through to the device inventory. A plain row rather than a
-     header icon, because what it opens is a screen — Speakers pushes,
-     Search and Zones lift. -->
-<NavRow icon="speaker" title="Speakers" count={totalSpeakers} onClick={onOpenSpeakers}>
+<NavRow icon="sliders" title="Speakers" count={totalSpeakers} onClick={onOpenSpeakers}>
     {#snippet sub()}
-        {#if sonos.offline.length > 0}
-            <span class="mono">{sonos.offline.length}</span>
-            unreachable — fix an address, or set one up
-        {:else}
-            Names, addresses, tone and the status light
-        {/if}
+        <span class="mono">{readyCount}</span>
+        ready · names, addresses, tone and the status light
     {/snippet}
 </NavRow>
 
-<style>
-    /* ── Zones at a glance ── */
-    .room-chips {
-        display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-        gap: var(--space-2);
-    }
-    .room-chip {
-        display: flex; align-items: center; justify-content: center; gap: 6px;
-        min-height: 44px; padding: 10px var(--space-3);
-        background: var(--card-2); border: 1px solid var(--hairline);
-        border-radius: var(--r-pill);
-        color: var(--text-mute); font-size: 12.5px; cursor: pointer;
-        transition: border-color var(--t-fast), color var(--t-fast);
-    }
-    .room-chip span {
-        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    }
-    .room-chip.on { background: var(--on-soft); color: var(--on); border-color: transparent; }
-    /* How many speakers a zone chip stands for — mono, like every count. */
-    .chip-count { font-size: 10.5px; color: var(--text-dim); flex-shrink: 0; }
-    .room-chip.on .chip-count { color: var(--on); }
-    .room-chip:disabled { opacity: 0.5; cursor: default; }
-    @media (hover: hover) {
-        .room-chip:not(:disabled):hover { border-color: var(--border-strong); color: var(--text); }
-        .room-chip.on:not(:disabled):hover { color: var(--on); }
-    }
+{#snippet offlineTitle()}
+    <span class="mono">{rooms.offline.length}</span>
+    unreachable
+{/snippet}
 
-    .now-grid {
+<style>
+    .room-grid {
         display: grid;
-        /* Wide enough that the track title still has room next to the
-           three-button transport — narrower columns crushed it to an ellipsis
-           on desktop. */
-        grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+        /* Wide enough for a track title beside the play button; narrower
+           columns crushed it to an ellipsis on desktop. */
+        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
         gap: var(--space-3);
     }
-    .favs { display: flex; gap: var(--space-3); padding-bottom: var(--space-1); }
-    .link-btn {
-        background: none; border: 0; padding: 0;
-        color: var(--text-mute); font-size: 12.5px; cursor: pointer;
+    .rooms-actions { display: flex; align-items: center; gap: var(--space-3); }
+    .rooms-hint {
+        display: flex; align-items: center; gap: 5px;
+        font-size: 11.5px; color: var(--text-dim);
     }
-    .link-btn:hover { color: var(--text); }
+    /* On a phone the press-and-hold is the discovery, and the line steals a
+       whole row from the grid. */
+    @media (max-width: 520px) {
+        .rooms-hint { display: none; }
+    }
+    .keys-note { display: none; }
+    @media (hover: hover) and (pointer: fine) {
+        .keys-note { display: block; }
+    }
+    kbd {
+        font-family: var(--font-mono); font-size: 10.5px;
+        padding: 1px 5px; border-radius: 4px;
+        background: var(--card-2); border: 1px solid var(--hairline);
+        color: var(--text-mute);
+    }
 </style>
