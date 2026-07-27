@@ -1023,7 +1023,9 @@
         border-color: transparent;
         color: var(--bg);
     }
-    .t-btn:hover:not(:disabled), .t-play:hover:not(:disabled) { transform: scale(1.04); }
+    @media (hover: hover) {
+        .t-btn:hover:not(:disabled), .t-play:hover:not(:disabled) { transform: scale(1.04); }
+    }
     .t-btn:disabled, .t-play:disabled { opacity: 0.45; cursor: default; }
     .t-note {
         flex-basis: 100%;
