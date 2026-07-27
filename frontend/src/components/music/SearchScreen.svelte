@@ -1,13 +1,20 @@
 <script lang="ts">
     /**
-     * Search — Spotify's catalog, and the one-time account setup in front of
-     * it. A screen, not a sheet: the grouped overview (a "Top result" card
-     * plus one section per kind that matched) is a browsing surface in its
-     * own right, closer in scope to Speakers than to a quick lookup, and 82%
-     * of the viewport with a grabber and close-X eating into it read as
-     * exactly that — a quick lookup — for content that wants the room to
-     * breathe. It takes the same §11 shape Speakers and the catalog drill-ins
-     * do: back chip, centered title, plain scrolling content.
+     * Browse — everywhere music comes *from*, in one place: your Sonos
+     * favorites, your recent searches, and Spotify's catalog behind the box at
+     * the top. Home is about rooms; this is about music; a tap here starts
+     * whatever is playing in whichever room the picker names.
+     *
+     * The favorites shelf used to live on Home, under its own copy of the
+     * destination picker, which meant the landing screen was half "where" and
+     * half "what" and neither half had room. Everything that *starts* music is
+     * here now, and Home is only rooms.
+     *
+     * A screen, not a sheet: the grouped overview (a "Top result" card plus
+     * one section per kind that matched) is a browsing surface in its own
+     * right, closer in scope to Speakers than to a quick lookup. It takes the
+     * same §11 shape Speakers and the catalog drill-ins do: back chip,
+     * centered title, plain scrolling content.
      *
      * The box behaves like a search box: typing debounces, Enter runs the
      * query immediately, a clear X appears once there is something to clear
@@ -47,6 +54,8 @@
          *  tracks and albums to pick from, not a single thing to start. */
         onOpenArtist,
         targetRow,
+        /** The Sonos favorites shelf, shown while nothing is being searched. */
+        favorites = undefined,
     }: {
         spotify: SpotifyStore;
         recents: SearchHistory;
@@ -59,7 +68,11 @@
         onEnqueue: (item: SpotifyItem, next: boolean) => void;
         onOpenArtist: (uri: string) => void;
         targetRow: Snippet;
+        favorites?: Snippet;
     } = $props();
+
+    /** Nothing typed and nothing returned — the shelf's moment. */
+    const idle = $derived(!spotify.query && !spotify.results);
 
     let searchEl = $state<HTMLInputElement | null>(null);
     let resultsEl = $state<HTMLDivElement | null>(null);
@@ -147,13 +160,24 @@
         <Icon name="chevronLeft" size={18} />
     </button>
     <div class="screen-title">
-        <h1>Search</h1>
-        {#if spotify.connected}<span class="screen-sub">Spotify</span>{/if}
+        <h1>Browse</h1>
+        <span class="screen-sub">{destination.label || "no room"}</span>
     </div>
     <span class="head-spacer" aria-hidden="true"></span>
 </div>
 
 <div class="search-body" in:fly={{ y: 10, duration: dur(240), easing: cubicOut }}>
+    <!-- Where anything started here will come out. Once, at the top, for the
+         whole screen — rather than a copy of it inside every section. -->
+    <div class="sp-where">{@render targetRow()}</div>
+
+    <!-- ── Favorites ───────────────────────────────────────────────
+         Your Sonos household's own list. It leads, because it is the one
+         thing here that needs no typing and no account. -->
+    {#if favorites && idle}
+        {@render favorites()}
+    {/if}
+
     <!-- ── Spotify search ──────────────────────────────────────────── -->
     {#if spotify.status}
         <section class="card">
@@ -291,29 +315,28 @@
                     {:else if spotify.myPlaylists.length > 0}
                         <span class="sp-browse-label">Your playlists</span>
                     {/if}
-                    <div class="sp-targets" class:pushed={!!spotify.results}>{@render targetRow()}</div>
                 </div>
                 <!-- Playing on a KEF speaker goes out through Spotify Connect,
                      which needs a permission this login may predate. Saying so
                      before the tap beats a 409 after it, and reconnecting is
                      the only thing that fixes it. -->
-                {#if destination.kefSpeaker && spotify.status && !spotify.status.playback}
+                {#if destination.room?.speaker && spotify.status && !spotify.status.playback}
                     <div class="sp-note">
                         <Icon name="info" size={14} />
                         <span>
-                            Reconnect Spotify to start music on {destination.kefSpeaker.name} —
+                            Reconnect Spotify to start music on {destination.room.name} —
                             this login was made before HomeHub could ask for that.
                         </span>
                         <button class="chip" onclick={() => spotify.connect()}>Reconnect</button>
                     </div>
-                {:else if destination.zone?.problem}
+                {:else if destination.room?.zone?.problem}
                     <!-- A zone that nothing can serve, said in the backend's own
                          words — they name which speaker blocked which route,
                          which is the part a user can act on. The same sentence
                          is on the zone's card; this is it before the tap. -->
                     <div class="sp-note">
                         <Icon name="info" size={14} />
-                        <span>{destination.zone.problem}</span>
+                        <span>{destination.room.zone.problem}</span>
                         {#if spotify.status && !spotify.status.playback}
                             <button class="chip" onclick={() => spotify.connect()}>Reconnect</button>
                         {/if}
@@ -604,9 +627,8 @@
         font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase;
         color: var(--text-dim);
     }
-    /* Sits opposite the kind filters when there are results to filter, and
-       leads the row when there aren't. */
-    .sp-targets.pushed { margin-left: auto; }
+    /* One picker for the screen, at the top of it. */
+    .sp-where { display: flex; }
     .sp-skeleton { height: 120px; border-radius: var(--r-md); }
     .sp-none { font-size: 12.5px; color: var(--text-mute); }
     /* One-line explanation above the results, for a destination that needs

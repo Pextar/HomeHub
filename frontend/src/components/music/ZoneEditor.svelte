@@ -1,23 +1,20 @@
 <script lang="ts">
     /**
-     * Naming a zone and choosing what is in it — the one gesture that builds a
-     * cross-vendor zone.
+     * Naming a room the user built, and choosing what is in it.
      *
-     * It is a form, so §11 gives it the sheet shape and the sticky footer. It
-     * reaches that sheet by *swapping* with Zones rather than opening over it:
-     * a sheet must never open another sheet, and Zones puts itself back on the
-     * way out (DESIGN.md §15, `lib/sheet-run.ts`).
+     * Dragging one room card onto another is how most of these come into
+     * existence, and it needs no form at all. This is for the rest: renaming
+     * one, adding a fourth speaker to it, dropping one out, deleting it.
      *
-     * Membership is deliberately the whole of it. Dragging one puck onto
-     * another drives Sonos' own grouping, which a KEF speaker cannot join, so
-     * the two gestures must not be conflated — a zone is built by ticking
-     * speakers, whatever make they are.
+     * It is a form, so §11 gives it the sheet shape and the sticky footer, and
+     * it reaches that shape by *swapping* with whatever raised it rather than
+     * opening over it — a sheet must never open another sheet
+     * (`lib/sheet-run.ts`).
      *
-     * It claims nothing about how the zone will play. The route is the
-     * backend's decision per playback and it reports one on every zone read;
+     * It claims nothing about how the room will play. The route is the
+     * backend's decision per playback and it reports one on every read;
      * predicting it here would mean a second copy of the route engine in the
-     * UI, drifting. The card the user lands back on says what the zone will
-     * actually do.
+     * UI, drifting. The player says what the room will actually do.
      */
     import Icon from "../Icon.svelte";
     import MusicSheet from "./MusicSheet.svelte";
@@ -31,7 +28,7 @@
         zone = null,
         zones,
         onCancel,
-        /** Saved: the caller decides where to go next (back to Zones). */
+        /** Saved: the caller decides where to go next. */
         onSaved,
         onDelete,
         onOpenSpeakers,
@@ -81,8 +78,8 @@
             : [...picked, member];
     }
 
-    /** Other zones a speaker already belongs to — worth knowing before a
-     *  speaker ends up in two zones that both try to play to it. */
+    /** Other rooms a speaker already belongs to — worth knowing before a
+     *  speaker ends up in two that both try to play to it. */
     function alsoIn(member: string): string {
         return zones
             .zonesWith(member)
@@ -95,7 +92,7 @@
         if (saving) return;
         const trimmed = name.trim();
         if (!trimmed) {
-            nameError = "Give the zone a name.";
+            nameError = "Give the room a name.";
             return;
         }
         saving = true;
@@ -114,11 +111,11 @@
 </script>
 
 <MusicSheet
-    label={zone ? "Edit zone" : "New zone"}
-    title={zone ? "Edit zone" : "New zone"}
+    label={zone ? "Edit room" : "New room"}
+    title={zone ? zone.name : "New room"}
     sub="Speakers that play together — any mix of makes"
     backIcon="chevronLeft"
-    backLabel="Back to Zones"
+    backLabel="Back"
     onBack={onCancel}
     onDismiss={onCancel}
     bind:scrollEl
@@ -157,7 +154,7 @@
                         title="No speakers to add"
                         action={{ label: "Speakers", onClick: onOpenSpeakers }}
                     >
-                        Register a Sonos or KEF speaker and it can join a zone.
+                        Register a Sonos or KEF speaker and it can join a room.
                     </QuietCard>
                 {/if}
             {:else}
@@ -194,14 +191,14 @@
                 {/each}
                 <div class="field-help">
                     Tick everything that should play together. The order you tick them in is the
-                    order the zone keeps — the first that can lead does.
+                    order the room keeps — the first that can lead does.
                 </div>
             {/if}
         </div>
 
         {#if zone}
             <button type="button" class="z-delete" onclick={() => onDelete(zone)}>
-                <Icon name="trash" size={15} /> Delete this zone
+                <Icon name="trash" size={15} /> Delete this room
             </button>
         {/if}
 
@@ -210,7 +207,7 @@
         <div class="z-foot">
             <button type="button" class="btn" onclick={onCancel}>Cancel</button>
             <button type="submit" class="btn btn-primary" disabled={saving}>
-                {saving ? "Saving…" : zone ? "Save zone" : "Create zone"}
+                {saving ? "Saving…" : zone ? "Save room" : "Create room"}
             </button>
         </div>
     </form>
@@ -237,7 +234,7 @@
         font-size: 13.5px;
         overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
-    /* Position in the zone, because it decides which speaker can lead. */
+    /* Position in the room, because it decides which speaker can lead. */
     .z-order { font-size: 11px; color: var(--on); flex-shrink: 0; }
     @media (pointer: coarse) {
         .z-row { min-height: 56px; }
