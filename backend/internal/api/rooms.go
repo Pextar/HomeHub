@@ -229,39 +229,22 @@ func (s *Server) doRoomSetState(user *store.User, room string, target bool) (ok 
 	if target {
 		action = "on"
 	}
-
-	s.Store.Mu.Lock()
-	var staged []store.StagedSend
-	for _, sock := range s.Store.Sockets {
-		if !strings.EqualFold(sock.Room, room) || !canAccess(user, sock.ID) {
-			continue
-		}
-		staged = append(staged, s.Store.StageSocketSend(sock.ID, action))
-	}
-	s.Store.Mu.Unlock()
-	if len(staged) == 0 {
-		return 0, nil, false, nil
-	}
-
-	s.Store.SendStaged(staged)
-
-	s.Store.Mu.Lock()
-	// Suppress per-socket push notifications; we send one summary below.
-	s.Store.SuppressStateChange = true
-	_ = s.Store.ApplyStaged(staged)
-	s.Store.SuppressStateChange = false
-	ok, failures = stagedFailures(staged)
-	entry := store.ActivityEntry{Kind: "room", Source: "manual", Action: action, Label: room}
-	if len(failures) > 0 {
-		entry.Status = "error"
-		entry.Error = fmt.Sprintf("%d of %d failed", len(failures), ok+len(failures))
-	}
-	s.Store.Activity.Add(entry)
-	err = s.Store.Save()
-	s.Store.Mu.Unlock()
-	if err != nil {
-		return ok, failures, true, err
-	}
-	s.notifyBulkState(fmt.Sprintf("%s turned %s", room, action), ok)
-	return ok, failures, true, nil
+	_, ok, failures, found, err = s.runStaged(stagedAction{
+		Kind: "room", Action: action, Source: "manual",
+		Stage: func() (string, []store.StagedSend, bool) {
+			var staged []store.StagedSend
+			for _, sock := range s.Store.Sockets {
+				if !strings.EqualFold(sock.Room, room) || !canAccess(user, sock.ID) {
+					continue
+				}
+				staged = append(staged, s.Store.StageSocketSend(sock.ID, action))
+			}
+			// An empty room is a 404 rather than a no-op success.
+			return room, staged, len(staged) > 0
+		},
+		Notify: func(label string, _ int) string {
+			return fmt.Sprintf("%s turned %s", label, action)
+		},
+	})
+	return ok, failures, found, err
 }

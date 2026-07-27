@@ -173,53 +173,34 @@ func (s *Server) activateScene(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// doActivateScene runs the scene's first step through the staged flow (delayed
-// steps are scheduled as background goroutines by StageAction), records
-// activation telemetry, and sends a single summary notification. Shared by the
-// activate REST handler and the assistant's activate_scene tool. found is false
-// when no scene has the given id. Caller must NOT hold Mu.
+// doActivateScene runs a scene's immediate step through the staged flow and
+// records activation telemetry. Shared by the scene REST handler and the
+// assistant's activate_scene tool. found is false when no scene has the given
+// id. Caller must NOT hold Mu.
 func (s *Server) doActivateScene(id string) (name string, okCount int, failures []map[string]string, found bool, err error) {
-	// Stage the first step, transmit off-lock, then fold the results back in.
-	// Smart-light brightness/colour is queued during staging and drained by
-	// FlushLights at the end.
-	s.Store.Mu.Lock()
-	scene, ok := s.Store.Scenes[id]
-	var staged []store.StagedSend
-	if ok {
-		name = scene.Name
-		staged, _ = s.Store.StageAction("scene", id, "activate")
-	}
-	s.Store.Mu.Unlock()
-	if !ok {
-		return "", 0, nil, false, nil
-	}
-
-	s.Store.SendStaged(staged)
-
-	s.Store.Mu.Lock()
-	// Per-socket notifications suppressed so we send a single summary.
-	s.Store.SuppressStateChange = true
-	_ = s.Store.ApplyStaged(staged)
-	s.Store.SuppressStateChange = false
-	okCount, failures = stagedFailures(staged)
-	// Record activation telemetry so the UI can show "ran N× · 2h ago".
-	// Re-fetch: the scene may have been deleted while the sends were in flight.
-	if sc, still := s.Store.Scenes[id]; still {
-		sc.LastActivatedAt = time.Now().UTC()
-		sc.ActivateCount++
-	}
-	entry := store.ActivityEntry{Kind: "scene", Source: "manual", Action: "activate", Label: name}
-	if len(failures) > 0 {
-		entry.Status = "error"
-		entry.Error = fmt.Sprintf("%d of %d failed", len(failures), okCount+len(failures))
-	}
-	s.Store.Activity.Add(entry)
-	err = s.Store.Save()
-	s.Store.Mu.Unlock()
-	s.Store.FlushLights()
-	if err != nil {
-		return name, okCount, failures, true, err
-	}
-	s.notifyBulkState(fmt.Sprintf("Scene activated: %s", name), okCount)
-	return name, okCount, failures, true, nil
+	return s.runStaged(stagedAction{
+		Kind: "scene", Action: "activate", Source: "manual",
+		Stage: func() (string, []store.StagedSend, bool) {
+			scene, ok := s.Store.Scenes[id]
+			if !ok {
+				return "", nil, false
+			}
+			// Staging also queues smart-light brightness/colour and schedules
+			// any delayed steps; FlushLights below drains the queue.
+			staged, _ := s.Store.StageAction("scene", id, "activate")
+			return scene.Name, staged, true
+		},
+		AfterApply: func(string) {
+			// Telemetry for the UI's "ran N× · 2h ago". Re-fetch: the scene
+			// may have been deleted while the sends were in flight.
+			if sc, still := s.Store.Scenes[id]; still {
+				sc.LastActivatedAt = time.Now().UTC()
+				sc.ActivateCount++
+			}
+		},
+		FlushLights: true,
+		Notify: func(label string, _ int) string {
+			return "Scene activated: " + label
+		},
+	})
 }

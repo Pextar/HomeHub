@@ -391,45 +391,30 @@ func (s *Server) bulkSetState(target bool) http.HandlerFunc {
 // returns the success count plus the per-socket failure list. Device I/O
 // happens between two lock acquisitions (staged flow) so one slow device
 // can't stall the rest of the API. Shared by the bulk REST handler and the
-// assistant's all_devices tool so the Mu/staged/off-lock sequence lives in
-// one place. Caller must NOT hold Mu.
+// assistant's all_devices tool. Caller must NOT hold Mu.
 func (s *Server) doBulkSetState(user *store.User, target bool) (ok int, failures []map[string]string, err error) {
 	action := "off"
 	if target {
 		action = "on"
 	}
-
-	s.Store.Mu.Lock()
-	staged := make([]store.StagedSend, 0, len(s.Store.Sockets))
-	for _, sock := range s.Store.Sockets {
-		if !canAccess(user, sock.ID) {
-			continue
-		}
-		staged = append(staged, s.Store.StageSocketSend(sock.ID, action))
-	}
-	s.Store.Mu.Unlock()
-
-	s.Store.SendStaged(staged)
-
-	s.Store.Mu.Lock()
-	// Suppress per-socket push notifications; we send one summary below.
-	s.Store.SuppressStateChange = true
-	_ = s.Store.ApplyStaged(staged)
-	s.Store.SuppressStateChange = false
-	ok, failures = stagedFailures(staged)
-	entry := store.ActivityEntry{Kind: "bulk", Source: "manual", Action: action, Label: "All sockets"}
-	if len(failures) > 0 {
-		entry.Status = "error"
-		entry.Error = fmt.Sprintf("%d of %d failed", len(failures), ok+len(failures))
-	}
-	s.Store.Activity.Add(entry)
-	err = s.Store.Save()
-	s.Store.Mu.Unlock()
-	if err != nil {
-		return ok, failures, err
-	}
-	s.notifyBulkState(fmt.Sprintf("All devices turned %s", action), ok)
-	return ok, failures, nil
+	_, ok, failures, _, err = s.runStaged(stagedAction{
+		Kind: "bulk", Action: action, Source: "manual",
+		Stage: func() (string, []store.StagedSend, bool) {
+			staged := make([]store.StagedSend, 0, len(s.Store.Sockets))
+			for _, sock := range s.Store.Sockets {
+				if !canAccess(user, sock.ID) {
+					continue
+				}
+				staged = append(staged, s.Store.StageSocketSend(sock.ID, action))
+			}
+			// Always "found": switching an empty set is a success, not a 404.
+			return "All sockets", staged, true
+		},
+		Notify: func(_ string, _ int) string {
+			return fmt.Sprintf("All devices turned %s", action)
+		},
+	})
+	return ok, failures, err
 }
 
 // stagedFailures splits staged results into a success count and the

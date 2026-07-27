@@ -174,37 +174,18 @@ func (s *Server) groupAction(action string) http.HandlerFunc {
 // REST handler and the assistant's control_group tool. found is false when no
 // group has the given id. Caller must NOT hold Mu.
 func (s *Server) doGroupAction(id, action string) (name string, ok int, failures []map[string]string, found bool, err error) {
-	s.Store.Mu.Lock()
-	g, exists := s.Store.Groups[id]
-	var staged []store.StagedSend
-	if exists {
-		name = g.Name
-		staged, _ = s.Store.StageAction("group", id, action)
-	}
-	s.Store.Mu.Unlock()
-	if !exists {
-		return "", 0, nil, false, nil
-	}
-
-	s.Store.SendStaged(staged)
-
-	s.Store.Mu.Lock()
-	// Suppress per-socket push notifications; we send one summary below.
-	s.Store.SuppressStateChange = true
-	_ = s.Store.ApplyStaged(staged)
-	s.Store.SuppressStateChange = false
-	ok, failures = stagedFailures(staged)
-	entry := store.ActivityEntry{Kind: "group", Source: "manual", Action: action, Label: name}
-	if len(failures) > 0 {
-		entry.Status = "error"
-		entry.Error = fmt.Sprintf("%d of %d failed", len(failures), ok+len(failures))
-	}
-	s.Store.Activity.Add(entry)
-	err = s.Store.Save()
-	s.Store.Mu.Unlock()
-	if err != nil {
-		return name, ok, failures, true, err
-	}
-	s.notifyBulkState(fmt.Sprintf("%s turned %s", name, action), ok)
-	return name, ok, failures, true, nil
+	return s.runStaged(stagedAction{
+		Kind: "group", Action: action, Source: "manual",
+		Stage: func() (string, []store.StagedSend, bool) {
+			g, exists := s.Store.Groups[id]
+			if !exists {
+				return "", nil, false
+			}
+			staged, _ := s.Store.StageAction("group", id, action)
+			return g.Name, staged, true
+		},
+		Notify: func(label string, _ int) string {
+			return fmt.Sprintf("%s turned %s", label, action)
+		},
+	})
 }
