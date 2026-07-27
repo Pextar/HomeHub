@@ -125,17 +125,7 @@ func (s *Server) deleteGroup(w http.ResponseWriter, r *http.Request) {
 			return errNotFound("group")
 		}
 		delete(s.Store.Groups, id)
-		for sid, sch := range s.Store.Schedules {
-			if sch.TargetType == "group" && sch.TargetID == id {
-				delete(s.Store.Schedules, sid)
-			}
-		}
-		for tid, t := range s.Store.Timers {
-			if t.TargetType == "group" && t.TargetID == id {
-				delete(s.Store.Timers, tid)
-			}
-		}
-		s.Store.PruneAutomationsForTarget("group", id)
+		s.Store.CascadeDeleteTarget("group", id)
 		return nil
 	}) {
 		return

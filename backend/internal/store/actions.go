@@ -201,23 +201,54 @@ func (s *Store) ScheduleStep(step SceneStep) {
 	})
 }
 
-// CascadeDeleteSocket removes a socket from every group/scene and
-// deletes schedules and timers that target it directly. Caller must
-// hold Mu.
-func (s *Store) CascadeDeleteSocket(socketID string) {
+// CascadeDeleteTarget removes everything that pointed at a deleted
+// schedulable target: the schedules and timers aimed at it, and the
+// automation actions that drive it (dropping rules, then automations, left
+// with nothing to do).
+//
+// Every deletable target type goes through here — sockets, rooms, groups and
+// scenes — so a new collection that can reference one is added in a single
+// place. This loop previously existed in four copies: two here and two
+// inlined in the API's group and scene delete handlers.
+//
+// Type-specific references are the caller's job; see CascadeDeleteSocket for
+// the widest example. Caller must hold Mu.
+func (s *Store) CascadeDeleteTarget(targetType, targetID string) {
 	for sid, sch := range s.Schedules {
-		if sch.TargetType == "socket" && sch.TargetID == socketID {
+		if sch.TargetType == targetType && sch.TargetID == targetID {
 			delete(s.Schedules, sid)
 		}
 	}
 	for tid, t := range s.Timers {
-		if t.TargetType == "socket" && t.TargetID == socketID {
+		if t.TargetType == targetType && t.TargetID == targetID {
 			delete(s.Timers, tid)
 		}
 	}
+	s.PruneAutomationsForTarget(targetType, targetID)
+}
+
+// CascadeDeleteSocket clears every reference to a deleted socket.
+//
+// A socket is the most widely referenced thing in the store, and missing one
+// of these leaves a dangling id that fails validation on the next unrelated
+// edit. The references are listed here in one place, and
+// TestSocketIDFieldsAreAllCascaded reflects over the type graph to fail if a
+// new field appears that holds a socket id and is not handled.
+//
+// Caller must hold Mu.
+func (s *Store) CascadeDeleteSocket(socketID string) {
+	// Schedules, timers and automation actions that target it.
+	s.CascadeDeleteTarget("socket", socketID)
+
+	// Group.SocketIDs — membership.
 	for _, g := range s.Groups {
 		g.SocketIDs = filterStrings(g.SocketIDs, socketID)
 	}
+	// User.SocketIDs — a limited profile's allow-list.
+	for _, u := range s.Users {
+		u.SocketIDs = filterStrings(u.SocketIDs, socketID)
+	}
+	// SceneAction.SocketID, inside every step of every scene.
 	for _, sc := range s.Scenes {
 		for i := range sc.Steps {
 			out := sc.Steps[i].Actions[:0]
@@ -229,28 +260,17 @@ func (s *Store) CascadeDeleteSocket(socketID string) {
 			sc.Steps[i].Actions = out
 		}
 	}
-	for _, u := range s.Users {
-		u.SocketIDs = filterStrings(u.SocketIDs, socketID)
-	}
+	// AutomationTrigger.SocketID and AutomationCondition.SocketID.
 	s.pruneAutomationsForSocket(socketID)
 }
 
 // CascadeDeleteRoom removes schedules and timers that target a deleted room
-// and prunes room actions from automations — mirroring CascadeDeleteSocket.
-// (Clearing the room name from sockets/sensors/scenes is handled by the API
-// layer, which owns the name-based association.) Caller must hold Mu.
+// and prunes room actions from automations.
+//
+// Clearing the room *name* from sockets, sensors and scenes is handled by the
+// API layer, which owns that name-based association. Caller must hold Mu.
 func (s *Store) CascadeDeleteRoom(roomID string) {
-	for sid, sch := range s.Schedules {
-		if sch.TargetType == "room" && sch.TargetID == roomID {
-			delete(s.Schedules, sid)
-		}
-	}
-	for tid, t := range s.Timers {
-		if t.TargetType == "room" && t.TargetID == roomID {
-			delete(s.Timers, tid)
-		}
-	}
-	s.PruneAutomationsForTarget("room", roomID)
+	s.CascadeDeleteTarget("room", roomID)
 }
 
 // pruneAutomationsForSocket cleans automations that reference a deleted

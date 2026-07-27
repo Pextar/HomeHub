@@ -127,17 +127,9 @@ func (s *Server) deleteScene(w http.ResponseWriter, r *http.Request) {
 			return errStatus(http.StatusNotFound, "scene not found")
 		}
 		delete(s.Store.Scenes, id)
-		for sid, sch := range s.Store.Schedules {
-			if sch.TargetType == "scene" && sch.TargetID == id {
-				delete(s.Store.Schedules, sid)
-			}
-		}
-		for tid, t := range s.Store.Timers {
-			if t.TargetType == "scene" && t.TargetID == id {
-				delete(s.Store.Timers, tid)
-			}
-		}
-		s.Store.PruneAutomationsForTarget("scene", id)
+		s.Store.CascadeDeleteTarget("scene", id)
+		// Beyond the shared cascade: a scene created by the scene wizard
+		// owns its automations outright, so they go with it.
 		s.Store.DeleteAutomationsOwnedByScene(id)
 		return nil
 	}) {
