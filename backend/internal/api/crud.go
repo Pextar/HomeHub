@@ -88,13 +88,14 @@ func (s *Server) updateOr(w http.ResponseWriter, undo func(), fn func() error) b
 
 // Boilerplate shared by the write handlers.
 //
-// Nearly every mutating endpoint opens by decoding a JSON body and closes
-// by persisting the store, and both steps have exactly one correct failure
-// response. Spelling them out per handler meant sixty copies of the first
-// and eighteen of the second, which is sixty-eight chances for the status
-// code or the message to drift.
+// Nearly every mutating endpoint opens by decoding a JSON body, which has
+// exactly one correct failure response. Spelling it out per handler meant
+// sixty copies, which is sixty chances for the status code or the message
+// to drift. (Persisting the store used to be the other half of this same
+// boilerplate; that half is now handled by update/updateOr above, which
+// call through to store.Update/UpdateOr instead of Save directly.)
 //
-// Both helpers write the error response themselves and report whether the
+// decodeBody writes the error response itself and reports whether the
 // caller should carry on, so a handler reads:
 //
 //	if !decodeBody(w, r, &thing) {
@@ -106,31 +107,6 @@ func (s *Server) updateOr(w http.ResponseWriter, undo func(), fn func() error) b
 func decodeBody(w http.ResponseWriter, r *http.Request, v any) bool {
 	if err := json.NewDecoder(r.Body).Decode(v); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
-		return false
-	}
-	return true
-}
-
-// saveStore persists every store file. On failure it writes a 500 and
-// returns false.
-//
-// Caller must hold Mu. Note that a failed save leaves the in-memory
-// mutation in place: handlers that need the store to match what is on disk
-// undo their change before returning (see saveStoreOr).
-func (s *Server) saveStore(w http.ResponseWriter) bool {
-	if err := s.Store.Save(); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
-		return false
-	}
-	return true
-}
-
-// saveStoreOr is saveStore with an undo, run before the error is written
-// when persisting fails. Caller must hold Mu.
-func (s *Server) saveStoreOr(w http.ResponseWriter, undo func()) bool {
-	if err := s.Store.Save(); err != nil {
-		undo()
-		writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
 		return false
 	}
 	return true

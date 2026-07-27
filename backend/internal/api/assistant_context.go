@@ -247,7 +247,6 @@ func (s *Server) resolveRoom(ref string) (name string, ok bool, reason string) {
 			}
 		}
 		name, ok, reason = "", false, "no room named "+quote(ref)
-		return
 	})
 	return
 }
