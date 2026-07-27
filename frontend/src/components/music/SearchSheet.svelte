@@ -61,6 +61,7 @@
     } = $props();
 
     let searchEl = $state<HTMLInputElement | null>(null);
+    let resultsEl = $state<HTMLDivElement | null>(null);
 
     // Only where a keyboard is already there. On a phone an auto-focus throws
     // up the software keyboard over the results the user came to look at.
@@ -71,7 +72,8 @@
     });
 
     // Enter runs the search now instead of waiting out the debounce; Escape
-    // clears the box rather than closing something behind it.
+    // clears the box rather than closing something behind it; ArrowDown hands
+    // the caret off to the first result, the way a desktop search box should.
     function onQueryKey(e: KeyboardEvent) {
         if (e.key === "Enter") {
             e.preventDefault();
@@ -80,6 +82,11 @@
             e.stopPropagation();
             spotify.clearQuery();
             searchEl?.focus();
+        } else if (e.key === "ArrowDown" && spotify.shownItems.length > 0) {
+            e.preventDefault();
+            resultsEl
+                ?.querySelector<HTMLButtonElement>("button.sp-hero, button.sp-open, button.sp-card")
+                ?.focus();
         }
     }
     function runHistoryQuery(q: string) {
@@ -273,6 +280,7 @@
                 {/if}
                 <div class="sp-filters">
                     {#if spotify.results}
+                        <button class="chip" class:active={spotify.kindFilter === "all"} onclick={() => (spotify.kindFilter = "all")}>All</button>
                         <button class="chip" class:active={spotify.kindFilter === "tracks"} onclick={() => (spotify.kindFilter = "tracks")}>Songs</button>
                         <button class="chip" class:active={spotify.kindFilter === "albums"} onclick={() => (spotify.kindFilter = "albums")}>Albums</button>
                         <button class="chip" class:active={spotify.kindFilter === "playlists"} onclick={() => (spotify.kindFilter = "playlists")}>Playlists</button>
@@ -308,79 +316,196 @@
                         {/if}
                     </div>
                 {/if}
-                {#if spotify.searching}
-                    <div class="skeleton sp-skeleton"></div>
-                {:else if spotify.results && spotify.shownItems.length === 0}
-                    <div class="sp-none">No {spotify.kindFilter} matched "{spotify.query.trim()}".</div>
-                {:else if !spotify.results && spotify.shownItems.length === 0}
-                    <!-- No query and no playlists to browse — say what this
-                         box does rather than leaving a blank panel. -->
-                    <div class="sp-none">
-                        Search Spotify for a song, album, playlist or artist. Tapping a result
-                        plays it on the room shown above{#if destination.sonosTarget}; the row's
-                        overflow menu queues it without interrupting{/if}.
-                    </div>
-                {:else}
-                    <div class="sp-results">
-                        {#each spotify.shownItems as item (item.uri)}
-                            {@const isArtist = item.kind === "artist"}
-                            <div class="sp-row">
-                                <!-- An artist row opens their page — top tracks and
-                                     albums to pick from — rather than playing
-                                     outright, so it needs no destination and
-                                     carries no queue overflow. -->
-                                <button class="sp-open"
-                                    disabled={isArtist ? false : (busy.is("item:" + item.uri) || !destination.current)}
-                                    onclick={() => (isArtist ? onOpenArtist(item.uri) : onPlayItem(item))}>
-                                    {#if item.art_url}
-                                        <img class="sp-art" class:sp-art-round={isArtist} src={item.art_url} alt="" loading="lazy" />
-                                    {:else}
-                                        <div class="sp-art placeholder" class:sp-art-round={isArtist}>[ art ]</div>
-                                    {/if}
-                                    <span class="sp-meta">
-                                        <span class="sp-name">{item.name}</span>
-                                        {#if item.sub}<span class="sp-sub">{item.sub}</span>{/if}
-                                    </span>
-                                    <span class="sp-play">
-                                        {#if isArtist}
-                                            <span class="sp-caret" aria-hidden="true"><Icon name="chevronLeft" size={16} /></span>
-                                        {:else}
-                                            <Icon name="play" size={16} />
-                                        {/if}
-                                    </span>
+                <!-- A list row — art, name/sub, play — shared by the flat
+                     single-kind list and the "Songs" section of the grouped
+                     overview below. An artist row opens their page — top
+                     tracks and albums to pick from — rather than playing
+                     outright, so it needs no destination and carries no
+                     queue overflow. -->
+                {#snippet resultRow(item: SpotifyItem)}
+                    {@const isArtist = item.kind === "artist"}
+                    <div class="sp-row">
+                        <button class="sp-open"
+                            disabled={isArtist ? false : (busy.is("item:" + item.uri) || !destination.current)}
+                            onclick={() => (isArtist ? onOpenArtist(item.uri) : onPlayItem(item))}>
+                            {#if item.art_url}
+                                <img class="sp-art" class:sp-art-round={isArtist} src={item.art_url} alt="" loading="lazy" />
+                            {:else}
+                                <div class="sp-art placeholder" class:sp-art-round={isArtist}>[ art ]</div>
+                            {/if}
+                            <span class="sp-meta">
+                                <span class="sp-name">{item.name}</span>
+                                {#if item.sub}<span class="sp-sub">{item.sub}</span>{/if}
+                            </span>
+                            <span class="sp-play">
+                                {#if isArtist}
+                                    <span class="sp-caret" aria-hidden="true"><Icon name="chevronLeft" size={16} /></span>
+                                {:else}
+                                    <Icon name="play" size={16} />
+                                {/if}
+                            </span>
+                        </button>
+                        <!-- Tapping the row plays now; queueing without
+                             interrupting lives behind the overflow — and only
+                             for a Sonos destination, since the queue is a
+                             Sonos group's. A KEF speaker has none, so the
+                             control that would be refused isn't there at all. -->
+                        {#if !isArtist && destination.sonosTarget}
+                            <button class="icon-btn sp-more" aria-label="More for {item.name}"
+                                aria-haspopup="menu" aria-expanded={menuFor === item.uri}
+                                disabled={busy.is("q:" + item.uri)}
+                                onclick={(e) => toggleMenu(e, item.uri)}>
+                                <Icon name="more" size={16} />
+                            </button>
+                        {/if}
+                        {#if !isArtist && menuFor === item.uri}
+                            <div class="overflow-menu" role="menu" use:menuNav
+                                in:scale={{ start: 0.95, duration: dur(140), easing: cubicOut, opacity: 0 }}
+                                out:scale={{ start: 0.95, duration: dur(100), easing: cubicOut, opacity: 0 }}>
+                                <button class="overflow-item" role="menuitem"
+                                    onclick={() => onEnqueue(item, true)}>
+                                    <Icon name="skipNext" size={16} /><span>Play next</span>
                                 </button>
-                                <!-- Tapping the row plays now; queueing without
-                                     interrupting lives behind the overflow —
-                                     and only for a Sonos destination, since
-                                     the queue is a Sonos group's. A KEF
-                                     speaker has none, so the control that
-                                     would be refused isn't there at all. -->
-                                {#if !isArtist && destination.sonosTarget}
-                                    <button class="icon-btn sp-more" aria-label="More for {item.name}"
-                                        aria-haspopup="menu" aria-expanded={menuFor === item.uri}
-                                        disabled={busy.is("q:" + item.uri)}
-                                        onclick={(e) => toggleMenu(e, item.uri)}>
-                                        <Icon name="more" size={16} />
-                                    </button>
-                                {/if}
-                                {#if !isArtist && menuFor === item.uri}
-                                    <div class="overflow-menu" role="menu" use:menuNav
-                                        in:scale={{ start: 0.95, duration: dur(140), easing: cubicOut, opacity: 0 }}
-                                        out:scale={{ start: 0.95, duration: dur(100), easing: cubicOut, opacity: 0 }}>
-                                        <button class="overflow-item" role="menuitem"
-                                            onclick={() => onEnqueue(item, true)}>
-                                            <Icon name="skipNext" size={16} /><span>Play next</span>
-                                        </button>
-                                        <button class="overflow-item" role="menuitem"
-                                            onclick={() => onEnqueue(item, false)}>
-                                            <Icon name="queue" size={16} /><span>Add to queue</span>
-                                        </button>
-                                    </div>
-                                {/if}
+                                <button class="overflow-item" role="menuitem"
+                                    onclick={() => onEnqueue(item, false)}>
+                                    <Icon name="queue" size={16} /><span>Add to queue</span>
+                                </button>
                             </div>
-                        {/each}
+                        {/if}
                     </div>
-                {/if}
+                {/snippet}
+
+                <!-- A carousel card — art over name/sub, no overflow — for
+                     the Artists/Albums/Playlists rows of the grouped
+                     overview, where "See all" (via the kind chip) is the
+                     path to a queueable list. -->
+                {#snippet resultCard(item: SpotifyItem)}
+                    {@const isArtist = item.kind === "artist"}
+                    <button class="sp-card"
+                        disabled={isArtist ? false : (busy.is("item:" + item.uri) || !destination.current)}
+                        onclick={() => (isArtist ? onOpenArtist(item.uri) : onPlayItem(item))}>
+                        {#if item.art_url}
+                            <img class="sp-card-art" class:sp-art-round={isArtist} src={item.art_url} alt="" loading="lazy" />
+                        {:else}
+                            <div class="sp-card-art placeholder" class:sp-art-round={isArtist}>[ art ]</div>
+                        {/if}
+                        <span class="sp-card-name">{item.name}</span>
+                        {#if item.sub}<span class="sp-card-sub">{item.sub}</span>{/if}
+                    </button>
+                {/snippet}
+
+                <div bind:this={resultsEl}>
+                    {#if spotify.searching}
+                        <div class="skeleton sp-skeleton"></div>
+                    {:else if spotify.results && spotify.shownItems.length === 0}
+                        <div class="sp-none">
+                            {#if spotify.kindFilter === "all"}
+                                No results for "{spotify.query.trim()}".
+                            {:else}
+                                No {spotify.kindFilter} matched "{spotify.query.trim()}".
+                            {/if}
+                        </div>
+                    {:else if !spotify.results && spotify.shownItems.length === 0}
+                        <!-- No query and no playlists to browse — say what this
+                             box does rather than leaving a blank panel. -->
+                        <div class="sp-none">
+                            Search Spotify for a song, album, playlist or artist. Tapping a result
+                            plays it on the room shown above{#if destination.sonosTarget}; the row's
+                            overflow menu queues it without interrupting{/if}.
+                        </div>
+                    {:else if spotify.results && spotify.kindFilter === "all"}
+                        <!-- The overview: best single match up top, then one
+                             section per kind that actually matched, songs as a
+                             queueable list and the rest as browsable carousels
+                             — the shape every major catalog search settles on,
+                             here with this app's own queueing and destination
+                             underneath rather than a copy of theirs. -->
+                        <div class="sp-groups">
+                            {#if spotify.topResult}
+                                {@const top = spotify.topResult}
+                                {@const isArtist = top.kind === "artist"}
+                                <div class="sp-section">
+                                    <span class="sp-browse-label">Top result</span>
+                                    <button class="sp-hero"
+                                        disabled={isArtist ? false : (busy.is("item:" + top.uri) || !destination.current)}
+                                        onclick={() => (isArtist ? onOpenArtist(top.uri) : onPlayItem(top))}>
+                                        {#if top.art_url}
+                                            <img class="sp-hero-art" class:sp-art-round={isArtist} src={top.art_url} alt="" loading="lazy" />
+                                        {:else}
+                                            <div class="sp-hero-art placeholder" class:sp-art-round={isArtist}>[ art ]</div>
+                                        {/if}
+                                        <span class="sp-hero-meta">
+                                            <span class="sp-hero-name">{top.name}</span>
+                                            <span class="sp-hero-kind">
+                                                {isArtist ? "Artist" : top.kind === "album" ? "Album" : top.kind === "playlist" ? "Playlist" : "Song"}{#if top.sub} · {top.sub}{/if}
+                                            </span>
+                                        </span>
+                                        <span class="sp-hero-play">
+                                            {#if isArtist}
+                                                <span class="sp-caret" aria-hidden="true"><Icon name="chevronLeft" size={18} /></span>
+                                            {:else}
+                                                <Icon name="play" size={18} />
+                                            {/if}
+                                        </span>
+                                    </button>
+                                </div>
+                            {/if}
+                            {#if spotify.results.tracks.length > 0}
+                                <div class="sp-section">
+                                    <div class="sp-sec-head">
+                                        <span class="sp-browse-label">Songs</span>
+                                        {#if spotify.results.tracks.length > 4}
+                                            <button class="chip" onclick={() => (spotify.kindFilter = "tracks")}>
+                                                See all {spotify.results.tracks.length}
+                                            </button>
+                                        {/if}
+                                    </div>
+                                    <div class="sp-results">
+                                        {#each spotify.results.tracks.slice(0, 4) as item (item.uri)}
+                                            {@render resultRow(item)}
+                                        {/each}
+                                    </div>
+                                </div>
+                            {/if}
+                            {#if spotify.results.artists.length > 0}
+                                <div class="sp-section">
+                                    <span class="sp-browse-label">Artists</span>
+                                    <div class="sp-carousel">
+                                        {#each spotify.results.artists as item (item.uri)}
+                                            {@render resultCard(item)}
+                                        {/each}
+                                    </div>
+                                </div>
+                            {/if}
+                            {#if spotify.results.albums.length > 0}
+                                <div class="sp-section">
+                                    <span class="sp-browse-label">Albums</span>
+                                    <div class="sp-carousel">
+                                        {#each spotify.results.albums as item (item.uri)}
+                                            {@render resultCard(item)}
+                                        {/each}
+                                    </div>
+                                </div>
+                            {/if}
+                            {#if spotify.results.playlists.length > 0}
+                                <div class="sp-section">
+                                    <span class="sp-browse-label">Playlists</span>
+                                    <div class="sp-carousel">
+                                        {#each spotify.results.playlists as item (item.uri)}
+                                            {@render resultCard(item)}
+                                        {/each}
+                                    </div>
+                                </div>
+                            {/if}
+                        </div>
+                    {:else}
+                        <div class="sp-results">
+                            {#each spotify.shownItems as item (item.uri)}
+                                {@render resultRow(item)}
+                            {/each}
+                        </div>
+                    {/if}
+                </div>
             {/if}
         </section>
     {/if}
@@ -486,6 +611,72 @@
     }
     @media (hover: hover) { .sp-hist-run:hover { color: var(--text); } }
     .sp-hist-chip .sp-hist-x { width: 26px; height: 26px; margin-right: 3px; color: var(--text-dim); }
+
+    /* ── Grouped overview ("All") ── */
+    .sp-groups { display: flex; flex-direction: column; gap: var(--space-5); }
+    .sp-section { display: flex; flex-direction: column; gap: var(--space-2); }
+    .sp-sec-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
+
+    .sp-hero {
+        display: flex; align-items: center; gap: var(--space-3);
+        width: 100%;
+        background: var(--card-2); border: 1px solid var(--hairline);
+        border-radius: var(--r-md); padding: var(--space-3);
+        color: var(--text); cursor: pointer; text-align: left; font: inherit;
+        transition: border-color 150ms ease;
+    }
+    .sp-hero:disabled { opacity: 0.5; cursor: default; }
+    @media (hover: hover) { .sp-hero:not(:disabled):hover { border-color: var(--border-strong); } }
+    .sp-hero-art {
+        width: 64px; height: 64px; flex-shrink: 0;
+        border-radius: var(--r-sm); object-fit: cover;
+        background: var(--card-3); border: 1px solid var(--hairline);
+    }
+    div.sp-hero-art { display: grid; place-items: center; font-size: 8px; color: var(--text-dim); }
+    .sp-hero-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+    .sp-hero-name {
+        font-size: 16px; font-weight: 600;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .sp-hero-kind {
+        font-family: var(--font-mono); font-size: 10.5px;
+        letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-mute);
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .sp-hero-play {
+        width: 40px; height: 40px; flex-shrink: 0;
+        display: grid; place-items: center; border-radius: 50%;
+        background: var(--on-soft); color: var(--on);
+    }
+
+    .sp-carousel {
+        display: flex; gap: var(--space-3); overflow-x: auto;
+        padding: 2px 2px 6px; margin: -2px -2px -6px;
+        scrollbar-width: none;
+    }
+    .sp-carousel::-webkit-scrollbar { display: none; }
+    .sp-card {
+        flex: 0 0 auto; width: 108px;
+        display: flex; flex-direction: column; gap: 6px;
+        background: transparent; border: 0; border-radius: var(--r-md);
+        padding: 2px; color: var(--text); cursor: pointer; text-align: left; font: inherit;
+    }
+    .sp-card:disabled { opacity: 0.5; cursor: default; }
+    .sp-card-art {
+        width: 100px; height: 100px;
+        border-radius: var(--r-sm); object-fit: cover;
+        background: var(--card-2); border: 1px solid var(--hairline);
+    }
+    div.sp-card-art { display: grid; place-items: center; font-size: 8px; color: var(--text-dim); }
+    .sp-card-name {
+        font-size: 12.5px; font-weight: 500;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .sp-card-sub {
+        font-size: 11px; color: var(--text-mute);
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    @media (hover: hover) { .sp-card:not(:disabled):hover .sp-card-name { color: var(--on); } }
 
     .sp-results { display: flex; flex-direction: column; gap: 2px; }
     /* The row is a container, not a control: tapping the body plays now,
