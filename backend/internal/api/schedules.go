@@ -109,23 +109,20 @@ func (s *Server) createSchedule(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	s.Store.Mu.Lock()
-	defer s.Store.Mu.Unlock()
+	if !s.updateOr(w, func() { delete(s.Store.Schedules, schedule.ID) }, func() error {
+		if err := s.Store.ValidateSchedule(&schedule); err != nil {
+			return errInvalid(err)
+		}
+		if schedule.ID == "" {
+			schedule.ID = fmt.Sprintf("schedule_%d", time.Now().UnixNano())
+		} else if _, exists := s.Store.Schedules[schedule.ID]; exists {
+			// A client-supplied ID must not silently replace an existing record.
+			return errStatus(http.StatusConflict, "a schedule with that id already exists")
+		}
 
-	if err := s.Store.ValidateSchedule(&schedule); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	if schedule.ID == "" {
-		schedule.ID = fmt.Sprintf("schedule_%d", time.Now().UnixNano())
-	} else if _, exists := s.Store.Schedules[schedule.ID]; exists {
-		// A client-supplied ID must not silently replace an existing record.
-		writeError(w, http.StatusConflict, "a schedule with that id already exists")
-		return
-	}
-
-	s.Store.Schedules[schedule.ID] = &schedule
-	if !s.saveStoreOr(w, func() { delete(s.Store.Schedules, schedule.ID) }) {
+		s.Store.Schedules[schedule.ID] = &schedule
+		return nil
+	}) {
 		return
 	}
 
@@ -148,77 +145,73 @@ func (s *Server) updateSchedule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.Store.Mu.Lock()
-	defer s.Store.Mu.Unlock()
-
-	existing, ok := s.Store.Schedules[id]
-	if !ok {
-		writeError(w, http.StatusNotFound, "schedule not found")
-		return
-	}
-
-	user := currentUser(r)
-	if !isAdmin(user) {
-		// The user must own the existing schedule (it must target their socket).
-		if sockID := scheduleSocketID(existing); !user.CanAccessSocket(sockID) {
-			writeError(w, http.StatusForbidden, "you don't own that schedule")
-			return
+	var existing *store.Schedule
+	if !s.update(w, func() error {
+		var ok bool
+		existing, ok = s.Store.Schedules[id]
+		if !ok {
+			return errStatus(http.StatusNotFound, "schedule not found")
 		}
-	}
 
-	// Build merged schedule and validate it whole.
-	merged := *existing
-	if v := strings.TrimSpace(updates.SocketID); v != "" {
-		merged.SocketID = v
-	}
-	if v := strings.TrimSpace(updates.TargetType); v != "" {
-		merged.TargetType = v
-	}
-	if v := strings.TrimSpace(updates.TargetID); v != "" {
-		merged.TargetID = v
-	}
-	if v := strings.TrimSpace(updates.Action); v != "" {
-		merged.Action = v
-	}
-	if v := strings.TrimSpace(updates.TimeMode); v != "" {
-		merged.TimeMode = v
-	}
-	if v := strings.TrimSpace(updates.Time); v != "" {
-		merged.Time = v
-	}
-	if updates.Days != nil {
-		merged.Days = updates.Days
-	}
-	if updates.Enabled != nil {
-		merged.Enabled = *updates.Enabled
-	}
-	if updates.RandomOffsetMinutes != nil {
-		merged.RandomOffsetMinutes = *updates.RandomOffsetMinutes
-	}
-	if updates.SolarOffsetMinutes != nil {
-		merged.SolarOffsetMinutes = *updates.SolarOffsetMinutes
-	}
-
-	if !isAdmin(user) {
-		// After merge, the target must still be the user's own socket.
-		tt := strings.TrimSpace(merged.TargetType)
-		if tt != "" && tt != "socket" {
-			writeError(w, http.StatusForbidden, "you can only schedule your own devices")
-			return
+		user := currentUser(r)
+		if !isAdmin(user) {
+			// The user must own the existing schedule (it must target their socket).
+			if sockID := scheduleSocketID(existing); !user.CanAccessSocket(sockID) {
+				return errStatus(http.StatusForbidden, "you don't own that schedule")
+			}
 		}
-		if sockID := scheduleSocketID(&merged); !user.CanAccessSocket(sockID) {
-			writeError(w, http.StatusForbidden, "you don't have access to that device")
-			return
+
+		// Build merged schedule and validate it whole.
+		merged := *existing
+		if v := strings.TrimSpace(updates.SocketID); v != "" {
+			merged.SocketID = v
 		}
-	}
+		if v := strings.TrimSpace(updates.TargetType); v != "" {
+			merged.TargetType = v
+		}
+		if v := strings.TrimSpace(updates.TargetID); v != "" {
+			merged.TargetID = v
+		}
+		if v := strings.TrimSpace(updates.Action); v != "" {
+			merged.Action = v
+		}
+		if v := strings.TrimSpace(updates.TimeMode); v != "" {
+			merged.TimeMode = v
+		}
+		if v := strings.TrimSpace(updates.Time); v != "" {
+			merged.Time = v
+		}
+		if updates.Days != nil {
+			merged.Days = updates.Days
+		}
+		if updates.Enabled != nil {
+			merged.Enabled = *updates.Enabled
+		}
+		if updates.RandomOffsetMinutes != nil {
+			merged.RandomOffsetMinutes = *updates.RandomOffsetMinutes
+		}
+		if updates.SolarOffsetMinutes != nil {
+			merged.SolarOffsetMinutes = *updates.SolarOffsetMinutes
+		}
 
-	if err := s.Store.ValidateSchedule(&merged); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
+		if !isAdmin(user) {
+			// After merge, the target must still be the user's own socket.
+			tt := strings.TrimSpace(merged.TargetType)
+			if tt != "" && tt != "socket" {
+				return errStatus(http.StatusForbidden, "you can only schedule your own devices")
+			}
+			if sockID := scheduleSocketID(&merged); !user.CanAccessSocket(sockID) {
+				return errStatus(http.StatusForbidden, "you don't have access to that device")
+			}
+		}
 
-	*existing = merged
-	if !s.saveStore(w) {
+		if err := s.Store.ValidateSchedule(&merged); err != nil {
+			return errInvalid(err)
+		}
+
+		*existing = merged
+		return nil
+	}) {
 		return
 	}
 	writeJSON(w, http.StatusOK, existing)
@@ -252,26 +245,23 @@ func (s *Server) setAllSchedules(enabled bool) http.HandlerFunc {
 func (s *Server) deleteSchedule(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
 
-	s.Store.Mu.Lock()
-	defer s.Store.Mu.Unlock()
-
-	sch, ok := s.Store.Schedules[id]
-	if !ok {
-		writeError(w, http.StatusNotFound, "schedule not found")
-		return
-	}
-
-	user := currentUser(r)
-	if !isAdmin(user) {
-		sockID := scheduleSocketID(sch)
-		if !user.CanAccessSocket(sockID) {
-			writeError(w, http.StatusForbidden, "you don't own that schedule")
-			return
+	if !s.update(w, func() error {
+		sch, ok := s.Store.Schedules[id]
+		if !ok {
+			return errStatus(http.StatusNotFound, "schedule not found")
 		}
-	}
 
-	delete(s.Store.Schedules, id)
-	if !s.saveStore(w) {
+		user := currentUser(r)
+		if !isAdmin(user) {
+			sockID := scheduleSocketID(sch)
+			if !user.CanAccessSocket(sockID) {
+				return errStatus(http.StatusForbidden, "you don't own that schedule")
+			}
+		}
+
+		delete(s.Store.Schedules, id)
+		return nil
+	}) {
 		return
 	}
 

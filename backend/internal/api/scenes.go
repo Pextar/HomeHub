@@ -58,22 +58,19 @@ func (s *Server) createScene(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.Store.Mu.Lock()
-	defer s.Store.Mu.Unlock()
-
-	if err := s.Store.ValidateScene(&sc); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	if sc.ID == "" {
-		sc.ID = fmt.Sprintf("scene_%d", time.Now().UnixNano())
-	} else if _, exists := s.Store.Scenes[sc.ID]; exists {
-		// A client-supplied ID must not silently replace an existing record.
-		writeError(w, http.StatusConflict, "a scene with that id already exists")
-		return
-	}
-	s.Store.Scenes[sc.ID] = &sc
-	if !s.saveStoreOr(w, func() { delete(s.Store.Scenes, sc.ID) }) {
+	if !s.updateOr(w, func() { delete(s.Store.Scenes, sc.ID) }, func() error {
+		if err := s.Store.ValidateScene(&sc); err != nil {
+			return errInvalid(err)
+		}
+		if sc.ID == "" {
+			sc.ID = fmt.Sprintf("scene_%d", time.Now().UnixNano())
+		} else if _, exists := s.Store.Scenes[sc.ID]; exists {
+			// A client-supplied ID must not silently replace an existing record.
+			return errStatus(http.StatusConflict, "a scene with that id already exists")
+		}
+		s.Store.Scenes[sc.ID] = &sc
+		return nil
+	}) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, sc)
@@ -87,34 +84,33 @@ func (s *Server) updateScene(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.Store.Mu.Lock()
-	defer s.Store.Mu.Unlock()
-
-	existing, ok := s.Store.Scenes[id]
-	if !ok {
-		writeError(w, http.StatusNotFound, "scene not found")
-		return
-	}
-	merged := *existing
-	if name := strings.TrimSpace(updates.Name); name != "" {
-		merged.Name = name
-	}
-	merged.Room = strings.TrimSpace(updates.Room)
-	merged.Icon = strings.TrimSpace(updates.Icon)
-	merged.Color = strings.TrimSpace(updates.Color)
-	if updates.Steps != nil {
-		merged.Steps = updates.Steps
-		merged.Actions = nil // clear legacy field when steps are provided
-	} else if updates.Actions != nil {
-		// Legacy clients that still send flat Actions; let ValidateScene migrate.
-		merged.Actions = updates.Actions
-	}
-	if err := s.Store.ValidateScene(&merged); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	*existing = merged
-	if !s.saveStore(w) {
+	var existing *store.Scene
+	if !s.update(w, func() error {
+		var ok bool
+		existing, ok = s.Store.Scenes[id]
+		if !ok {
+			return errStatus(http.StatusNotFound, "scene not found")
+		}
+		merged := *existing
+		if name := strings.TrimSpace(updates.Name); name != "" {
+			merged.Name = name
+		}
+		merged.Room = strings.TrimSpace(updates.Room)
+		merged.Icon = strings.TrimSpace(updates.Icon)
+		merged.Color = strings.TrimSpace(updates.Color)
+		if updates.Steps != nil {
+			merged.Steps = updates.Steps
+			merged.Actions = nil // clear legacy field when steps are provided
+		} else if updates.Actions != nil {
+			// Legacy clients that still send flat Actions; let ValidateScene migrate.
+			merged.Actions = updates.Actions
+		}
+		if err := s.Store.ValidateScene(&merged); err != nil {
+			return errInvalid(err)
+		}
+		*existing = merged
+		return nil
+	}) {
 		return
 	}
 	writeJSON(w, http.StatusOK, existing)
@@ -123,26 +119,25 @@ func (s *Server) updateScene(w http.ResponseWriter, r *http.Request) {
 func (s *Server) deleteScene(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
 
-	s.Store.Mu.Lock()
-	defer s.Store.Mu.Unlock()
-	if _, ok := s.Store.Scenes[id]; !ok {
-		writeError(w, http.StatusNotFound, "scene not found")
-		return
-	}
-	delete(s.Store.Scenes, id)
-	for sid, sch := range s.Store.Schedules {
-		if sch.TargetType == "scene" && sch.TargetID == id {
-			delete(s.Store.Schedules, sid)
+	if !s.update(w, func() error {
+		if _, ok := s.Store.Scenes[id]; !ok {
+			return errStatus(http.StatusNotFound, "scene not found")
 		}
-	}
-	for tid, t := range s.Store.Timers {
-		if t.TargetType == "scene" && t.TargetID == id {
-			delete(s.Store.Timers, tid)
+		delete(s.Store.Scenes, id)
+		for sid, sch := range s.Store.Schedules {
+			if sch.TargetType == "scene" && sch.TargetID == id {
+				delete(s.Store.Schedules, sid)
+			}
 		}
-	}
-	s.Store.PruneAutomationsForTarget("scene", id)
-	s.Store.DeleteAutomationsOwnedByScene(id)
-	if !s.saveStore(w) {
+		for tid, t := range s.Store.Timers {
+			if t.TargetType == "scene" && t.TargetID == id {
+				delete(s.Store.Timers, tid)
+			}
+		}
+		s.Store.PruneAutomationsForTarget("scene", id)
+		s.Store.DeleteAutomationsOwnedByScene(id)
+		return nil
+	}) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

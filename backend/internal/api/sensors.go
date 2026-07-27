@@ -42,22 +42,19 @@ func (s *Server) createSensor(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.Store.Mu.Lock()
-	defer s.Store.Mu.Unlock()
-
-	if err := s.Store.ValidateSensor(&sn); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	if sn.ID == "" {
-		sn.ID = fmt.Sprintf("sensor_%d", time.Now().UnixNano())
-	} else if _, exists := s.Store.Sensors[sn.ID]; exists {
-		// A client-supplied ID must not silently replace an existing record.
-		writeError(w, http.StatusConflict, "a sensor with that id already exists")
-		return
-	}
-	s.Store.Sensors[sn.ID] = &sn
-	if !s.saveStoreOr(w, func() { delete(s.Store.Sensors, sn.ID) }) {
+	if !s.updateOr(w, func() { delete(s.Store.Sensors, sn.ID) }, func() error {
+		if err := s.Store.ValidateSensor(&sn); err != nil {
+			return errInvalid(err)
+		}
+		if sn.ID == "" {
+			sn.ID = fmt.Sprintf("sensor_%d", time.Now().UnixNano())
+		} else if _, exists := s.Store.Sensors[sn.ID]; exists {
+			// A client-supplied ID must not silently replace an existing record.
+			return errStatus(http.StatusConflict, "a sensor with that id already exists")
+		}
+		s.Store.Sensors[sn.ID] = &sn
+		return nil
+	}) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, sn)
@@ -70,44 +67,43 @@ func (s *Server) updateSensor(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.Store.Mu.Lock()
-	defer s.Store.Mu.Unlock()
+	var existing *store.Sensor
+	if !s.update(w, func() error {
+		var ok bool
+		existing, ok = s.Store.Sensors[id]
+		if !ok {
+			return errStatus(http.StatusNotFound, "sensor not found")
+		}
 
-	existing, ok := s.Store.Sensors[id]
-	if !ok {
-		writeError(w, http.StatusNotFound, "sensor not found")
-		return
-	}
+		merged := *existing
+		if v := strings.TrimSpace(updates.Name); v != "" {
+			merged.Name = v
+		}
+		if v := strings.TrimSpace(updates.Kind); v != "" {
+			merged.Kind = v
+		}
+		if v := strings.TrimSpace(updates.Unit); v != "" {
+			merged.Unit = v
+		}
+		if v := strings.TrimSpace(updates.Code); v != "" {
+			merged.Code = v
+		}
+		if v := strings.TrimSpace(updates.Protocol); v != "" {
+			merged.Protocol = v
+		}
+		// Field and Room are allowed to be cleared, so always overwrite.
+		merged.Field = strings.TrimSpace(updates.Field)
+		merged.Room = strings.TrimSpace(updates.Room)
+		// Thresholds are pointers — nil means "clear it", so always overwrite.
+		merged.AlertMin = updates.AlertMin
+		merged.AlertMax = updates.AlertMax
 
-	merged := *existing
-	if v := strings.TrimSpace(updates.Name); v != "" {
-		merged.Name = v
-	}
-	if v := strings.TrimSpace(updates.Kind); v != "" {
-		merged.Kind = v
-	}
-	if v := strings.TrimSpace(updates.Unit); v != "" {
-		merged.Unit = v
-	}
-	if v := strings.TrimSpace(updates.Code); v != "" {
-		merged.Code = v
-	}
-	if v := strings.TrimSpace(updates.Protocol); v != "" {
-		merged.Protocol = v
-	}
-	// Field and Room are allowed to be cleared, so always overwrite.
-	merged.Field = strings.TrimSpace(updates.Field)
-	merged.Room = strings.TrimSpace(updates.Room)
-	// Thresholds are pointers — nil means "clear it", so always overwrite.
-	merged.AlertMin = updates.AlertMin
-	merged.AlertMax = updates.AlertMax
-
-	if err := s.Store.ValidateSensor(&merged); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	*existing = merged
-	if !s.saveStore(w) {
+		if err := s.Store.ValidateSensor(&merged); err != nil {
+			return errInvalid(err)
+		}
+		*existing = merged
+		return nil
+	}) {
 		return
 	}
 	writeJSON(w, http.StatusOK, existing)
@@ -116,16 +112,15 @@ func (s *Server) updateSensor(w http.ResponseWriter, r *http.Request) {
 func (s *Server) deleteSensor(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
 
-	s.Store.Mu.Lock()
-	defer s.Store.Mu.Unlock()
-	if _, ok := s.Store.Sensors[id]; !ok {
-		writeError(w, http.StatusNotFound, "sensor not found")
-		return
-	}
-	delete(s.Store.Sensors, id)
-	delete(s.Store.Readings, id)
-	s.Store.PruneAutomationsForSensor(id)
-	if !s.saveStore(w) {
+	if !s.update(w, func() error {
+		if _, ok := s.Store.Sensors[id]; !ok {
+			return errStatus(http.StatusNotFound, "sensor not found")
+		}
+		delete(s.Store.Sensors, id)
+		delete(s.Store.Readings, id)
+		s.Store.PruneAutomationsForSensor(id)
+		return nil
+	}) {
 		return
 	}
 

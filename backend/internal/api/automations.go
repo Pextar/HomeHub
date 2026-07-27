@@ -70,22 +70,19 @@ func (s *Server) createAutomation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.Store.Mu.Lock()
-	defer s.Store.Mu.Unlock()
-
-	if err := s.Store.ValidateAutomation(&a); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	if a.ID == "" {
-		a.ID = fmt.Sprintf("automation_%d", time.Now().UnixNano())
-	} else if _, exists := s.Store.Automations[a.ID]; exists {
-		// A client-supplied ID must not silently replace an existing record.
-		writeError(w, http.StatusConflict, "an automation with that id already exists")
-		return
-	}
-	s.Store.Automations[a.ID] = &a
-	if !s.saveStoreOr(w, func() { delete(s.Store.Automations, a.ID) }) {
+	if !s.updateOr(w, func() { delete(s.Store.Automations, a.ID) }, func() error {
+		if err := s.Store.ValidateAutomation(&a); err != nil {
+			return errInvalid(err)
+		}
+		if a.ID == "" {
+			a.ID = fmt.Sprintf("automation_%d", time.Now().UnixNano())
+		} else if _, exists := s.Store.Automations[a.ID]; exists {
+			// A client-supplied ID must not silently replace an existing record.
+			return errStatus(http.StatusConflict, "an automation with that id already exists")
+		}
+		s.Store.Automations[a.ID] = &a
+		return nil
+	}) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, a)
@@ -99,26 +96,25 @@ func (s *Server) updateAutomation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.Store.Mu.Lock()
-	defer s.Store.Mu.Unlock()
+	var existing *store.Automation
+	if !s.update(w, func() error {
+		var ok bool
+		existing, ok = s.Store.Automations[id]
+		if !ok {
+			return errStatus(http.StatusNotFound, "automation not found")
+		}
 
-	existing, ok := s.Store.Automations[id]
-	if !ok {
-		writeError(w, http.StatusNotFound, "automation not found")
-		return
-	}
-
-	// Full-object replace: the editor always sends the complete automation.
-	// Preserve identity and run history; everything else comes from the body.
-	updated.ID = id
-	updated.LastFiredAt = existing.LastFiredAt
-	updated.RunCount = existing.RunCount
-	if err := s.Store.ValidateAutomation(&updated); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	*existing = updated
-	if !s.saveStore(w) {
+		// Full-object replace: the editor always sends the complete automation.
+		// Preserve identity and run history; everything else comes from the body.
+		updated.ID = id
+		updated.LastFiredAt = existing.LastFiredAt
+		updated.RunCount = existing.RunCount
+		if err := s.Store.ValidateAutomation(&updated); err != nil {
+			return errInvalid(err)
+		}
+		*existing = updated
+		return nil
+	}) {
 		return
 	}
 	writeJSON(w, http.StatusOK, existing)
@@ -127,14 +123,13 @@ func (s *Server) updateAutomation(w http.ResponseWriter, r *http.Request) {
 func (s *Server) deleteAutomation(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
 
-	s.Store.Mu.Lock()
-	defer s.Store.Mu.Unlock()
-	if _, ok := s.Store.Automations[id]; !ok {
-		writeError(w, http.StatusNotFound, "automation not found")
-		return
-	}
-	delete(s.Store.Automations, id)
-	if !s.saveStore(w) {
+	if !s.update(w, func() error {
+		if _, ok := s.Store.Automations[id]; !ok {
+			return errStatus(http.StatusNotFound, "automation not found")
+		}
+		delete(s.Store.Automations, id)
+		return nil
+	}) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

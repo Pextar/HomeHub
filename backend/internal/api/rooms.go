@@ -69,22 +69,19 @@ func (s *Server) createRoom(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.Store.Mu.Lock()
-	defer s.Store.Mu.Unlock()
-
-	if rm.ID == "" {
-		rm.ID = fmt.Sprintf("room_%d", time.Now().UnixNano())
-	} else if _, exists := s.Store.Rooms[rm.ID]; exists {
-		// A client-supplied ID must not silently replace an existing record.
-		writeError(w, http.StatusConflict, "a room with that id already exists")
-		return
-	}
-	if err := s.Store.ValidateRoom(&rm); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	s.Store.Rooms[rm.ID] = &rm
-	if !s.saveStoreOr(w, func() { delete(s.Store.Rooms, rm.ID) }) {
+	if !s.updateOr(w, func() { delete(s.Store.Rooms, rm.ID) }, func() error {
+		if rm.ID == "" {
+			rm.ID = fmt.Sprintf("room_%d", time.Now().UnixNano())
+		} else if _, exists := s.Store.Rooms[rm.ID]; exists {
+			// A client-supplied ID must not silently replace an existing record.
+			return errStatus(http.StatusConflict, "a room with that id already exists")
+		}
+		if err := s.Store.ValidateRoom(&rm); err != nil {
+			return errInvalid(err)
+		}
+		s.Store.Rooms[rm.ID] = &rm
+		return nil
+	}) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, roomSummary{ID: rm.ID, Name: rm.Name})
@@ -99,47 +96,46 @@ func (s *Server) updateRoom(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.Store.Mu.Lock()
-	defer s.Store.Mu.Unlock()
+	var existing *store.Room
+	if !s.update(w, func() error {
+		var ok bool
+		existing, ok = s.Store.Rooms[id]
+		if !ok {
+			return errStatus(http.StatusNotFound, "room not found")
+		}
 
-	existing, ok := s.Store.Rooms[id]
-	if !ok {
-		writeError(w, http.StatusNotFound, "room not found")
-		return
-	}
+		oldName := existing.Name
+		merged := *existing
+		merged.ID = id
+		if name := strings.TrimSpace(updates.Name); name != "" {
+			merged.Name = name
+		}
+		if err := s.Store.ValidateRoom(&merged); err != nil {
+			return errInvalid(err)
+		}
 
-	oldName := existing.Name
-	merged := *existing
-	merged.ID = id
-	if name := strings.TrimSpace(updates.Name); name != "" {
-		merged.Name = name
-	}
-	if err := s.Store.ValidateRoom(&merged); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-
-	// Cascade rename to sockets and sensors that carried the old name.
-	if !strings.EqualFold(oldName, merged.Name) {
-		for _, sock := range s.Store.Sockets {
-			if strings.EqualFold(sock.Room, oldName) {
-				sock.Room = merged.Name
+		// Cascade rename to sockets and sensors that carried the old name.
+		if !strings.EqualFold(oldName, merged.Name) {
+			for _, sock := range s.Store.Sockets {
+				if strings.EqualFold(sock.Room, oldName) {
+					sock.Room = merged.Name
+				}
+			}
+			for _, sn := range s.Store.Sensors {
+				if strings.EqualFold(sn.Room, oldName) {
+					sn.Room = merged.Name
+				}
+			}
+			for _, sc := range s.Store.Scenes {
+				if strings.EqualFold(sc.Room, oldName) {
+					sc.Room = merged.Name
+				}
 			}
 		}
-		for _, sn := range s.Store.Sensors {
-			if strings.EqualFold(sn.Room, oldName) {
-				sn.Room = merged.Name
-			}
-		}
-		for _, sc := range s.Store.Scenes {
-			if strings.EqualFold(sc.Room, oldName) {
-				sc.Room = merged.Name
-			}
-		}
-	}
 
-	*existing = merged
-	if !s.saveStore(w) {
+		*existing = merged
+		return nil
+	}) {
 		return
 	}
 	writeJSON(w, http.StatusOK, roomSummary{ID: existing.ID, Name: existing.Name})
@@ -149,40 +145,41 @@ func (s *Server) updateRoom(w http.ResponseWriter, r *http.Request) {
 func (s *Server) deleteRoom(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
 
-	s.Store.Mu.Lock()
-	defer s.Store.Mu.Unlock()
-
-	existing, ok := s.Store.Rooms[id]
-	if !ok {
-		writeError(w, http.StatusNotFound, "room not found")
-		return
-	}
-
-	name := existing.Name
-	delete(s.Store.Rooms, id)
-	// Cascade: drop schedules/timers targeting the room and prune room
-	// actions from automations.
-	s.Store.CascadeDeleteRoom(id)
-
-	// Cascade: clear room name from sockets, sensors, and scenes.
-	for _, sock := range s.Store.Sockets {
-		if strings.EqualFold(sock.Room, name) {
-			sock.Room = ""
+	// Captured so the undo can put the room back if the write fails, and
+	// memory keeps matching disk.
+	var existing *store.Room
+	if !s.updateOr(w, func() { s.Store.Rooms[id] = existing }, func() error {
+		var ok bool
+		existing, ok = s.Store.Rooms[id]
+		if !ok {
+			return errStatus(http.StatusNotFound, "room not found")
 		}
-	}
-	for _, sn := range s.Store.Sensors {
-		if strings.EqualFold(sn.Room, name) {
-			sn.Room = ""
-		}
-	}
-	for _, sc := range s.Store.Scenes {
-		if strings.EqualFold(sc.Room, name) {
-			sc.Room = ""
-		}
-	}
 
-	// Restore the room if the write failed, so memory matches disk.
-	if !s.saveStoreOr(w, func() { s.Store.Rooms[id] = existing }) {
+		name := existing.Name
+		delete(s.Store.Rooms, id)
+		// Cascade: drop schedules/timers targeting the room and prune room
+		// actions from automations.
+		s.Store.CascadeDeleteRoom(id)
+
+		// Cascade: clear room name from sockets, sensors, and scenes.
+		for _, sock := range s.Store.Sockets {
+			if strings.EqualFold(sock.Room, name) {
+				sock.Room = ""
+			}
+		}
+		for _, sn := range s.Store.Sensors {
+			if strings.EqualFold(sn.Room, name) {
+				sn.Room = ""
+			}
+		}
+		for _, sc := range s.Store.Scenes {
+			if strings.EqualFold(sc.Room, name) {
+				sc.Room = ""
+			}
+		}
+
+		return nil
+	}) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
