@@ -3,6 +3,7 @@ package store
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -179,32 +180,26 @@ func TestLoadNeverLeavesANilMap(t *testing.T) {
 	}
 }
 
-// Rooms became entities later than sockets did, and Load carries a
-// migration that derives them from the room strings already on sockets and
-// sensors. Its comment says existing installations get that migration
-// automatically.
+// Rooms became entities after sockets did, so Load reconciles: any room name
+// carried by a socket or sensor that has no matching Room gets one.
 //
-// They do not. The migration is guarded by `s.Rooms == nil`, but New()
-// has already assigned an empty map and readJSON leaves it untouched when
-// the file is absent, so on a real first run the guard is false. The only
-// input that reaches the migration is a rooms.json holding the literal
-// `null`, which nothing writes.
-//
-// These tests pin that as it stands rather than fixing it, so the
-// behaviour cannot change by accident while Load is reshaped. See the
-// note in the commit that added them.
-func TestRoomDerivationOnlyFiresForALiteralNull(t *testing.T) {
-	withSockets := func(t *testing.T, roomsJSON string) *Store {
+// This used to be a one-shot first-run migration guarded by a nil map, which
+// never fired — see ensureRoomsForNamedDevices. These cover the behaviour
+// that replaced it.
+func TestRoomsAreDerivedForOrphanedNames(t *testing.T) {
+	// dir seeds sockets and sensors carrying room names, plus whatever
+	// rooms.json content the case wants.
+	seed := func(t *testing.T, roomsJSON string) *Store {
 		t.Helper()
 		dir := t.TempDir()
-		seed := New(dir, noopRF{})
-		seed.Sockets["a"] = &Socket{ID: "a", Name: "A", Room: "Lounge"}
-		seed.Sockets["b"] = &Socket{ID: "b", Name: "B", Room: "lounge"}
-		seed.Sensors["c"] = &Sensor{ID: "c", Name: "C", Room: "Kitchen"}
-		if err := writeJSON(filepath.Join(dir, "sockets.json"), seed.Sockets); err != nil {
+		s := New(dir, noopRF{})
+		s.Sockets["a"] = &Socket{ID: "a", Name: "A", Room: "Lounge"}
+		s.Sockets["b"] = &Socket{ID: "b", Name: "B", Room: "lounge"}
+		s.Sensors["c"] = &Sensor{ID: "c", Name: "C", Room: "Kitchen"}
+		if err := writeJSON(filepath.Join(dir, "sockets.json"), s.Sockets); err != nil {
 			t.Fatal(err)
 		}
-		if err := writeJSON(filepath.Join(dir, "sensors.json"), seed.Sensors); err != nil {
+		if err := writeJSON(filepath.Join(dir, "sensors.json"), s.Sensors); err != nil {
 			t.Fatal(err)
 		}
 		if roomsJSON != "" {
@@ -215,35 +210,94 @@ func TestRoomDerivationOnlyFiresForALiteralNull(t *testing.T) {
 		return loadedStore(t, dir)
 	}
 
-	// What a genuine first run looks like — and the migration does not run.
-	t.Run("absent rooms.json derives nothing (the bug)", func(t *testing.T) {
-		if got := withSockets(t, ""); len(got.Rooms) != 0 {
-			t.Errorf("derived %d rooms; the guard is expected not to fire", len(got.Rooms))
+	names := func(s *Store) map[string]bool {
+		out := map[string]bool{}
+		for _, rm := range s.Rooms {
+			out[rm.Name] = true
 		}
-	})
+		return out
+	}
 
-	// An install that deliberately deleted every room must not have them
-	// re-derived on the next restart. This one is correct.
-	t.Run("an empty rooms.json derives nothing", func(t *testing.T) {
-		if got := withSockets(t, "{}"); len(got.Rooms) != 0 {
-			t.Errorf("derived %d rooms from an empty rooms.json, want 0", len(got.Rooms))
-		}
-	})
-
-	// The one input that does reach the migration, which is where its
-	// de-duplication behaviour can be observed: two spellings of one room
-	// collapse to a single entity, and the first spelling seen wins.
-	t.Run("a literal null runs the migration, de-duplicated case-insensitively", func(t *testing.T) {
-		got := withSockets(t, "null")
+	// A genuine first run: no rooms.json at all.
+	t.Run("absent rooms.json derives the referenced rooms", func(t *testing.T) {
+		got := seed(t, "")
 		if len(got.Rooms) != 2 {
-			t.Fatalf("derived %d rooms, want 2 (Lounge and Kitchen)", len(got.Rooms))
+			t.Fatalf("derived %d rooms, want 2; got %v", len(got.Rooms), names(got))
 		}
-		names := map[string]bool{}
+		if n := names(got); !n["Kitchen"] || (!n["Lounge"] && !n["lounge"]) {
+			t.Errorf("rooms = %v", n)
+		}
+	})
+
+	// The case that made the original bug permanent: an install that upgraded,
+	// missed the migration, then saved an empty rooms.json.
+	t.Run("an empty rooms.json still derives them", func(t *testing.T) {
+		if got := seed(t, "{}"); len(got.Rooms) != 2 {
+			t.Errorf("derived %d rooms, want 2; got %v", len(got.Rooms), names(got))
+		}
+	})
+
+	// Two spellings of one room collapse to a single entity.
+	t.Run("matching is case-insensitive", func(t *testing.T) {
+		got := seed(t, "")
+		lounge := 0
 		for _, rm := range got.Rooms {
-			names[rm.Name] = true
+			if strings.EqualFold(rm.Name, "lounge") {
+				lounge++
+			}
 		}
-		if !names["Kitchen"] || (!names["Lounge"] && !names["lounge"]) {
-			t.Errorf("derived rooms = %v", names)
+		if lounge != 1 {
+			t.Errorf("got %d Lounge rooms, want 1", lounge)
+		}
+	})
+
+	// An existing room is matched, not duplicated — including across case.
+	t.Run("existing rooms are left alone", func(t *testing.T) {
+		got := seed(t, `{"rm_1":{"id":"rm_1","name":"LOUNGE"},"rm_2":{"id":"rm_2","name":"Kitchen"}}`)
+		if len(got.Rooms) != 2 {
+			t.Errorf("rooms = %v, want the two existing ones untouched", names(got))
+		}
+		if got.Rooms["rm_1"].Name != "LOUNGE" {
+			t.Errorf("existing room was rewritten: %q", got.Rooms["rm_1"].Name)
+		}
+	})
+
+	// Deleting a room clears its name from every device, so there is no
+	// orphan left for the reconciliation to rebuild from.
+	t.Run("a deleted room is not resurrected", func(t *testing.T) {
+		dir := t.TempDir()
+		s := New(dir, noopRF{})
+		s.Sockets["a"] = &Socket{ID: "a", Name: "A", Room: ""}
+		if err := writeJSON(filepath.Join(dir, "sockets.json"), s.Sockets); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "rooms.json"), []byte("{}"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if got := loadedStore(t, dir); len(got.Rooms) != 0 {
+			t.Errorf("derived %d rooms from devices with no room name", len(got.Rooms))
+		}
+	})
+
+	// Ids must not depend on map iteration order, or a restart could
+	// renumber rooms.
+	t.Run("derived ids are stable across loads", func(t *testing.T) {
+		first := names(seed(t, ""))
+		for i := 0; i < 5; i++ {
+			if got := names(seed(t, "")); len(got) != len(first) {
+				t.Fatalf("run %d derived %v, want %v", i, got, first)
+			}
+		}
+	})
+
+	// A derived id must not collide with one already in use.
+	t.Run("derived ids avoid existing ones", func(t *testing.T) {
+		got := seed(t, `{"room_1":{"id":"room_1","name":"Hallway"}}`)
+		if len(got.Rooms) != 3 {
+			t.Fatalf("rooms = %v, want Hallway plus the two derived", names(got))
+		}
+		if got.Rooms["room_1"].Name != "Hallway" {
+			t.Errorf("room_1 was overwritten: %q", got.Rooms["room_1"].Name)
 		}
 	})
 }

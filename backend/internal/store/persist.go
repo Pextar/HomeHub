@@ -3,6 +3,8 @@ package store
 import (
 	"fmt"
 	"path/filepath"
+	"sort"
+	"strings"
 )
 
 // The persisted collections, described once.
@@ -96,8 +98,7 @@ var collections = []collection{
 		},
 	},
 	mapCollection("users", "Users", usersFile, func(s *Store) *map[string]*User { return &s.Users }),
-	with(mapCollection("rooms", "Rooms", roomsFile, func(s *Store) *map[string]*Room { return &s.Rooms }),
-		func(c *collection) { c.ensure = nil }),
+	mapCollection("rooms", "Rooms", roomsFile, func(s *Store) *map[string]*Room { return &s.Rooms }),
 	mapCollection("sonos speakers", "Sonos", sonosFile, func(s *Store) *map[string]*SonosSpeaker { return &s.Sonos }),
 	mapCollection("kef speakers", "KEF", kefFile, func(s *Store) *map[string]*KEFSpeaker { return &s.KEF }),
 	mapCollection("zones", "Zones", zonesFile, func(s *Store) *map[string]*Zone { return &s.Zones }),
@@ -132,4 +133,71 @@ func (s *Store) saveMatching(pick func(collection) bool) error {
 		}
 	}
 	return nil
+}
+
+// ensureRoomsForNamedDevices creates a Room for every room name carried by a
+// socket or sensor that has no matching entity.
+//
+// Rooms became entities after sockets did, and Load has always carried a
+// migration to derive them from the room strings already in place. It never
+// ran: it was guarded by `s.Rooms == nil`, but New() assigns an empty map and
+// readJSON leaves it alone when the file is absent, so on a real first run
+// the guard was false. Installations that predate rooms were left with
+// sockets naming a room that did not exist, and once anything called Save the
+// empty rooms.json made the intended one-shot window unreachable for good.
+//
+// Reconciling on every load rather than only on the first fixes those
+// installations, and cannot resurrect a deliberately deleted room: deleting a
+// room clears its name from the sockets, sensors and scenes that carried it,
+// so no orphan name is left to rebuild from.
+//
+// Caller must hold Mu (Load runs before the store is shared).
+func (s *Store) ensureRoomsForNamedDevices() {
+	known := make(map[string]bool, len(s.Rooms))
+	for _, rm := range s.Rooms {
+		known[strings.ToLower(strings.TrimSpace(rm.Name))] = true
+	}
+
+	// First spelling encountered wins, matched case-insensitively, so
+	// "Lounge" and "lounge" produce one room rather than two.
+	missing := make(map[string]string)
+	note := func(name string) {
+		name = strings.TrimSpace(name)
+		key := strings.ToLower(name)
+		if name == "" || known[key] {
+			return
+		}
+		if _, dup := missing[key]; !dup {
+			missing[key] = name
+		}
+	}
+	for _, sock := range s.Sockets {
+		note(sock.Room)
+	}
+	for _, sn := range s.Sensors {
+		note(sn.Room)
+	}
+	if len(missing) == 0 {
+		return
+	}
+
+	// Sorted so the ids assigned don't depend on map iteration order.
+	keys := make([]string, 0, len(missing))
+	for k := range missing {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	next := 1
+	for _, k := range keys {
+		var id string
+		for {
+			id = fmt.Sprintf("room_%d", next)
+			next++
+			if _, taken := s.Rooms[id]; !taken {
+				break
+			}
+		}
+		s.Rooms[id] = &Room{ID: id, Name: missing[k]}
+	}
 }

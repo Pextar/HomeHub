@@ -174,38 +174,7 @@ func (s *Store) Load() error {
 		return err
 	}
 
-	// Rooms became entities after sockets did, so an installation that
-	// predates them derives Room records from the room strings already on
-	// sockets and sensors.
-	//
-	// NOTE: this does not currently fire on a real first run. New() has
-	// already assigned an empty map and readJSON leaves it alone when the
-	// file is absent, so the nil check below is only true for a rooms.json
-	// holding the literal `null`. That is pinned by
-	// TestRoomDerivationOnlyFiresForALiteralNull; making the migration
-	// actually run is a behaviour change for every existing install and
-	// wants deciding on its own.
-	if s.Rooms == nil {
-		s.Rooms = make(map[string]*Room)
-		seen := make(map[string]bool)
-		counter := 1
-		add := func(name string) {
-			name = strings.TrimSpace(name)
-			if name == "" || seen[strings.ToLower(name)] {
-				return
-			}
-			seen[strings.ToLower(name)] = true
-			id := fmt.Sprintf("room_%d", counter)
-			counter++
-			s.Rooms[id] = &Room{ID: id, Name: name}
-		}
-		for _, sock := range s.Sockets {
-			add(sock.Room)
-		}
-		for _, sn := range s.Sensors {
-			add(sn.Room)
-		}
-	}
+	s.ensureRoomsForNamedDevices()
 
 	// Legacy schedules carried a bare socket_id; normalise them to the
 	// target_type/target_id pair everything else uses.

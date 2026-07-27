@@ -91,14 +91,15 @@ func TestOnlyReadingsAreExcludedFromFullSave(t *testing.T) {
 	}
 }
 
-// Rooms is the one collection allowed to stay nil after loading, because
-// Load reads that nil to decide whether to run the first-run migration.
-func TestOnlyRoomsSkipsTheNilGuard(t *testing.T) {
+// Every collection substitutes an empty map for a nil one, so callers can
+// index them under the lock without checking. Rooms used to be excluded so
+// that Load could read its nil-ness as "first run"; that signal never worked
+// and has been replaced by reconciliation, so the exception is gone.
+func TestEveryCollectionGuardsAgainstANilMap(t *testing.T) {
 	for _, c := range collections {
-		hasGuard := c.ensure != nil
-		want := c.label != "rooms"
-		if hasGuard != want {
-			t.Errorf("collection %q has nil-guard = %v, want %v", c.label, hasGuard, want)
+		if c.ensure == nil {
+			t.Errorf("collection %q has no nil-guard; a file holding `null` "+
+				"would leave the field nil", c.label)
 		}
 	}
 }
