@@ -111,6 +111,43 @@ func TestUpdateOrRunsTheUndoOnlyWhenSavingFails(t *testing.T) {
 	})
 }
 
+// ErrNoChange exists so a handler that only sometimes mutates doesn't
+// rewrite every store file on a no-op request.
+func TestErrNoChangeCommitsWithoutSaving(t *testing.T) {
+	s := txStore(t)
+	s.Groups["g1"] = &Group{ID: "g1", Name: "Downstairs"}
+
+	if err := s.Update(func() error { return ErrNoChange }); err != nil {
+		t.Fatalf("Update returned %v, want nil — ErrNoChange is not a failure", err)
+	}
+	// Nothing was written, so a fresh Store sees nothing.
+	again := New(s.DataDir, noopRF{})
+	if err := again.Load(); err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if len(again.Groups) != 0 {
+		t.Error("ErrNoChange still persisted")
+	}
+
+	// A save failure would otherwise be reported here, so this also shows
+	// the Save really was skipped rather than merely succeeding quietly.
+	s.DataDir = filepath.Join(s.DataDir, "missing")
+	if err := s.Update(func() error { return ErrNoChange }); err != nil {
+		t.Errorf("Update returned %v, want nil even with an unwritable dir", err)
+	}
+}
+
+func TestErrNoChangeSkipsTheUndo(t *testing.T) {
+	s := txStore(t)
+	ran := false
+	if err := s.UpdateOr(func() { ran = true }, func() error { return ErrNoChange }); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if ran {
+		t.Error("the undo ran for ErrNoChange, which is a success")
+	}
+}
+
 func TestMutateDoesNotPersist(t *testing.T) {
 	s := txStore(t)
 	s.Mutate(func() { s.Groups["g1"] = &Group{ID: "g1", Name: "Runtime only"} })

@@ -68,14 +68,14 @@ func (s *Server) broadcastMusic() {
 // Sorted so the synchronous fallback always asks the same speaker for the
 // household topology.
 func (s *Server) sonosSpeakerList() []sonos.Speaker {
-	s.Store.Mu.RLock()
-	defer s.Store.Mu.RUnlock()
-	out := make([]sonos.Speaker, 0, len(s.Store.Sonos))
-	for _, sp := range s.Store.Sonos {
-		out = append(out, sonos.Speaker{ID: sp.ID, IP: sp.IP, UUID: sp.UUID})
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
-	return out
+	return store.ViewValue(s.Store, func() []sonos.Speaker {
+		out := make([]sonos.Speaker, 0, len(s.Store.Sonos))
+		for _, sp := range s.Store.Sonos {
+			out = append(out, sonos.Speaker{ID: sp.ID, IP: sp.IP, UUID: sp.UUID})
+		}
+		sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+		return out
+	})
 }
 
 // sonosCallbackURL builds the address one speaker should post notifications

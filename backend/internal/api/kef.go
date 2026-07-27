@@ -151,15 +151,14 @@ func (s *Server) kefCreateSpeaker(w http.ResponseWriter, r *http.Request) {
 		sp.Name = dev.Name
 	}
 
-	s.Store.Mu.Lock()
-	defer s.Store.Mu.Unlock()
-	sp.ID = fmt.Sprintf("kef_%d", time.Now().UnixNano())
-	if err := s.Store.ValidateKEFSpeaker(&sp); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	s.Store.KEF[sp.ID] = &sp
-	if !s.saveStoreOr(w, func() { delete(s.Store.KEF, sp.ID) }) {
+	if !s.updateOr(w, func() { delete(s.Store.KEF, sp.ID) }, func() error {
+		sp.ID = fmt.Sprintf("kef_%d", time.Now().UnixNano())
+		if err := s.Store.ValidateKEFSpeaker(&sp); err != nil {
+			return errInvalid(err)
+		}
+		s.Store.KEF[sp.ID] = &sp
+		return nil
+	}) {
 		return
 	}
 	s.kefEvents().Nudge() // start watching it now, not at the next reconcile
@@ -175,27 +174,27 @@ func (s *Server) kefUpdateSpeaker(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.Store.Mu.Lock()
-	defer s.Store.Mu.Unlock()
-	existing, ok := s.Store.KEF[id]
-	if !ok {
-		writeError(w, http.StatusNotFound, "speaker not found")
-		return
-	}
-	merged := *existing
-	if v := strings.TrimSpace(updates.Name); v != "" {
-		merged.Name = v
-	}
-	if v := strings.TrimSpace(updates.IP); v != "" {
-		merged.IP = v
-	}
-	merged.Room = strings.TrimSpace(updates.Room)
-	if err := s.Store.ValidateKEFSpeaker(&merged); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	*existing = merged
-	if !s.saveStore(w) {
+	var existing *store.KEFSpeaker
+	if !s.update(w, func() error {
+		var ok bool
+		existing, ok = s.Store.KEF[id]
+		if !ok {
+			return errStatus(http.StatusNotFound, "speaker not found")
+		}
+		merged := *existing
+		if v := strings.TrimSpace(updates.Name); v != "" {
+			merged.Name = v
+		}
+		if v := strings.TrimSpace(updates.IP); v != "" {
+			merged.IP = v
+		}
+		merged.Room = strings.TrimSpace(updates.Room)
+		if err := s.Store.ValidateKEFSpeaker(&merged); err != nil {
+			return errInvalid(err)
+		}
+		*existing = merged
+		return nil
+	}) {
 		return
 	}
 	// A re-addressed speaker needs its poller repointed; the old one is
@@ -207,21 +206,17 @@ func (s *Server) kefUpdateSpeaker(w http.ResponseWriter, r *http.Request) {
 // kefDeleteSpeaker handles DELETE /api/kef/speakers/{id}.
 func (s *Server) kefDeleteSpeaker(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
-	// The monitor is nudged after the lock is released: it must not be
-	// poked while Mu is held.
-	deleted := func() bool {
-		s.Store.Mu.Lock()
-		defer s.Store.Mu.Unlock()
+	// s.update releases the lock before returning, so the monitor is nudged
+	// off-lock.
+	if !s.update(w, func() error {
 		if _, ok := s.Store.KEF[id]; !ok {
-			writeError(w, http.StatusNotFound, "speaker not found")
-			return false
+			return errNotFound("speaker")
 		}
 		delete(s.Store.KEF, id)
 		// Drop it from any zone that held it — see sonosDeleteSpeaker.
 		s.Store.CascadeDeleteSpeaker(store.QualifyKEF(id))
-		return s.saveStore(w)
-	}()
-	if !deleted {
+		return nil
+	}) {
 		return
 	}
 	s.kefEvents().Nudge() // stop polling it
@@ -496,12 +491,12 @@ func (s *Server) RunKEFEvents(ctx context.Context) {
 
 // kefSpeakerList adapts the store's speakers to what the monitor needs.
 func (s *Server) kefSpeakerList() []kef.Speaker {
-	s.Store.Mu.RLock()
-	defer s.Store.Mu.RUnlock()
-	out := make([]kef.Speaker, 0, len(s.Store.KEF))
-	for _, sp := range s.Store.KEF {
-		out = append(out, kef.Speaker{ID: sp.ID, IP: sp.IP})
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
-	return out
+	return store.ViewValue(s.Store, func() []kef.Speaker {
+		out := make([]kef.Speaker, 0, len(s.Store.KEF))
+		for _, sp := range s.Store.KEF {
+			out = append(out, kef.Speaker{ID: sp.ID, IP: sp.IP})
+		}
+		sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+		return out
+	})
 }

@@ -241,14 +241,13 @@ func (s *Server) mediaCreateZone(w http.ResponseWriter, r *http.Request) {
 	}
 	z.ID = fmt.Sprintf("zone_%d", time.Now().UnixNano())
 
-	s.Store.Mu.Lock()
-	defer s.Store.Mu.Unlock()
-	if err := s.Store.ValidateZone(&z); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	s.Store.Zones[z.ID] = &z
-	if !s.saveStore(w) {
+	if !s.update(w, func() error {
+		if err := s.Store.ValidateZone(&z); err != nil {
+			return errInvalid(err)
+		}
+		s.Store.Zones[z.ID] = &z
+		return nil
+	}) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, z)
@@ -262,29 +261,29 @@ func (s *Server) mediaUpdateZone(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.Store.Mu.Lock()
-	defer s.Store.Mu.Unlock()
-	existing, ok := s.Store.Zones[id]
-	if !ok {
-		writeError(w, http.StatusNotFound, "zone not found")
-		return
-	}
-	merged := *existing
-	if updates.Name != "" {
-		merged.Name = updates.Name
-	}
-	// Members are replaced wholesale rather than merged: the UI sends the
-	// full arrangement, and there is no way to express a removal otherwise.
-	if updates.Members != nil {
-		merged.Members = updates.Members
-	}
-	merged.Room = updates.Room
-	if err := s.Store.ValidateZone(&merged); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	*existing = merged
-	if !s.saveStore(w) {
+	var existing *store.Zone
+	if !s.update(w, func() error {
+		var ok bool
+		existing, ok = s.Store.Zones[id]
+		if !ok {
+			return errStatus(http.StatusNotFound, "zone not found")
+		}
+		merged := *existing
+		if updates.Name != "" {
+			merged.Name = updates.Name
+		}
+		// Members are replaced wholesale rather than merged: the UI sends the
+		// full arrangement, and there is no way to express a removal otherwise.
+		if updates.Members != nil {
+			merged.Members = updates.Members
+		}
+		merged.Room = updates.Room
+		if err := s.Store.ValidateZone(&merged); err != nil {
+			return errInvalid(err)
+		}
+		*existing = merged
+		return nil
+	}) {
 		return
 	}
 	writeJSON(w, http.StatusOK, existing)
@@ -293,14 +292,13 @@ func (s *Server) mediaUpdateZone(w http.ResponseWriter, r *http.Request) {
 // mediaDeleteZone handles DELETE /api/media/zones/{id}.
 func (s *Server) mediaDeleteZone(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
-	s.Store.Mu.Lock()
-	defer s.Store.Mu.Unlock()
-	if _, ok := s.Store.Zones[id]; !ok {
-		writeError(w, http.StatusNotFound, "zone not found")
-		return
-	}
-	delete(s.Store.Zones, id)
-	if !s.saveStore(w) {
+	if !s.update(w, func() error {
+		if _, ok := s.Store.Zones[id]; !ok {
+			return errStatus(http.StatusNotFound, "zone not found")
+		}
+		delete(s.Store.Zones, id)
+		return nil
+	}) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

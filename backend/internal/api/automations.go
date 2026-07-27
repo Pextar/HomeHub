@@ -23,40 +23,42 @@ type automationResponse struct {
 
 func (s *Server) getAutomations(w http.ResponseWriter, r *http.Request) {
 	now := time.Now()
-	s.Store.Mu.RLock()
-	list := make([]*store.Automation, 0, len(s.Store.Automations))
-	for _, a := range s.Store.Automations {
-		list = append(list, a)
-	}
-	sort.Slice(list, func(i, j int) bool {
-		if list[i].Name != list[j].Name {
-			return list[i].Name < list[j].Name
+	var b []byte
+	var err error
+	s.Store.View(func() {
+		list := make([]*store.Automation, 0, len(s.Store.Automations))
+		for _, a := range s.Store.Automations {
+			list = append(list, a)
 		}
-		return list[i].ID < list[j].ID
-	})
+		sort.Slice(list, func(i, j int) bool {
+			if list[i].Name != list[j].Name {
+				return list[i].Name < list[j].Name
+			}
+			return list[i].ID < list[j].ID
+		})
 
-	result := make([]automationResponse, len(list))
-	for i, a := range list {
-		var effs []string
-		any := false
-		for ri := range a.Rules {
-			if effs == nil {
-				effs = make([]string, len(a.Rules))
+		result := make([]automationResponse, len(list))
+		for i, a := range list {
+			var effs []string
+			any := false
+			for ri := range a.Rules {
+				if effs == nil {
+					effs = make([]string, len(a.Rules))
+				}
+				if eff, ok := store.TriggerEffectiveHHMM(&a.Rules[ri].Trigger, now, s.Store.Settings); ok {
+					effs[ri] = eff
+					any = true
+				}
 			}
-			if eff, ok := store.TriggerEffectiveHHMM(&a.Rules[ri].Trigger, now, s.Store.Settings); ok {
-				effs[ri] = eff
-				any = true
+			if !any {
+				effs = nil
 			}
+			result[i] = automationResponse{Automation: a, EffectiveTriggerTimes: effs}
 		}
-		if !any {
-			effs = nil
-		}
-		result[i] = automationResponse{Automation: a, EffectiveTriggerTimes: effs}
-	}
-	// Snapshot under the lock — result still holds live *store.Automation
-	// pointers that writers mutate in place.
-	b, err := json.Marshal(result)
-	s.Store.Mu.RUnlock()
+		// Snapshot under the lock — result still holds live *store.Automation
+		// pointers that writers mutate in place.
+		b, err = json.Marshal(result)
+	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to encode response")
 		return

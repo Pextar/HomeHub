@@ -14,16 +14,18 @@ import (
 )
 
 func (s *Server) getScenes(w http.ResponseWriter, r *http.Request) {
-	s.Store.Mu.RLock()
-	out := make([]*store.Scene, 0, len(s.Store.Scenes))
-	for _, sc := range s.Store.Scenes {
-		out = append(out, sc)
-	}
-	sort.Slice(out, func(i, j int) bool {
-		return strings.ToLower(out[i].Name) < strings.ToLower(out[j].Name)
+	var b []byte
+	var err error
+	s.Store.View(func() {
+		out := make([]*store.Scene, 0, len(s.Store.Scenes))
+		for _, sc := range s.Store.Scenes {
+			out = append(out, sc)
+		}
+		sort.Slice(out, func(i, j int) bool {
+			return strings.ToLower(out[i].Name) < strings.ToLower(out[j].Name)
+		})
+		b, err = json.Marshal(out)
 	})
-	b, err := json.Marshal(out)
-	s.Store.Mu.RUnlock()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to encode response")
 		return

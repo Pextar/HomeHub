@@ -17,25 +17,27 @@ import (
 
 func (s *Server) getSockets(w http.ResponseWriter, r *http.Request) {
 	user := currentUser(r)
-	s.Store.Mu.RLock()
-	result := make([]*store.Socket, 0, len(s.Store.Sockets))
-	for _, sock := range s.Store.Sockets {
-		if !canAccess(user, sock.ID) {
-			continue
+	var b []byte
+	var err error
+	s.Store.View(func() {
+		result := make([]*store.Socket, 0, len(s.Store.Sockets))
+		for _, sock := range s.Store.Sockets {
+			if !canAccess(user, sock.ID) {
+				continue
+			}
+			result = append(result, sock)
 		}
-		result = append(result, sock)
-	}
-	sort.Slice(result, func(i, j int) bool {
-		if result[i].Room != result[j].Room {
-			return strings.ToLower(result[i].Room) < strings.ToLower(result[j].Room)
-		}
-		return strings.ToLower(result[i].Name) < strings.ToLower(result[j].Name)
+		sort.Slice(result, func(i, j int) bool {
+			if result[i].Room != result[j].Room {
+				return strings.ToLower(result[i].Room) < strings.ToLower(result[j].Room)
+			}
+			return strings.ToLower(result[i].Name) < strings.ToLower(result[j].Name)
+		})
+		// Marshal under the lock so we snapshot the sockets consistently rather
+		// than handing live *store.Socket pointers to the encoder after unlocking
+		// (writers mutate those structs in place).
+		b, err = json.Marshal(result)
 	})
-	// Marshal under the lock so we snapshot the sockets consistently rather
-	// than handing live *store.Socket pointers to the encoder after unlocking
-	// (writers mutate those structs in place).
-	b, err := json.Marshal(result)
-	s.Store.Mu.RUnlock()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to encode response")
 		return
@@ -240,26 +242,35 @@ func (s *Server) doControlSocket(id, action string) (sock store.Socket, found bo
 		return store.Socket{}, true, fmt.Errorf("unsupported action %q (use on, off, or toggle)", action)
 	}
 
-	s.Store.Mu.Lock()
-	defer s.Store.Mu.Unlock()
-	socket, ok := s.Store.Sockets[id]
-	if !ok {
+	var applyErr error
+	saveErr := s.Store.Update(func() error {
+		socket, ok := s.Store.Sockets[id]
+		if !ok {
+			return store.ErrNoChange
+		}
+		found = true
+		applyErr = s.Store.ApplyState(socket, target)
+		entry := store.ActivityEntry{Kind: "socket", Source: "assistant", Action: action, Label: socket.Name}
+		if applyErr != nil {
+			entry.Status = "error"
+			entry.Error = applyErr.Error()
+		}
+		s.Store.Activity.Add(entry)
+		sock = *socket
+		if applyErr != nil {
+			// The transmit failed, so there is no new state to persist. The
+			// activity entry above still records the attempt.
+			return store.ErrNoChange
+		}
+		return nil
+	})
+	if !found {
 		return store.Socket{}, false, nil
 	}
-	applyErr := s.Store.ApplyState(socket, target)
-	entry := store.ActivityEntry{Kind: "socket", Source: "assistant", Action: action, Label: socket.Name}
 	if applyErr != nil {
-		entry.Status = "error"
-		entry.Error = applyErr.Error()
+		return sock, true, applyErr
 	}
-	s.Store.Activity.Add(entry)
-	if applyErr != nil {
-		return *socket, true, applyErr
-	}
-	if err := s.Store.Save(); err != nil {
-		return *socket, true, err
-	}
-	return *socket, true, nil
+	return sock, true, saveErr
 }
 
 // learnSocket picks a random unused code and broadcasts an ON signal so
@@ -307,12 +318,13 @@ func (s *Server) learnSocket(w http.ResponseWriter, r *http.Request) {
 		code = existing
 	} else {
 		// Generate a fresh unused code.
-		s.Store.Mu.RLock()
-		used := make(map[string]bool, len(s.Store.Sockets))
-		for _, sock := range s.Store.Sockets {
-			used[sock.Code] = true
-		}
-		s.Store.Mu.RUnlock()
+		var used map[string]bool
+		s.Store.View(func() {
+			used = make(map[string]bool, len(s.Store.Sockets))
+			for _, sock := range s.Store.Sockets {
+				used[sock.Code] = true
+			}
+		})
 
 		// 32 attempts is plenty given how wide both code spaces are.
 		for i := 0; i < 32; i++ {

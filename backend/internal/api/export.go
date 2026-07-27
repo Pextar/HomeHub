@@ -77,43 +77,40 @@ func (s *Server) importConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.Store.Mu.Lock()
-	defer s.Store.Mu.Unlock()
+	if !s.update(w, func() error {
+		if err := validateBundle(&bundle, s.Store); err != nil {
+			return errStatus(http.StatusBadRequest, "%s", "invalid bundle: "+err.Error())
+		}
 
-	if err := validateBundle(&bundle, s.Store); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid bundle: "+err.Error())
-		return
-	}
-
-	if bundle.Sockets != nil {
-		s.Store.Sockets = bundle.Sockets
-	}
-	if bundle.Schedules != nil {
-		s.Store.Schedules = bundle.Schedules
-	}
-	if bundle.Groups != nil {
-		s.Store.Groups = bundle.Groups
-	}
-	if bundle.Scenes != nil {
-		s.Store.Scenes = bundle.Scenes
-	}
-	if bundle.Automations != nil {
-		s.Store.Automations = bundle.Automations
-	}
-	if bundle.Sensors != nil {
-		s.Store.Sensors = bundle.Sensors
-	}
-	if bundle.Sonos != nil {
-		s.Store.Sonos = bundle.Sonos
-	}
-	if bundle.KEF != nil {
-		s.Store.KEF = bundle.KEF
-	}
-	if bundle.Settings != nil {
-		s.Store.Settings = bundle.Settings
-	}
-
-	if !s.saveStore(w) {
+		if bundle.Sockets != nil {
+			s.Store.Sockets = bundle.Sockets
+		}
+		if bundle.Schedules != nil {
+			s.Store.Schedules = bundle.Schedules
+		}
+		if bundle.Groups != nil {
+			s.Store.Groups = bundle.Groups
+		}
+		if bundle.Scenes != nil {
+			s.Store.Scenes = bundle.Scenes
+		}
+		if bundle.Automations != nil {
+			s.Store.Automations = bundle.Automations
+		}
+		if bundle.Sensors != nil {
+			s.Store.Sensors = bundle.Sensors
+		}
+		if bundle.Sonos != nil {
+			s.Store.Sonos = bundle.Sonos
+		}
+		if bundle.KEF != nil {
+			s.Store.KEF = bundle.KEF
+		}
+		if bundle.Settings != nil {
+			s.Store.Settings = bundle.Settings
+		}
+		return nil
+	}) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{

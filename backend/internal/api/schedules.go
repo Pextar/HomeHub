@@ -37,46 +37,48 @@ func (s *Server) getSchedules(w http.ResponseWriter, r *http.Request) {
 	admin := isAdmin(user)
 	now := time.Now()
 
-	s.Store.Mu.RLock()
-	raw := make([]*store.Schedule, 0, len(s.Store.Schedules))
-	keys := make(map[string]string, len(s.Store.Schedules))
-	effective := make(map[string]string, len(s.Store.Schedules))
-	for _, sch := range s.Store.Schedules {
-		// Non-admins only see schedules targeting their own sockets.
-		if !admin {
-			sockID := scheduleSocketID(sch)
-			if sockID == "" || !user.CanAccessSocket(sockID) {
-				continue
+	var b []byte
+	var err error
+	s.Store.View(func() {
+		raw := make([]*store.Schedule, 0, len(s.Store.Schedules))
+		keys := make(map[string]string, len(s.Store.Schedules))
+		effective := make(map[string]string, len(s.Store.Schedules))
+		for _, sch := range s.Store.Schedules {
+			// Non-admins only see schedules targeting their own sockets.
+			if !admin {
+				sockID := scheduleSocketID(sch)
+				if sockID == "" || !user.CanAccessSocket(sockID) {
+					continue
+				}
 			}
+			raw = append(raw, sch)
+			k, ok := sch.EffectiveHHMM(now, s.Store.Settings)
+			if !ok {
+				// Unresolvable schedules (e.g. sunrise without a configured
+				// location) sort to the end so the list still reads top-to-bottom
+				// by trigger time.
+				k = "~~"
+			} else {
+				effective[sch.ID] = k
+			}
+			keys[sch.ID] = k
 		}
-		raw = append(raw, sch)
-		k, ok := sch.EffectiveHHMM(now, s.Store.Settings)
-		if !ok {
-			// Unresolvable schedules (e.g. sunrise without a configured
-			// location) sort to the end so the list still reads top-to-bottom
-			// by trigger time.
-			k = "~~"
-		} else {
-			effective[sch.ID] = k
-		}
-		keys[sch.ID] = k
-	}
-	sort.Slice(raw, func(i, j int) bool {
-		ki, kj := keys[raw[i].ID], keys[raw[j].ID]
-		if ki != kj {
-			return ki < kj
-		}
-		return raw[i].ID < raw[j].ID
-	})
+		sort.Slice(raw, func(i, j int) bool {
+			ki, kj := keys[raw[i].ID], keys[raw[j].ID]
+			if ki != kj {
+				return ki < kj
+			}
+			return raw[i].ID < raw[j].ID
+		})
 
-	result := make([]scheduleResponse, len(raw))
-	for i, sch := range raw {
-		result[i] = scheduleResponse{Schedule: sch, EffectiveTime: effective[sch.ID]}
-	}
-	// Snapshot under the lock — result still holds live *store.Schedule
-	// pointers that writers mutate in place.
-	b, err := json.Marshal(result)
-	s.Store.Mu.RUnlock()
+		result := make([]scheduleResponse, len(raw))
+		for i, sch := range raw {
+			result[i] = scheduleResponse{Schedule: sch, EffectiveTime: effective[sch.ID]}
+		}
+		// Snapshot under the lock — result still holds live *store.Schedule
+		// pointers that writers mutate in place.
+		b, err = json.Marshal(result)
+	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to encode response")
 		return
@@ -222,21 +224,20 @@ func (s *Server) updateSchedule(w http.ResponseWriter, r *http.Request) {
 // many schedules ended up changed.
 func (s *Server) setAllSchedules(enabled bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		s.Store.Mu.Lock()
-		defer s.Store.Mu.Unlock()
-
 		changed := 0
-		for _, sch := range s.Store.Schedules {
-			if sch.Enabled != enabled {
-				sch.Enabled = enabled
-				changed++
+		if !s.update(w, func() error {
+			for _, sch := range s.Store.Schedules {
+				if sch.Enabled != enabled {
+					sch.Enabled = enabled
+					changed++
+				}
 			}
-		}
-		if changed > 0 {
-			if err := s.Store.Save(); err != nil {
-				writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
-				return
+			if changed == 0 {
+				return store.ErrNoChange
 			}
+			return nil
+		}) {
+			return
 		}
 		writeJSON(w, http.StatusOK, map[string]interface{}{"enabled": enabled, "changed": changed})
 	}

@@ -138,10 +138,10 @@ func (s *Server) matterSetState(w http.ResponseWriter, r *http.Request) {
 	// the truth without waiting for the next refresh. MirrorState also fires
 	// OnChange/OnStateChange so SSE clients and push subscribers stay live.
 	if update.On != nil {
-		s.Store.Mu.Lock()
-		s.Store.MirrorState(mux.Vars(r)["socketId"], *update.On)
-		_ = s.Store.Save()
-		s.Store.Mu.Unlock()
+		_ = s.Store.Update(func() error {
+			s.Store.MirrorState(mux.Vars(r)["socketId"], *update.On)
+			return nil
+		})
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

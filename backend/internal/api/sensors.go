@@ -15,19 +15,21 @@ import (
 )
 
 func (s *Server) getSensors(w http.ResponseWriter, r *http.Request) {
-	s.Store.Mu.RLock()
-	result := make([]*store.Sensor, 0, len(s.Store.Sensors))
-	for _, sn := range s.Store.Sensors {
-		result = append(result, sn)
-	}
-	sort.Slice(result, func(i, j int) bool {
-		if result[i].Room != result[j].Room {
-			return result[i].Room < result[j].Room
+	var b []byte
+	var err error
+	s.Store.View(func() {
+		result := make([]*store.Sensor, 0, len(s.Store.Sensors))
+		for _, sn := range s.Store.Sensors {
+			result = append(result, sn)
 		}
-		return result[i].Name < result[j].Name
+		sort.Slice(result, func(i, j int) bool {
+			if result[i].Room != result[j].Room {
+				return result[i].Room < result[j].Room
+			}
+			return result[i].Name < result[j].Name
+		})
+		b, err = json.Marshal(result)
 	})
-	b, err := json.Marshal(result)
-	s.Store.Mu.RUnlock()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to encode response")
 		return
@@ -146,9 +148,8 @@ func (s *Server) startSensorPair(w http.ResponseWriter, r *http.Request) {
 		secs = 300
 	}
 
-	s.Store.Mu.Lock()
-	until := s.Store.StartDiscovery(time.Duration(secs) * time.Second)
-	s.Store.Mu.Unlock()
+	var until time.Time
+	s.Store.Mutate(func() { until = s.Store.StartDiscovery(time.Duration(secs) * time.Second) })
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"active":  true,
@@ -183,16 +184,21 @@ func (s *Server) getSensorReadings(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
 	q := r.URL.Query()
 
-	s.Store.Mu.RLock()
-	if _, ok := s.Store.Sensors[id]; !ok {
-		s.Store.Mu.RUnlock()
+	// Copied out under the read lock so the filtering below runs unlocked.
+	var readings []store.SensorReading
+	var found bool
+	s.Store.View(func() {
+		if _, found = s.Store.Sensors[id]; !found {
+			return
+		}
+		src := s.Store.Readings[id]
+		readings = make([]store.SensorReading, len(src))
+		copy(readings, src)
+	})
+	if !found {
 		writeError(w, http.StatusNotFound, "sensor not found")
 		return
 	}
-	src := s.Store.Readings[id]
-	readings := make([]store.SensorReading, len(src))
-	copy(readings, src)
-	s.Store.Mu.RUnlock()
 
 	if v := q.Get("since_minutes"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
@@ -231,14 +237,18 @@ func (s *Server) postSensorReading(w http.ResponseWriter, r *http.Request) {
 		t = body.Time.UTC()
 	}
 
-	s.Store.Mu.Lock()
-	defer s.Store.Mu.Unlock()
-
-	if err := s.Store.AppendReading(id, store.SensorReading{Time: t, Value: body.Value}); err != nil {
-		if strings.Contains(err.Error(), "not found") {
-			writeError(w, http.StatusNotFound, err.Error())
+	// Mutate, not Update: AppendReading arms a debounced sensor-only save of
+	// its own, so a full Save here would rewrite every store file on every
+	// incoming reading.
+	var appendErr error
+	s.Store.Mutate(func() {
+		appendErr = s.Store.AppendReading(id, store.SensorReading{Time: t, Value: body.Value})
+	})
+	if appendErr != nil {
+		if strings.Contains(appendErr.Error(), "not found") {
+			writeError(w, http.StatusNotFound, appendErr.Error())
 		} else {
-			writeError(w, http.StatusInternalServerError, err.Error())
+			writeError(w, http.StatusInternalServerError, appendErr.Error())
 		}
 		return
 	}

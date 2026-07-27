@@ -1,6 +1,9 @@
 package store
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+)
 
 // Transactions.
 //
@@ -23,6 +26,15 @@ import "fmt"
 // None of these may be nested: Go's RWMutex is not reentrant, so calling
 // View from inside Update deadlocks. Compose within a single closure.
 
+// ErrNoChange tells Update the transaction succeeded but left nothing worth
+// writing, so the Save is skipped and Update returns nil.
+//
+// Without it, a handler that only sometimes mutates — the bulk schedule
+// toggle when every schedule is already in the requested state, or the
+// bootstrap path on a server that is already configured — would rewrite
+// every store file on each call.
+var ErrNoChange = errors.New("store: nothing to persist")
+
 // SaveError marks a failure to persist, as opposed to an error returned by
 // the transaction body. Callers map the two to different responses — a
 // validation error is the client's problem, a save failure is ours.
@@ -42,6 +54,18 @@ func (s *Store) View(fn func()) {
 	fn()
 }
 
+// ViewValue is View for a helper that computes a single value.
+//
+// It exists so a read helper with early returns keeps its control flow —
+// `return x` inside fn is a return from fn, not from the enclosing
+// function, which is exactly what the RLock/defer RUnlock shape it
+// replaces did.
+func ViewValue[T any](s *Store, fn func() T) T {
+	s.Mu.RLock()
+	defer s.Mu.RUnlock()
+	return fn()
+}
+
 // Update runs fn with the write lock held and persists if fn returns nil.
 //
 // An error from fn aborts before Save, leaving the store as fn left it —
@@ -57,6 +81,9 @@ func (s *Store) UpdateOr(undo func(), fn func() error) error {
 	s.Mu.Lock()
 	defer s.Mu.Unlock()
 	if err := fn(); err != nil {
+		if errors.Is(err, ErrNoChange) {
+			return nil
+		}
 		return err
 	}
 	if err := s.Save(); err != nil {

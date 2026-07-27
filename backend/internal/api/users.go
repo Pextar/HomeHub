@@ -163,49 +163,48 @@ func (s *Server) createUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.Store.Mu.Lock()
-	defer s.Store.Mu.Unlock()
-
-	if s.Store.UserByUsername(username) != nil {
-		writeError(w, http.StatusConflict, "a user with that name already exists")
-		return
-	}
-
-	user := &store.User{
-		ID:        fmt.Sprintf("user_%d", time.Now().UnixNano()),
-		Username:  username,
-		Admin:     body.Admin,
-		Kid:       body.Kid && !body.Admin, // kid mode is a flavor of a limited profile
-		SocketIDs: sanitizeSocketIDs(s.Store, body.SocketIDs),
-		CreatedAt: time.Now(),
-	}
-
+	// Both are built inside the transaction and rendered after it.
+	var user *store.User
 	var inviteURL string
-	if body.Admin {
-		// Admin (manager) users get a one-time invite link so they can set
-		// their own password — the creating admin never picks it for them.
-		token, err := generateInviteToken()
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to generate invite token")
-			return
+	if !s.updateOr(w, func() { delete(s.Store.Users, user.ID) }, func() error {
+		if s.Store.UserByUsername(username) != nil {
+			return errStatus(http.StatusConflict, "a user with that name already exists")
 		}
-		user.InviteToken = token
-		user.InviteExpiry = time.Now().Add(7 * 24 * time.Hour)
 
-		// Build the invite URL from the request's host so it points at the
-		// actual running instance (works on LAN, custom domains, etc.).
-		scheme := "http"
-		if isSecureRequest(r) {
-			scheme = "https"
+		user = &store.User{
+			ID:        fmt.Sprintf("user_%d", time.Now().UnixNano()),
+			Username:  username,
+			Admin:     body.Admin,
+			Kid:       body.Kid && !body.Admin, // kid mode is a flavor of a limited profile
+			SocketIDs: sanitizeSocketIDs(s.Store, body.SocketIDs),
+			CreatedAt: time.Now(),
 		}
-		inviteURL = fmt.Sprintf("%s://%s/?invite=%s", scheme, r.Host, token)
-	} else {
-		// Limited profiles get a generated login code.
-		user.LoginCode = generateLoginCode(s.Store)
-	}
 
-	s.Store.Users[user.ID] = user
-	if !s.saveStoreOr(w, func() { delete(s.Store.Users, user.ID) }) {
+		if body.Admin {
+			// Admin (manager) users get a one-time invite link so they can set
+			// their own password — the creating admin never picks it for them.
+			token, err := generateInviteToken()
+			if err != nil {
+				return errStatus(http.StatusInternalServerError, "failed to generate invite token")
+			}
+			user.InviteToken = token
+			user.InviteExpiry = time.Now().Add(7 * 24 * time.Hour)
+
+			// Build the invite URL from the request's host so it points at the
+			// actual running instance (works on LAN, custom domains, etc.).
+			scheme := "http"
+			if isSecureRequest(r) {
+				scheme = "https"
+			}
+			inviteURL = fmt.Sprintf("%s://%s/?invite=%s", scheme, r.Host, token)
+		} else {
+			// Limited profiles get a generated login code.
+			user.LoginCode = generateLoginCode(s.Store)
+		}
+
+		s.Store.Users[user.ID] = user
+		return nil
+	}) {
 		return
 	}
 
@@ -234,91 +233,84 @@ func (s *Server) updateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.Store.Mu.Lock()
-	defer s.Store.Mu.Unlock()
-
-	user, ok := s.Store.Users[id]
-	if !ok {
-		writeError(w, http.StatusNotFound, "user not found")
-		return
-	}
-
-	// The owner's admin status is immutable — block any attempt to demote.
-	if user.Owner && body.Admin != nil && !*body.Admin {
-		writeError(w, http.StatusBadRequest, "the owner account cannot be demoted")
-		return
-	}
-
-	// Snapshot the credentials so we can detect a change below and bump
-	// TokenVersion, which invalidates this user's existing sessions.
-	prevHash, prevCode := user.PasswordHash, user.LoginCode
-
-	if body.Username != nil {
-		name := strings.TrimSpace(*body.Username)
-		if name == "" {
-			writeError(w, http.StatusBadRequest, "username cannot be empty")
-			return
+	var user *store.User
+	if !s.update(w, func() error {
+		var ok bool
+		user, ok = s.Store.Users[id]
+		if !ok {
+			return errStatus(http.StatusNotFound, "user not found")
 		}
-		if existing := s.Store.UserByUsername(name); existing != nil && existing.ID != user.ID {
-			writeError(w, http.StatusConflict, "a user with that name already exists")
-			return
+
+		// The owner's admin status is immutable — block any attempt to demote.
+		if user.Owner && body.Admin != nil && !*body.Admin {
+			return errStatus(http.StatusBadRequest, "the owner account cannot be demoted")
 		}
-		user.Username = name
-	}
-	if body.SocketIDs != nil {
-		user.SocketIDs = sanitizeSocketIDs(s.Store, *body.SocketIDs)
-	}
 
-	// Resolve the target role, then reconcile credentials with it: admins
-	// have a password and no code; limited profiles have a code and no
-	// password.
-	targetAdmin := user.Admin
-	if body.Admin != nil {
-		targetAdmin = *body.Admin
-	}
-	if user.Admin && !targetAdmin && s.Store.AdminCount() <= 1 {
-		writeError(w, http.StatusBadRequest, "can't remove the last admin")
-		return
-	}
+		// Snapshot the credentials so we can detect a change below and bump
+		// TokenVersion, which invalidates this user's existing sessions.
+		prevHash, prevCode := user.PasswordHash, user.LoginCode
 
-	if targetAdmin {
-		if body.Password != nil && strings.TrimSpace(*body.Password) != "" {
-			hash, err := bcrypt.GenerateFromPassword([]byte(*body.Password), bcrypt.DefaultCost)
-			if err != nil {
-				writeError(w, http.StatusInternalServerError, "failed to hash password")
-				return
+		if body.Username != nil {
+			name := strings.TrimSpace(*body.Username)
+			if name == "" {
+				return errStatus(http.StatusBadRequest, "username cannot be empty")
 			}
-			user.PasswordHash = string(hash)
-			// Setting a password clears any pending invite.
+			if existing := s.Store.UserByUsername(name); existing != nil && existing.ID != user.ID {
+				return errStatus(http.StatusConflict, "a user with that name already exists")
+			}
+			user.Username = name
+		}
+		if body.SocketIDs != nil {
+			user.SocketIDs = sanitizeSocketIDs(s.Store, *body.SocketIDs)
+		}
+
+		// Resolve the target role, then reconcile credentials with it: admins
+		// have a password and no code; limited profiles have a code and no
+		// password.
+		targetAdmin := user.Admin
+		if body.Admin != nil {
+			targetAdmin = *body.Admin
+		}
+		if user.Admin && !targetAdmin && s.Store.AdminCount() <= 1 {
+			return errStatus(http.StatusBadRequest, "can't remove the last admin")
+		}
+
+		if targetAdmin {
+			if body.Password != nil && strings.TrimSpace(*body.Password) != "" {
+				hash, err := bcrypt.GenerateFromPassword([]byte(*body.Password), bcrypt.DefaultCost)
+				if err != nil {
+					return errStatus(http.StatusInternalServerError, "failed to hash password")
+				}
+				user.PasswordHash = string(hash)
+				// Setting a password clears any pending invite.
+				user.InviteToken = ""
+				user.InviteExpiry = time.Time{}
+			}
+			if user.PasswordHash == "" && user.InviteToken == "" {
+				return errStatus(http.StatusBadRequest, "set a password to make this profile an admin")
+			}
+			user.Admin = true
+			user.Kid = false // admins never use the kid layout
+			user.LoginCode = ""
+		} else {
+			user.Admin = false
+			user.Owner = false // can't be owner without being admin
+			user.PasswordHash = ""
 			user.InviteToken = ""
 			user.InviteExpiry = time.Time{}
+			if body.Kid != nil {
+				user.Kid = *body.Kid
+			}
+			if user.LoginCode == "" || body.RegenerateCode {
+				user.LoginCode = generateLoginCode(s.Store)
+			}
 		}
-		if user.PasswordHash == "" && user.InviteToken == "" {
-			writeError(w, http.StatusBadRequest, "set a password to make this profile an admin")
-			return
-		}
-		user.Admin = true
-		user.Kid = false // admins never use the kid layout
-		user.LoginCode = ""
-	} else {
-		user.Admin = false
-		user.Owner = false // can't be owner without being admin
-		user.PasswordHash = ""
-		user.InviteToken = ""
-		user.InviteExpiry = time.Time{}
-		if body.Kid != nil {
-			user.Kid = *body.Kid
-		}
-		if user.LoginCode == "" || body.RegenerateCode {
-			user.LoginCode = generateLoginCode(s.Store)
-		}
-	}
 
-	if user.PasswordHash != prevHash || user.LoginCode != prevCode {
-		user.TokenVersion++
-	}
-
-	if !s.saveStore(w) {
+		if user.PasswordHash != prevHash || user.LoginCode != prevCode {
+			user.TokenVersion++
+		}
+		return nil
+	}) {
 		return
 	}
 	writeJSON(w, http.StatusOK, toUserView(user))
@@ -327,24 +319,23 @@ func (s *Server) updateUser(w http.ResponseWriter, r *http.Request) {
 func (s *Server) deleteUser(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
 
-	s.Store.Mu.Lock()
-	defer s.Store.Mu.Unlock()
-
-	user, ok := s.Store.Users[id]
-	if !ok {
-		writeError(w, http.StatusNotFound, "user not found")
-		return
-	}
-	if user.Owner {
-		writeError(w, http.StatusBadRequest, "the owner account cannot be deleted")
-		return
-	}
-	if user.Admin && s.Store.AdminCount() <= 1 {
-		writeError(w, http.StatusBadRequest, "can't delete the last admin")
-		return
-	}
-	delete(s.Store.Users, id)
-	if !s.saveStoreOr(w, func() { s.Store.Users[id] = user }) {
+	// Captured so the undo can put the user back if the write fails.
+	var user *store.User
+	if !s.updateOr(w, func() { s.Store.Users[id] = user }, func() error {
+		var ok bool
+		user, ok = s.Store.Users[id]
+		if !ok {
+			return errStatus(http.StatusNotFound, "user not found")
+		}
+		if user.Owner {
+			return errStatus(http.StatusBadRequest, "the owner account cannot be deleted")
+		}
+		if user.Admin && s.Store.AdminCount() <= 1 {
+			return errStatus(http.StatusBadRequest, "can't delete the last admin")
+		}
+		delete(s.Store.Users, id)
+		return nil
+	}) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -392,27 +383,25 @@ func (s *Server) acceptInvite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.Store.Mu.Lock()
-	defer s.Store.Mu.Unlock()
+	// Needed after the transaction to log the user straight in.
+	var user *store.User
+	if !s.update(w, func() error {
+		user = s.Store.UserByInviteToken(token)
+		if user == nil || user.InviteExpiry.Before(time.Now()) {
+			return errStatus(http.StatusNotFound, "invite link is invalid or has expired")
+		}
 
-	user := s.Store.UserByInviteToken(token)
-	if user == nil || user.InviteExpiry.Before(time.Now()) {
-		writeError(w, http.StatusNotFound, "invite link is invalid or has expired")
-		return
-	}
+		hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+		if err != nil {
+			return errStatus(http.StatusInternalServerError, "failed to hash password")
+		}
 
-	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to hash password")
-		return
-	}
-
-	user.PasswordHash = string(hash)
-	user.InviteToken = ""
-	user.InviteExpiry = time.Time{}
-	user.TokenVersion++ // invalidate any stale tokens (shouldn't be any, but defensive)
-
-	if !s.saveStore(w) {
+		user.PasswordHash = string(hash)
+		user.InviteToken = ""
+		user.InviteExpiry = time.Time{}
+		user.TokenVersion++ // invalidate any stale tokens (shouldn't be any, but defensive)
+		return nil
+	}) {
 		return
 	}
 
@@ -456,31 +445,31 @@ func (s *Server) Bootstrap() error {
 	if s.AuthUser == "" || s.AuthPass == "" {
 		return nil
 	}
-	s.Store.Mu.Lock()
-	defer s.Store.Mu.Unlock()
-	if len(s.Store.Users) > 0 {
-		// Ensure the first admin is marked as owner (migration for existing installs).
-		for _, u := range s.Store.Users {
-			if u.Admin && !u.Owner {
-				u.Owner = true
-				return s.Store.Save()
+	return s.Store.Update(func() error {
+		if len(s.Store.Users) > 0 {
+			// Ensure the first admin is marked as owner (migration for existing installs).
+			for _, u := range s.Store.Users {
+				if u.Admin && !u.Owner {
+					u.Owner = true
+					return nil
+				}
 			}
+			return store.ErrNoChange
 		}
+		hash, err := bcrypt.GenerateFromPassword([]byte(s.AuthPass), bcrypt.DefaultCost)
+		if err != nil {
+			return fmt.Errorf("hash bootstrap password: %w", err)
+		}
+		user := &store.User{
+			ID:        fmt.Sprintf("user_%d", time.Now().UnixNano()),
+			Username:  s.AuthUser,
+			Admin:     true,
+			Owner:     true, // the one permanent admin
+			SocketIDs: []string{},
+			CreatedAt: time.Now(),
+		}
+		user.PasswordHash = string(hash)
+		s.Store.Users[user.ID] = user
 		return nil
-	}
-	hash, err := bcrypt.GenerateFromPassword([]byte(s.AuthPass), bcrypt.DefaultCost)
-	if err != nil {
-		return fmt.Errorf("hash bootstrap password: %w", err)
-	}
-	user := &store.User{
-		ID:        fmt.Sprintf("user_%d", time.Now().UnixNano()),
-		Username:  s.AuthUser,
-		Admin:     true,
-		Owner:     true, // the one permanent admin
-		SocketIDs: []string{},
-		CreatedAt: time.Now(),
-	}
-	user.PasswordHash = string(hash)
-	s.Store.Users[user.ID] = user
-	return s.Store.Save()
+	})
 }
