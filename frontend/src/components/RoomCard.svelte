@@ -5,7 +5,7 @@
     import { route, data, toasts } from "../lib/stores.svelte";
     import { openModal } from "../lib/modal.svelte";
     import { api } from "../lib/api";
-    import { runAction } from "../lib/utils";
+    import { runAction, roomIcon } from "../lib/utils";
     import { scale } from "svelte/transition";
     import { cubicOut } from "svelte/easing";
     import type { RoomSummary } from "../lib/types";
@@ -25,18 +25,6 @@
     }
     const tone = $derived(TONES[nameHash(room.name) % TONES.length]);
 
-    // Pick a room icon based on common name keywords (supports English + Swedish).
-    type IconName = "bed" | "utensils" | "couch" | "monitor" | "sun" | "sensor" | "home";
-    function roomIcon(name: string): IconName {
-        const n = name.toLowerCase();
-        if (/bed|sov(rum)?/.test(n)) return "bed";
-        if (/kitchen|kök|kok|mat(sal)?|dining/.test(n)) return "utensils";
-        if (/living|vardags|lounge|sal(ong)?/.test(n)) return "couch";
-        if (/office|kontor|studio|study|work/.test(n)) return "monitor";
-        if (/outdoor|utom(hus)?|garden|yard|patio|altan|balkong|terr/.test(n)) return "sun";
-        if (/bath|wc|toilet|toalett|shower/.test(n)) return "sensor";
-        return "home";
-    }
     const icon = $derived(roomIcon(room.name));
 
     function open() {

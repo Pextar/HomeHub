@@ -47,6 +47,9 @@
     { route: "scenes", icon: "scenes", label: "Scenes", admin: true },
     { route: "users", icon: "user", label: "Profiles", admin: true },
     { route: "settings", icon: "settings", label: "Settings", admin: true },
+    // A kiosk surface for wall/tablet displays rather than a management
+    // screen — it sits last so the phone's primary tabs are unaffected.
+    { route: "panel", icon: "monitor", label: "Panel" },
   ];
   const items = $derived(allItems.filter((i) => session.isAdmin || !i.admin));
   const primary = $derived(items.slice(0, PRIMARY_COUNT));

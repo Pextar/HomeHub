@@ -12,7 +12,7 @@ export interface BulkResult {
   failures: { socket_id: string; error: string }[];
 }
 
-export type Route = "dashboard" | "rooms" | "floorplan" | "sockets" | "music" | "groups" | "scenes" | "schedules" | "sensors" | "automations" | "insights" | "activity" | "users" | "settings" | "console";
+export type Route = "dashboard" | "rooms" | "floorplan" | "sockets" | "music" | "groups" | "scenes" | "schedules" | "sensors" | "automations" | "insights" | "activity" | "users" | "settings" | "console" | "panel";
 
 export interface ActivityEntry {
   id: number;

@@ -1087,7 +1087,89 @@ _up one_.
 
 ---
 
-## 16. When in doubt
+## 16. Panel — the kiosk surface
+
+The Panel (`views/Panel.svelte`, pieces in `components/panel/`) is the
+always-on display: an old iPad on a wall or shelf, logged in once, living at
+`/#/panel`. It is a **sibling of the app shell, not a view inside it** —
+`App.svelte` renders it chromeless the same way it renders `KidHome`: no
+sidebar, no tab dock, no assistant FAB, no pull-to-refresh. It is reached
+from the sidebar's last entry and the PWA's "Panel" shortcut, and left
+through one quiet Exit chip, top-right.
+
+**Home and music are one surface with two depths.** The panel is the fused
+Home+Music screen — home control on the left and centre, the player on the
+right, both always visible. The full Music view is the second depth, one
+tap away through the player's art and meta, for the jobs a wall can't do
+(search, queue management, grouping, EQ). Three behaviours keep the pair
+coherent:
+
+- **Sticky home.** Entering the panel marks the device panel-homed
+  (`panel-home` in localStorage, next to the theme — it describes this
+  screen, never the household). While the mark stands, the dashboard route
+  renders the panel in its place, so an iPad that reboots or relaunches
+  the PWA lands home again. Exit lifts the mark and returns to the normal
+  app. Kid profiles never enter the panel, so the mark can't strand one.
+- **Idle auto-return.** While panel-homed and on any other route, the
+  shared idle clock (same `lib/panel.ts` numbers the panel sleeps by)
+  walks the device back to `#/panel?idle=1` — arriving on the ambient
+  face, not waking the UI. Open modals are dismissed first: a kiosk must
+  never strand a sheet over its home screen.
+- **The ambient face carries music.** While something plays, the idle face
+  adds one line under the status — art thumbnail, track, "Artist · Album ·
+  Zone" (`PanelNowPlaying`, fed by the same binding that sizes the music
+  column). The clock stays the subject; playback is the footnote. Nothing
+  playing, nothing shown.
+
+The reference hardware is an iPad Air 2 — 1024×768, Safari 15, an A8X that
+drops frames on blur and stacked shadows. Every rule below is that
+constraint made visible.
+
+- **One screen, no navigation.** Landscape grid, three zones: clock/status
+  hero (left, 300px), room lights (centre, flexible), music (right, 352px —
+  present only when speakers exist; the grid is sized from the
+  `speakers-seen` memory so the column doesn't pop in after the first
+  poll). Nothing scrolls: each zone owns its overflow internally. Portrait
+  is a stacked, scrollable fallback — supported, not designed-for.
+- **The job is glance + tap.** Room tiles toggle the room; the music card
+  transports and sets volume; the master button does all-on/all-off.
+  Nothing here manages anything — no sheets, no modals, no forms, no
+  detail screens. A gesture that needs configuration sends the user to the
+  full app, not to a panel sub-screen.
+- **The resting state is the ambient face.** After 120s untouched (45s
+  between 22:00–06:00) the UI fades to clock + date + one status line
+  ("3 of 8 lights on · 21° inside"), dimmed to 45% at night. Any touch
+  wakes it. The face drifts a few pixels per minute (transform-only) so no
+  pixel holds one value for hours. This is the nightstand face, the
+  burn-in guard and the backlight saver in one.
+- **Type and targets are distance-scaled, not phone-scaled.** Hero clock
+  76px; ambient clock `clamp(104px, 20vw, 168px)`; tile names 19px; track
+  title 21px; transport buttons 64px with an 80px centre; room tiles share
+  the zone's height down to a 120px floor, then scroll internally.
+- **Old-GPU motion budget.** No backdrop-filter anywhere. The §6.1 glow
+  lives only on small badges (56px icon chips), never on whole tiles.
+  Animations are opacity/transform only, ≤200ms, and the ambient fade is
+  the one 600ms exception. The app-shell view transition does not run
+  here.
+- **Music is the panel's second satellite** (after Home's "Playing now",
+  §6.8) and carries the waveform by the same licence. One source is
+  featured — the user's chip pick, else whatever is playing — with Sonos
+  groups and KEF speakers as equal sources. Transport stays honest per
+  bridge (§15): KEF gets play/pause but no skips, standby renders as a
+  label, and a source that can't be reached is absent rather than dead.
+  Art and meta are the tap-through to the full Music view; transport,
+  volume and the source chips stay on the panel — the player answers on
+  the wall, the library lives one tap in.
+- **Rooms, or devices.** With no rooms defined, the centre falls back to a
+  device grid; an empty control surface is never acceptable. Unassigned
+  devices appear only there — the room grid is rooms, not clutter.
+- **Everything else is stock.** Same tokens, same `.tile.on` gradient on
+  room tiles / master / playing card, same mono numerals, same runAction
+  toasts. The panel should read as the app, quieter — not a redesign of it.
+
+---
+
+## 17. When in doubt
 
 1. Open `index.html` in the design project — it's the source of truth.
 2. Pick the nearest existing screen and copy its skeleton.

@@ -39,9 +39,10 @@ export default defineConfig({
           { src: "pwa-icon.svg", sizes: "any", type: "image/svg+xml", purpose: "maskable" },
         ],
         shortcuts: [
-          { name: "Sockets",   short_name: "Sockets",   url: "/#/sockets" },
-          { name: "Scenes",    short_name: "Scenes",    url: "/#/scenes" },
+          { name: "Sockets", short_name: "Sockets", url: "/#/sockets" },
+          { name: "Scenes", short_name: "Scenes", url: "/#/scenes" },
           { name: "Schedules", short_name: "Schedules", url: "/#/schedules" },
+          { name: "Panel", short_name: "Panel", url: "/#/panel" },
         ],
       },
     }),

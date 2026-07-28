@@ -32,6 +32,21 @@ export function lampEmoji(socket: Pick<Socket, "emoji">): string {
   return socket.emoji?.trim() ? socket.emoji : "💡";
 }
 
+// Pick a room icon based on common name keywords (supports English + Swedish).
+// Shared by RoomCard and the panel's room tiles so a room reads the same
+// everywhere it appears.
+export type RoomIconName = "bed" | "utensils" | "couch" | "monitor" | "sun" | "sensor" | "home";
+export function roomIcon(name: string): RoomIconName {
+  const n = name.toLowerCase();
+  if (/bed|sov(rum)?/.test(n)) return "bed";
+  if (/kitchen|kök|kok|mat(sal)?|dining/.test(n)) return "utensils";
+  if (/living|vardags|lounge|sal(ong)?/.test(n)) return "couch";
+  if (/office|kontor|studio|study|work/.test(n)) return "monitor";
+  if (/outdoor|utom(hus)?|garden|yard|patio|altan|balkong|terr/.test(n)) return "sun";
+  if (/bath|wc|toilet|toalett|shower/.test(n)) return "sensor";
+  return "home";
+}
+
 // Short, best-effort haptic tap for physical touch feedback — toggles, scene
 // runs, and any moment where the app should answer the finger. A no-op where
 // the Vibration API is unavailable (desktop, iOS Safari).

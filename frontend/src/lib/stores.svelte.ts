@@ -134,7 +134,7 @@ function createToastStore() {
 }
 
 function createRouteStore() {
-  const valid: Route[] = ["dashboard", "rooms", "floorplan", "sockets", "music", "groups", "scenes", "schedules", "sensors", "automations", "insights", "activity", "users", "settings", "console"];
+  const valid: Route[] = ["dashboard", "rooms", "floorplan", "sockets", "music", "groups", "scenes", "schedules", "sensors", "automations", "insights", "activity", "users", "settings", "console", "panel"];
   const current = $state<{ route: Route; query: Record<string, string> }>({ route: parse(), query: parseQuery() });
 
   function parse(): Route {
@@ -192,17 +192,33 @@ function createThemeStore() {
 // controller's settings — one person hiding a button on their phone must not
 // change what everyone else sees.
 function createUIPrefsStore() {
-  const s = $state<{ assistantButton: boolean }>({ assistantButton: initial() });
+  const s = $state<{ assistantButton: boolean; panelHome: boolean }>({
+    assistantButton: initial(),
+    panelHome: initialPanelHome(),
+  });
 
   function initial(): boolean {
     try { return localStorage.getItem("assistant-fab") !== "off"; }
     catch { return true; } // private browsing
+  }
+  function initialPanelHome(): boolean {
+    try { return localStorage.getItem("panel-home") === "on"; }
+    catch { return false; } // private browsing
   }
   return {
     get assistantButton() { return s.assistantButton; },
     setAssistantButton(on: boolean) {
       s.assistantButton = on;
       try { localStorage.setItem("assistant-fab", on ? "on" : "off"); }
+      catch { /* private browsing */ }
+    },
+    // Whether this device lives on the panel (DESIGN.md §16): set when the
+    // panel is entered, cleared by its Exit chip. While set, the dashboard
+    // route renders the panel and idle time walks the device back to it.
+    get panelHome() { return s.panelHome; },
+    setPanelHome(on: boolean) {
+      s.panelHome = on;
+      try { localStorage.setItem("panel-home", on ? "on" : "off"); }
       catch { /* private browsing */ }
     },
   };

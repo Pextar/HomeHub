@@ -19,9 +19,12 @@
     import Settings from "./views/Settings.svelte";
     import Console from "./views/Console.svelte";
     import KidHome from "./views/KidHome.svelte";
+    import Panel from "./views/Panel.svelte";
     import AssistantLauncher from "./components/AssistantLauncher.svelte";
-    import { data, route, toasts, session } from "./lib/stores.svelte";
+    import { data, route, toasts, session, uiPrefs } from "./lib/stores.svelte";
     import { onLive } from "./lib/live";
+    import { panelIdleMs } from "./lib/panel";
+    import { closeModal, modalStack } from "./lib/modal.svelte";
     import { pullToRefresh } from "./lib/pull-refresh";
     import { fly, fade } from "svelte/transition";
     import { cubicOut } from "svelte/easing";
@@ -41,7 +44,12 @@
                     // Without this an iOS PWA left on screen would never notice
                     // an update until the user manually reloaded.
                     if (r) {
-                        setInterval(() => { r.update().catch(() => {}); }, 60 * 60 * 1000);
+                        setInterval(
+                            () => {
+                                r.update().catch(() => {});
+                            },
+                            60 * 60 * 1000,
+                        );
                     }
                 },
                 onNeedRefresh() {
@@ -54,7 +62,10 @@
                     });
                 },
                 onOfflineReady() {
-                    toasts.success("Ready offline", "The app is installed and works without network.");
+                    toasts.success(
+                        "Ready offline",
+                        "The app is installed and works without network.",
+                    );
                 },
             });
         } catch {
@@ -106,15 +117,63 @@
         users: Users,
         settings: Settings,
         console: Console,
+        panel: Panel,
     };
 
     // Routes a non-admin profile is allowed to open. Everything else is
     // admin-only; deep-linking elsewhere bounces back to the dashboard.
-    const ADMIN_ONLY: Route[] = ["rooms", "floorplan", "music", "groups", "scenes", "schedules", "automations", "sensors", "insights", "activity", "users", "settings", "console"];
+    const ADMIN_ONLY: Route[] = [
+        "rooms",
+        "floorplan",
+        "music",
+        "groups",
+        "scenes",
+        "schedules",
+        "automations",
+        "sensors",
+        "insights",
+        "activity",
+        "users",
+        "settings",
+        "console",
+    ];
     const effectiveRoute = $derived(
         !session.isAdmin && ADMIN_ONLY.includes(route.current) ? "dashboard" : route.current,
     );
     const Current = $derived(views[effectiveRoute]);
+
+    // ── Kiosk coherence (DESIGN.md §16) ─────────────────────────────────
+    // Entering the panel marks this device as panel-homed: the dashboard
+    // route renders the panel in its place, and idling on any other route
+    // walks the device back home. The panel's Exit chip clears the mark.
+    const panelHome = $derived(uiPrefs.panelHome && !session.user?.kid);
+    const showPanel = $derived(
+        effectiveRoute === "panel" || (panelHome && effectiveRoute === "dashboard"),
+    );
+
+    // Idle auto-return. Armed only while panel-homed and away from the
+    // panel; any touch re-arms it. When it fires, open modals are dismissed
+    // first — a kiosk must never strand a sheet over its home screen — and
+    // it arrives on the ambient face (?idle=1) rather than waking the UI.
+    let lastActive = Date.now();
+    $effect(() => {
+        if (!panelHome || showPanel) return;
+        lastActive = Date.now();
+        const onTouch = () => {
+            lastActive = Date.now();
+        };
+        window.addEventListener("pointerdown", onTouch, { passive: true });
+        const id = setInterval(() => {
+            if (Date.now() - lastActive > panelIdleMs()) {
+                while (modalStack().length > 0) closeModal();
+                route.go("panel", { idle: "1" });
+            }
+        }, 1000);
+        return () => {
+            window.removeEventListener("pointerdown", onTouch);
+            clearInterval(id);
+        };
+    });
 
     // Reset scroll position to the top whenever the user navigates to a
     // different page, so the new view always starts at the top.
@@ -129,6 +188,10 @@
         <div class="boot"></div>
     {:else if session.user?.kid}
         <KidHome />
+    {:else if showPanel}
+        <!-- The panel is a kiosk surface, not a view inside the shell: no
+             sidebar, tab dock, pull-to-refresh or assistant FAB (DESIGN.md §16). -->
+        <Panel />
     {:else}
         <a class="skip-link" href="#main">Skip to main content</a>
 
@@ -156,7 +219,10 @@
 <ModalRoot />
 
 <style>
-    .boot { min-height: 100vh; background: var(--bg); }
+    .boot {
+        min-height: 100vh;
+        background: var(--bg);
+    }
     .app {
         /* Flex instead of grid so the sidebar's CSS width transition
            naturally pushes the main content — no grid-template-columns
