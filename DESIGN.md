@@ -1099,10 +1099,20 @@ through one quiet Exit chip, top-right.
 
 **Home and music are one surface with two depths.** The panel is the fused
 Home+Music screen — home control on the left and centre, the player on the
-right, both always visible. The full Music view is the second depth, one
-tap away through the player's art and meta, for the jobs a wall can't do
-(search, queue management, grouping, EQ). Three behaviours keep the pair
-coherent:
+right, both always visible. The second depth is the panel's **own music
+screen** (`#/panel?music=1`, one tap in through the player's art and
+meta): the featured room's player riding on the right, and a work area on
+the left switched by chip between three panes — **Search** (the catalog
+and the household's favorites), **Queue** (the featured Sonos group's,
+with jump / remove / two-tap clear), **Rooms** (every room, with
+Sonos-native grouping: join the featured room, split one, or step a
+single speaker out). Its back chip returns to the dashboard depth, and
+idling there sleeps home to the ambient face like any other panel idle.
+Both depths read one shared speaker store (`lib/panel-music.svelte.ts`) —
+one poll, one featured source, one now-playing line. The full Music view
+stays for the jobs a wall can't do (cross-vendor HomeHub rooms, speaker
+settings, EQ, Spotify setup), reached via Exit. Three behaviours keep the
+pair coherent:
 
 - **Sticky home.** Entering the panel marks the device panel-homed
   (`panel-home` in localStorage, next to the theme — it describes this
@@ -1125,17 +1135,22 @@ The reference hardware is an iPad Air 2 — 1024×768, Safari 15, an A8X that
 drops frames on blur and stacked shadows. Every rule below is that
 constraint made visible.
 
-- **One screen, no navigation.** Landscape grid, three zones: clock/status
-  hero (left, 300px), room lights (centre, flexible), music (right, 352px —
-  present only when speakers exist; the grid is sized from the
-  `speakers-seen` memory so the column doesn't pop in after the first
+- **One screen per depth, no chrome.** Landscape grid, three zones:
+  clock/status hero (left, 300px), room lights (centre, flexible), music
+  (right, 352px — present only when speakers exist; the grid is sized from
+  the `speakers-seen` memory so the column doesn't pop in after the first
   poll). Nothing scrolls: each zone owns its overflow internally. Portrait
-  is a stacked, scrollable fallback — supported, not designed-for.
+  is a stacked, scrollable fallback — supported, not designed-for. The
+  music depth keeps the same shape: search and its results on the left
+  (the list owns its scroll), the featured player on the right.
 - **The job is glance + tap.** Room tiles toggle the room; the music card
-  transports and sets volume; the master button does all-on/all-off.
-  Nothing here manages anything — no sheets, no modals, no forms, no
-  detail screens. A gesture that needs configuration sends the user to the
-  full app, not to a panel sub-screen.
+  transports and sets volume; the master button does all-on/all-off. The
+  music depth adds the player's daily jobs — search, the queue, Sonos
+  grouping — as panes on the one kiosk surface, still with no sheets, no
+  modals, no forms: destructive taps arm for a second tap instead of a
+  confirm dialog. Anything that _configures_ (speakers, cross-vendor
+  rooms, Spotify) sends the user to the full app, not to a panel
+  sub-screen.
 - **The resting state is the ambient face.** After 120s untouched (45s
   between 22:00–06:00) the UI fades to clock + date + one status line
   ("3 of 8 lights on · 21° inside"), dimmed to 45% at night. Any touch
@@ -1157,9 +1172,36 @@ constraint made visible.
   groups and KEF speakers as equal sources. Transport stays honest per
   bridge (§15): KEF gets play/pause but no skips, standby renders as a
   label, and a source that can't be reached is absent rather than dead.
-  Art and meta are the tap-through to the full Music view; transport,
-  volume and the source chips stay on the panel — the player answers on
-  the wall, the library lives one tap in.
+  Art and meta are the tap-through to the music depth; transport,
+  volume and the source chips stay on both depths — the player answers
+  on the wall, the library lives one tap in.
+- **The player card is one component with two widths** (§16 keeps them
+  in `components/panel/`). Both depths get the scrubber — seek on a
+  Sonos track, a read-only rail elsewhere, an honest no-position line
+  where there is no duration — and a Sonos coordinator's play-mode
+  chips (shuffle, repeat, crossfade). The depth's card adds what the
+  dashboard's glance surface hasn't room for: one fader per speaker
+  under the room-wide one when a group has more than one, the KEF
+  input selector, and the Up-next row that names the actual next track
+  and opens the queue pane (§15.8's door, same sentence).
+- **On the music depth, every result plays.** A wall has no drill-down,
+  so the catalog's "a tap opens; only a song plays" (§15.9) flattens to
+  one gesture: a song plays, an album or playlist plays whole, and an
+  artist starts their top track — the toast names what started and on
+  which room, the featured source being the destination the player
+  column's chips name. Queueing without interrupting lives behind the
+  row's overflow ("Play next", "Add to queue"), only for a Sonos
+  destination, exactly like §15.8's rule — and the queue pane is where
+  it lands. Spotify setup stays in the full view: an unconnected depth
+  says so and points there, because configuration is the full app's job.
+- **Grouping on the wall is Sonos-native and tap-based.** The app's
+  drag would be imprecise at arm's length, so the Rooms pane names the
+  action instead: every other Sonos room gets "Join {featured}", the
+  featured group gets a two-tap "Split", and each non-lead member gets
+  an × to step out. Cross-vendor HomeHub rooms are never created here —
+  the route engine, the Spotify-session trade-offs and the persistent
+  naming all belong to the full view — and the pane says so in one
+  honest line rather than offering half of it.
 - **Rooms, or devices.** With no rooms defined, the centre falls back to a
   device grid; an empty control surface is never acceptable. Unassigned
   devices appear only there — the room grid is rooms, not clutter.

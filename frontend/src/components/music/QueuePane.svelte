@@ -24,6 +24,9 @@
         /** False while the coordinator is playing something with no queue. */
         playing = false,
         clearBusy = false,
+        /** True where no confirm dialog exists (the kiosk panel): the first
+         *  tap arms the button for a few seconds, the second clears. */
+        confirmClear = false,
         isBusy,
         onJump,
         onRemove,
@@ -35,16 +38,35 @@
         currentTrack?: number;
         playing?: boolean;
         clearBusy?: boolean;
+        confirmClear?: boolean;
         isBusy: (key: string) => boolean;
         onJump: (track: number) => void;
         onRemove: (track: number) => void;
         onClear: () => void;
     } = $props();
+
+    // Two-tap clear for surfaces without a confirm modal: armed, it says
+    // so and resets on its own after a few seconds.
+    let armed = $state(false);
+    let armTimer: ReturnType<typeof setTimeout> | undefined;
+    function clearClick() {
+        if (!confirmClear || armed) {
+            armed = false;
+            clearTimeout(armTimer);
+            onClear();
+            return;
+        }
+        armed = true;
+        clearTimeout(armTimer);
+        armTimer = setTimeout(() => (armed = false), 3000);
+    }
 </script>
 
 <div class="q-bar">
     <span class="q-total mono">{total} {total === 1 ? "track" : "tracks"}</span>
-    <button class="chip" disabled={clearBusy || items.length === 0} onclick={onClear}>Clear</button>
+    <button class="chip" class:on={armed} disabled={clearBusy || items.length === 0} onclick={clearClick}>
+        {armed ? "Clear?" : "Clear"}
+    </button>
 </div>
 
 {#if loading}

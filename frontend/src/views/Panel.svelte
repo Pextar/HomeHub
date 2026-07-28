@@ -3,15 +3,18 @@
     import PanelClock from "../components/panel/PanelClock.svelte";
     import PanelRooms from "../components/panel/PanelRooms.svelte";
     import PanelMusic from "../components/panel/PanelMusic.svelte";
+    import PanelBrowse from "../components/panel/PanelBrowse.svelte";
     import Icon from "../components/Icon.svelte";
     import { route, data, uiPrefs } from "../lib/stores.svelte";
-    import { isPanelNight, panelIdleMs, type PanelNowPlaying } from "../lib/panel";
+    import { isPanelNight, panelIdleMs } from "../lib/panel";
+    import { createPanelMusic } from "../lib/panel-music.svelte";
     import { fade } from "svelte/transition";
     import { dur } from "../lib/motion";
 
-    // The panel is a kiosk surface (DESIGN.md §16): one landscape screen,
-    // no navigation, no chrome. Three zones — clock/status, room lights,
-    // music — plus an ambient face it falls back to when untouched.
+    // The panel is a kiosk surface (DESIGN.md §16): no chrome, no app
+    // shell. The dashboard depth holds three zones — clock/status, room
+    // lights, music — with a music depth one tap in, and an ambient face
+    // it all falls back to when untouched.
 
     // ── Clock ────────────────────────────────────────────────────────────
     // One tick for the whole panel; children take the labels as props.
@@ -62,13 +65,23 @@
     let idle = $state(route.query.idle === "1");
     let lastTouch = Date.now();
 
+    // The music depth is the same route one level in (#/panel?music=1), so
+    // the kiosk coherence around the panel — sticky home, the app-level
+    // idle auto-return — covers it untouched, and back is one hash away.
+    const musicOpen = $derived(route.query.music === "1");
+
     function wake() {
         lastTouch = Date.now();
         idle = false;
     }
     $effect(() => {
         const id = setInterval(() => {
-            if (Date.now() - lastTouch > panelIdleMs(now)) idle = true;
+            if (Date.now() - lastTouch > panelIdleMs(now)) {
+                idle = true;
+                // Sleep means home: idling on the music depth walks back to
+                // the dashboard depth's ambient face (§16).
+                if (musicOpen) route.go("panel", { idle: "1" });
+            }
         }, 1000);
         return () => clearInterval(id);
     });
@@ -82,21 +95,15 @@
         return `translate(${dx}px, ${dy}px)`;
     });
 
-    // PanelMusic reports whether it found any speakers — the third column
-    // only exists then; a home without speakers gets a wider rooms grid.
-    // Seeded from the same "speakers-seen" memory Home's card keeps, so a
-    // home with speakers doesn't watch the column pop in after the poll.
-    let hasSpeakers = $state(seenSpeakers());
-    function seenSpeakers(): boolean {
-        try {
-            return localStorage.getItem("speakers-seen") === "true";
-        } catch {
-            return false;
-        } // private browsing
-    }
-
-    // And what's playing — the ambient face carries it (§16).
-    let playing = $state<PanelNowPlaying | null>(null);
+    // The speaker brain, shared by both depths: the dashboard's music
+    // column and the music depth's player/search read the same poll, the
+    // same featured source and the same now-playing line, and it stays
+    // alive across depth swaps (§16). It also reports whether any speakers
+    // exist — the third column only exists then; a home without speakers
+    // gets a wider rooms grid.
+    const music = createPanelMusic();
+    // And what's playing — the ambient face carries it.
+    const playing = $derived(music.nowPlaying);
 
     // Entering the panel marks this device as panel-homed (the dashboard
     // route renders the panel, idle time walks back here); Exit lifts the
@@ -111,14 +118,18 @@
 <!-- The pointerdown handler is the wake layer for the ambient face, not an
      interactive control. -->
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="panel" class:has-music={hasSpeakers} onpointerdown={wake}>
-    <PanelClock {timeLabel} {dateLabel} {lightsOn} {lightsTotal} {insideTemp} />
-    <PanelRooms />
-    <PanelMusic bind:hasSpeakers bind:playing />
+<div class="panel" class:has-music={music.hasSpeakers} onpointerdown={wake}>
+    {#if musicOpen}
+        <PanelBrowse {music} />
+    {:else}
+        <PanelClock {timeLabel} {dateLabel} {lightsOn} {lightsTotal} {insideTemp} />
+        <PanelRooms />
+        <PanelMusic {music} />
 
-    <button class="exit" onclick={exit}>
-        <Icon name="close" size={14} /><span>Exit</span>
-    </button>
+        <button class="exit" onclick={exit}>
+            <Icon name="close" size={14} /><span>Exit</span>
+        </button>
+    {/if}
 
     {#if idle}
         <div class="ambient" class:night={isNight} transition:fade={{ duration: dur(600) }}>
