@@ -644,7 +644,10 @@ func artistLine(artists []wireArtist) string {
 
 // Search queries the catalog for tracks, albums, playlists and artists.
 func (c *Client) Search(ctx context.Context, query string, limit int) (*Results, error) {
-	if limit <= 0 || limit > 20 {
+	// Spotify quietly tightened /search's cap from the documented 50 down to
+	// 10 — anything higher is answered 400 "Invalid limit", so the clamp has
+	// to be theirs, not the docs'.
+	if limit <= 0 || limit > 10 {
 		limit = 10
 	}
 	var raw struct {

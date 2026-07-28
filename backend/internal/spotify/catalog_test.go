@@ -63,6 +63,26 @@ func TestSearchEnrichesItems(t *testing.T) {
 	}
 }
 
+// Spotify tightened /search's limit cap from the documented 50 down to 10
+// (anything higher is answered 400 "Invalid limit"), so a caller asking for
+// more must never reach the wire with it.
+func TestSearchClampsToSpotifyCap(t *testing.T) {
+	var sent string
+	c := connected(t, "", roundTripFunc(func(r *http.Request) *http.Response {
+		sent = r.URL.Query().Get("limit")
+		return jsonResponse(http.StatusOK, `{}`)
+	}))
+
+	for _, ask := range []int{0, 12, 50} {
+		if _, err := c.Search(context.Background(), "adele", ask); err != nil {
+			t.Fatal(err)
+		}
+		if sent != "10" {
+			t.Errorf("Search(limit=%d) sent limit=%s, want 10", ask, sent)
+		}
+	}
+}
+
 // TestArtistPageSplitAndDegrade pins the two contracts the artist screen
 // leans on: the discography arrives split into albums and singles, and a
 // refused section (related artists 403s for apps created after Nov 2024)
