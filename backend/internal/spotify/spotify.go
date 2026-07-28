@@ -494,12 +494,27 @@ func apiError(status int, raw []byte) error {
 // Item is one playable search/browse result, flattened for the frontend.
 // URI is the canonical Spotify URI (spotify:track:… / spotify:album:… /
 // spotify:playlist:… / spotify:artist:…) that the Sonos mapping consumes.
+//
+// The rest is whatever the endpoint it came from answered for, so a row can
+// be as informative as Spotify's own: a track carries its album and length,
+// an album its year and track count, an artist its following and genres.
+// Absent means "the service didn't say", and the UI drops the field rather
+// than fabricating it.
 type Item struct {
 	Kind   string `json:"kind"` // track | album | playlist | artist
 	URI    string `json:"uri"`
 	Name   string `json:"name"`
 	Sub    string `json:"sub,omitempty"`     // artist / owner line
 	ArtURL string `json:"art_url,omitempty"` // https CDN image
+
+	Album       string   `json:"album,omitempty"`        // tracks: the record it sits on
+	DurationMS  int      `json:"duration_ms,omitempty"`  // tracks
+	Explicit    bool     `json:"explicit,omitempty"`     // tracks
+	Year        string   `json:"year,omitempty"`         // albums: release year
+	TotalTracks int      `json:"total_tracks,omitempty"` // albums + playlists
+	Followers   int      `json:"followers,omitempty"`    // artists + playlists
+	Genres      []string `json:"genres,omitempty"`       // artists
+	Popularity  int      `json:"popularity,omitempty"`   // artists, 0–100
 }
 
 // Results groups items by kind, in Spotify's relevance order.
@@ -515,33 +530,50 @@ type wireImage struct {
 	URL string `json:"url"`
 }
 type wireArtist struct {
+	URI  string `json:"uri"`
 	Name string `json:"name"`
 }
 type wireArtistFull struct {
-	URI    string      `json:"uri"`
-	Name   string      `json:"name"`
-	Images []wireImage `json:"images"`
+	URI        string      `json:"uri"`
+	Name       string      `json:"name"`
+	Images     []wireImage `json:"images"`
+	Genres     []string    `json:"genres"`
+	Popularity int         `json:"popularity"`
+	Followers  struct {
+		Total int `json:"total"`
+	} `json:"followers"`
 }
 type wireTrack struct {
-	URI     string       `json:"uri"`
-	Name    string       `json:"name"`
-	Artists []wireArtist `json:"artists"`
-	Album   struct {
+	URI        string       `json:"uri"`
+	Name       string       `json:"name"`
+	DurationMS int          `json:"duration_ms"`
+	Explicit   bool         `json:"explicit"`
+	Artists    []wireArtist `json:"artists"`
+	Album      struct {
 		Name   string      `json:"name"`
 		Images []wireImage `json:"images"`
 	} `json:"album"`
 }
 type wireAlbum struct {
-	URI     string       `json:"uri"`
-	Name    string       `json:"name"`
-	Artists []wireArtist `json:"artists"`
-	Images  []wireImage  `json:"images"`
+	URI         string       `json:"uri"`
+	Name        string       `json:"name"`
+	AlbumType   string       `json:"album_type"` // album | single | compilation
+	ReleaseDate string       `json:"release_date"`
+	TotalTracks int          `json:"total_tracks"`
+	Artists     []wireArtist `json:"artists"`
+	Images      []wireImage  `json:"images"`
 }
 type wirePlaylist struct {
-	URI    string      `json:"uri"`
-	Name   string      `json:"name"`
-	Images []wireImage `json:"images"`
-	Owner  struct {
+	URI       string      `json:"uri"`
+	Name      string      `json:"name"`
+	Images    []wireImage `json:"images"`
+	Followers struct {
+		Total int `json:"total"`
+	} `json:"followers"`
+	Tracks struct {
+		Total int `json:"total"`
+	} `json:"tracks"`
+	Owner struct {
 		DisplayName string `json:"display_name"`
 	} `json:"owner"`
 }
@@ -553,6 +585,53 @@ func artOf(images []wireImage) string {
 		return ""
 	}
 	return images[len(images)/2].URL
+}
+
+// artOfLarge is for hero surfaces (artist page, album header), where the
+// biggest image Spotify sent is the one worth painting full-bleed.
+func artOfLarge(images []wireImage) string {
+	if len(images) == 0 {
+		return ""
+	}
+	return images[0].URL
+}
+
+// yearOf keeps just the year of a release date — Spotify answers
+// "2019-11-29", "2019-11" or "2019" depending on what the label gave it.
+func yearOf(releaseDate string) string {
+	if len(releaseDate) < 4 {
+		return ""
+	}
+	return releaseDate[:4]
+}
+
+// trackItem flattens a full track object once — every surface that lists
+// tracks (search, top tracks, a playlist's own listing) gets the same fields.
+func trackItem(t wireTrack) Item {
+	return Item{
+		Kind: "track", URI: t.URI, Name: t.Name,
+		Sub: artistLine(t.Artists), ArtURL: artOf(t.Album.Images),
+		Album: t.Album.Name, DurationMS: t.DurationMS, Explicit: t.Explicit,
+	}
+}
+
+// albumItem flattens an album listing entry: its year and size are what tell
+// a reissue from the original in a discography.
+func albumItem(a wireAlbum) Item {
+	return Item{
+		Kind: "album", URI: a.URI, Name: a.Name,
+		Sub: artistLine(a.Artists), ArtURL: artOf(a.Images),
+		Year: yearOf(a.ReleaseDate), TotalTracks: a.TotalTracks,
+	}
+}
+
+// artistItem flattens a full artist object — search results and related
+// artists both arrive in this shape.
+func artistItem(a wireArtistFull) Item {
+	return Item{
+		Kind: "artist", URI: a.URI, Name: a.Name, ArtURL: artOf(a.Images),
+		Followers: a.Followers.Total, Genres: a.Genres, Popularity: a.Popularity,
+	}
 }
 
 func artistLine(artists []wireArtist) string {
@@ -592,16 +671,10 @@ func (c *Client) Search(ctx context.Context, query string, limit int) (*Results,
 	}
 	res := &Results{Tracks: []Item{}, Albums: []Item{}, Playlists: []Item{}, Artists: []Item{}}
 	for _, t := range raw.Tracks.Items {
-		res.Tracks = append(res.Tracks, Item{
-			Kind: "track", URI: t.URI, Name: t.Name,
-			Sub: artistLine(t.Artists), ArtURL: artOf(t.Album.Images),
-		})
+		res.Tracks = append(res.Tracks, trackItem(t))
 	}
 	for _, a := range raw.Albums.Items {
-		res.Albums = append(res.Albums, Item{
-			Kind: "album", URI: a.URI, Name: a.Name,
-			Sub: artistLine(a.Artists), ArtURL: artOf(a.Images),
-		})
+		res.Albums = append(res.Albums, albumItem(a))
 	}
 	for _, p := range raw.Playlists.Items {
 		if p == nil {
@@ -610,12 +683,11 @@ func (c *Client) Search(ctx context.Context, query string, limit int) (*Results,
 		res.Playlists = append(res.Playlists, Item{
 			Kind: "playlist", URI: p.URI, Name: p.Name,
 			Sub: p.Owner.DisplayName, ArtURL: artOf(p.Images),
+			TotalTracks: p.Tracks.Total,
 		})
 	}
 	for _, a := range raw.Artists.Items {
-		res.Artists = append(res.Artists, Item{
-			Kind: "artist", URI: a.URI, Name: a.Name, ArtURL: artOf(a.Images),
-		})
+		res.Artists = append(res.Artists, artistItem(a))
 	}
 	return res, nil
 }
@@ -629,40 +701,65 @@ func artistIDFromURI(uri string) (string, error) {
 	return strings.TrimPrefix(uri, prefix), nil
 }
 
-// ArtistDetail is an artist's page: enough to browse from without typing —
-// their most-played tracks and their discography.
+// ArtistDetail is an artist's page, as informative as Spotify's own: the
+// following and genres up top, the most-played tracks, the discography split
+// the way Spotify splits it, and the artists their listeners also play.
 type ArtistDetail struct {
-	URI       string `json:"uri"`
-	Name      string `json:"name"`
-	ArtURL    string `json:"art_url,omitempty"`
-	TopTracks []Item `json:"top_tracks"`
-	Albums    []Item `json:"albums"`
+	URI        string   `json:"uri"`
+	Name       string   `json:"name"`
+	ArtURL     string   `json:"art_url,omitempty"`
+	Genres     []string `json:"genres,omitempty"`
+	Followers  int      `json:"followers,omitempty"`
+	Popularity int      `json:"popularity,omitempty"` // 0–100
+	TopTracks  []Item   `json:"top_tracks"`
+	Albums     []Item   `json:"albums"`
+	Singles    []Item   `json:"singles"`
+	Related    []Item   `json:"related"`
 }
 
-// Artist fetches one artist's page. Top tracks and albums degrade
-// independently — an artist with no answer for one still has a name and a
-// picture worth showing, the same "render only what the service answered
+// Artist fetches one artist's page. Its sections degrade independently — an
+// artist with no answer for one still has a name, a picture and the other
+// sections worth showing, the same "render only what the service answered
 // for" discipline the Sonos side follows for its own capability probes.
 func (c *Client) Artist(ctx context.Context, uri string) (*ArtistDetail, error) {
 	id, err := artistIDFromURI(uri)
 	if err != nil {
 		return nil, err
 	}
-	var raw struct {
-		Name   string      `json:"name"`
-		Images []wireImage `json:"images"`
-	}
+	var raw wireArtistFull
 	if err := c.apiGet(ctx, "/artists/"+url.PathEscape(id), nil, &raw); err != nil {
 		return nil, err
 	}
 	c.ensureCountry(ctx)
-	det := &ArtistDetail{URI: uri, Name: raw.Name, ArtURL: artOf(raw.Images), TopTracks: []Item{}, Albums: []Item{}}
-	if tt, err := c.artistTopTracks(ctx, id); err == nil {
-		det.TopTracks = tt
+	det := &ArtistDetail{
+		URI: uri, Name: raw.Name, ArtURL: artOfLarge(raw.Images),
+		Genres: raw.Genres, Followers: raw.Followers.Total, Popularity: raw.Popularity,
+		TopTracks: []Item{}, Albums: []Item{}, Singles: []Item{}, Related: []Item{},
 	}
-	if al, err := c.artistAlbums(ctx, id); err == nil {
-		det.Albums = al
-	}
+	// The three section reads run together — the page is only as fast as its
+	// slowest section either way — and each keeps its own failure, so a
+	// refused one costs a section, never the page.
+	var wg sync.WaitGroup
+	wg.Add(3)
+	go func() {
+		defer wg.Done()
+		if tt, err := c.artistTopTracks(ctx, id); err == nil {
+			det.TopTracks = tt
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		if al, si, err := c.artistDiscography(ctx, id); err == nil {
+			det.Albums, det.Singles = al, si
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		if rel, err := c.relatedArtists(ctx, id); err == nil {
+			det.Related = rel
+		}
+	}()
+	wg.Wait()
 	return det, nil
 }
 
@@ -675,44 +772,61 @@ func (c *Client) artistTopTracks(ctx context.Context, id string) ([]Item, error)
 	}
 	out := make([]Item, 0, len(raw.Tracks))
 	for _, t := range raw.Tracks {
-		out = append(out, Item{
-			Kind: "track", URI: t.URI, Name: t.Name,
-			Sub: artistLine(t.Artists), ArtURL: artOf(t.Album.Images),
-		})
+		out = append(out, trackItem(t))
 	}
 	return out, nil
 }
 
-// artistAlbums lists the artist's albums and singles. Spotify lists regional
-// re-releases as separate entries with the same name; one is enough, so
-// later duplicates by name are dropped.
-func (c *Client) artistAlbums(ctx context.Context, id string) ([]Item, error) {
+// artistDiscography lists the artist's records, split the way Spotify splits
+// them: full albums on one shelf, singles and EPs on another. Spotify lists
+// regional re-releases as separate entries with the same name; one is enough,
+// so later duplicates by name are dropped — per shelf, since a single and
+// the album it was lifted from legitimately share one.
+func (c *Client) artistDiscography(ctx context.Context, id string) (albums, singles []Item, err error) {
 	var raw struct {
 		Items []wireAlbum `json:"items"`
 	}
 	q := url.Values{
 		"include_groups": {"album,single"},
-		"limit":          {"30"},
+		"limit":          {"50"},
 	}
 	if m := c.market(); m != nil {
 		q.Set("market", m.Get("market"))
 	}
-	err := c.apiGet(ctx, "/artists/"+url.PathEscape(id)+"/albums", q, &raw)
-	if err != nil {
-		return nil, err
+	if err := c.apiGet(ctx, "/artists/"+url.PathEscape(id)+"/albums", q, &raw); err != nil {
+		return nil, nil, err
 	}
-	out := make([]Item, 0, len(raw.Items))
+	albums, singles = []Item{}, []Item{}
 	seen := make(map[string]bool, len(raw.Items))
 	for _, a := range raw.Items {
-		key := strings.ToLower(strings.TrimSpace(a.Name))
+		key := a.AlbumType + ":" + strings.ToLower(strings.TrimSpace(a.Name))
 		if seen[key] {
 			continue
 		}
 		seen[key] = true
-		out = append(out, Item{
-			Kind: "album", URI: a.URI, Name: a.Name,
-			Sub: artistLine(a.Artists), ArtURL: artOf(a.Images),
-		})
+		if a.AlbumType == "single" {
+			singles = append(singles, albumItem(a))
+		} else {
+			albums = append(albums, albumItem(a))
+		}
+	}
+	return albums, singles, nil
+}
+
+// relatedArtists answers "fans also like". Spotify retired the endpoint for
+// apps created after November 2024 (they are answered with a 403), so a
+// refusal costs the section rather than the page — the caller keeps the
+// error to itself and renders without it.
+func (c *Client) relatedArtists(ctx context.Context, id string) ([]Item, error) {
+	var raw struct {
+		Artists []wireArtistFull `json:"artists"`
+	}
+	if err := c.apiGet(ctx, "/artists/"+url.PathEscape(id)+"/related-artists", nil, &raw); err != nil {
+		return nil, err
+	}
+	out := make([]Item, 0, len(raw.Artists))
+	for _, a := range raw.Artists {
+		out = append(out, artistItem(a))
 	}
 	return out, nil
 }
@@ -772,15 +886,21 @@ func (c *Client) searchArtistID(ctx context.Context, name string) (string, error
 }
 
 // ContextDetail is a playlist or album's own track listing — the drill-in
-// behind a favorite that turns out to be a list rather than one song
-// (DESIGN.md §15).
+// behind a favorite or a search result that turns out to be a list rather
+// than one song (DESIGN.md §15). The header fields are what make the page
+// worth opening: whose it is, when it came out, how much is on it.
 type ContextDetail struct {
-	Kind   string `json:"kind"` // playlist | album
-	URI    string `json:"uri"`
-	Name   string `json:"name"`
-	Sub    string `json:"sub,omitempty"`
-	ArtURL string `json:"art_url,omitempty"`
-	Tracks []Item `json:"tracks"`
+	Kind        string `json:"kind"` // playlist | album
+	URI         string `json:"uri"`
+	Name        string `json:"name"`
+	Sub         string `json:"sub,omitempty"` // album: artists · playlist: owner
+	ArtURL      string `json:"art_url,omitempty"`
+	Year        string `json:"year,omitempty"`      // album
+	Followers   int    `json:"followers,omitempty"` // playlist
+	TotalTracks int    `json:"total_tracks,omitempty"`
+	Description string `json:"description,omitempty"` // playlist
+	ArtistURI   string `json:"artist_uri,omitempty"`  // album: first artist, for "More by"
+	Tracks      []Item `json:"tracks"`
 }
 
 // Context browses a playlist or album's tracks.
@@ -798,35 +918,39 @@ func (c *Client) Context(ctx context.Context, uri string) (*ContextDetail, error
 func (c *Client) playlistContext(ctx context.Context, uri string) (*ContextDetail, error) {
 	id := strings.TrimPrefix(uri, "spotify:playlist:")
 	var raw struct {
-		Name   string      `json:"name"`
-		Images []wireImage `json:"images"`
-		Owner  struct {
+		Name        string      `json:"name"`
+		Description string      `json:"description"`
+		Images      []wireImage `json:"images"`
+		Owner       struct {
 			DisplayName string `json:"display_name"`
 		} `json:"owner"`
+		Followers struct {
+			Total int `json:"total"`
+		} `json:"followers"`
 		Tracks struct {
+			Total int `json:"total"`
 			Items []struct {
 				Track *wireTrack `json:"track"` // null for a removed or local track
 			} `json:"items"`
 		} `json:"tracks"`
 	}
 	err := c.apiGet(ctx, "/playlists/"+url.PathEscape(id), url.Values{
-		"fields": {"name,images,owner.display_name,tracks.items(track(uri,name,artists,album(name,images)))"},
+		"fields": {"name,description,images,owner.display_name,followers.total,tracks.total,tracks.items(track(uri,name,duration_ms,explicit,artists,album(name,images)))"},
 	}, &raw)
 	if err != nil {
 		return nil, err
 	}
 	det := &ContextDetail{
 		Kind: "playlist", URI: uri, Name: raw.Name,
-		Sub: raw.Owner.DisplayName, ArtURL: artOf(raw.Images), Tracks: []Item{},
+		Sub: raw.Owner.DisplayName, ArtURL: artOfLarge(raw.Images),
+		Description: raw.Description, Followers: raw.Followers.Total,
+		TotalTracks: raw.Tracks.Total, Tracks: []Item{},
 	}
 	for _, it := range raw.Tracks.Items {
 		if it.Track == nil || it.Track.URI == "" {
 			continue
 		}
-		det.Tracks = append(det.Tracks, Item{
-			Kind: "track", URI: it.Track.URI, Name: it.Track.Name,
-			Sub: artistLine(it.Track.Artists), ArtURL: artOf(it.Track.Album.Images),
-		})
+		det.Tracks = append(det.Tracks, trackItem(*it.Track))
 	}
 	return det, nil
 }
@@ -834,10 +958,12 @@ func (c *Client) playlistContext(ctx context.Context, uri string) (*ContextDetai
 func (c *Client) albumContext(ctx context.Context, uri string) (*ContextDetail, error) {
 	id := strings.TrimPrefix(uri, "spotify:album:")
 	var raw struct {
-		Name    string       `json:"name"`
-		Images  []wireImage  `json:"images"`
-		Artists []wireArtist `json:"artists"`
-		Tracks  struct {
+		Name        string       `json:"name"`
+		ReleaseDate string       `json:"release_date"`
+		TotalTracks int          `json:"total_tracks"`
+		Images      []wireImage  `json:"images"`
+		Artists     []wireArtist `json:"artists"`
+		Tracks      struct {
 			Items []wireTrack `json:"items"`
 		} `json:"tracks"`
 	}
@@ -846,16 +972,23 @@ func (c *Client) albumContext(ctx context.Context, uri string) (*ContextDetail, 
 	}
 	det := &ContextDetail{
 		Kind: "album", URI: uri, Name: raw.Name,
-		Sub: artistLine(raw.Artists), ArtURL: artOf(raw.Images), Tracks: []Item{},
+		Sub: artistLine(raw.Artists), ArtURL: artOfLarge(raw.Images),
+		Year: yearOf(raw.ReleaseDate), TotalTracks: raw.TotalTracks, Tracks: []Item{},
+	}
+	if len(raw.Artists) > 0 {
+		det.ArtistURI = raw.Artists[0].URI
 	}
 	for _, t := range raw.Tracks.Items {
 		if t.URI == "" {
 			continue
 		}
-		det.Tracks = append(det.Tracks, Item{
-			Kind: "track", URI: t.URI, Name: t.Name,
-			Sub: artistLine(t.Artists), ArtURL: artOf(raw.Images),
-		})
+		// An album's own tracks arrive simplified — no album object — so the
+		// record's own art stands in, and the album name is the page's, not
+		// the row's.
+		it := trackItem(t)
+		it.ArtURL = det.ArtURL
+		it.Album = ""
+		det.Tracks = append(det.Tracks, it)
 	}
 	return det, nil
 }

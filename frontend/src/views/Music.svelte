@@ -35,6 +35,7 @@
     import SearchScreen from "../components/music/SearchScreen.svelte";
     import SpeakersScreen from "../components/music/SpeakersScreen.svelte";
     import ArtistScreen from "../components/music/ArtistScreen.svelte";
+    import ContextScreen from "../components/music/ContextScreen.svelte";
     import FavoriteBrowseScreen from "../components/music/FavoriteBrowseScreen.svelte";
     import MiniPlayer from "../components/music/MiniPlayer.svelte";
     import MusicHome from "../components/music/MusicHome.svelte";
@@ -241,8 +242,23 @@
     // Home is the only fixed one. Everything else pushes over it with a back
     // chip; sheets lift from the bottom. A sheet never opens another sheet, so
     // anything that would be a second sheet is a screen instead.
-    type Screen = "home" | "speakers" | "artist" | "favorite" | "browse";
-    let screen = $state<Screen>("home");
+    //
+    // The pushed screens form a real stack — Browse opens an artist, the
+    // artist opens an album — so "back" means *up one level*, the way every
+    // music app's drill-down reads, never "all the way home". Only the top
+    // of the stack renders; what each level was scrolled to is kept on its
+    // entry and restored when it surfaces again.
+    type Screen = "home" | "speakers" | "artist" | "favorite" | "browse" | "context";
+    interface ScreenEntry {
+        id: Exclude<Screen, "home">;
+        /** Catalog screens: the artist / album / playlist URI they show. */
+        uri?: string;
+        /** Where this level was scrolled when something pushed over it. */
+        scroll: number;
+    }
+    let stack = $state<ScreenEntry[]>([]);
+    const screen = $derived<Screen>(stack.length ? stack[stack.length - 1].id : "home");
+    const topEntry = $derived(stack.length ? stack[stack.length - 1] : undefined);
 
     /** Where Home was left, so coming back lands where you were. */
     let homeScrollY = 0;
@@ -255,15 +271,16 @@
      */
     let playerReturn: string | null = null;
 
-    function pushScreen(s: Exclude<Screen, "home">) {
+    function pushScreen(e: ScreenEntry) {
         if (sheets.open === "player") playerReturn = playerKey;
         hideSheet();
-        if (screen === "home") homeScrollY = window.scrollY;
-        screen = s;
+        if (stack.length === 0) homeScrollY = window.scrollY;
+        else stack[stack.length - 1].scroll = window.scrollY;
+        stack = [...stack, e];
         toTop();
     }
     function openSpeakers() {
-        pushScreen("speakers");
+        pushScreen({ id: "speakers", scroll: 0 });
     }
     /** True when Browse was opened to type in, rather than to read. */
     let searchWantsFocus = $state(false);
@@ -271,27 +288,40 @@
         // A recent search is a request to *run* it, so it runs — and the caret
         // stays out of the way, since the results are what was asked for.
         searchWantsFocus = !q;
-        pushScreen("browse");
+        pushScreen({ id: "browse", scroll: 0 });
         if (q) spotify.runQuery(q);
     }
 
-    /** Back to Home — except when a player noted a room to come back to. */
+    /** Per-level teardown, as a popped screen gives up its scratch state. */
+    function onLeftScreen(e: ScreenEntry) {
+        if (e.id === "speakers") {
+            detailId = null;
+            kefDetailId = null;
+        } else if (e.id === "favorite") {
+            browseFavorite = null;
+            favoriteContext = null;
+        }
+    }
+
+    /** Back means up one level — except when a player noted a room to come
+     *  back to, which is owed exactly once the stack runs out. */
     function leaveScreen() {
+        const leaving = stack[stack.length - 1];
+        if (!leaving) return;
+        onLeftScreen(leaving);
+        if (stack.length > 1) {
+            stack = stack.slice(0, -1);
+            restoreScroll(stack[stack.length - 1].scroll);
+            return;
+        }
+        stack = [];
         if (playerReturn) {
             const back = rooms.byKey(playerReturn);
             playerReturn = null;
-            screen = "home";
             if (back) return openPlayer(back);
             // The room disappeared in the meantime (regrouped, removed) — fall
             // through to Home like any other missing target.
         }
-        screen = "home";
-        detailId = null;
-        kefDetailId = null;
-        artistUri = null;
-        artistDetail = null;
-        browseFavorite = null;
-        favoriteContext = null;
         restoreScroll(homeScrollY);
     }
 
@@ -561,27 +591,55 @@
     }
 
     // ── Catalog drill-ins ────────────────────────────────────────────────
-    // Screens, not sheets: both are reached from a screen's worth of
+    // Screens, not sheets: all are reached from a screen's worth of
     // navigation, and a sheet must never open another one.
-    let artistUri = $state<string | null>(null);
-    let artistDetail = $state<SpotifyArtistDetail | null>(null);
-    let artistLoading = $state(false);
+    //
+    // An artist or an album changes slowly and the stack wanders back and
+    // forth (artist → album → back), so each detail is fetched once per URI
+    // and kept for the session — coming back is instant rather than a
+    // skeleton replaying itself.
+    let artistCache = $state<Record<string, SpotifyArtistDetail>>({});
+    let artistLoadingUri = $state<string | null>(null);
+    const artistUri = $derived(topEntry?.id === "artist" ? topEntry.uri! : null);
+    const artistDetail = $derived(artistUri ? (artistCache[artistUri] ?? null) : null);
+    const artistLoading = $derived(!!artistUri && artistLoadingUri === artistUri);
 
     async function openArtist(uri: string) {
-        pushScreen("artist");
-        artistUri = uri;
-        artistDetail = null;
-        artistLoading = true;
+        if (topEntry?.id === "artist" && topEntry.uri === uri) return;
+        pushScreen({ id: "artist", uri, scroll: 0 });
+        if (artistCache[uri]) return; // been here — renders instantly
+        artistLoadingUri = uri;
         try {
-            const det = await api.spotifyArtist(uri);
-            if (artistUri !== uri) return; // superseded by another tap
-            artistDetail = det;
+            artistCache[uri] = await api.spotifyArtist(uri);
         } catch (e) {
-            if (artistUri !== uri) return;
             toasts.error("Couldn't load artist", (e as Error).message);
-            leaveScreen();
+            if (artistUri === uri) leaveScreen();
         } finally {
-            if (artistUri === uri) artistLoading = false;
+            if (artistLoadingUri === uri) artistLoadingUri = null;
+        }
+    }
+
+    let contextCache = $state<Record<string, SpotifyContextDetail>>({});
+    let contextLoadingUri = $state<string | null>(null);
+    const contextUri = $derived(topEntry?.id === "context" ? topEntry.uri! : null);
+    const contextDetail = $derived(contextUri ? (contextCache[contextUri] ?? null) : null);
+    const contextLoading = $derived(!!contextUri && contextLoadingUri === contextUri);
+
+    /** An album or a playlist tapped anywhere — search, an artist's
+     *  discography — opens its own page rather than playing blind: the track
+     *  listing is what a tap on a container is actually asking for. */
+    async function openContext(uri: string) {
+        if (topEntry?.id === "context" && topEntry.uri === uri) return;
+        pushScreen({ id: "context", uri, scroll: 0 });
+        if (contextCache[uri]) return;
+        contextLoadingUri = uri;
+        try {
+            contextCache[uri] = await api.spotifyContext(uri);
+        } catch (e) {
+            toasts.error("Couldn't open it", (e as Error).message);
+            if (contextUri === uri) leaveScreen();
+        } finally {
+            if (contextLoadingUri === uri) contextLoadingUri = null;
         }
     }
 
@@ -593,7 +651,7 @@
      *  instead of playing outright — the corner mark on the card said so. */
     async function openFavoriteBrowse(f: SonosFavorite) {
         if (!f.spotify_uri) return;
-        pushScreen("favorite");
+        pushScreen({ id: "favorite", scroll: 0 });
         browseFavorite = f;
         favoriteContext = null;
         favoriteLoading = true;
@@ -633,7 +691,7 @@
         const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
 
         if (key === "Escape") {
-            if (searchScreen?.closeMenu()) return;
+            if (closeCatalogMenu()) return;
             if (drag.drag || drag.grabKey) {
                 // Put a held room back before leaving anything.
                 const name = drag.grabbedName || drag.drag?.name || "Room";
@@ -685,7 +743,22 @@
     let playerEl = $state<HTMLElement | null>(null);
     let player = $state<Player | null>(null);
     let searchScreen = $state<SearchScreen | null>(null);
+    let artistScreen = $state<ArtistScreen | null>(null);
+    let contextScreen = $state<ContextScreen | null>(null);
+    let favoriteScreen = $state<FavoriteBrowseScreen | null>(null);
     let speakersScreen = $state<SpeakersScreen | null>(null);
+
+    /** Every catalog screen carries row overflow menus, and Escape has to
+     *  close one of those before it starts leaving screens. Only the top of
+     *  the stack is mounted, so at most one of these answers. */
+    function closeCatalogMenu(): boolean {
+        return !!(
+            searchScreen?.closeMenu() ||
+            artistScreen?.closeMenu() ||
+            contextScreen?.closeMenu() ||
+            favoriteScreen?.closeMenu()
+        );
+    }
     // Set by the open sheet while a drag-down rides out. The art swipe stands
     // down for those 220ms; raising a sheet clears it.
     let sheetDismissing = $state(false);
@@ -870,6 +943,28 @@
             {targetRow}
             onBack={leaveScreen}
             onPick={playItem}
+            onEnqueue={(item, next) =>
+                enqueue({ service: "Spotify", uri: item.uri, title: item.name }, next)}
+            onOpenArtist={openArtist}
+            onOpenContext={openContext}
+            bind:this={artistScreen}
+        />
+    {:else if screen === "context"}
+        <ContextScreen
+            context={contextDetail}
+            loading={contextLoading}
+            {destination}
+            {busy}
+            {targetRow}
+            onBack={leaveScreen}
+            onPlayAll={() =>
+                contextDetail &&
+                playItem({ kind: contextDetail.kind, uri: contextDetail.uri, name: contextDetail.name })}
+            onPick={playItem}
+            onEnqueue={(item, next) =>
+                enqueue({ service: "Spotify", uri: item.uri, title: item.name }, next)}
+            onOpenArtist={openArtist}
+            bind:this={contextScreen}
         />
     {:else if screen === "favorite" && browseFavorite}
         <FavoriteBrowseScreen
@@ -883,6 +978,10 @@
             onPlayAll={() => playFavorite(browseFavorite!)}
             playAllBusy={busy.is("fav:" + browseFavorite.id)}
             onPick={playItem}
+            onEnqueue={(item, next) =>
+                enqueue({ service: "Spotify", uri: item.uri, title: item.name }, next)}
+            onOpenArtist={openArtist}
+            bind:this={favoriteScreen}
         />
     {:else if screen === "browse"}
         <SearchScreen
@@ -897,6 +996,7 @@
             onEnqueue={(item, next) =>
                 enqueue({ service: "Spotify", uri: item.uri, title: item.name }, next)}
             onOpenArtist={openArtist}
+            onOpenContext={openContext}
             {targetRow}
             favorites={favShelf}
             bind:this={searchScreen}

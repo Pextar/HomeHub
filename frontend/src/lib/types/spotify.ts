@@ -51,6 +51,18 @@ export interface SpotifyItem {
   name: string;
   sub?: string;     // artist / owner line
   art_url?: string; // https CDN image
+
+  // Whatever else the endpoint answered for, so a row can be as informative
+  // as Spotify's own. Absent means "the service didn't say" — drop the
+  // field rather than fabricating one.
+  album?: string;        // tracks: the record it sits on
+  duration_ms?: number;  // tracks
+  explicit?: boolean;    // tracks
+  year?: string;         // albums: release year
+  total_tracks?: number; // albums + playlists
+  followers?: number;    // artists + playlists
+  genres?: string[];     // artists
+  popularity?: number;   // artists, 0–100
 }
 
 export interface SpotifyResults {
@@ -60,22 +72,34 @@ export interface SpotifyResults {
   artists: SpotifyItem[];
 }
 
-/** An artist's page: enough to browse from without typing. */
+/** An artist's page: the following and genres up top, the most-played
+ *  tracks, the discography split the way Spotify splits it, and the artists
+ *  their listeners also play. */
 export interface SpotifyArtistDetail {
   uri: string;
   name: string;
   art_url?: string;
+  genres?: string[];
+  followers?: number;
+  popularity?: number; // 0–100
   top_tracks: SpotifyItem[];
   albums: SpotifyItem[];
+  singles: SpotifyItem[];
+  related: SpotifyItem[];
 }
 
 /** A playlist or album's own track listing — the drill-in behind a favorite
- *  that turns out to be a list rather than one song. */
+ *  or a search result that turns out to be a list rather than one song. */
 export interface SpotifyContextDetail {
   kind: "playlist" | "album";
   uri: string;
   name: string;
-  sub?: string;
+  sub?: string;         // album: artists · playlist: owner
   art_url?: string;
+  year?: string;        // album
+  followers?: number;   // playlist
+  total_tracks?: number;
+  description?: string; // playlist
+  artist_uri?: string;  // album: first artist, for "More by"
   tracks: SpotifyItem[];
 }

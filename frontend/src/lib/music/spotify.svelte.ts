@@ -109,7 +109,7 @@ export function createSpotify(remember: (q: string) => void): SpotifyStore {
     s.kindFilter = "all";
     s.searching = true;
     try {
-      const r = await api.spotifySearch(q, 8);
+      const r = await api.spotifySearch(q, 12);
       if (mine !== seq) return;
       s.results = r;
     } catch (e) {

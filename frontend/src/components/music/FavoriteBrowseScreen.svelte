@@ -1,14 +1,18 @@
 <script lang="ts">
     /**
      * A favorite that turns out to be a list — a Spotify playlist or album —
-     * rather than one song: its own tracks, so tapping the favorite reads as
-     * "look inside" and playing it whole is still one tap away via "Play
-     * all". A screen, not a sheet, for the same reason as the artist page:
-     * it is reached from the Home shelf or the idle player, and a sheet must
-     * never open another one.
+     * rather than one song. It is the same page as any other album or
+     * playlist (`ContextScreen`), because it *is* one: the only difference is
+     * how you got here and that "play it whole" goes out through the Sonos
+     * household's favorite rather than the Spotify URI.
+     *
+     * That distinction is the reason this file still exists. Favorites are a
+     * Sonos household list, so only a Sonos room can be handed one — and the
+     * whole-list play has to take that road, while an individual track inside
+     * it is a plain Spotify item any room can take.
      */
     import type { Snippet } from "svelte";
-    import BrowseScreen from "./BrowseScreen.svelte";
+    import ContextScreen from "./ContextScreen.svelte";
     import type { Destination } from "../../lib/music/destination.svelte";
     import type { Busy } from "../../lib/music/busy.svelte";
     import type { SonosFavorite, SpotifyContextDetail, SpotifyItem } from "../../lib/types";
@@ -24,6 +28,8 @@
         onPlayAll,
         playAllBusy,
         onPick,
+        onEnqueue,
+        onOpenArtist,
     }: {
         favorite: SonosFavorite;
         context: SpotifyContextDetail | null;
@@ -35,25 +41,46 @@
         onPlayAll: () => void;
         playAllBusy: boolean;
         onPick: (item: SpotifyItem) => void;
+        onEnqueue: (item: SpotifyItem, next: boolean) => void;
+        onOpenArtist: (uri: string) => void;
     } = $props();
 
-    const sections = $derived([{ label: "Tracks", items: context?.tracks ?? [] }]);
+    /** Until the lookup lands, the favorite's own title and art stand in — a
+     *  page that already knows its name shouldn't render as a blank one. */
+    const shown = $derived<SpotifyContextDetail | null>(
+        context ??
+            (loading
+                ? null
+                : {
+                      kind: "playlist",
+                      uri: favorite.spotify_uri ?? favorite.uri,
+                      name: favorite.title,
+                      art_url: favorite.art_uri,
+                      tracks: [],
+                  }),
+    );
+
+    let screen = $state<ContextScreen | null>(null);
+    export function closeMenu(): boolean {
+        return !!screen?.closeMenu();
+    }
 </script>
 
-<BrowseScreen
-    loading={loading || !context}
-    art={context?.art_url ?? favorite.art_uri}
-    title={context?.name ?? favorite.title}
-    sub={context?.sub}
-    backLabel="Back to Music"
-    onBack={onBack}
-    {onPlayAll}
-    {playAllBusy}
-    playAllDisabled={!destination.sonosTarget}
+<ContextScreen
+    context={shown}
+    {loading}
     {destination}
     {busy}
     {targetRow}
-    {sections}
+    {onBack}
+    {onPlayAll}
+    {playAllBusy}
+    playAllDisabled={!destination.sonosTarget}
+    playAllNote={destination.sonosTarget
+        ? ""
+        : `Favorites come out of your Sonos household, so ${destination.label || "this room"} can't play the whole list — pick a Sonos room above, or start a single track below.`}
     {onPick}
-    empty="This list didn't come back with any tracks."
+    {onEnqueue}
+    {onOpenArtist}
+    bind:this={screen}
 />
