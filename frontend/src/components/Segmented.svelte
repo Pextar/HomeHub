@@ -88,6 +88,7 @@
         box-shadow: var(--focus-ring);
     }
     .segmented label.disabled { opacity: 0.4; cursor: not-allowed; }
+    .segmented label:active:not(.disabled) { transform: scale(0.96); transition-duration: 80ms; }
 
     /* Variants */
     .segmented.full { display: flex; width: 100%; }

@@ -817,7 +817,7 @@
 {#if !sonos.loaded}
     <section class="card"><div class="skeleton sk"></div></section>
 {:else if totalSpeakers === 0}
-    <EmptyState
+    <EmptyState fill
         icon="speaker"
         title="No speakers yet"
         message="Add your Sonos or KEF speakers to control playback, volume and grouping right here, with neither app needed."

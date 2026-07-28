@@ -322,7 +322,7 @@
         background: rgba(10, 8, 4, 0.66);
         backdrop-filter: blur(6px);
         display: grid; place-items: center;
-        z-index: 150;
+        z-index: var(--z-modal);
         padding: var(--space-4);
         /* Prevent any overscroll from leaking to the underlying document. */
         overscroll-behavior: contain;
@@ -450,7 +450,7 @@
         place-items: center;
         padding: var(--space-4);
         border-radius: inherit;
-        z-index: 5;
+        z-index: var(--z-raised);
     }
     :global([data-theme="light"]) .discard-scrim { background: rgba(26, 24, 19, 0.30); }
     .discard-card {

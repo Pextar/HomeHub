@@ -34,7 +34,7 @@
         display: flex;
         flex-direction: column;
         gap: var(--space-2);
-        z-index: 200;
+        z-index: var(--z-ghost);
         max-width: 360px;
         pointer-events: none;
     }

@@ -7,12 +7,15 @@
         title: string;
         message?: string;
         compact?: boolean;
+        /** Fill the leftover viewport height so a lone empty state doesn't
+            strand itself at the top of a blank screen. */
+        fill?: boolean;
         children?: Snippet;
     }
-    let { icon, title, message, compact = false, children }: Props = $props();
+    let { icon, title, message, compact = false, fill = false, children }: Props = $props();
 </script>
 
-<div class="empty-state" class:empty-state-compact={compact}>
+<div class="empty-state" class:empty-state-compact={compact} class:empty-fill={fill}>
     {#if icon}
         <Icon name={icon} size={48} />
     {/if}

@@ -37,7 +37,11 @@
     );
     const nothingToShow  = $derived(shownSchedules.length === 0 && shownAutomations.length === 0);
     const totalRules     = $derived(v.schedules.length + v.automations.length);
-    const enabledCount   = $derived(v.automations.filter(a => a.enabled).length);
+    // "Active" counts enabled schedules too — the subtitle used to say
+    // "0 active" under a list of enabled schedule switches.
+    const enabledCount   = $derived(
+        v.automations.filter(a => a.enabled).length + v.schedules.filter(s => s.enabled).length,
+    );
     const anySchedEnabled = $derived(v.schedules.some(s => s.enabled));
     let pausing = $state(false);
 
@@ -58,9 +62,15 @@
     }
 
     // ── Today's 24h timeline (schedules only) ───────────────────────────
-    const now = new Date();
-    const todayIdx = now.getDay();
-    const nowMin = now.getHours() * 60 + now.getMinutes();
+    // Ticking clock so the "now" line creeps across the rail and the next
+    // event rolls over while the view sits open, instead of freezing at mount.
+    let now = $state(new Date());
+    $effect(() => {
+        const id = setInterval(() => { now = new Date(); }, 60_000);
+        return () => clearInterval(id);
+    });
+    const todayIdx = $derived(now.getDay());
+    const nowMin = $derived(now.getHours() * 60 + now.getMinutes());
 
     function minutesOf(s: Schedule): number | null {
         const t = (s.effective_time || s.time || "").trim();
@@ -193,7 +203,8 @@
     {#snippet actions()}
         {#if v.schedules.length > 0}
             <button class="btn btn-ghost pause-btn" onclick={toggleAll} disabled={pausing}>
-                {anySchedEnabled ? "Pause schedules" : "Resume schedules"}
+                <span class="lbl-full">{anySchedEnabled ? "Pause schedules" : "Resume schedules"}</span>
+                <span class="lbl-short">{anySchedEnabled ? "Pause" : "Resume"}</span>
             </button>
         {/if}
         <button class="add-btn" aria-label="New automation" onclick={() => openModal(AutomationModal, {})}>
@@ -203,7 +214,7 @@
 </Topbar>
 
 {#if totalRules === 0}
-    <EmptyState icon="automation" title="No automations yet"
+    <EmptyState fill icon="automation" title="No automations yet"
         message="Automations react to time, a sensor crossing a threshold, or a device turning on/off — then run actions.">
         <button class="btn btn-primary" onclick={() => openModal(AutomationModal, {})}>New automation</button>
     </EmptyState>
@@ -332,6 +343,12 @@
 <style>
     /* ── Topbar add button ──────────────────────────────────── */
     .pause-btn { font-size: 13px; }
+    /* Phones get the short label so the view title never truncates. */
+    .lbl-short { display: none; }
+    @media (max-width: 480px) {
+        .lbl-full { display: none; }
+        .lbl-short { display: inline; }
+    }
     .add-btn {
         width: 38px; height: 38px;
         display: grid; place-items: center;
@@ -394,6 +411,9 @@
         background: var(--text);
         border-radius: 1px;
         transform: translateX(-50%);
+        /* The line creeps: the clock ticks once a minute and the transition
+           glides the gap, so the rail always reads as live. */
+        transition: left 60s linear;
     }
     .tl-now-dot {
         position: absolute;
@@ -480,7 +500,7 @@
     .overflow-menu {
         position: absolute;
         right: 12px; top: 48px;
-        z-index: 10;
+        z-index: var(--z-menu);
         min-width: 170px;
         display: flex; flex-direction: column;
         background: var(--bg-raised);

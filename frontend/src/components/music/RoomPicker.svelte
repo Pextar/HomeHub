@@ -131,7 +131,7 @@
     @media (pointer: coarse) { .pick-btn { min-height: 44px; } }
 
     .pick-menu {
-        position: absolute; top: calc(100% + 6px); left: 0; z-index: 40;
+        position: absolute; top: calc(100% + 6px); left: 0; z-index: var(--z-menu);
         min-width: 190px; max-height: 320px; overflow-y: auto;
         display: flex; flex-direction: column; gap: 1px;
         padding: 5px;

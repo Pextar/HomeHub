@@ -8,9 +8,8 @@
     import TimerRow from "../components/TimerRow.svelte";
     import { route, data, toasts, session } from "../lib/stores.svelte";
     import { api } from "../lib/api";
-    import { runAction, describeTarget } from "../lib/utils";
+    import { runAction, describeTarget, haptic } from "../lib/utils";
     import { openModal } from "../lib/modal.svelte";
-    import ConfirmModal from "../components/ConfirmModal.svelte";
     import EmptyState from "../components/EmptyState.svelte";
     import SocketModal from "../modals/SocketModal.svelte";
     import { fly, scale } from "svelte/transition";
@@ -125,35 +124,38 @@
     });
 
     // ── Bulk actions ────────────────────────────────────────────────────────
-    async function allOn() {
-        const ok = await openModal<boolean>(ConfirmModal, {
-            title: "Turn all devices ON?",
-            message: `This will switch on ${totalSockets} device${totalSockets === 1 ? "" : "s"}.`,
-            confirmLabel: "Turn all on",
-        });
-        if (!ok) return;
+    // No confirmation — the master switch is the app's flagship gesture, and a
+    // dialog in front of it kills the moment. The action fires immediately and
+    // offers Undo instead: every device returns to exactly its prior state.
+    async function bulk(on: boolean) {
+        haptic();
+        const before = new Map(v.sockets.map(s => [s.id, s.state] as const));
         try {
-            const r = await api.allOn();
-            toasts.success("All on", `${r.updated} updated, ${r.failures.length} failed.`);
+            const r = on ? await api.allOn() : await api.allOff();
             await data.refresh();
+            toasts.show({
+                title: on ? "All on" : "All off",
+                message: `${r.updated} updated${r.failures.length ? `, ${r.failures.length} failed` : ""}.`,
+                tone: "success",
+                timeoutMs: 8000,
+                action: { label: "Undo", onClick: () => undoBulk(before) },
+            });
         } catch (e) { toasts.error("Failed", (e as Error).message); }
     }
-    async function allOff() {
-        const ok = await openModal<boolean>(ConfirmModal, {
-            title: "Turn all devices OFF?",
-            message: `This will switch off ${totalSockets} device${totalSockets === 1 ? "" : "s"}.`,
-            confirmLabel: "Turn all off",
-            danger: true,
-        });
-        if (!ok) return;
-        try {
-            const r = await api.allOff();
-            toasts.success("All off", `${r.updated} updated, ${r.failures.length} failed.`);
-            await data.refresh();
-        } catch (e) { toasts.error("Failed", (e as Error).message); }
+    async function undoBulk(before: ReadonlyMap<string, boolean>) {
+        haptic();
+        const restore = data.value.sockets.filter(s => before.has(s.id) && before.get(s.id) !== s.state);
+        let failed = 0;
+        await Promise.all(restore.map(async s => {
+            try { await (before.get(s.id) ? api.socketOn(s.id) : api.socketOff(s.id)); }
+            catch { failed++; }
+        }));
+        await data.refresh();
+        if (failed) toasts.error("Undo", `${failed} device${failed === 1 ? "" : "s"} didn't respond.`);
+        else toasts.success("Undone", `${restore.length} device${restore.length === 1 ? "" : "s"} back to how they were.`);
     }
     function toggleAllMaster() {
-        if (heroOn) allOff(); else allOn();
+        bulk(!heroOn);
     }
     // A group's switch means "everything in it", matching the Groups view.
     function toggleGroup(g: { id: string; name: string }, on: boolean) {
@@ -169,10 +171,9 @@
     </div>
     {#if session.isAdmin}
         <div class="greet-actions">
-            <button class="chip search-chip" onclick={() => route.go("sockets")} aria-label="Search devices and scenes">
+            <button class="chip search-chip" onclick={() => route.go("sockets", { focus: "search" })} aria-label="Search devices">
                 <Icon name="search" size={14} />
-                Search devices, scenes…
-                <kbd class="search-key">⌘K</kbd>
+                Search devices…
             </button>
             <button class="chip add-device" onclick={() => openModal(SocketModal, {})}>
                 <Icon name="plus" size={14} /> Add device
@@ -202,7 +203,7 @@
     </section>
 {:else if totalSockets === 0}
     <!-- First run: no devices at all — point at the add-device flow. -->
-    <EmptyState icon="socket" title="No devices yet"
+    <EmptyState fill icon="socket" title="No devices yet"
         message="Add your first RF socket or smart light to start controlling your home.">
         {#if session.isAdmin}
             <button class="btn btn-primary" onclick={() => openModal(SocketModal, {})}>Add device</button>
@@ -452,45 +453,47 @@
             color: var(--text-mute);
         }
     }
-    .search-key {
-        margin-left: 20px;
-        font-family: var(--font-mono);
-        font-size: 11px;
-        color: var(--text-dim);
-        background: none;
-        border: none;
-        padding: 0;
-        cursor: pointer;
+    /* Hero spans full width on phones with the stat tiles as a compact strip
+       beneath it; on desktop they share one row, matching the mockup. */
+    .top-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-3); }
+    .hero { grid-column: 1 / -1; }
+    .stat {
+        padding: 12px 14px;
+        flex-direction: column;
+        justify-content: space-between;
+        gap: 4px;
+        min-width: 0;
     }
-
-    /* Hero spans full width on phones; on desktop it shares a row with the
-       real-data stat tiles, matching the desktop dashboard mockup. */
-    .top-grid { display: grid; grid-template-columns: 1fr; gap: var(--space-4); }
-    .stat { display: none; }
     @media (min-width: 1024px) {
         /* One track per tile that actually rendered (--top-cols), so the row
            always spans the full width whatever the home has to report. */
-        .top-grid { grid-template-columns: var(--top-cols); align-items: stretch; }
-        .stat { display: flex; }
-    }
-    .stat {
-        padding: 18px;
-        flex-direction: column;
-        justify-content: space-between;
-        gap: 8px;
+        .top-grid { grid-template-columns: var(--top-cols); align-items: stretch; gap: var(--space-4); }
+        .hero { grid-column: auto; }
+        .stat { padding: 18px; gap: 8px; }
     }
     .stat-eyebrow {
         color: var(--text-mute);
-        font-size: 11px;
+        font-size: 10px;
         letter-spacing: 0.08em;
         text-transform: uppercase;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
-    .stat-value { font-size: 32px; font-weight: 600; letter-spacing: -0.02em; font-family: var(--font-mono); }
+    .stat-value { font-size: 20px; font-weight: 600; letter-spacing: -0.02em; font-family: var(--font-mono); font-feature-settings: "tnum" 1; }
+    @media (min-width: 1024px) {
+        .stat-eyebrow { font-size: 11px; }
+        .stat-value { font-size: 32px; }
+    }
     .stat-value.cool { color: var(--cool); }
-    .stat-sub { color: var(--text-mute); font-size: 12px; }
+    .stat-sub { color: var(--text-mute); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    @media (min-width: 1024px) {
+        .stat-sub { font-size: 12px; }
+    }
 
     /* ── Whole-home hero ────────────────────────────── */
-    .hero { padding: 20px; gap: 16px; }
+    .hero { padding: 20px; gap: 16px; transition: box-shadow var(--t-med); }
+    /* When the home is lit the hero carries the room's glow with it — the
+       "lit from within" beat, not just a warmer card. */
+    .hero.tile.on { box-shadow: 0 12px 48px -14px var(--on-glow); }
     .hero-top {
         display: flex;
         align-items: flex-start;
@@ -572,7 +575,7 @@
         gap: 10px;
     }
     @media (min-width: 600px) {
-        .favorites { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: var(--space-3); }
+        .favorites { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--space-3); }
     }
     .favorite-item { display: flex; min-width: 0; }
     .favorite-item > :global(.tile) { flex: 1; min-width: 0; }
@@ -587,7 +590,7 @@
         gap: 10px;
     }
     @media (min-width: 600px) {
-        .groups { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: var(--space-3); }
+        .groups { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--space-3); }
     }
     .group-tile { min-width: 0; }
     .gt-top { display: flex; justify-content: space-between; align-items: flex-start; }
@@ -630,7 +633,7 @@
         gap: 10px;
     }
     @media (min-width: 600px) {
-        .sensors { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: var(--space-3); }
+        .sensors { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--space-3); }
     }
     .sensor-item { display: flex; min-width: 0; }
     .sensor-item > :global(.sensor) { flex: 1; min-width: 0; }
@@ -645,10 +648,13 @@
     }
     @media (min-width: 560px) {
         .rooms {
-            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
             gap: var(--space-3);
         }
     }
+    /* A lone card never leaves half a row of nothing beside it. */
+    .rooms > :only-child, .favorites > :only-child,
+    .groups > :only-child, .sensors > :only-child { grid-column: 1 / -1; }
     .room-item { display: flex; min-width: 0; }
     .room-item > :global(.room) { flex: 1; min-width: 0; }
 

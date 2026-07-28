@@ -198,7 +198,7 @@
     .overlay {
         position: fixed;
         inset: 0;
-        z-index: 150;
+        z-index: var(--z-modal);
         background: rgba(10, 12, 24, 0.55);
         backdrop-filter: blur(6px);
         display: flex;

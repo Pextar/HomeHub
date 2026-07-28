@@ -250,7 +250,7 @@
     .z-delete:hover { text-decoration: underline; }
 
     .z-foot {
-        position: sticky; bottom: 0; z-index: 2;
+        position: sticky; bottom: 0; z-index: var(--z-raised);
         display: grid; grid-template-columns: 1fr 2fr; gap: var(--space-3);
         padding: var(--space-3) 0 var(--space-2);
         background: var(--bg-bar);

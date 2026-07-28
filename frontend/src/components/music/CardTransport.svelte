@@ -12,6 +12,7 @@
      * a KEF card carries play/pause only, like a Sonos card on a phone.
      */
     import Icon from "../Icon.svelte";
+    import { haptic } from "../../lib/utils";
 
     let {
         playing,
@@ -47,7 +48,7 @@
         class="mini-btn on"
         aria-label={playing ? "Pause" : "Play"}
         disabled={toggleBusy}
-        onclick={onToggle}
+        onclick={() => { haptic(); onToggle(); }}
     >
         <Icon name={playing ? "pause" : "play"} size={16} />
     </button>

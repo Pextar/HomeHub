@@ -269,11 +269,11 @@
        modal stack (150) — DESIGN.md §15 has the player covering the nav, and
        a "Clear queue" confirm still has to land on top of the player. */
     .scrim {
-        position: fixed; inset: 0; z-index: 125;
+        position: fixed; inset: 0; z-index: var(--z-scrim);
         background: rgba(0, 0, 0, 0.5);
     }
     .sheet {
-        position: fixed; z-index: 126;
+        position: fixed; z-index: var(--z-sheet);
         left: 0; right: 0; bottom: 0;
         max-height: 92vh;
         background: var(--bg);
@@ -330,7 +330,7 @@
        floating block cutting the content in half. */
     .sheet-top {
         --fade: 22px;
-        position: sticky; top: 0; z-index: 3;
+        position: sticky; top: 0; z-index: var(--z-raised);
         margin: 0 calc(var(--space-5) * -1) calc(var(--fade) * -1);
         padding: 0 var(--space-5) var(--fade);
         background: var(--bg-bar);

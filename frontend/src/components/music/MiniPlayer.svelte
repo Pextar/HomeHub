@@ -79,7 +79,7 @@
     .mini {
         position: sticky;
         bottom: calc(var(--space-4) + env(safe-area-inset-bottom));
-        z-index: 30;
+        z-index: var(--z-menu);
         overflow: hidden;
         display: flex; align-items: center; gap: var(--space-3);
         padding: 9px 10px;
@@ -113,7 +113,7 @@
         position: fixed;
         left: var(--space-4); right: var(--space-4);
         bottom: calc(var(--space-4) + env(safe-area-inset-bottom));
-        z-index: 127;
+        z-index: var(--z-dock);
         margin-top: 0;
     }
     @media (min-width: 601px) {

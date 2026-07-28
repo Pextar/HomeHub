@@ -79,7 +79,7 @@
 <Topbar title="Activity" subtitle="Everything that happened in your home" />
 
 {#if v.activity.length === 0}
-    <EmptyState icon="activity" title="No activity yet"
+    <EmptyState fill icon="activity" title="No activity yet"
         message="Device changes, schedules and scene runs will show up here as they happen." />
 {:else}
     <div class="filters h-scroll">
@@ -161,7 +161,7 @@
         border: 1px solid var(--hairline);
         display: grid; place-items: center;
         flex-shrink: 0;
-        z-index: 1;
+        z-index: var(--z-sticky);
     }
     .bullet.err { border-color: var(--bad); background: var(--danger-soft); }
     .body { flex: 1; min-width: 0; padding-top: 2px; }

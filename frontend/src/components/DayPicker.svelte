@@ -54,7 +54,7 @@
         cursor: pointer;
         user-select: none;
         transition: background var(--t-fast), color var(--t-fast),
-                    border-color var(--t-fast);
+                    border-color var(--t-fast), transform 120ms var(--spring);
         min-width: 0;
     }
     .day-chip[data-selected="true"] {
@@ -62,7 +62,7 @@
         color: var(--primary-fg);
         border-color: transparent;
     }
-    .day-chip:active { transform: scale(0.92); transition-duration: 60ms; }
+    .day-chip:active { transform: scale(0.92); transition-duration: 80ms; }
     .presets {
         display: flex;
         gap: var(--space-2);

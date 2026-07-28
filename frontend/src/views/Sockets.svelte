@@ -21,9 +21,25 @@
     let roomFilter = $state(route.query.room ?? "");
     let statusFilter = $state("all");
 
+    // ?focus=search (the dashboard's search chip) drops the caret straight
+    // into the field instead of just landing on the view.
+    let searchEl = $state<HTMLInputElement>();
+    $effect(() => {
+        if (route.query.focus === "search") searchEl?.focus();
+    });
+
     const allRooms = $derived(
         [...new Set(v.sockets.map(s => s.room || "Unassigned"))].sort()
     );
+    const roomCounts = $derived.by(() => {
+        // eslint-disable-next-line svelte/prefer-svelte-reactivity -- transient local Map, built and consumed synchronously
+        const m = new Map<string, number>();
+        for (const s of v.sockets) {
+            const r = s.room || "Unassigned";
+            m.set(r, (m.get(r) ?? 0) + 1);
+        }
+        return m;
+    });
 
     const filtered = $derived.by(() => {
         let list = v.sockets;
@@ -54,14 +70,14 @@
 </Topbar>
 
 {#if v.sockets.length === 0}
-    <EmptyState icon="socket" title="No devices yet" message="Add your first device — RF, Tasmota, or Matter.">
+    <EmptyState fill icon="socket" title="No devices yet" message="Add your first device — RF, Tasmota, or Matter.">
         <button class="btn btn-primary" onclick={() => openModal(SocketModal, {})}>Add device</button>
     </EmptyState>
 {:else}
     <div class="toolbar">
         <div class="search">
             <Icon name="search" size={16} />
-            <input type="search" placeholder="Search devices…" bind:value={search} aria-label="Search devices" />
+            <input type="search" placeholder="Search devices…" bind:value={search} bind:this={searchEl} aria-label="Search devices" />
         </div>
         <select bind:value={roomFilter} aria-label="Filter by room" class="room-filter">
             <option value="">All rooms</option>
@@ -69,6 +85,17 @@
                 <option value={r}>{r}</option>
             {/each}
         </select>
+        <!-- Rooms are chip filters on touch (§2), not a form select. -->
+        <div class="room-chips h-scroll" role="group" aria-label="Filter by room">
+            <button class="chip" class:active={roomFilter === ""} onclick={() => roomFilter = ""}>
+                All rooms <span class="mono chip-n">{v.sockets.length}</span>
+            </button>
+            {#each allRooms as r (r)}
+                <button class="chip" class:active={roomFilter === r} onclick={() => roomFilter = r}>
+                    {r} <span class="mono chip-n">{roomCounts.get(r) ?? 0}</span>
+                </button>
+            {/each}
+        </div>
         <Segmented
             name="socket-status"
             bind:value={statusFilter}
@@ -150,11 +177,14 @@
     }
     .search input::placeholder { color: var(--text-faint); }
     .room-filter { max-width: 200px; }
+    .room-chips { display: none; }
+    .chip-n { font-size: 11px; opacity: 0.7; }
 
     @media (max-width: 600px) {
         .toolbar { flex-direction: column; align-items: stretch; gap: var(--space-2); }
         .search { min-width: 0; }
-        .room-filter { max-width: none; }
+        .room-filter { display: none; }
+        .room-chips { display: flex; margin: 0 calc(-1 * var(--space-3)); padding: 0 var(--space-3); }
     }
     /* Touch: ensure search row is 44px tall */
     @media (pointer: coarse) {
@@ -192,7 +222,7 @@
     }
     .grid {
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
         gap: var(--space-3);
     }
     /* Compact device tiles flow two-up on phones, matching the mockup. */

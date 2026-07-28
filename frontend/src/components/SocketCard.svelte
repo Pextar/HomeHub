@@ -4,7 +4,7 @@
     import { api } from "../lib/api";
     import { socketAction, automationsUsingSocket, plural } from "../lib/utils";
     import { openModal } from "../lib/modal.svelte";
-    import { toasts, data } from "../lib/stores.svelte";
+    import { toasts, data, scenePulse } from "../lib/stores.svelte";
     import type { Socket } from "../lib/types";
     import SocketModal from "../modals/SocketModal.svelte";
     import TimerModal from "../modals/TimerModal.svelte";
@@ -39,6 +39,20 @@
             pulsing = true;
             if (isSmartLight) brightness = null; // lazy-fetch effect refetches
             const t = setTimeout(() => { pulsing = false; }, 550);
+            return () => clearTimeout(t);
+        }
+    });
+
+    // Scene-run flash: when a scene fires, every tile it touched washes an
+    // amber ring outward — the visible "the room just changed" beat.
+    let flashing = $state(false);
+    $effect(() => {
+        const p = scenePulse.current;
+        if (p && p.ids.includes(socket.id)) {
+            flashing = false;
+            // Re-arm on the next frame so back-to-back scenes re-trigger.
+            requestAnimationFrame(() => { flashing = true; });
+            const t = setTimeout(() => { flashing = false; }, 700);
             return () => clearTimeout(t);
         }
     });
@@ -171,7 +185,7 @@
     }
 </script>
 
-<article class="tile" class:on={socket.state} class:pulsing class:readonly={isReadOnly} bind:this={cardEl}>
+<article class="tile" class:on={socket.state} class:pulsing class:scene-flash={flashing} class:readonly={isReadOnly} bind:this={cardEl}>
     {#if !isReadOnly}
         <button class="sw" class:on={socket.state}
             role="switch" aria-checked={socket.state}
@@ -190,7 +204,7 @@
             <span class="meta-row">
                 <span class="meta">{isReadOnly ? "Sensor" : statusText}{socket.room ? ` · ${socket.room}` : ""}</span>
                 <span class="protocol-badge" data-proto={proto} title={`${socket.protocol || "rf"} · ${socket.code}`}>
-                    <Icon name={protoIcon} size={11} />{protoLabel}
+                    <Icon name={protoIcon} size={11} /><span class="p-label">{protoLabel}</span>
                 </span>
             </span>
         </span>
@@ -276,7 +290,7 @@
     .sw {
         position: absolute;
         top: 16px; right: 16px;
-        z-index: 2;
+        z-index: var(--z-raised);
         width: 44px; height: 26px;
         background: var(--card-3);
         border: 0; border-radius: 13px;
@@ -313,8 +327,6 @@
         flex-direction: column;
         gap: 12px;
         cursor: pointer;
-        /* leave room for the absolute switch on the first row */
-        padding-right: 52px;
         min-height: 36px;
     }
     .tile-hit:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: var(--r-md); }
@@ -356,6 +368,8 @@
     }
     .meta-row {
         display: flex; align-items: center; justify-content: space-between; gap: 8px;
+        /* Clear the .more-corner button so the badge never slides under it. */
+        padding-right: 26px;
     }
     .meta {
         color: var(--text-mute); font-size: 12px;
@@ -363,6 +377,12 @@
     }
     .protocol-badge { flex-shrink: 0; }
     .tile.on .meta { color: var(--on); }
+    /* On touch cards the badge's text label is what squeezes the room name
+       into "Off · Offi…" — drop to the icon (the title attr keeps the long
+       form one long-press away) so status + room survive untruncated. */
+    @media (pointer: coarse) {
+        .p-label { display: none; }
+    }
 
     /* Interactive brightness slider — replaces the old read-only .rail.
        Positioned as a flex sibling to .tile-hit so tapping the slider
@@ -475,7 +495,7 @@
     /* position/bottom/right|left are set inline (position:fixed + computed
        coords) so the menu never clips off-screen on narrow grid cards. */
     .overflow-menu {
-        z-index: 200;
+        z-index: var(--z-menu);
         min-width: 210px;
         display: flex;
         flex-direction: column;

@@ -149,7 +149,7 @@
         place-items: center;
         cursor: pointer;
         box-shadow: 0 8px 24px var(--on-glow), var(--shadow-md);
-        z-index: 90;
+        z-index: var(--z-fab);
         transition: transform 80ms ease, opacity 150ms ease;
     }
     .fab:active { transform: scale(0.93); }
@@ -162,7 +162,7 @@
     .backdrop {
         position: fixed;
         inset: 0;
-        z-index: 130;
+        z-index: var(--z-sheet);
         display: flex;
         background: rgba(10, 10, 8, 0.6);
         backdrop-filter: blur(3px);

@@ -32,8 +32,9 @@ export function lampEmoji(socket: Pick<Socket, "emoji">): string {
   return socket.emoji?.trim() ? socket.emoji : "💡";
 }
 
-// Short, best-effort haptic tap for playful touch feedback (Kid module). A
-// no-op where the Vibration API is unavailable (desktop, iOS Safari).
+// Short, best-effort haptic tap for physical touch feedback — toggles, scene
+// runs, and any moment where the app should answer the finger. A no-op where
+// the Vibration API is unavailable (desktop, iOS Safari).
 export function haptic(ms = 15): void {
   if (typeof navigator !== "undefined" && typeof navigator.vibrate === "function") {
     try { navigator.vibrate(ms); } catch { /* ignore */ }
@@ -161,12 +162,14 @@ export async function runAction(
 
 // Toggle/turn a single socket on or off with an optimistic flip. The store
 // updates instantly, the API response is merged in when it lands, and a
-// failure rolls the state back — all without a full data refresh.
+// failure rolls the state back — all without a full data refresh. Fires the
+// haptic tap up front so the action answers the finger even on slow hardware.
 export async function socketAction(
   socket: Socket,
   action: SocketAction,
   opts: { successMessage?: string; errorTitle?: string } = {},
 ): Promise<boolean> {
+  haptic();
   const { successMessage, errorTitle = "Action failed" } = opts;
   const prev = socket.state;
   const next = action === "toggle" ? !prev : action === "on";

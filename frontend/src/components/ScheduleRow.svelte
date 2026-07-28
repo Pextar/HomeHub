@@ -186,7 +186,7 @@
         position: absolute;
         top: calc(100% + 4px);
         right: 0;
-        z-index: 50;
+        z-index: var(--z-menu);
         background: var(--bg-raised);
         border: 1px solid var(--border);
         border-radius: var(--radius-md);
