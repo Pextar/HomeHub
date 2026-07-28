@@ -251,6 +251,97 @@ func TestValueKeepsCompositePayload(t *testing.T) {
 	}
 }
 
+// playerDataTypelessJSON is the shape an LSX II on current firmware really
+// answers player:player/data with while Spotify Connect plays: the bare
+// player record, no "type" field anywhere. Captured from a live speaker.
+const playerDataTypelessJSON = `{
+  "state": "playing",
+  "playId": {"systemMemberId": "lsxii-3c974471", "timestamp": 965589733},
+  "trackRoles": {
+    "icon": "https://i.scdn.co/image/ab67616d0000b273ccd9af18cc83991382c9ab9a",
+    "mediaData": {
+      "metaData": {
+        "album": "Cheers to the Fall",
+        "albumCoverUri": "spotify:image:ab67616d0000b273ccd9af18cc83991382c9ab9a",
+        "serviceID": "spotify",
+        "artist": "Andra Day",
+        "trackId": "spotify:track:0tV8pOpiNsKqUys0ilUcXz"
+      },
+      "resources": [{"mimeType": "audio/unknown"}]
+    },
+    "type": "audio",
+    "title": "Rise Up"
+  },
+  "status": {"duration": 253342}
+}`
+
+func TestValueAcceptsTypelessPlayerData(t *testing.T) {
+	// A speaker whose player:player/data carries no "type" field at all must
+	// still read as a composite payload. Refusing it ("value has no type")
+	// left GetState swallowing the error and reporting a playing speaker as
+	// stopped, with no track and no artwork.
+	var v value
+	if err := json.Unmarshal([]byte(playerDataTypelessJSON), &v); err != nil {
+		t.Fatal(err)
+	}
+	if v.Type != "" {
+		t.Errorf("type = %q, want empty for a typeless record", v.Type)
+	}
+	track, status, dur := ParsePlayerData(v.Raw)
+	if track == nil {
+		t.Fatal("ParsePlayerData returned no track")
+	}
+	if track.Title != "Rise Up" || track.Artist != "Andra Day" || track.Album != "Cheers to the Fall" {
+		t.Errorf("track = %+v", track)
+	}
+	if track.ArtURI != "https://i.scdn.co/image/ab67616d0000b273ccd9af18cc83991382c9ab9a" {
+		t.Errorf("art = %q", track.ArtURI)
+	}
+	if status != StatusPlaying || dur != 253342 {
+		t.Errorf("status = %q, duration = %d", status, dur)
+	}
+}
+
+func TestTypelessValueRefusesTypedDecode(t *testing.T) {
+	// The typeless record must not become readable as a scalar: asking for
+	// an int where the speaker sent the player record is still an error,
+	// not a silent zero.
+	var v value
+	if err := json.Unmarshal([]byte(playerDataTypelessJSON), &v); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := v.decode(typeI32, &n); err == nil {
+		t.Error("decode of a typeless record as i32_ succeeded, want an error")
+	}
+}
+
+func TestGetStateTypelessPlayerData(t *testing.T) {
+	// End to end through the fake speaker: GetState must report the track,
+	// the artwork and the playing status from a typeless player record.
+	f := newFakeSpeaker(t)
+	f.set(pathSpeakerStatus, `{"type":"kefSpeakerStatus","kefSpeakerStatus":"powerOn"}`)
+	f.set(pathSource, `{"type":"kefPhysicalSource","kefPhysicalSource":"wifi"}`)
+	f.set(pathVolume, `{"type":"i32_","i32_":34}`)
+	f.set(pathMute, `{"type":"bool_","bool_":false}`)
+	f.set(pathPlayerData, playerDataTypelessJSON)
+	f.set(pathPlayTime, `{"type":"i64_","i64_":211300}`)
+
+	st, err := GetState(ctx(t), testIP)
+	if err != nil {
+		t.Fatalf("GetState: %v", err)
+	}
+	if st.Status != StatusPlaying || !st.Playing {
+		t.Errorf("status = %q, playing = %v", st.Status, st.Playing)
+	}
+	if st.Track == nil || st.Track.Title != "Rise Up" {
+		t.Errorf("track = %+v", st.Track)
+	}
+	if st.DurationMS != 253342 || st.PositionMS != 211300 {
+		t.Errorf("duration = %d, position = %d", st.DurationMS, st.PositionMS)
+	}
+}
+
 func TestGetValueAcceptsBareObject(t *testing.T) {
 	// Older firmware answers with the object rather than a one-element array.
 	f := newFakeSpeaker(t)

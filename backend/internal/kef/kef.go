@@ -67,8 +67,10 @@ func ValidateHost(host string) error {
 //
 // Composite values break that shape: player:player/data answers
 // {"type":"playerData","state":"playing","trackRoles":{…}} — the fields sit
-// beside the type name rather than under it. So the payload is "whatever
-// `type` names, or the whole object when it names nothing".
+// beside the type name rather than under it. Newer LSX II firmware breaks it
+// further and sends no "type" field at all on that path, just the bare
+// player record. So the payload is "whatever `type` names, or the whole
+// object when it names nothing — or when there is no type at all".
 type value struct {
 	Type string
 	Raw  json.RawMessage
@@ -94,7 +96,13 @@ func (v *value) UnmarshalJSON(b []byte) error {
 	}
 	raw, ok := obj["type"]
 	if !ok {
-		return errors.New("kef: value has no type")
+		// A typeless composite: firmware that answers player:player/data
+		// with the bare record. The whole object is the payload; Type stays
+		// empty, so decode() still refuses to read it as a typed scalar —
+		// asking for an int where the speaker sent a record stays an error.
+		v.Type = ""
+		v.Raw = append(json.RawMessage(nil), b...)
+		return nil
 	}
 	if err := json.Unmarshal(raw, &v.Type); err != nil {
 		return fmt.Errorf("kef: value type: %w", err)
