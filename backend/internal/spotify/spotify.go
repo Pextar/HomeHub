@@ -79,10 +79,13 @@ type persisted struct {
 	// rather than discovering as a 403 mid-tap.
 	Scope string `json:"scope,omitempty"`
 	// Country is the account's Spotify market, read from /me at connect
-	// time. Several catalog endpoints (artist top tracks, artist albums)
+	// time. Several catalog endpoints (artist albums, track listings)
 	// silently return an empty list rather than an error when a request
 	// carries no market — passing this is the difference between an
 	// artist page with content and one that's mysteriously empty.
+	// February 2026 stopped /me answering it for Development Mode apps,
+	// so a login made after that keeps this empty and those reads go
+	// out market-less; logins from before keep what they captured.
 	Country string `json:"country,omitempty"`
 }
 
@@ -413,6 +416,10 @@ func (c *Client) accessToken(ctx context.Context) (string, error) {
 // recorded (HandleCallback now captures it up front, but an account
 // connected by an older build never ran that code). Best-effort: a
 // failure just leaves market lookups empty, same as before this existed.
+// Since February 2026 /me no longer answers "country" for Development
+// Mode apps at all, so for them this is a no-op — logins that captured
+// a country before the removal keep it, and that is the only source
+// left.
 func (c *Client) ensureCountry(ctx context.Context) {
 	c.mu.Lock()
 	known := c.p.Country != ""
@@ -746,7 +753,7 @@ func (c *Client) Artist(ctx context.Context, uri string) (*ArtistDetail, error) 
 	wg.Add(3)
 	go func() {
 		defer wg.Done()
-		if tt, err := c.artistTopTracks(ctx, id); err == nil {
+		if tt, err := c.artistPopularTracks(ctx, raw.Name); err == nil {
 			det.TopTracks = tt
 		}
 	}()
@@ -766,15 +773,27 @@ func (c *Client) Artist(ctx context.Context, uri string) (*ArtistDetail, error) 
 	return det, nil
 }
 
-func (c *Client) artistTopTracks(ctx context.Context, id string) ([]Item, error) {
+// artistPopularTracks answers "what they're best known for" without the
+// top-tracks endpoint, which Spotify removed for Development Mode apps in
+// the February 2026 tightening. Search ranking still weighs listens, so an
+// artist-scoped track query comes back in roughly most-played order — the
+// same section, fed through the one ranked catalog read left open.
+func (c *Client) artistPopularTracks(ctx context.Context, name string) ([]Item, error) {
 	var raw struct {
-		Tracks []wireTrack `json:"tracks"`
+		Tracks struct {
+			Items []wireTrack `json:"items"`
+		} `json:"tracks"`
 	}
-	if err := c.apiGet(ctx, "/artists/"+url.PathEscape(id)+"/top-tracks", c.market(), &raw); err != nil {
+	err := c.apiGet(ctx, "/search", url.Values{
+		"q":     {`artist:"` + strings.ReplaceAll(name, `"`, "") + `"`},
+		"type":  {"track"},
+		"limit": {"10"},
+	}, &raw)
+	if err != nil {
 		return nil, err
 	}
-	out := make([]Item, 0, len(raw.Tracks))
-	for _, t := range raw.Tracks {
+	out := make([]Item, 0, len(raw.Tracks.Items))
+	for _, t := range raw.Tracks.Items {
 		out = append(out, trackItem(t))
 	}
 	return out, nil
@@ -785,41 +804,58 @@ func (c *Client) artistTopTracks(ctx context.Context, id string) ([]Item, error)
 // regional re-releases as separate entries with the same name; one is enough,
 // so later duplicates by name are dropped — per shelf, since a single and
 // the album it was lifted from legitimately share one.
+//
+// The February 2026 tightening cut this endpoint's limit cap from 50 to 10
+// (anything higher is answered 400 "Invalid limit"), so a discography now
+// arrives in pages of ten and is walked with offset until Spotify runs out
+// or the shelf has what the old single call used to bring back. A page that
+// fails mid-walk keeps what arrived rather than costing the section.
 func (c *Client) artistDiscography(ctx context.Context, id string) (albums, singles []Item, err error) {
-	var raw struct {
-		Items []wireAlbum `json:"items"`
-	}
-	q := url.Values{
-		"include_groups": {"album,single"},
-		"limit":          {"50"},
-	}
-	if m := c.market(); m != nil {
-		q.Set("market", m.Get("market"))
-	}
-	if err := c.apiGet(ctx, "/artists/"+url.PathEscape(id)+"/albums", q, &raw); err != nil {
-		return nil, nil, err
-	}
 	albums, singles = []Item{}, []Item{}
-	seen := make(map[string]bool, len(raw.Items))
-	for _, a := range raw.Items {
-		key := a.AlbumType + ":" + strings.ToLower(strings.TrimSpace(a.Name))
-		if seen[key] {
-			continue
+	seen := make(map[string]bool)
+	for offset := 0; offset < 50; offset += 10 {
+		var raw struct {
+			Items []wireAlbum `json:"items"`
 		}
-		seen[key] = true
-		if a.AlbumType == "single" {
-			singles = append(singles, albumItem(a))
-		} else {
-			albums = append(albums, albumItem(a))
+		q := url.Values{
+			"include_groups": {"album,single"},
+			"limit":          {"10"},
+			"offset":         {fmt.Sprint(offset)},
+		}
+		if m := c.market(); m != nil {
+			q.Set("market", m.Get("market"))
+		}
+		if err := c.apiGet(ctx, "/artists/"+url.PathEscape(id)+"/albums", q, &raw); err != nil {
+			if offset == 0 {
+				return nil, nil, err
+			}
+			break
+		}
+		for _, a := range raw.Items {
+			key := a.AlbumType + ":" + strings.ToLower(strings.TrimSpace(a.Name))
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			if a.AlbumType == "single" {
+				singles = append(singles, albumItem(a))
+			} else {
+				albums = append(albums, albumItem(a))
+			}
+		}
+		if len(raw.Items) < 10 {
+			break
 		}
 	}
 	return albums, singles, nil
 }
 
 // relatedArtists answers "fans also like". Spotify retired the endpoint for
-// apps created after November 2024 (they are answered with a 403), so a
-// refusal costs the section rather than the page — the caller keeps the
-// error to itself and renders without it.
+// apps created after November 2024, and removed it for every Development
+// Mode app in February 2026 (answered with a 403), so a refusal costs the
+// section rather than the page — the caller keeps the error to itself and
+// renders without it. The call stays for extended-quota apps, which still
+// get an answer.
 func (c *Client) relatedArtists(ctx context.Context, id string) ([]Item, error) {
 	var raw struct {
 		Artists []wireArtistFull `json:"artists"`
@@ -835,23 +871,19 @@ func (c *Client) relatedArtists(ctx context.Context, id string) ([]Item, error) 
 }
 
 // SimilarTracks finds tracks to continue with once a group's queue runs out
-// — same-artist top tracks, seeded from whatever is currently playing.
-// Spotify retired the recommendations and related-artists endpoints for apps
-// created after November 2024, so this integration can't assume access to
-// either; same-artist top tracks stay available to every app and are an
-// honest (if narrower) answer to "more like this". exclude drops URIs
-// queued recently, so a short discography doesn't loop the same handful of
-// songs every time the queue runs out.
+// — the artist's most-played tracks, seeded from whatever is currently
+// playing. Spotify retired the recommendations and related-artists endpoints
+// for apps created after November 2024, and removed top tracks in February
+// 2026, so "more like this" is answered through search — the one ranked
+// catalog read left. exclude drops URIs queued recently, so a short
+// discography doesn't loop the same handful of songs every time the queue
+// runs out.
 func (c *Client) SimilarTracks(ctx context.Context, artistName string, exclude map[string]bool, limit int) ([]Item, error) {
 	artistName = strings.TrimSpace(artistName)
 	if artistName == "" {
 		return nil, errors.New("spotify: no artist to seed similar tracks from")
 	}
-	id, err := c.searchArtistID(ctx, artistName)
-	if err != nil {
-		return nil, err
-	}
-	tracks, err := c.artistTopTracks(ctx, id)
+	tracks, err := c.artistPopularTracks(ctx, artistName)
 	if err != nil {
 		return nil, err
 	}
@@ -866,26 +898,6 @@ func (c *Client) SimilarTracks(ctx context.Context, artistName string, exclude m
 		}
 	}
 	return out, nil
-}
-
-func (c *Client) searchArtistID(ctx context.Context, name string) (string, error) {
-	var raw struct {
-		Artists struct {
-			Items []struct {
-				URI string `json:"uri"`
-			} `json:"items"`
-		} `json:"artists"`
-	}
-	err := c.apiGet(ctx, "/search", url.Values{
-		"q": {name}, "type": {"artist"}, "limit": {"1"},
-	}, &raw)
-	if err != nil {
-		return "", err
-	}
-	if len(raw.Artists.Items) == 0 {
-		return "", fmt.Errorf("spotify: no artist matched %q", name)
-	}
-	return artistIDFromURI(raw.Artists.Items[0].URI)
 }
 
 // ContextDetail is a playlist or album's own track listing — the drill-in
@@ -918,6 +930,27 @@ func (c *Client) Context(ctx context.Context, uri string) (*ContextDetail, error
 	}
 }
 
+// wirePlaylistEntry is one slot in a playlist's track listing. February
+// 2026 renamed the entry's "track" to "item" (and the page itself from
+// "tracks" to "items"); extended-quota apps still get the old shape, so
+// both are read and whichever Spotify answered for wins.
+type wirePlaylistEntry struct {
+	Track *wireTrack `json:"track"` // pre-February-2026 shape; null for a removed or local track
+	Item  *wireTrack `json:"item"`  // current shape
+}
+
+type wirePlaylistPage struct {
+	Total int                 `json:"total"`
+	Items []wirePlaylistEntry `json:"items"`
+}
+
+func (e wirePlaylistEntry) track() *wireTrack {
+	if e.Item != nil {
+		return e.Item
+	}
+	return e.Track
+}
+
 func (c *Client) playlistContext(ctx context.Context, uri string) (*ContextDetail, error) {
 	id := strings.TrimPrefix(uri, "spotify:playlist:")
 	var raw struct {
@@ -930,30 +963,33 @@ func (c *Client) playlistContext(ctx context.Context, uri string) (*ContextDetai
 		Followers struct {
 			Total int `json:"total"`
 		} `json:"followers"`
-		Tracks struct {
-			Total int `json:"total"`
-			Items []struct {
-				Track *wireTrack `json:"track"` // null for a removed or local track
-			} `json:"items"`
-		} `json:"tracks"`
+		Tracks wirePlaylistPage `json:"tracks"` // pre-February-2026 shape
+		Items  wirePlaylistPage `json:"items"`  // current shape
 	}
 	err := c.apiGet(ctx, "/playlists/"+url.PathEscape(id), url.Values{
-		"fields": {"name,description,images,owner.display_name,followers.total,tracks.total,tracks.items(track(uri,name,duration_ms,explicit,artists,album(name,images)))"},
+		"fields": {"name,description,images,owner.display_name,followers.total," +
+			"items.total,items.items(item(uri,name,duration_ms,explicit,artists,album(name,images)))," +
+			"tracks.total,tracks.items(track(uri,name,duration_ms,explicit,artists,album(name,images)))"},
 	}, &raw)
 	if err != nil {
 		return nil, err
+	}
+	page := raw.Items
+	if page.Total == 0 && len(page.Items) == 0 {
+		page = raw.Tracks
 	}
 	det := &ContextDetail{
 		Kind: "playlist", URI: uri, Name: raw.Name,
 		Sub: raw.Owner.DisplayName, ArtURL: artOfLarge(raw.Images),
 		Description: raw.Description, Followers: raw.Followers.Total,
-		TotalTracks: raw.Tracks.Total, Tracks: []Item{},
+		TotalTracks: page.Total, Tracks: []Item{},
 	}
-	for _, it := range raw.Tracks.Items {
-		if it.Track == nil || it.Track.URI == "" {
+	for _, e := range page.Items {
+		t := e.track()
+		if t == nil || t.URI == "" {
 			continue
 		}
-		det.Tracks = append(det.Tracks, trackItem(*it.Track))
+		det.Tracks = append(det.Tracks, trackItem(*t))
 	}
 	return det, nil
 }
