@@ -70,6 +70,11 @@
     // idle auto-return — covers it untouched, and back is one hash away.
     const musicOpen = $derived(route.query.music === "1");
 
+    // Touches feed the activity clock on pointerdown; waking is the face's
+    // own click (below), so the tap that wakes can never act on the panel.
+    function poke() {
+        lastTouch = Date.now();
+    }
     function wake() {
         lastTouch = Date.now();
         idle = false;
@@ -115,10 +120,10 @@
     }
 </script>
 
-<!-- The pointerdown handler is the wake layer for the ambient face, not an
+<!-- The pointerdown handler only feeds the activity clock, not an
      interactive control. -->
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="panel" class:has-music={music.hasSpeakers} onpointerdown={wake}>
+<div class="panel" class:has-music={music.hasSpeakers} onpointerdown={poke}>
     {#if musicOpen}
         <PanelBrowse {music} />
     {:else}
@@ -132,7 +137,17 @@
     {/if}
 
     {#if idle}
-        <div class="ambient" class:night={isNight} transition:fade={{ duration: dur(600) }}>
+        <!-- Wake on click, claimed by the face itself while it still covers
+             the panel: a pointerdown wake lets the tap's click fall through
+             to a tile once the face is gone — instantly under reduced motion,
+             or when a long press outlives the fade. -->
+        <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
+        <div
+            class="ambient"
+            class:night={isNight}
+            transition:fade={{ duration: dur(600) }}
+            onclick={wake}
+        >
             <div class="face" style:transform={drift}>
                 <div class="a-clock mono">{timeLabel}</div>
                 <div class="a-date">{dateLabel}</div>
