@@ -33,6 +33,9 @@
         seekable = false,
         /** Absent for a source with no play modes. */
         modes = undefined,
+        /** The desktop stage's size: left-aligned with the column, a bigger
+         *  play button carrying the row. */
+        large = false,
     }: {
         playing: boolean;
         onToggle: () => void;
@@ -51,10 +54,11 @@
             onShuffle: () => void;
             onRepeat: () => void;
         };
+        large?: boolean;
     } = $props();
 </script>
 
-<div class="p-transport">
+<div class="p-transport" class:large>
     {#if modes}
         <button
             class="icon-btn t-mode"
@@ -85,7 +89,10 @@
         aria-label={playing ? "Pause" : "Play"}
         title="Play / pause (space)"
         disabled={toggleBusy}
-        onclick={() => { haptic(); onToggle(); }}
+        onclick={() => {
+            haptic();
+            onToggle();
+        }}
     >
         <Icon name={playing ? "pause" : "play"} size={26} />
     </button>
@@ -115,27 +122,83 @@
 </div>
 
 <style>
-    .p-transport { display: flex; align-items: center; justify-content: center; gap: var(--space-4); }
-    .t-btn { width: 48px; height: 48px; }
-    .t-mode { width: 42px; height: 42px; border-radius: 50%; color: var(--text-mute); }
-    .t-mode.on { background: var(--on-soft); color: var(--on); }
-    .t-mode:disabled { opacity: 0.35; }
-    .p-play {
-        width: 66px; height: 66px; border-radius: 50%;
-        display: grid; place-items: center; flex-shrink: 0;
-        background: var(--on); color: var(--primary-fg); border: 0;
-        cursor: pointer; box-shadow: 0 0 24px -2px var(--on-glow);
+    .p-transport {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: var(--space-4);
     }
-    .p-play:active { transform: scale(0.96); }
-    .p-play:disabled { opacity: 0.5; }
+    /* The stage: aligned with the column's left edge, sized up to carry it. */
+    .p-transport.large {
+        justify-content: flex-start;
+        gap: var(--space-5);
+    }
+    .p-transport.large .p-play {
+        width: 76px;
+        height: 76px;
+    }
+    .p-transport.large .t-btn {
+        width: 56px;
+        height: 56px;
+    }
+    .p-transport.large .t-mode {
+        width: 46px;
+        height: 46px;
+    }
+    .t-btn {
+        width: 48px;
+        height: 48px;
+    }
+    .t-mode {
+        width: 42px;
+        height: 42px;
+        border-radius: 50%;
+        color: var(--text-mute);
+    }
+    .t-mode.on {
+        background: var(--on-soft);
+        color: var(--on);
+    }
+    .t-mode:disabled {
+        opacity: 0.35;
+    }
+    .p-play {
+        width: 66px;
+        height: 66px;
+        border-radius: 50%;
+        display: grid;
+        place-items: center;
+        flex-shrink: 0;
+        background: var(--on);
+        color: var(--primary-fg);
+        border: 0;
+        cursor: pointer;
+        box-shadow: 0 0 24px -2px var(--on-glow);
+    }
+    .p-play:active {
+        transform: scale(0.96);
+    }
+    .p-play:disabled {
+        opacity: 0.5;
+    }
 
     @media (pointer: coarse) {
-        .t-btn { width: 52px; height: 52px; }
-        .t-mode { width: 48px; height: 48px; }
+        .t-btn {
+            width: 52px;
+            height: 52px;
+        }
+        .t-mode {
+            width: 48px;
+            height: 48px;
+        }
         /* Five transport controls have to fit a 360px screen. */
-        .p-transport { gap: var(--space-3); }
+        .p-transport {
+            gap: var(--space-3);
+        }
     }
     @media (prefers-reduced-motion: reduce) {
-        .p-play { transition-duration: 0.001ms; }
+        .p-play {
+            transition-duration: 0.001ms;
+        }
     }
 </style>

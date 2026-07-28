@@ -21,6 +21,7 @@
      * Nothing here infers a capability from a make. A control that would be
      * refused is worse than a control that isn't there.
      */
+    import { onMount } from "svelte";
     import Icon from "../Icon.svelte";
     import MusicSheet from "./MusicSheet.svelte";
     import PlayerArt from "./PlayerArt.svelte";
@@ -81,6 +82,19 @@
     const gs = $derived(rooms.groupState(r));
     const faders = $derived(rooms.faders(r));
 
+    // From the desktop shell's breakpoint up the player is a stage: art on
+    // the left, everything that drives it on the right, and the queue becomes
+    // the right column rather than swapping the whole sheet. Below it, the
+    // layout wrappers vanish and nothing about the phone changes.
+    let wide = $state(false);
+    onMount(() => {
+        const mq = window.matchMedia("(min-width: 901px)");
+        const update = () => (wide = mq.matches);
+        update();
+        mq.addEventListener("change", update);
+        return () => mq.removeEventListener("change", update);
+    });
+
     let queuePane = $state(false);
     /** The queue belongs to a Sonos group; nothing else has one to show. */
     const queueLength = $derived(r.canQueue ? (gs?.queue_length ?? 0) : 0);
@@ -96,13 +110,15 @@
         if (r.speaker && !r.speaker.state?.powered_on) {
             return { title: "Standby", sub: "Press play to wake it.", idle: true };
         }
-        return { title: "Nothing playing", sub: "Find something below to start it here.", idle: true };
+        return {
+            title: "Nothing playing",
+            sub: "Find something below to start it here.",
+            idle: true,
+        };
     });
 
     /** The name of the thing the header's action opens. */
-    const configureLabel = $derived(
-        r.kind === "zone" ? `Edit ${r.name}` : `${r.name} settings`,
-    );
+    const configureLabel = $derived(r.kind === "zone" ? `Edit ${r.name}` : `${r.name} settings`);
 
     // The two panes share one scroll container, so switching has to rewind it
     // — otherwise the queue opens halfway down at the player's offset.
@@ -150,11 +166,23 @@
                 if (e.shiftKey) rooms.skip(r, "previous");
                 else rooms.seek(r, Math.max(0, pos - 10));
                 break;
-            case "ArrowUp": e.preventDefault(); rooms.nudgeVolume(r, 5); break;
-            case "ArrowDown": e.preventDefault(); rooms.nudgeVolume(r, -5); break;
-            case "n": rooms.skip(r, "next"); break;
-            case "p": rooms.skip(r, "previous"); break;
-            case "m": rooms.toggleMute(r); break;
+            case "ArrowUp":
+                e.preventDefault();
+                rooms.nudgeVolume(r, 5);
+                break;
+            case "ArrowDown":
+                e.preventDefault();
+                rooms.nudgeVolume(r, -5);
+                break;
+            case "n":
+                rooms.skip(r, "next");
+                break;
+            case "p":
+                rooms.skip(r, "previous");
+                break;
+            case "m":
+                rooms.toggleMute(r);
+                break;
             case "s":
                 if (r.group && gs) sonos.setPlayMode(r.group, { shuffle: !gs.shuffle });
                 break;
@@ -193,11 +221,15 @@
     onBack={() => (queuePane ? (queuePane = false) : onClose())}
     onDismiss={onClose}
     action={{ icon: "sliders", label: configureLabel, onClick: onConfigure }}
+    wide
+    backdropUri={rooms.art(r)}
     bind:scrollEl
     bind:sheetEl
     bind:dismissing
 >
-    {#if queuePane && r.group}
+    {#if queuePane && r.group && !wide}
+        <!-- On a phone the queue is the sheet's second pane: it swaps the
+             whole surface and puts it back on the way out. -->
         {@const c = sonos.coordinatorOf(r.group)}
         <QueuePane
             items={sonos.queue}
@@ -212,240 +244,394 @@
             onClear={onClearQueue}
         />
     {:else}
-        <PlayerArt
-            artUri={rooms.art(r)}
-            sheetDismissing={dismissing}
-            onSkip={r.canSkip ? (dir) => rooms.skip(r, dir) : undefined}
-        />
+        <div class="st">
+            <div class="st-left">
+                <PlayerArt
+                    artUri={rooms.art(r)}
+                    sheetDismissing={dismissing}
+                    large={wide}
+                    onSkip={r.canSkip ? (dir) => rooms.skip(r, dir) : undefined}
+                />
+            </div>
 
-        <PlayerMeta title={meta.title} sub={meta.sub} idle={meta.idle} />
+            <div class="st-right">
+                {#if queuePane && r.group}
+                    <!-- On the stage the queue is the right column — the art stays,
+                 because what's playing is still the point of the window. -->
+                    {@const c = sonos.coordinatorOf(r.group)}
+                    <QueuePane
+                        items={sonos.queue}
+                        loading={sonos.queueLoading}
+                        total={queueLength || sonos.queue.length}
+                        currentTrack={c?.state?.queue_track}
+                        {playing}
+                        clearBusy={!c || busy.is("qclear:" + c?.id)}
+                        isBusy={(k) => busy.is(k)}
+                        onJump={(track) => r.group && sonos.jumpTo(r.group, track)}
+                        onRemove={(track) => r.group && sonos.removeQueued(r.group, track)}
+                        onClear={onClearQueue}
+                    />
+                {:else}
+                    <PlayerMeta title={meta.title} sub={meta.sub} idle={meta.idle} large={wide} />
 
-        <!-- What a play here does, in the backend's words. Above the transport
+                    <!-- What a play here does, in the backend's words. Above the transport
              because it qualifies it: on the stream route the skips below are
              absent, and this is the sentence that explains why. -->
-        {#if r.zone}
-            <ZoneRoute route={r.zone.route} sync={r.zone.sync} reason={r.zone.reason} problem={r.zone.problem} />
-        {/if}
+                    {#if r.zone}
+                        <ZoneRoute
+                            route={r.zone.route}
+                            sync={r.zone.sync}
+                            reason={r.zone.reason}
+                            problem={r.zone.problem}
+                        />
+                    {/if}
 
-        <TrackRail
-            position={rooms.livePosition(r)}
-            {duration}
-            {seekable}
-            idle={!title}
-            liveLabel={r.speaker ? "no track position on this input" : "live stream — no track position"}
-            onSeek={(sec) => rooms.seek(r, sec)}
-        />
+                    <TrackRail
+                        position={rooms.livePosition(r)}
+                        {duration}
+                        {seekable}
+                        idle={!title}
+                        liveLabel={r.speaker
+                            ? "no track position on this input"
+                            : "live stream — no track position"}
+                        onSeek={(sec) => rooms.seek(r, sec)}
+                    />
 
-        <PlayerTransport
-            {playing}
-            onToggle={() => rooms.togglePlay(r)}
-            toggleBusy={rooms.playBusy(r) || !r.reachable}
-            onPrev={r.canSkip ? () => rooms.skip(r, "previous") : undefined}
-            prevBusy={rooms.prevBusy(r)}
-            onNext={r.canSkip ? () => rooms.skip(r, "next") : undefined}
-            nextBusy={rooms.nextBusy(r)}
-            {seekable}
-            modes={gs && r.group
-                ? {
-                      shuffle: gs.shuffle,
-                      repeat: gs.repeat,
-                      repeatLabel: repeatLabel(gs.repeat),
-                      busy: busy.is("mode:" + r.id),
-                      onShuffle: () => r.group && sonos.setPlayMode(r.group, { shuffle: !gs.shuffle }),
-                      onRepeat: () =>
-                          r.group && sonos.setPlayMode(r.group, { repeat: NEXT_REPEAT[gs.repeat] }),
-                  }
-                : undefined}
-        />
+                    <PlayerTransport
+                        {playing}
+                        onToggle={() => rooms.togglePlay(r)}
+                        toggleBusy={rooms.playBusy(r) || !r.reachable}
+                        onPrev={r.canSkip ? () => rooms.skip(r, "previous") : undefined}
+                        prevBusy={rooms.prevBusy(r)}
+                        onNext={r.canSkip ? () => rooms.skip(r, "next") : undefined}
+                        nextBusy={rooms.nextBusy(r)}
+                        large={wide}
+                        {seekable}
+                        modes={gs && r.group
+                            ? {
+                                  shuffle: gs.shuffle,
+                                  repeat: gs.repeat,
+                                  repeatLabel: repeatLabel(gs.repeat),
+                                  busy: busy.is("mode:" + r.id),
+                                  onShuffle: () =>
+                                      r.group &&
+                                      sonos.setPlayMode(r.group, { shuffle: !gs.shuffle }),
+                                  onRepeat: () =>
+                                      r.group &&
+                                      sonos.setPlayMode(r.group, {
+                                          repeat: NEXT_REPEAT[gs.repeat],
+                                      }),
+                              }
+                            : undefined}
+                    />
 
-        {#if r.zone && !r.canSkip}
-            <p class="hint centred">
-                HomeHub is the Spotify device while this room plays, so track changes come from
-                Spotify itself — skip there, and it follows here.
-            </p>
-        {/if}
+                    {#if r.zone && !r.canSkip}
+                        <p class="hint centred">
+                            HomeHub is the Spotify device while this room plays, so track changes
+                            come from Spotify itself — skip there, and it follows here.
+                        </p>
+                    {/if}
 
-        <!-- The keys are only worth advertising where there is a keyboard;
+                    <!-- The keys are only worth advertising where there is a keyboard;
              phones get the art swipe instead. -->
-        <p class="p-keys mono" aria-hidden="true">{keyLine}</p>
+                    <p class="p-keys mono" aria-hidden="true">{keyLine}</p>
 
-        <!-- Stop, not just pause: it also hands the Spotify session back, which
+                    <!-- Stop, not just pause: it also hands the Spotify session back, which
              is what frees another room to take it. -->
-        {#if r.zone && (playing || title)}
-            <div class="centred-row">
-                <button class="chip" disabled={busy.is("zstop:" + r.id)} onclick={onStop}>
-                    Stop and release Spotify
-                </button>
-            </div>
-        {/if}
+                    {#if r.zone && (playing || title)}
+                        <div class="centred-row">
+                            <button
+                                class="chip"
+                                disabled={busy.is("zstop:" + r.id)}
+                                onclick={onStop}
+                            >
+                                Stop and release Spotify
+                            </button>
+                        </div>
+                    {/if}
 
-        {#if gs && r.group}
-            {@const c = sonos.coordinatorOf(r.group)}
-            <div class="p-extras">
-                <div class="p-chips">
-                    <!-- Preferences, not device states, so chips rather than switches. -->
-                    <button
-                        class="chip"
-                        class:on={gs.crossfade}
-                        aria-pressed={gs.crossfade}
-                        disabled={!c || busy.is("xfade:" + c?.id)}
-                        onclick={() => r.group && sonos.toggleCrossfade(r.group)}
-                    >
-                        Crossfade
-                    </button>
-                    <button
-                        class="chip"
-                        class:on={!!c?.autoplay}
-                        aria-pressed={!!c?.autoplay}
-                        disabled={!c || busy.is("autoplay:" + c?.id)}
-                        onclick={() => r.group && sonos.toggleAutoplay(r.group)}
-                    >
-                        Autoplay
-                    </button>
-                </div>
-                {#if queueLength > 0}
-                    <button class="p-upnext" onclick={() => (queuePane = true)}>
-                        <Icon name="queue" size={17} />
-                        <span class="up-body">
-                            <span class="up-label">Up next</span>
-                            <span class="up-track">
-                                {sonos.nextInQueue(c?.state?.queue_track)?.title ?? "End of the queue"}
-                            </span>
-                        </span>
-                        <span class="up-count mono">{queueLength}</span>
-                        <span class="up-go" aria-hidden="true"><Icon name="chevronLeft" size={16} /></span>
-                    </button>
-                {/if}
-            </div>
-        {/if}
+                    {#if gs && r.group}
+                        {@const c = sonos.coordinatorOf(r.group)}
+                        <div class="p-extras">
+                            <div class="p-chips">
+                                <!-- Preferences, not device states, so chips rather than switches. -->
+                                <button
+                                    class="chip"
+                                    class:on={gs.crossfade}
+                                    aria-pressed={gs.crossfade}
+                                    disabled={!c || busy.is("xfade:" + c?.id)}
+                                    onclick={() => r.group && sonos.toggleCrossfade(r.group)}
+                                >
+                                    Crossfade
+                                </button>
+                                <button
+                                    class="chip"
+                                    class:on={!!c?.autoplay}
+                                    aria-pressed={!!c?.autoplay}
+                                    disabled={!c || busy.is("autoplay:" + c?.id)}
+                                    onclick={() => r.group && sonos.toggleAutoplay(r.group)}
+                                >
+                                    Autoplay
+                                </button>
+                            </div>
+                            {#if queueLength > 0}
+                                <button class="p-upnext" onclick={() => (queuePane = true)}>
+                                    <Icon name="queue" size={17} />
+                                    <span class="up-body">
+                                        <span class="up-label">Up next</span>
+                                        <span class="up-track">
+                                            {sonos.nextInQueue(c?.state?.queue_track)?.title ??
+                                                "End of the queue"}
+                                        </span>
+                                    </span>
+                                    <span class="up-count mono">{queueLength}</span>
+                                    <span class="up-go" aria-hidden="true"
+                                        ><Icon name="chevronLeft" size={16} /></span
+                                    >
+                                </button>
+                            {/if}
+                        </div>
+                    {/if}
 
-        <!-- Somewhere to go, playing or not: swapping a song out is as ordinary
+                    <!-- Somewhere to go, playing or not: swapping a song out is as ordinary
              a thing to want here as starting the first one. Favorites only
              stand in for an empty player — with a track up, the row that
              matters is the search. -->
-        {@render startSomething(title ? null : (r.kind === "sonos" ? r.id : null))}
+                    {@render startSomething(title ? null : r.kind === "sonos" ? r.id : null)}
 
-        <div class="p-speakers">
-            <div class="eyrow">Volume</div>
-            {#if r.grouped}
-                <VolumeRow
-                    name="All speakers"
-                    value={rooms.volume(r)}
-                    label="{r.name} volume"
-                    onInput={(v) => rooms.dragVolume(r, v)}
-                    onChange={(v) => rooms.setVolume(r, v)}
-                />
-                <div class="m-divider" aria-hidden="true"></div>
-            {/if}
-            {#each faders as f (f.key)}
-                <VolumeRow
-                    name={f.name}
-                    value={f.value}
-                    label="{f.name} volume"
-                    mute={{ muted: f.muted, busy: f.muteBusy, onToggle: f.onMute }}
-                    onRemove={f.onRemove}
-                    removeBusy={f.removeBusy}
-                    onInput={f.onInput}
-                    onChange={f.onChange}
-                />
-            {/each}
-            {#if r.group?.unregistered?.length}
-                <div class="p-note mono">
-                    also in this room: {r.group.unregistered.join(", ")} — add them to control here
-                </div>
-            {/if}
-            {#if r.zone?.speakers.some((sp) => sp.missing)}
-                <div class="p-note bad mono">
-                    a speaker in this room no longer exists — edit it to drop it
-                </div>
-            {/if}
-        </div>
+                    <div class="p-speakers">
+                        <div class="eyrow">Volume</div>
+                        {#if r.grouped}
+                            <VolumeRow
+                                name="All speakers"
+                                value={rooms.volume(r)}
+                                label="{r.name} volume"
+                                onInput={(v) => rooms.dragVolume(r, v)}
+                                onChange={(v) => rooms.setVolume(r, v)}
+                            />
+                            <div class="m-divider" aria-hidden="true"></div>
+                        {/if}
+                        {#each faders as f (f.key)}
+                            <VolumeRow
+                                name={f.name}
+                                value={f.value}
+                                label="{f.name} volume"
+                                mute={{ muted: f.muted, busy: f.muteBusy, onToggle: f.onMute }}
+                                onRemove={f.onRemove}
+                                removeBusy={f.removeBusy}
+                                onInput={f.onInput}
+                                onChange={f.onChange}
+                            />
+                        {/each}
+                        {#if r.group?.unregistered?.length}
+                            <div class="p-note mono">
+                                also in this room: {r.group.unregistered.join(", ")} — add them to control
+                                here
+                            </div>
+                        {/if}
+                        {#if r.zone?.speakers.some((sp) => sp.missing)}
+                            <div class="p-note bad mono">
+                                a speaker in this room no longer exists — edit it to drop it
+                            </div>
+                        {/if}
+                    </div>
 
-        <!-- The question a KEF speaker raises that nothing else does: which
+                    <!-- The question a KEF speaker raises that nothing else does: which
              input. Every model shows the same list — there is no "what inputs
              do you have" call, so a model without USB refuses it rather than
              the UI guessing. -->
-        {#if r.speaker}
-            {@const sp = r.speaker}
-            <div class="p-speakers">
-                <div class="eyrow">Input</div>
-                <div class="p-chips">
-                    {#each KEF_SOURCES as src (src.value)}
-                        <button
-                            class="chip"
-                            class:on={sp.state?.source === src.value}
-                            aria-pressed={sp.state?.source === src.value}
-                            disabled={busy.is("kefsrc:" + sp.id)}
-                            onclick={() => kef.setSource(sp, src.value)}>{src.label}</button
-                        >
-                    {/each}
-                </div>
-                <p class="hint">
-                    Currently on {kefSourceLabel(sp.state?.source)}. Grouping this speaker with
-                    another makes a HomeHub room, which streams to both.
-                </p>
-            </div>
-        {/if}
+                    {#if r.speaker}
+                        {@const sp = r.speaker}
+                        <div class="p-speakers">
+                            <div class="eyrow">Input</div>
+                            <div class="p-chips">
+                                {#each KEF_SOURCES as src (src.value)}
+                                    <button
+                                        class="chip"
+                                        class:on={sp.state?.source === src.value}
+                                        aria-pressed={sp.state?.source === src.value}
+                                        disabled={busy.is("kefsrc:" + sp.id)}
+                                        onclick={() => kef.setSource(sp, src.value)}
+                                        >{src.label}</button
+                                    >
+                                {/each}
+                            </div>
+                            <p class="hint">
+                                Currently on {kefSourceLabel(sp.state?.source)}. Grouping this
+                                speaker with another makes a HomeHub room, which streams to both.
+                            </p>
+                        </div>
+                    {/if}
 
-        <!-- Taking the room apart. Native grouping undoes here; a room the user
+                    <!-- Taking the room apart. Native grouping undoes here; a room the user
              named and built is edited or deleted, which is a form, so the
              header's action owns it instead. -->
-        {#if onUngroup}
-            <div class="centred-row">
-                <button class="chip" disabled={rooms.ungroupBusy(r)} onclick={onUngroup}>
-                    Split into {r.members.length} separate rooms
-                </button>
+                    {#if onUngroup}
+                        <div class="centred-row">
+                            <button
+                                class="chip"
+                                disabled={rooms.ungroupBusy(r)}
+                                onclick={onUngroup}
+                            >
+                                Split into {r.members.length} separate rooms
+                            </button>
+                        </div>
+                    {/if}
+                {/if}
             </div>
-        {/if}
+        </div>
     {/if}
 </MusicSheet>
 
 <style>
-    .centred { text-align: center; }
-    .centred-row { display: flex; justify-content: center; }
+    /* Below the desktop shell's breakpoint the stage wrappers vanish, and the
+       player's children stack in the sheet exactly as they always have. */
+    .st,
+    .st-left,
+    .st-right {
+        display: contents;
+    }
+    @media (min-width: 901px) {
+        .st {
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr);
+            gap: 52px;
+            align-items: start;
+            padding-top: var(--space-2);
+        }
+        .st-left {
+            display: block;
+            /* The art stays put while a long right column scrolls under it. */
+            position: sticky;
+            top: 48px;
+        }
+        .st-right {
+            display: flex;
+            flex-direction: column;
+            gap: var(--space-5);
+            min-width: 0;
+        }
+        .st-right > .centred {
+            text-align: left;
+        }
+        .st-right > .centred-row {
+            justify-content: flex-start;
+        }
+        .st-right .p-keys {
+            text-align: left;
+        }
+    }
 
-    .p-keys { display: none; }
+    .centred {
+        text-align: center;
+    }
+    .centred-row {
+        display: flex;
+        justify-content: center;
+    }
+
+    .p-keys {
+        display: none;
+    }
     @media (hover: hover) and (pointer: fine) {
         .p-keys {
-            display: block; text-align: center;
-            font-size: 10px; letter-spacing: 0.06em;
+            display: block;
+            text-align: center;
+            font-size: 10px;
+            letter-spacing: 0.06em;
             color: var(--text-dim);
         }
     }
 
-    .p-extras { display: flex; flex-direction: column; gap: var(--space-3); }
-    .p-chips { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+    .p-extras {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-3);
+    }
+    .p-chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--space-2);
+    }
 
     /* Up next doubles as the way into the queue pane. */
     .p-upnext {
-        display: flex; align-items: center; gap: var(--space-3);
-        min-height: 56px; padding: 10px var(--space-3);
-        background: var(--card); border: 1px solid var(--hairline);
+        display: flex;
+        align-items: center;
+        gap: var(--space-3);
+        min-height: 56px;
+        padding: 10px var(--space-3);
+        background: var(--card);
+        border: 1px solid var(--hairline);
         border-radius: var(--r-md);
-        color: var(--text-mute); cursor: pointer; text-align: left; font: inherit;
+        color: var(--text-mute);
+        cursor: pointer;
+        text-align: left;
+        font: inherit;
         transition: border-color var(--t-fast);
     }
-    @media (hover: hover) { .p-upnext:hover { border-color: var(--border-strong); } }
-    .up-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+    @media (hover: hover) {
+        .p-upnext:hover {
+            border-color: var(--border-strong);
+        }
+    }
+    .up-body {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+    }
     .up-label {
         font-family: var(--font-mono);
-        font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase;
+        font-size: 10px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
         color: var(--text-dim);
     }
     .up-track {
-        font-size: 13px; color: var(--text);
-        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        font-size: 13px;
+        color: var(--text);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
     }
-    .up-count { font-size: 12px; color: var(--text-dim); flex-shrink: 0; }
-    .up-go { display: flex; transform: rotate(180deg); flex-shrink: 0; }
+    .up-count {
+        font-size: 12px;
+        color: var(--text-dim);
+        flex-shrink: 0;
+    }
+    .up-go {
+        display: flex;
+        transform: rotate(180deg);
+        flex-shrink: 0;
+    }
 
-    .p-speakers { display: flex; flex-direction: column; gap: 2px; }
-    .p-speakers .eyrow { margin-bottom: var(--space-1); }
-    .m-divider { height: 1px; background: var(--hairline); margin: var(--space-2) 0; }
-    .p-note { font-size: 11px; color: var(--text-dim); margin-top: var(--space-2); }
-    .p-note.bad { color: var(--bad); }
+    .p-speakers {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+    }
+    .p-speakers .eyrow {
+        margin-bottom: var(--space-1);
+    }
+    .m-divider {
+        height: 1px;
+        background: var(--hairline);
+        margin: var(--space-2) 0;
+    }
+    .p-note {
+        font-size: 11px;
+        color: var(--text-dim);
+        margin-top: var(--space-2);
+    }
+    .p-note.bad {
+        color: var(--bad);
+    }
 
     @media (prefers-reduced-motion: reduce) {
-        .p-upnext { transition-duration: 0.001ms; }
+        .p-upnext {
+            transition-duration: 0.001ms;
+        }
     }
 </style>

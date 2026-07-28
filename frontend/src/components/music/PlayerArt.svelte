@@ -16,10 +16,14 @@
         /** Set while the sheet is riding out a committed drag-down: no new
          *  gesture should start during those 220ms. */
         sheetDismissing = false,
+        /** The desktop stage's size: the art is the left column's whole job,
+         *  so it grows past the phone layout's cap. */
+        large = false,
         onSkip = undefined,
     }: {
         artUri?: string;
         sheetDismissing?: boolean;
+        large?: boolean;
         onSkip?: (dir: "next" | "previous") => void;
     } = $props();
 
@@ -74,6 +78,7 @@
 <div
     class="p-art"
     class:swiping
+    class:large
     role="none"
     onpointerdown={onPointerDown}
     onpointermove={onPointerMove}
@@ -91,29 +96,62 @@
 
 <style>
     .p-art {
-        display: flex; justify-content: center; padding: var(--space-2) 0 0;
+        display: flex;
+        justify-content: center;
+        padding: var(--space-2) 0 0;
         /* Horizontal is the swipe-to-skip gesture's; vertical stays the
            sheet's (scroll, drag-to-dismiss). */
         touch-action: pan-y;
-        transition: transform 260ms var(--spring), opacity var(--t-fast);
+        transition:
+            transform 260ms var(--spring),
+            opacity var(--t-fast);
         will-change: transform;
     }
-    .p-art.swiping { transition: none; }
-    .p-art img { user-select: none; -webkit-user-drag: none; }
-    .p-art img, .p-art-ph {
-        width: min(340px, 78vw); aspect-ratio: 1;
-        border-radius: var(--r-lg); object-fit: cover;
+    .p-art.swiping {
+        transition: none;
     }
     .p-art img {
-        background: var(--card-3); border: 1px solid var(--tile-on-border);
+        user-select: none;
+        -webkit-user-drag: none;
+    }
+    .p-art img,
+    .p-art-ph {
+        width: min(340px, 78vw);
+        aspect-ratio: 1;
+        border-radius: var(--r-lg);
+        object-fit: cover;
+    }
+    .p-art img {
+        background: var(--card-3);
+        border: 1px solid var(--tile-on-border);
         box-shadow: 0 18px 40px -18px var(--on-glow);
     }
     .p-art-ph {
-        display: grid; place-items: center;
-        background: var(--tile-on-gradient); border: 1px solid var(--tile-on-border);
-        color: var(--text-dim); font-family: var(--font-mono); font-size: 11px;
+        display: grid;
+        place-items: center;
+        background: var(--tile-on-gradient);
+        border: 1px solid var(--tile-on-border);
+        color: var(--text-dim);
+        font-family: var(--font-mono);
+        font-size: 11px;
+    }
+    /* The stage's left column: the art fills it, capped by the window's own
+       height so it never pushes the controls off the bottom. */
+    .p-art.large {
+        padding-top: 0;
+    }
+    .p-art.large img,
+    .p-art.large .p-art-ph {
+        width: min(420px, 30vw, 58vh);
+    }
+    .p-art.large img {
+        box-shadow:
+            0 32px 72px -24px rgba(0, 0, 0, 0.65),
+            0 18px 48px -16px var(--on-glow);
     }
     @media (prefers-reduced-motion: reduce) {
-        .p-art { transition-duration: 0.001ms; }
+        .p-art {
+            transition-duration: 0.001ms;
+        }
     }
 </style>

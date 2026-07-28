@@ -48,6 +48,12 @@
         action = undefined,
         /** True while the dock floats over this sheet and the last row must clear it. */
         docked = false,
+        /** Desktop-only: a wide stage window instead of the phone-width dialog.
+         *  Below 901px it is the same sheet it always was. */
+        wide = false,
+        /** The playing track's art — blurred into the stage's ambient backdrop.
+         *  Only consulted in wide mode on desktop. */
+        backdropUri = undefined,
         /** Backdrop click and the drag-down throw both land here. */
         onDismiss,
         /** Bound so the view can note the scroll offset before a swap, and so
@@ -70,6 +76,8 @@
         onBack: () => void;
         action?: Action;
         docked?: boolean;
+        wide?: boolean;
+        backdropUri?: string;
         onDismiss: () => void;
         scrollEl?: HTMLElement | null;
         sheetEl?: HTMLElement | null;
@@ -199,6 +207,7 @@
 <div
     class="sheet"
     class:dragging
+    class:stage={wide}
     role="dialog"
     aria-modal="true"
     aria-label={label}
@@ -214,6 +223,16 @@
     in:sheet={{}}
     out:sheet={{ instant: dismissing }}
 >
+    {#if backdropUri}
+        <!-- The stage's ambient light: the track's own art, blown up and
+             blurred into the room the sheet is standing in. Desktop only. -->
+        <div
+            class="sheet-bg"
+            aria-hidden="true"
+            style:background-image={`url("${backdropUri}")`}
+        ></div>
+        <div class="sheet-wash" aria-hidden="true"></div>
+    {/if}
     <div
         class="sheet-scroll"
         class:docked
@@ -269,16 +288,22 @@
        modal stack (150) — DESIGN.md §15 has the player covering the nav, and
        a "Clear queue" confirm still has to land on top of the player. */
     .scrim {
-        position: fixed; inset: 0; z-index: var(--z-scrim);
+        position: fixed;
+        inset: 0;
+        z-index: var(--z-scrim);
         background: rgba(0, 0, 0, 0.5);
     }
     .sheet {
-        position: fixed; z-index: var(--z-sheet);
-        left: 0; right: 0; bottom: 0;
+        position: fixed;
+        z-index: var(--z-sheet);
+        left: 0;
+        right: 0;
+        bottom: 0;
         max-height: 92vh;
         background: var(--bg);
         border-radius: var(--r-xl) var(--r-xl) 0 0;
-        border: 1px solid var(--hairline); border-bottom: 0;
+        border: 1px solid var(--hairline);
+        border-bottom: 0;
         box-shadow: var(--shadow-lg);
         outline: none;
         /* Keep scrolled content inside the top radius, and GPU-promote the
@@ -287,18 +312,22 @@
         will-change: transform;
     }
     .grabber {
-        width: 38px; height: 4px; border-radius: 2px;
+        width: 38px;
+        height: 4px;
+        border-radius: 2px;
         background: var(--border-strong);
         margin: 8px auto 0;
         pointer-events: none;
     }
     .sheet-scroll {
-        max-height: 92vh; overflow-y: auto;
+        max-height: 92vh;
+        overflow-y: auto;
         overscroll-behavior: contain;
         -webkit-overflow-scrolling: touch;
-        padding: 0 var(--space-5)
-            calc(var(--space-8) + env(safe-area-inset-bottom));
-        display: flex; flex-direction: column; gap: var(--space-5);
+        padding: 0 var(--space-5) calc(var(--space-8) + env(safe-area-inset-bottom));
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-5);
     }
     /* The dock floats over Zones and Search, so the last row of either has to
        clear it rather than spending its life underneath. */
@@ -308,20 +337,85 @@
     /* On desktop the sheet becomes a centered dialog. */
     @media (min-width: 601px) {
         .sheet {
-            left: 50%; bottom: auto; top: 50%;
+            left: 50%;
+            bottom: auto;
+            top: 50%;
             transform: translate(-50%, -50%);
             width: min(440px, calc(100vw - 48px));
             max-height: 88vh;
-            border-radius: var(--r-xl); border-bottom: 1px solid var(--hairline);
+            border-radius: var(--r-xl);
+            border-bottom: 1px solid var(--hairline);
         }
-        .sheet-scroll { max-height: 88vh; }
+        .sheet-scroll {
+            max-height: 88vh;
+        }
+    }
+
+    /* From the desktop shell's width up, a `wide` sheet stops being a phone
+       dialog and becomes a stage: closer to the size of the room it's playing
+       in, with the track's own art blurred into the walls. The content grid
+       lives in the player — here it only gets the bigger frame. */
+    @media (min-width: 901px) {
+        .sheet.stage {
+            width: min(1120px, calc(100vw - 96px));
+            height: min(740px, calc(100vh - 64px));
+            max-height: none;
+        }
+        .sheet.stage .sheet-scroll {
+            max-height: none;
+            height: 100%;
+            padding: 0 44px 40px;
+            /* Painted above the ambient backdrop. */
+            position: relative;
+            z-index: 1;
+        }
+        .sheet.stage .sheet-bg {
+            position: absolute;
+            inset: -12%;
+            background-size: cover;
+            background-position: center;
+            filter: blur(64px) saturate(1.35);
+        }
+        .sheet.stage .sheet-wash {
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(
+                158deg,
+                rgba(20, 19, 15, 0.42) 0%,
+                rgba(20, 19, 15, 0.66) 55%,
+                rgba(20, 19, 15, 0.85) 100%
+            );
+        }
+        :global([data-theme="light"]) .sheet.stage .sheet-wash {
+            background: linear-gradient(
+                158deg,
+                rgba(245, 241, 234, 0.48) 0%,
+                rgba(245, 241, 234, 0.7) 55%,
+                rgba(245, 241, 234, 0.86) 100%
+            );
+        }
+        /* The hairline vanishes against a bright backdrop — the stage's edge
+           borrows the accent instead. */
+        .sheet.stage {
+            border-color: rgba(245, 189, 110, 0.16);
+        }
+        :global([data-theme="light"]) .sheet.stage {
+            border-color: rgba(201, 122, 31, 0.24);
+        }
     }
     /* The bar is the drag handle on phones, so the browser must not claim
        the gesture for scrolling first. */
     @media (max-width: 600px) {
-        .sheet-top { touch-action: none; cursor: grab; }
-        .sheet.dragging .sheet-top { cursor: grabbing; }
-        .sheet-scroll { touch-action: pan-y; }
+        .sheet-top {
+            touch-action: none;
+            cursor: grab;
+        }
+        .sheet.dragging .sheet-top {
+            cursor: grabbing;
+        }
+        .sheet-scroll {
+            touch-action: pan-y;
+        }
     }
 
     /* The band is translucent and blurred, and its bottom edge fades out — art
@@ -330,7 +424,9 @@
        floating block cutting the content in half. */
     .sheet-top {
         --fade: 22px;
-        position: sticky; top: 0; z-index: var(--z-raised);
+        position: sticky;
+        top: 0;
+        z-index: var(--z-raised);
         margin: 0 calc(var(--space-5) * -1) calc(var(--fade) * -1);
         padding: 0 var(--space-5) var(--fade);
         background: var(--bg-bar);
@@ -340,25 +436,44 @@
         mask-image: linear-gradient(to bottom, #000 calc(100% - var(--fade)), transparent);
     }
     .player-head {
-        display: flex; align-items: center; justify-content: space-between;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
         gap: var(--space-3);
         padding: var(--space-2) 0 var(--space-3);
     }
     .p-icon {
-        width: 38px; height: 38px; border-radius: 50%;
-        background: var(--card-2); border: 1px solid var(--hairline);
+        width: 38px;
+        height: 38px;
+        border-radius: 50%;
+        background: var(--card-2);
+        border: 1px solid var(--hairline);
     }
     /* Keeps the title centered on sheets whose head carries no action chip. */
-    .p-icon-gap { width: 38px; flex-shrink: 0; }
-    .p-onair { text-align: center; min-width: 0; }
-    .p-onair-name { font-size: 13px; font-weight: 600; margin-top: 2px; }
+    .p-icon-gap {
+        width: 38px;
+        flex-shrink: 0;
+    }
+    .p-onair {
+        text-align: center;
+        min-width: 0;
+    }
+    .p-onair-name {
+        font-size: 13px;
+        font-weight: 600;
+        margin-top: 2px;
+    }
     .p-onair-sub {
-        font-size: 11.5px; color: var(--text-mute); margin-top: 2px;
+        font-size: 11.5px;
+        color: var(--text-mute);
+        margin-top: 2px;
         line-height: 1.35;
     }
 
     @media (prefers-reduced-motion: reduce) {
         /* The drag snap-back is an inline style, so it needs its own override. */
-        .sheet { transition: none !important; }
+        .sheet {
+            transition: none !important;
+        }
     }
 </style>

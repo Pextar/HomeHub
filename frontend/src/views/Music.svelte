@@ -63,8 +63,13 @@
     import { createSearchHistory } from "../lib/music/history.svelte";
     import { createSpotify } from "../lib/music/spotify.svelte";
     import type {
-        SonosSpeakerView, SonosFavorite, KEFSpeakerView,
-        SpotifyItem, SpotifyArtistDetail, SpotifyContextDetail, MediaZone,
+        SonosSpeakerView,
+        SonosFavorite,
+        KEFSpeakerView,
+        SpotifyItem,
+        SpotifyArtistDetail,
+        SpotifyContextDetail,
+        MediaZone,
     } from "../lib/types";
 
     // The three bridges, and the model that turns them into rooms. The busy
@@ -147,7 +152,11 @@
         await busy.claim(key, async () => {
             try {
                 const res = await fn();
-                await (kind === "kef" ? kef.refresh() : kind === "zone" ? zones.refresh() : sonos.refresh());
+                await (kind === "kef"
+                    ? kef.refresh()
+                    : kind === "zone"
+                      ? zones.refresh()
+                      : sonos.refresh());
                 // A KEF play answers as soon as *Spotify* accepted it — the
                 // audio then goes out to the cloud and comes back — so the read
                 // above still says "stopped". A streamed room has the same gap:
@@ -217,7 +226,12 @@
     function playFavorite(f: SonosFavorite, target: string | null = destination.sonosTarget) {
         if (!target) return;
         const r = rooms.byKey("sonos:" + target);
-        void startPlayback("fav:" + f.id, () => api.sonosPlayFavorite(target, f), f.title, r?.name ?? "");
+        void startPlayback(
+            "fav:" + f.id,
+            () => api.sonosPlayFavorite(target, f),
+            f.title,
+            r?.name ?? "",
+        );
     }
 
     /**
@@ -234,7 +248,10 @@
         const added = await sonos.enqueue(target, item, next);
         if (!added) return;
         const where = added.track ? `position ${added.track} of ${added.length}` : "the queue";
-        toasts.success(next ? "Playing next" : "Added to queue", `${item.title ?? "Track"} · ${where}`);
+        toasts.success(
+            next ? "Playing next" : "Added to queue",
+            `${item.title ?? "Track"} · ${where}`,
+        );
         if (playerRoom?.id === target) void sonos.loadQueue(target);
     }
 
@@ -822,7 +839,10 @@
     }
 
     async function openKEFModal(sp: KEFSpeakerView) {
-        const changed = await openModal<boolean>(SpeakerModal, { existing: sp, brand: "kef" as const });
+        const changed = await openModal<boolean>(SpeakerModal, {
+            existing: sp,
+            brand: "kef" as const,
+        });
         if (changed) {
             if (kefDetailId === sp.id) kefDetailId = null;
             void kef.refresh();
@@ -890,7 +910,8 @@
 {#if !sonos.loaded}
     <section class="card"><div class="skeleton sk"></div></section>
 {:else if totalSpeakers === 0}
-    <EmptyState fill
+    <EmptyState
+        fill
         icon="speaker"
         title="No speakers yet"
         message="Add your Sonos or KEF speakers to control playback, volume and grouping right here, with neither app needed."
@@ -959,7 +980,11 @@
             onBack={leaveScreen}
             onPlayAll={() =>
                 contextDetail &&
-                playItem({ kind: contextDetail.kind, uri: contextDetail.uri, name: contextDetail.name })}
+                playItem({
+                    kind: contextDetail.kind,
+                    uri: contextDetail.uri,
+                    name: contextDetail.name,
+                })}
             onPick={playItem}
             onEnqueue={(item, next) =>
                 enqueue({ service: "Spotify", uri: item.uri, title: item.name }, next)}
@@ -1014,6 +1039,20 @@
             artUri={rooms.art(d)}
             playing={rooms.isPlaying(d)}
             progress={rooms.progress(d)}
+            seek={d.canSeek && rooms.durationSec(d) > 0
+                ? {
+                      position: rooms.livePosition(d),
+                      duration: rooms.durationSec(d),
+                      onSeek: (sec) => rooms.seek(d, sec),
+                  }
+                : undefined}
+            volume={{
+                value: rooms.volume(d),
+                muted: rooms.muted(d),
+                onInput: (v) => rooms.dragVolume(d, v),
+                onChange: (v) => rooms.setVolume(d, v),
+                onToggleMute: () => rooms.toggleMute(d),
+            }}
             onOpen={() => openPlayer(d)}
         >
             {#snippet transport()}
@@ -1132,42 +1171,61 @@
 {/if}
 
 <style>
-    .sk { height: 220px; border-radius: var(--r-lg); }
+    .sk {
+        height: 220px;
+        border-radius: var(--r-lg);
+    }
 
     /* Announced, never drawn — the running commentary on a grouping gesture
        that has no visible one. */
     .sr-only {
         position: absolute;
-        width: 1px; height: 1px;
-        margin: -1px; padding: 0;
+        width: 1px;
+        height: 1px;
+        margin: -1px;
+        padding: 0;
         overflow: hidden;
         clip-path: inset(50%);
         white-space: nowrap;
         border: 0;
     }
 
-    .favs { display: flex; gap: var(--space-3); padding-bottom: var(--space-1); }
+    .favs {
+        display: flex;
+        gap: var(--space-3);
+        padding-bottom: var(--space-1);
+    }
 
     /* Browse keeps its label wherever the header has room for it, and drops to
        the icon alone on a phone — where a third labelled chip is exactly what
        crushed the subtitle to a two-word stub. */
-    .act-browse { flex-shrink: 0; }
+    .act-browse {
+        flex-shrink: 0;
+    }
     @media (max-width: 620px) {
         .act-browse {
             position: relative;
-            width: 38px; height: 38px; padding: 0;
-            justify-content: center; border-radius: 50%;
+            width: 38px;
+            height: 38px;
+            padding: 0;
+            justify-content: center;
+            border-radius: 50%;
         }
         .act-label {
             position: absolute;
-            width: 1px; height: 1px;
-            margin: -1px; padding: 0;
+            width: 1px;
+            height: 1px;
+            margin: -1px;
+            padding: 0;
             overflow: hidden;
             clip-path: inset(50%);
             white-space: nowrap;
         }
     }
     @media (max-width: 620px) and (pointer: coarse) {
-        .act-browse { width: 44px; height: 44px; }
+        .act-browse {
+            width: 44px;
+            height: 44px;
+        }
     }
 </style>

@@ -23,6 +23,10 @@
         liveLabel = "live stream — no track position",
         /** Nothing at all when there is no track loaded to describe. */
         idle = false,
+        /** The desktop player bar's shape: times flanking the rail in one
+         *  row. A source with no duration just renders nothing — the bar
+         *  doesn't need the caption. */
+        inline = false,
         onSeek = undefined,
     }: {
         position: number;
@@ -30,6 +34,7 @@
         seekable?: boolean;
         liveLabel?: string;
         idle?: boolean;
+        inline?: boolean;
         onSeek?: (sec: number) => void;
     } = $props();
 
@@ -52,47 +57,113 @@
 </script>
 
 {#if duration > 0}
-    <div class="rail-box">
-        {#if seekable && onSeek}
-            <Slider
-                variant="scrub"
-                max={duration}
-                value={shown}
-                label="Seek"
-                valueText="{fmtSecs(shown)} of {fmtSecs(duration)}"
-                onInput={(v) => (scrub = v)}
-                onChange={commit}
-            />
-        {:else}
-            <span class="ro-rail" aria-hidden="true">
-                <i style:width="{Math.min(100, (shown / duration) * 100)}%"></i>
-            </span>
-        {/if}
-        <div class="rail-times mono">
-            <span>{fmtSecs(shown)}</span><span>{fmtSecs(duration)}</span>
+    {#if inline}
+        <div class="rail-inline">
+            <span class="rt mono">{fmtSecs(shown)}</span>
+            {#if seekable && onSeek}
+                <Slider
+                    variant="scrub"
+                    max={duration}
+                    value={shown}
+                    label="Seek"
+                    valueText="{fmtSecs(shown)} of {fmtSecs(duration)}"
+                    onInput={(v) => (scrub = v)}
+                    onChange={commit}
+                />
+            {:else}
+                <span class="ro-rail" aria-hidden="true">
+                    <i style:width="{Math.min(100, (shown / duration) * 100)}%"></i>
+                </span>
+            {/if}
+            <span class="rt mono">{fmtSecs(duration)}</span>
         </div>
-    </div>
-{:else if !idle}
+    {:else}
+        <div class="rail-box">
+            {#if seekable && onSeek}
+                <Slider
+                    variant="scrub"
+                    max={duration}
+                    value={shown}
+                    label="Seek"
+                    valueText="{fmtSecs(shown)} of {fmtSecs(duration)}"
+                    onInput={(v) => (scrub = v)}
+                    onChange={commit}
+                />
+            {:else}
+                <span class="ro-rail" aria-hidden="true">
+                    <i style:width="{Math.min(100, (shown / duration) * 100)}%"></i>
+                </span>
+            {/if}
+            <div class="rail-times mono">
+                <span>{fmtSecs(shown)}</span><span>{fmtSecs(duration)}</span>
+            </div>
+        </div>
+    {/if}
+{:else if !idle && !inline}
     <div class="rail-live mono">{liveLabel}</div>
 {/if}
 
 <style>
-    .rail-box { display: flex; flex-direction: column; gap: 6px; }
+    .rail-box {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+    }
     .rail-times {
-        display: flex; justify-content: space-between;
-        font-size: 11px; color: var(--text-dim);
+        display: flex;
+        justify-content: space-between;
+        font-size: 11px;
+        color: var(--text-dim);
     }
     /* Read-only: a bar, not a track with a knob on it — nothing here moves. */
     .ro-rail {
-        display: block; height: 6px; border-radius: 3px;
-        background: var(--card-3); overflow: hidden;
+        display: block;
+        height: 6px;
+        border-radius: 3px;
+        background: var(--card-3);
+        overflow: hidden;
     }
-    .ro-rail i { display: block; height: 100%; background: var(--on); transition: width 1s linear; }
+    .ro-rail i {
+        display: block;
+        height: 100%;
+        background: var(--on);
+        transition: width 1s linear;
+    }
     .rail-live {
-        text-align: center; font-size: 10.5px; letter-spacing: 0.08em;
-        text-transform: uppercase; color: var(--text-dim);
+        text-align: center;
+        font-size: 10.5px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--text-dim);
+    }
+    /* Inline: one row, times flanking the rail — the player bar's shape. */
+    .rail-inline {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        width: 100%;
+    }
+    .rail-inline .rt {
+        font-size: 11px;
+        color: var(--text-dim);
+        flex-shrink: 0;
+        min-width: 32px;
+    }
+    .rail-inline .rt:last-child {
+        text-align: right;
+    }
+    .rail-inline .ro-rail {
+        flex: 1;
+    }
+    /* The scrubber's `width: 100%` is a column rule — in the row it would
+       push the end time clean out of the box. */
+    .rail-inline :global(input[type="range"].scrub) {
+        width: auto;
+        flex: 1;
     }
     @media (prefers-reduced-motion: reduce) {
-        .ro-rail i { transition-duration: 0.001ms; }
+        .ro-rail i {
+            transition-duration: 0.001ms;
+        }
     }
 </style>

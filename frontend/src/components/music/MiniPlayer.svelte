@@ -21,6 +21,9 @@
     import Icon from "../Icon.svelte";
     import Waveform from "./Waveform.svelte";
     import ProgressLine from "./ProgressLine.svelte";
+    import TrackRail from "./TrackRail.svelte";
+    import Slider from "./Slider.svelte";
+    import { haptic } from "../../lib/utils";
     import { dur } from "../../lib/motion";
 
     let {
@@ -33,6 +36,11 @@
          *  over it, because that is exactly where the transport would
          *  otherwise disappear. */
         overSheet = false,
+        /** The desktop player bar's scrubber — present only when the room
+         *  has a track with a length it can seek into. */
+        seek = undefined,
+        /** The desktop player bar's volume cluster. */
+        volume = undefined,
         onOpen,
         transport,
     }: {
@@ -42,6 +50,14 @@
         playing: boolean;
         progress?: number;
         overSheet?: boolean;
+        seek?: { position: number; duration: number; onSeek: (sec: number) => void };
+        volume?: {
+            value: number;
+            muted: boolean;
+            onInput: (v: number) => void;
+            onChange: (v: number) => void;
+            onToggleMute: () => void;
+        };
         onOpen: () => void;
         transport: Snippet;
     } = $props();
@@ -51,6 +67,7 @@
     class="mini"
     class:paused={!playing}
     class:over-sheet={overSheet}
+    class:has-scrub={!!seek}
     transition:fly={{ y: 20, duration: dur(220), easing: cubicOut }}
 >
     <button class="mini-open" onclick={onOpen}>
@@ -71,7 +88,47 @@
             <span class="mini-idle" aria-hidden="true"><Icon name="speaker" size={14} /></span>
         {/if}
     </button>
-    {@render transport()}
+    <div class="mini-center">
+        {@render transport()}
+        {#if seek}
+            <div class="mini-scrub">
+                <TrackRail
+                    inline
+                    position={seek.position}
+                    duration={seek.duration}
+                    seekable
+                    onSeek={seek.onSeek}
+                />
+            </div>
+        {/if}
+    </div>
+    <div class="mini-right">
+        {#if volume}
+            <button
+                class="icon-btn mini-mute"
+                aria-label={volume.muted ? "Unmute" : "Mute"}
+                aria-pressed={volume.muted}
+                onclick={() => {
+                    haptic();
+                    volume.onToggleMute();
+                }}
+            >
+                <Icon name={volume.muted ? "volumeOff" : "volume"} size={16} />
+            </button>
+            <div class="mini-vol">
+                <Slider
+                    value={volume.value}
+                    label="Volume"
+                    onInput={volume.onInput}
+                    onChange={volume.onChange}
+                />
+            </div>
+            <span class="mini-volnum mono">{volume.value}</span>
+        {/if}
+        <button class="icon-btn mini-expand" aria-label="Open the player" onclick={onOpen}>
+            <Icon name="chevronUp" size={16} />
+        </button>
+    </div>
     <ProgressLine value={progress} />
 </div>
 
@@ -81,7 +138,9 @@
         bottom: calc(var(--space-4) + env(safe-area-inset-bottom));
         z-index: var(--z-menu);
         overflow: hidden;
-        display: flex; align-items: center; gap: var(--space-3);
+        display: flex;
+        align-items: center;
+        gap: var(--space-3);
         padding: 9px 10px;
         margin-top: var(--space-2);
         background: var(--tile-on-gradient);
@@ -90,13 +149,22 @@
         box-shadow: var(--shadow-md);
         /* Padding animates so the bar glides into the gutter as the FAB it
            was dodging scales away, instead of snapping the moment it goes. */
-        transition: background var(--t-med), border-color var(--t-med),
+        transition:
+            background var(--t-med),
+            border-color var(--t-med),
             padding-right var(--t-med);
     }
     /* Held open after a pause: nothing is playing, so it drops the "ON"
        surface a lit device gets and reads as a plain card. */
-    .mini.paused { background: var(--card); border-color: var(--hairline); }
-    .mini-idle { display: flex; color: var(--text-mute); flex-shrink: 0; }
+    .mini.paused {
+        background: var(--card);
+        border-color: var(--hairline);
+    }
+    .mini-idle {
+        display: flex;
+        color: var(--text-mute);
+        flex-shrink: 0;
+    }
     @media (max-width: 900px) {
         .mini {
             bottom: calc(var(--nav-clear) + var(--space-3));
@@ -111,40 +179,147 @@
        player's, since tapping it swaps one for the other. */
     .mini.over-sheet {
         position: fixed;
-        left: var(--space-4); right: var(--space-4);
+        left: var(--space-4);
+        right: var(--space-4);
         bottom: calc(var(--space-4) + env(safe-area-inset-bottom));
         z-index: var(--z-dock);
         margin-top: 0;
     }
     @media (min-width: 601px) {
         .mini.over-sheet {
-            left: 50%; right: auto;
+            left: 50%;
+            right: auto;
             transform: translateX(-50%);
             width: min(440px, calc(100vw - 48px));
         }
     }
     .mini-open {
-        flex: 1; min-width: 0;
-        display: flex; align-items: center; gap: var(--space-3);
-        background: none; border: 0; padding: 0;
-        color: var(--text); text-align: left; cursor: pointer;
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        align-items: center;
+        gap: var(--space-3);
+        background: none;
+        border: 0;
+        padding: 0;
+        color: var(--text);
+        text-align: left;
+        cursor: pointer;
     }
     .mini-art {
-        width: 40px; height: 40px; border-radius: var(--r-md);
-        object-fit: cover; background: var(--card-3); flex-shrink: 0;
+        width: 40px;
+        height: 40px;
+        border-radius: var(--r-md);
+        object-fit: cover;
+        background: var(--card-3);
+        flex-shrink: 0;
     }
-    .mini-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+    .mini-meta {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 1px;
+    }
     .mini-t {
-        font-size: 13px; font-weight: 600;
-        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        font-size: 13px;
+        font-weight: 600;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
     }
     .mini-s {
-        font-size: 11px; color: var(--text-mute);
-        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        font-size: 11px;
+        color: var(--text-mute);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
     }
 
+    /* The desktop player bar. Below the shell's breakpoint the three zones
+       collapse back into the phone's single row: the center's contents join
+       it directly, the right cluster and the scrubber wait for width. */
+    .mini-center {
+        display: contents;
+    }
+    .mini-right,
+    .mini-scrub {
+        display: none;
+    }
+    @media (min-width: 901px) {
+        .mini {
+            bottom: var(--space-4);
+            gap: var(--space-4);
+            padding: 10px 12px;
+        }
+        .mini-open {
+            flex: 0 1 300px;
+            min-width: 128px;
+        }
+        .mini-art {
+            width: 46px;
+            height: 46px;
+        }
+        .mini-center {
+            flex: 1;
+            min-width: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: var(--space-4);
+        }
+        .mini-scrub {
+            display: block;
+            flex: 1;
+            min-width: 96px;
+            max-width: 520px;
+        }
+        .mini-right {
+            display: flex;
+            align-items: center;
+            gap: var(--space-2);
+            flex-shrink: 0;
+        }
+        .mini-mute,
+        .mini-expand {
+            width: 38px;
+            height: 38px;
+            border-radius: 50%;
+            color: var(--text-mute);
+        }
+        .mini-expand {
+            background: var(--card-3);
+            border: 1px solid var(--hairline);
+            color: var(--text);
+        }
+        /* The volume slider waits for real width; the mute and the way into
+           the player fit anywhere. */
+        .mini-vol,
+        .mini-volnum {
+            display: none;
+        }
+        /* The hairline yields to the real scrubber. */
+        .mini.has-scrub :global(.prog) {
+            display: none;
+        }
+    }
+    @media (min-width: 1150px) {
+        .mini-vol {
+            display: block;
+            width: 104px;
+        }
+        .mini-volnum {
+            display: block;
+            font-size: 12px;
+            color: var(--text-mute);
+            width: 3ch;
+            text-align: right;
+        }
+    }
 
     @media (prefers-reduced-motion: reduce) {
-        .mini { transition-duration: 0.001ms; }
+        .mini {
+            transition-duration: 0.001ms;
+        }
     }
 </style>
