@@ -1,6 +1,9 @@
 <script lang="ts">
     import type { Snippet, ComponentProps } from "svelte";
     import Icon from "./Icon.svelte";
+    import { scale } from "svelte/transition";
+    import { cubicOut } from "svelte/easing";
+    import { dur } from "../lib/motion";
 
     interface Props {
         icon?: ComponentProps<typeof Icon>["name"];
@@ -15,7 +18,9 @@
     let { icon, title, message, compact = false, fill = false, children }: Props = $props();
 </script>
 
-<div class="empty-state" class:empty-state-compact={compact} class:empty-fill={fill}>
+<!-- Settles in like a list tile would — an empty view shouldn't pop. -->
+<div class="empty-state" class:empty-state-compact={compact} class:empty-fill={fill}
+    in:scale={{ start: 0.96, opacity: 0, duration: dur(220), easing: cubicOut }}>
     {#if icon}
         <Icon name={icon} size={48} />
     {/if}

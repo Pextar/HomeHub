@@ -141,9 +141,11 @@
                     text-anchor={i === 0 ? "start" : i === chart.xTicks.length - 1 ? "end" : "middle"}>{t.label}</text>
             {/each}
 
-            <!-- Area + line -->
-            <path d={chart.area} fill={stroke} opacity="0.14" />
-            <path d={chart.line} fill="none" stroke={stroke} stroke-width="2"
+            <!-- Area + line. The line draws itself in on mount (pathLength="1"
+                 normalises the dash trick to 0–1); the global reduced-motion
+                 rule collapses both to instant. -->
+            <path class="area" d={chart.area} fill={stroke} opacity="0.14" />
+            <path class="line" d={chart.line} pathLength="1" fill="none" stroke={stroke} stroke-width="2"
                 stroke-linecap="round" stroke-linejoin="round" />
 
             <!-- Hover marker -->
@@ -172,6 +174,18 @@
         touch-action: pan-y;
     }
     svg { display: block; max-width: 100%; }
+    .line {
+        stroke-dasharray: 1;
+        animation: chart-draw 650ms ease-out;
+    }
+    .area { animation: chart-fade 650ms ease-out; }
+    @keyframes chart-draw {
+        from { stroke-dashoffset: 1; }
+        to { stroke-dashoffset: 0; }
+    }
+    @keyframes chart-fade {
+        from { opacity: 0; }
+    }
     .axis {
         fill: var(--text-muted);
         font-size: 10px;

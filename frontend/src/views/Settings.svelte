@@ -9,6 +9,9 @@
     import ShortcutsModal from "../modals/ShortcutsModal.svelte";
     import ConfirmModal from "../components/ConfirmModal.svelte";
     import { pushClient, pushSupported } from "../lib/push.svelte";
+    import { fly } from "svelte/transition";
+    import { cubicOut } from "svelte/easing";
+    import { dur, stagger } from "../lib/motion";
 
     const v = $derived(data.value);
 
@@ -213,7 +216,8 @@
 <Topbar title="Settings" subtitle="Controller configuration" />
 
 <!-- Profile card -->
-<div class="profile-card">
+<div class="profile-card"
+    in:fly={{ y: 10, duration: dur(220), delay: stagger(0), easing: cubicOut }}>
     <span class="avatar mono">{initial}</span>
     <div class="who">
         <div class="who-name">{username}</div>
@@ -231,7 +235,8 @@
 </div>
 
 {#if session.isAdmin}
-    <section class="card">
+    <section class="card"
+        in:fly={{ y: 10, duration: dur(220), delay: stagger(1), easing: cubicOut }}>
         <header>
             <h2>Interface</h2>
             <p>How the app looks on this device. Stored here, not on the controller.</p>
@@ -253,7 +258,8 @@
     </section>
 {/if}
 
-<section class="card">
+<section class="card"
+    in:fly={{ y: 10, duration: dur(220), delay: stagger(2), easing: cubicOut }}>
     <header>
         <h2>Location</h2>
         <p>Used to compute sunrise and sunset for solar-based schedules.</p>
@@ -289,7 +295,8 @@
     </form>
 </section>
 
-<section class="card">
+<section class="card"
+    in:fly={{ y: 10, duration: dur(220), delay: stagger(3), easing: cubicOut }}>
     <header>
         <h2>Integrations</h2>
         <p>Control your devices from outside the app.</p>
@@ -301,7 +308,8 @@
     </div>
 </section>
 
-<section class="card">
+<section class="card"
+    in:fly={{ y: 10, duration: dur(220), delay: stagger(4), easing: cubicOut }}>
     <header>
         <h2>Push notifications</h2>
         <p>
@@ -423,7 +431,8 @@
     {/if}
 </section>
 
-<section class="card">
+<section class="card"
+    in:fly={{ y: 10, duration: dur(220), delay: stagger(5), easing: cubicOut }}>
     <header>
         <h2>Backup &amp; restore</h2>
         <p>Export your full configuration to a file, or restore it from one. Profiles and passwords are never included.</p>
@@ -445,7 +454,8 @@
     </div>
 </section>
 
-<section class="card">
+<section class="card"
+    in:fly={{ y: 10, duration: dur(220), delay: stagger(6), easing: cubicOut }}>
     <header>
         <h2>System</h2>
         <p>Power-user tools for inspecting and driving the hub directly.</p>
@@ -473,9 +483,10 @@
         cursor: pointer;
         text-align: left;
         color: var(--text);
-        transition: background var(--t-fast);
+        transition: background var(--t-fast), transform var(--t-fast);
     }
     .system-row:hover { background: var(--surface-hover); }
+    .system-row:active { transform: scale(0.98); transition-duration: 80ms; }
     .system-row :global(svg:last-child) { color: var(--text-mute); transform: rotate(-90deg); flex-shrink: 0; }
     .system-icon {
         width: 36px; height: 36px;

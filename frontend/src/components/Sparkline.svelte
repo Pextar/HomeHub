@@ -33,7 +33,25 @@
      its container so the sparkline stays responsive on narrow screens. -->
 <svg viewBox="0 0 {width} {height}" height={height} aria-hidden="true" preserveAspectRatio="none" style="width:100%; display:block">
     {#if path.area}
-        <path d={path.area} fill={stroke} opacity="0.12" />
-        <path d={path.line} fill="none" stroke={stroke} stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+        <path class="area" d={path.area} fill={stroke} opacity="0.12" />
+        <!-- pathLength="1" normalises the dash trick: dasharray/offset in 0–1
+             regardless of how long the actual path is. Draws in on mount;
+             the global reduced-motion rule collapses it to instant. -->
+        <path class="line" d={path.line} pathLength="1" fill="none" stroke={stroke} stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
     {/if}
 </svg>
+
+<style>
+    .line {
+        stroke-dasharray: 1;
+        animation: spark-draw 550ms ease-out;
+    }
+    .area { animation: spark-fade 550ms ease-out; }
+    @keyframes spark-draw {
+        from { stroke-dashoffset: 1; }
+        to { stroke-dashoffset: 0; }
+    }
+    @keyframes spark-fade {
+        from { opacity: 0; }
+    }
+</style>

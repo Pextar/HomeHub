@@ -128,9 +128,12 @@
         display: flex;
         flex-direction: column;
         gap: 12px;
-        transition: background var(--t-med), border-color var(--t-med);
+        transition: background var(--t-med), border-color var(--t-med), transform var(--t-fast);
         overflow: visible; /* allow dropdown menu to escape the card bounds */
     }
+    /* Whole tile answers a press — :active propagates up from the body
+       button or the switch, whichever took the tap. */
+    .tile:active { transform: scale(0.98); transition-duration: 80ms; }
     .tile.on {
         background: var(--tile-on-gradient);
         border-color: var(--tile-on-border);

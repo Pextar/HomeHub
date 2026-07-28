@@ -3,7 +3,7 @@
     import Icon from "../components/Icon.svelte";
     import { data, route } from "../lib/stores.svelte";
     import { socketAction, protocolKind } from "../lib/utils";
-    import { fly } from "svelte/transition";
+    import { fly, fade } from "svelte/transition";
     import { cubicOut } from "svelte/easing";
     import { dur } from "../lib/motion";
     import type { Socket } from "../lib/types";
@@ -204,7 +204,7 @@
             <span>Add devices in <strong>Devices</strong> and they'll appear on the plan, grouped by room.</span>
         </div>
     {:else}
-        <div class="canvas">
+        <div class="canvas" in:fade={{ duration: dur(240) }}>
             <svg
                 bind:this={svgEl}
                 viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}
@@ -225,10 +225,12 @@
 
                 <rect x="0" y="0" width={VIEW_W} height={VIEW_H} fill="url(#fp-grid)" />
 
-                <!-- glows behind everything -->
+                <!-- glows behind everything — fade in/out with the flip so a
+                     light warms the plan instead of popping onto it -->
                 {#each scene.nodes as node (node.socket.id + "-glow")}
                     {#if node.on}
-                        <circle cx={node.x} cy={node.y} r="30" fill="url(#fp-glow)" />
+                        <circle cx={node.x} cy={node.y} r="30" fill="url(#fp-glow)"
+                            transition:fade={{ duration: dur(300) }} />
                     {/if}
                 {/each}
 
@@ -285,6 +287,7 @@
                                 x={node.x + NODE_R + 4} y={node.y + 3}
                                 class="node-label mono"
                                 fill={node.on ? "var(--on)" : "var(--text-dim)"}
+                                transition:fade={{ duration: dur(200) }}
                             >{shortName(node.socket.name)}</text>
                         {/if}
                     </g>
@@ -381,6 +384,15 @@
     .zone-label { font-size: 7px; letter-spacing: 0.18em; }
     .node-label { font-size: 7px; letter-spacing: 0.04em; }
     .compass { font-size: 7px; }
+
+    /* State flips ease: the dot swells, the ring warms to amber, and room
+       zones light up along with their nodes. `r` is a CSS geometry property
+       in every modern engine, so the attribute change transitions. */
+    .node circle {
+        transition: r var(--t-med) ease, fill var(--t-med), stroke var(--t-med),
+            stroke-opacity var(--t-med), stroke-width var(--t-med);
+    }
+    .zone rect, .zone-label { transition: stroke var(--t-med), stroke-opacity var(--t-med), fill var(--t-med); }
 
     .node:focus-visible { outline: none; }
     .node:focus-visible circle:first-of-type {

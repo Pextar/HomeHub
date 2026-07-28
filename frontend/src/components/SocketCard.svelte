@@ -269,8 +269,11 @@
         display: flex;
         flex-direction: column;
         overflow: visible;
-        transition: background var(--t-med), border-color var(--t-med), box-shadow var(--t-fast);
+        transition: background var(--t-med), border-color var(--t-med), box-shadow var(--t-fast), transform var(--t-fast);
     }
+    /* Press anywhere on the card (body, switch, slider) and the whole tile
+       answers — :active propagates up from whichever child took the tap. */
+    .tile:active { transform: scale(0.98); transition-duration: 80ms; }
     .tile.on {
         background: var(--tile-on-gradient);
         border-color: var(--tile-on-border);
@@ -339,22 +342,27 @@
         position: relative;
         flex-shrink: 0;
         color: var(--text-mute);
-        transition: background var(--t-med), color var(--t-med);
+        transition: background var(--t-med), color var(--t-med), box-shadow var(--t-med);
     }
     .tile.on .tile-bulb {
         background: var(--on);
         color: var(--primary-fg);
         box-shadow: 0 0 0 1px var(--on), 0 0 24px 4px var(--on-glow);
     }
-    .tile.on .tile-bulb::after {
+    /* Always rendered at opacity 0 so the halo fades in with the flip —
+       a pseudo-element that only exists under .on would pop. */
+    .tile-bulb::after {
         content: "";
         position: absolute;
         inset: -22px;
         border-radius: 50%;
         background: radial-gradient(closest-side, var(--on-glow), transparent 70%);
+        opacity: 0;
+        transition: opacity var(--t-med);
         pointer-events: none;
         z-index: -1;
     }
+    .tile.on .tile-bulb::after { opacity: 1; }
 
     .tile-info { display: flex; flex-direction: column; gap: 2px; margin-top: 2px; min-width: 0; padding-right: 0; }
     .name {
@@ -374,6 +382,8 @@
     .meta {
         color: var(--text-mute); font-size: 12px;
         overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
+        /* "Off" → amber "On" fades with the rest of the tile. */
+        transition: color var(--t-med);
     }
     .protocol-badge { flex-shrink: 0; }
     .tile.on .meta { color: var(--on); }
@@ -485,9 +495,10 @@
         border-radius: var(--r-sm);
         cursor: pointer;
         opacity: 0;
-        transition: opacity var(--t-fast), background var(--t-fast), color var(--t-fast);
+        transition: opacity var(--t-fast), background var(--t-fast), color var(--t-fast), transform var(--t-fast);
     }
     .more-corner:hover { background: var(--surface-hover); color: var(--text); }
+    .more-corner:active { transform: scale(0.92); transition-duration: 60ms; }
     @media (hover: hover) { .tile:hover .more-corner { opacity: 1; } }
     @media (pointer: coarse) { .more-corner { opacity: 0.6; bottom: 8px; right: 8px; } }
 

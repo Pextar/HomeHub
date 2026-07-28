@@ -292,8 +292,10 @@
         color: var(--text-mute);
         border-radius: var(--r-sm);
         cursor: pointer;
+        transition: background var(--t-fast), color var(--t-fast), transform var(--t-fast);
     }
     .more-corner:hover { background: var(--surface-hover); color: var(--text); }
+    .more-corner:active { transform: scale(0.92); transition-duration: 60ms; }
 
     .overflow-menu {
         position: absolute;

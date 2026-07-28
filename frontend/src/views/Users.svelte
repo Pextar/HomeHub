@@ -9,6 +9,10 @@
     import { data, toasts, session } from "../lib/stores.svelte";
     import { openModal } from "../lib/modal.svelte";
     import { copyText } from "../lib/clipboard";
+    import { scale } from "svelte/transition";
+    import { flip } from "svelte/animate";
+    import { cubicOut } from "svelte/easing";
+    import { dur, stagger } from "../lib/motion";
     import type { User } from "../lib/types";
 
     let users = $state<User[]>([]);
@@ -131,8 +135,10 @@
     </EmptyState>
 {:else}
     <ul class="cards">
-        {#each sortedUsers as u (u.id)}
-            <li class="card">
+        {#each sortedUsers as u, i (u.id)}
+            <li class="card"
+                animate:flip={{ duration: dur(280), easing: cubicOut }}
+                in:scale={{ start: 0.96, opacity: 0, duration: dur(220), delay: stagger(i), easing: cubicOut }}>
                 <div class="top">
                     <div class="ident">
                         <span class="avatar mono" style="background:{avatarColor(u)}">
@@ -269,7 +275,7 @@
         border-radius: var(--radius-sm);
         color: var(--text-muted);
         cursor: pointer;
-        transition: background var(--t-fast), color var(--t-fast), border-color var(--t-fast);
+        transition: background var(--t-fast), color var(--t-fast), border-color var(--t-fast), transform var(--t-fast);
     }
     .icon-btn:hover { background: var(--surface-hover); color: var(--text); }
     .icon-btn.danger:hover { color: var(--danger); border-color: var(--danger); }
@@ -296,6 +302,7 @@
         cursor: pointer;
         padding: 0;
         margin-right: auto;
+        transition: color var(--t-fast);
     }
     .code:hover { color: var(--primary); }
     @media (pointer: coarse) {
