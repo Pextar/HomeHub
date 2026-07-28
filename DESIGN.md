@@ -527,6 +527,12 @@ them, the focus, search and its history, the grouping gesture — in
 the shell: the topbar, the navigation of §15, the polling, and which surface
 is up.
 
+- **The catalog has two shared shapes and no third.** Every list of songs is
+  `components/music/TrackList.svelte` and every browsable card is
+  `MediaCard.svelte`; the four catalog screens (`SearchScreen`,
+  `ArtistScreen`, `ContextScreen`, and `FavoriteBrowseScreen` over the last of
+  those) compose them rather than growing their own row. A fifth surface that
+  lists tracks adds a prop there, not a fourth copy of the row.
 - **The room model is the module's spine** (`lib/music/rooms.svelte.ts`). It
   is the only file that knows a Sonos group from a KEF speaker from a HomeHub
   zone; every component above it takes a `Room` and asks it what it can do
@@ -773,6 +779,61 @@ large, so the module never swallows keys the rest of the app might want.
   ArrowDown hands the caret to the first result, and arriving puts the caret
   in the box on `(pointer: fine)` only — auto-focus on a phone throws the
   software keyboard over the results.
+
+### 15.9 The catalog: search, artist, album, playlist
+
+Browse used to answer a search with four flat lists of name-and-art rows, so
+choosing between two albums by the same band meant tapping one to find out.
+The catalog surfaces now say what the service actually told us — and they are
+a **stack**, because browsing a catalog is a drill-down and back has to mean
+_up one_.
+
+- **A tap opens; only a song plays.** An artist opens their page, an album or
+  playlist opens its listing, a track plays on the focused room. A container
+  also carries an explicit `Play album` / `Play playlist`, so "look inside"
+  and "start it" are different targets rather than one ambiguous one. There is
+  no exception to widen here: **no speaker takes an artist URI** (see
+  `sonos.SpotifyItem`), so `Play <artist>` starts their top track and the line
+  under it says which — a button that names what it will do beats one that
+  silently picks.
+- **The screens are a real stack** (`stack` in `views/Music.svelte`), not a
+  single `screen` flag. Browse → artist → album is three levels; the back
+  chip, Escape and the Android gesture all climb one, and every level restores
+  the scroll offset it was left at (§15.6). Only the top level is mounted.
+- **A detail is fetched once per URI and kept for the session.** An artist's
+  page doesn't change while you're looking at an album from it, so coming back
+  is instant instead of replaying a skeleton.
+- **Every row and card says what distinguishes it.** A track carries its album
+  and its length, an album its year and track count, an artist their following,
+  a playlist its owner and size. All of it is optional on the wire: absent
+  means the service didn't answer, and the field is dropped rather than
+  invented — the same discipline as a speaker's capabilities.
+- **One top result, at full size.** A search for a name is usually a search for
+  one thing; it gets a card with its own stats and a stated destination ("See
+  top tracks & albums"), above the per-kind shelves.
+- **Songs are a list, everything else is a grid.** `TrackList` is the one
+  row shape (numbered where the order is the information — an album's sides,
+  an artist's most-played) and `MediaCard` the one card. A grid, not a
+  carousel: a rail hid half the matches behind a horizontal swipe on the
+  screen where they were hardest to reach.
+- **The kind filter counts.** `Albums 7` is a decision; `Albums` is a guess.
+- **What the page has already said, the rows don't repeat.** An album's own
+  tracks carry neither its cover nor its artist (a featured artist still
+  differs, so that survives), and below 560px the trailing play mark goes —
+  it is a hover affordance, and it was being paid for by truncating the title
+  and artist you choose a song by.
+- **Sections degrade one at a time.** The artist page's top tracks,
+  discography and "Fans also like" are three independent reads; Spotify
+  retired related-artists for apps created after Nov 2024, so a refusal costs
+  that shelf and nothing else. A shelf with no answer is absent, never empty.
+- **A favorite that is a list is the same page as any other list**
+  (`FavoriteBrowseScreen` renders `ContextScreen`). The only difference is that
+  playing it _whole_ goes out through the Sonos household, so that button —
+  and only that button — is disabled off a Sonos room, with the reason said
+  under it; an individual track inside it is a plain Spotify item any room
+  can take.
+- **Playlist descriptions arrive as HTML** and are rendered as text. Spotify
+  puts links in them; interpolating that would be an injection.
 
 - **Home shows what's playing, and only that.** The dashboard's "Playing now"
   section (`components/NowPlaying.svelte`) is the only piece of Music that
