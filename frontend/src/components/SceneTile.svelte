@@ -1,9 +1,9 @@
 <script lang="ts">
     import Icon from "./Icon.svelte";
     import { api } from "../lib/api";
-    import { runAction, automationsUsingTarget, plural, formatAgo } from "../lib/utils";
+    import { runAction, automationsUsingTarget, plural, formatAgo, haptic } from "../lib/utils";
     import { openModal } from "../lib/modal.svelte";
-    import { data, toasts } from "../lib/stores.svelte";
+    import { data, toasts, scenePulse } from "../lib/stores.svelte";
     import SceneModal from "../modals/SceneModal.svelte";
     import ConfirmModal from "./ConfirmModal.svelte";
     import type { Scene } from "../lib/types";
@@ -84,6 +84,9 @@
 
     function activate() {
         moreOpen = false;
+        haptic(25);
+        // Flash every tile the scene touches, so the room visibly answers.
+        scenePulse.fire([...new Set(allActions.map(a => a.socket_id))]);
         runAction(() => api.activateScene(scene.id), `Scene activated: ${scene.name}`);
     }
     function openEdit() { moreOpen = false; openModal(SceneModal, { existing: scene }); }
@@ -295,7 +298,7 @@
     .overflow-menu {
         position: absolute;
         right: 10px; top: 40px;
-        z-index: 10;
+        z-index: var(--z-menu);
         min-width: 170px;
         display: flex; flex-direction: column;
         background: var(--bg-raised);

@@ -82,7 +82,7 @@
 </Topbar>
 
 {#if v.sensors.length === 0}
-    <EmptyState icon="sensor" title="No sensors yet"
+    <EmptyState fill icon="sensor" title="No sensors yet"
         message="Pair a 433MHz sensor by triggering it, or add one by hand.">
         <button class="btn btn-primary" onclick={() => openModal(PairSensorModal, {})}>Pair sensor</button>
         <button class="btn btn-ghost" onclick={() => openModal(SensorModal, {})}>Add manually</button>
@@ -194,6 +194,10 @@
         color: var(--text-muted);
     }
     .icon-btn:hover { color: var(--text); background: var(--surface-hover); }
+    @media (pointer: coarse) {
+        .icon-btn { position: relative; }
+        .icon-btn::after { content: ""; position: absolute; inset: -6px; }
+    }
     .loading { color: var(--text-muted); font-size: 12px; font-family: var(--font-mono); }
 
     .card-header h2 { font-size: 17px; font-weight: 600; letter-spacing: -0.02em; }
@@ -204,7 +208,7 @@
         gap: 10px;
     }
     @media (min-width: 600px) {
-        .grid { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: var(--space-3); }
+        .grid { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--space-3); }
     }
     .grid-item {
         text-align: left;
@@ -216,7 +220,10 @@
         transition: transform var(--t-fast);
         min-width: 0;
     }
-    .grid-item:hover { transform: translateY(-1px); }
+    @media (hover: hover) {
+        .grid-item:hover { transform: translateY(-1px); }
+    }
+    .grid-item:active { transform: scale(0.98); transition-duration: 80ms; }
     .grid-item > :global(.sensor) { width: 100%; }
     .grid-item.active :global(.sensor) {
         border-color: var(--on);

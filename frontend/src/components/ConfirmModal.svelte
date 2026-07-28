@@ -55,6 +55,6 @@
         color: var(--text-muted);
         font-size: 13.5px;
         line-height: 1.45;
-        max-width: 300px;
+        max-width: 340px;
     }
 </style>

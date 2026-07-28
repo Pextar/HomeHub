@@ -52,6 +52,22 @@
   const primary = $derived(items.slice(0, PRIMARY_COUNT));
   const overflow = $derived(items.slice(PRIMARY_COUNT));
 
+  // Live count shown beside a drawer row — the menu answers "what's in
+  // there" before you tap. Empty/unknown sections get no badge at all.
+  function badgeFor(r: Route): string | null {
+    const d = data.value;
+    switch (r) {
+      case "automations": {
+        const n = d.automations.length + d.schedules.length;
+        return n ? String(n) : null;
+      }
+      case "rooms":   return d.rooms.length ? String(d.rooms.length) : null;
+      case "sensors": return d.sensors.length ? String(d.sensors.length) : null;
+      case "scenes":  return d.scenes.length ? String(d.scenes.length) : null;
+      default:        return null;
+    }
+  }
+
   let moreOpen = $state(false);
   // When true, the drawer out-transitions are instant so nav-item taps
   // don't leave the backdrop visible over the incoming view.
@@ -387,6 +403,7 @@
           </button>
         {/if}
         {#each overflow as item (item.route)}
+          {@const badge = badgeFor(item.route)}
           <a
             href="#/{item.route}"
             class="drawer-item"
@@ -396,6 +413,7 @@
           >
             <span class="drawer-icon"><Icon name={item.icon} size={20} /></span>
             <span class="drawer-label">{item.label}</span>
+            {#if badge}<span class="drawer-badge mono">{badge}</span>{/if}
           </a>
         {/each}
       </div>
@@ -632,8 +650,8 @@
     transition: opacity 150ms ease;
     flex-shrink: 0;
   }
-  .sidebar:hover .nav-key { opacity: 1; }
-  .nav-item[aria-current="page"] .nav-key { opacity: 1; color: var(--text-mute); }
+  .sidebar:hover .nav-key,
+  .nav-item:focus-visible .nav-key { opacity: 1; }
   .sidebar.collapsed .nav-key { display: none; }
 
   /* Collapse nav item padding → centers the icon in the 32px inner rail */
@@ -667,7 +685,7 @@
     opacity: 0;
     transition: opacity 120ms ease;
     pointer-events: none;
-    z-index: 200;
+    z-index: var(--z-menu);
   }
   .sidebar.collapsed .nav-desktop .nav-item:hover::after {
     opacity: 1;
@@ -851,7 +869,7 @@
          on the content showing either side of the pill. */
       pointer-events: none;
       padding: 0 14px var(--tabdock-inset);
-      z-index: 100;
+      z-index: var(--z-dock);
       gap: 0;
     }
     .brand {
@@ -883,7 +901,7 @@
       flex: 1;
       /* Above the lens, so the icon reads against the amber. */
       position: relative;
-      z-index: 1;
+      z-index: var(--z-sticky);
       align-items: center;
       justify-content: center;
       gap: 0;
@@ -958,7 +976,7 @@
     inset: 0;
     background: rgba(10, 10, 8, 0.6);
     backdrop-filter: blur(3px);
-    z-index: 120;
+    z-index: var(--z-scrim);
     display: flex;
     align-items: flex-end;
     justify-content: center;
@@ -1063,6 +1081,22 @@
   }
   .drawer-label {
     font-size: 15px;
+    flex: 1;
+    min-width: 0;
+  }
+  .drawer-badge {
+    font-size: 11px;
+    color: var(--text-mute);
+    background: var(--card-2);
+    border: 1px solid var(--hairline);
+    padding: 2px 8px;
+    border-radius: var(--r-pill);
+    flex-shrink: 0;
+  }
+  .drawer-item[aria-current="page"] .drawer-badge {
+    color: var(--on);
+    border-color: var(--tile-on-border);
+    background: var(--on-soft);
   }
   .drawer-health {
     display: flex;

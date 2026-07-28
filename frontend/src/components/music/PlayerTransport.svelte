@@ -15,6 +15,7 @@
      * one that isn't there (§15).
      */
     import Icon from "../Icon.svelte";
+    import { haptic } from "../../lib/utils";
     import type { SonosRepeat } from "../../lib/types";
 
     let {
@@ -84,7 +85,7 @@
         aria-label={playing ? "Pause" : "Play"}
         title="Play / pause (space)"
         disabled={toggleBusy}
-        onclick={onToggle}
+        onclick={() => { haptic(); onToggle(); }}
     >
         <Icon name={playing ? "pause" : "play"} size={26} />
     </button>

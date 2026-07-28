@@ -45,7 +45,7 @@
 </Topbar>
 
 {#if v.rooms.length === 0}
-    <EmptyState icon="couch" title="No rooms yet"
+    <EmptyState fill icon="couch" title="No rooms yet"
         message="Rooms group your devices by where they are — a living room, a bedroom, the kitchen. Create one to get started.">
         <button class="btn btn-primary" onclick={addRoom}>
             <Icon name="plus" size={16} /> New room

@@ -21,7 +21,7 @@
 </Topbar>
 
 {#if v.scenes.length === 0}
-    <EmptyState icon="scenes" title="No scenes yet"
+    <EmptyState fill icon="scenes" title="No scenes yet"
         message="Save the perfect lighting combo as a scene and recall it anytime.">
         <button class="btn btn-primary" onclick={() => openModal(SceneModal, {})}>Add scene</button>
     </EmptyState>

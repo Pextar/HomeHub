@@ -230,7 +230,7 @@
     .overflow-menu {
         position: absolute;
         right: 10px; top: 42px;
-        z-index: 10;
+        z-index: var(--z-menu);
         min-width: 170px;
         display: flex; flex-direction: column;
         background: var(--bg-raised);

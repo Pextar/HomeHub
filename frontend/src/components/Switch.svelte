@@ -1,4 +1,6 @@
 <script lang="ts">
+    import { haptic } from "../lib/utils";
+
     interface Props {
         checked: boolean;
         onChange?: (checked: boolean) => void;
@@ -9,6 +11,7 @@
 
     function handle(e: Event) {
         const v = (e.currentTarget as HTMLInputElement).checked;
+        haptic();
         checked = v;
         onChange?.(v);
     }

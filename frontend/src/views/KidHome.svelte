@@ -613,7 +613,7 @@
     .welcome {
         position: fixed;
         inset: 0;
-        z-index: 200;
+        z-index: var(--z-overlay);
         display: grid;
         place-items: center;
         overflow: hidden;
@@ -663,7 +663,7 @@
     .exit-backdrop {
         position: fixed;
         inset: 0;
-        z-index: 300;
+        z-index: var(--z-overlay);
         background: rgba(0, 0, 0, 0.55);
         display: grid;
         place-items: center;

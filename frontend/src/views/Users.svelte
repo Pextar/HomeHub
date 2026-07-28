@@ -122,7 +122,7 @@
         {/each}
     </ul>
 {:else if sortedUsers.length === 0}
-    <EmptyState
+    <EmptyState fill
         icon="user"
         title="No profiles yet"
         message="Add a profile to give someone their own login. Limited profiles get a 6-digit code and only see the devices you assign them."

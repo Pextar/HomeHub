@@ -22,6 +22,7 @@
     import AssistantLauncher from "./components/AssistantLauncher.svelte";
     import { data, route, toasts, session } from "./lib/stores.svelte";
     import { onLive } from "./lib/live";
+    import { pullToRefresh } from "./lib/pull-refresh";
     import { fly, fade } from "svelte/transition";
     import { cubicOut } from "svelte/easing";
     import { dur } from "./lib/motion";
@@ -134,7 +135,7 @@
         <div class="app">
             <Sidebar />
             <main id="main" class="main" tabindex="-1">
-                <div class="view-stack">
+                <div class="view-stack" use:pullToRefresh={() => data.refresh()}>
                     {#key effectiveRoute}
                         <div
                             class="view"

@@ -6,6 +6,7 @@
     import { data, route } from "../lib/stores.svelte";
     import { scale } from "svelte/transition";
     import { cubicOut } from "svelte/easing";
+    import { Tween } from "svelte/motion";
     import { dur, stagger } from "../lib/motion";
 
     const v = $derived(data.value);
@@ -17,12 +18,22 @@
     const reporting = $derived(powerSensors.filter(s => s.last_value != null));
     const totalDraw = $derived(Math.round(reporting.reduce((sum, s) => sum + (s.last_value ?? 0), 0)));
     const unit = $derived(powerSensors[0]?.unit || "W");
+
+    // The hero number tweens between reads so a changing load feels like a
+    // living meter, not a page refresh.
+    const tweenedDraw = new Tween(0);
+    let _init = true;
+    $effect(() => {
+        const d = _init ? 0 : dur(500);
+        _init = false;
+        tweenedDraw.set(totalDraw, { duration: d, easing: cubicOut });
+    });
 </script>
 
 <Topbar title="Insights" subtitle="Live energy from your power sensors" />
 
 {#if powerSensors.length === 0}
-    <EmptyState icon="chart" title="No power sensors yet"
+    <EmptyState fill icon="chart" title="No power sensors yet"
         message="Add a sensor of type ‘power’ to see live draw and history here. Energy is read straight from your meters — nothing is estimated.">
         <button class="btn btn-primary" onclick={() => route.go("sensors")}>Go to sensors</button>
     </EmptyState>
@@ -32,7 +43,7 @@
         <div class="hero-eyebrow mono">Total draw now</div>
         <div class="hero-figure">
             <Icon name="bolt" size={22} />
-            <span class="num-display">{totalDraw}</span>
+            <span class="num-display">{Math.round(tweenedDraw.current)}</span>
             <span class="hero-unit">{unit}</span>
         </div>
         <div class="hero-sub">

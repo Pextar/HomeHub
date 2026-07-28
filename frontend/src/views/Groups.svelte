@@ -67,7 +67,7 @@
 </Topbar>
 
 {#if v.groups.length === 0}
-    <EmptyState icon="groups" title="No groups yet"
+    <EmptyState fill icon="groups" title="No groups yet"
         message="Group sockets together to control them in one click.">
         <button class="chip" onclick={() => openModal(GroupModal, {})}><Icon name="plus" size={14} /> New group</button>
     </EmptyState>
@@ -179,13 +179,18 @@
         transition: opacity var(--t-fast), background var(--t-fast), color var(--t-fast);
     }
     .more-corner:hover { background: var(--surface-hover); color: var(--text); }
+    .more-corner:active { transform: scale(0.92); transition-duration: 60ms; }
     @media (hover: hover) { .tile:hover .more-corner { opacity: 1; } }
-    @media (pointer: coarse) { .more-corner { opacity: 0.6; } }
+    @media (pointer: coarse) {
+        .more-corner { opacity: 0.6; }
+        /* 44×44 hit area without growing the 28px visual. */
+        .more-corner::after { content: ""; position: absolute; inset: -8px; }
+    }
 
     .overflow-menu {
         position: absolute;
         right: 12px; bottom: 44px;
-        z-index: 10;
+        z-index: var(--z-menu);
         min-width: 190px;
         display: flex; flex-direction: column;
         background: var(--bg-raised);

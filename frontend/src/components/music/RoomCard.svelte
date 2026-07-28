@@ -235,7 +235,7 @@
 
     /* The travelling copy. */
     .rc-ghost {
-        position: fixed; z-index: 200;
+        position: fixed; z-index: var(--z-ghost);
         pointer-events: none;
         box-shadow: var(--shadow-lg);
         opacity: 1;

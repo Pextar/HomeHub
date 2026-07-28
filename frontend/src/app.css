@@ -108,6 +108,20 @@
     /* The deepest surface in the app, below --bg. Console-only per
        DESIGN.md §2 — nothing else may use it. */
     --console-bg: #0a0907;
+
+    /* ── Stacking layers ─────────────────────────────────────────
+       The only z-indices in the app. Ordered low → high; a layer
+       only exists so it can sit above everything below it. */
+    --z-sticky: 1;    /* sticky headers inside a view */
+    --z-raised: 2;    /* a control raised above its own card */
+    --z-menu: 50;     /* overflow menus, anchored popovers */
+    --z-fab: 90;      /* assistant FAB — above content, below the dock band's overlays */
+    --z-dock: 100;    /* mobile tab dock, fixed view bars (mini-player) */
+    --z-scrim: 120;   /* sheet/drawer backdrops */
+    --z-sheet: 130;   /* bottom sheets, assistant chat */
+    --z-modal: 150;   /* centered dialogs and confirms */
+    --z-ghost: 200;   /* drag ghosts and toasts — above any surface */
+    --z-overlay: 300; /* full-screen takeovers (kid exit, welcome) */
 }
 
 /* `.force-dark` pins this palette on a subtree whatever the active theme.
@@ -298,7 +312,7 @@ a { color: inherit; text-decoration: none; }
     background: var(--bg-elevated);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
-    z-index: 100;
+    z-index: var(--z-overlay);
 }
 .skip-link:focus { left: 8px; }
 
@@ -496,7 +510,7 @@ textarea[aria-invalid="true"]:focus-visible {
 }
 
 /* ---------- Mobile ---------- */
-@media (max-width: 600px) {
+@media (max-width: 600px), (pointer: coarse) {
     /* Stack side-by-side field pairs vertically */
     .field-row { grid-template-columns: 1fr; }
 
@@ -565,10 +579,71 @@ textarea[aria-invalid="true"]:focus-visible {
     white-space: nowrap;
     cursor: pointer;
     touch-action: manipulation;
-    transition: background var(--t-fast), color var(--t-fast), border-color var(--t-fast);
+    transition: background var(--t-fast), color var(--t-fast), border-color var(--t-fast),
+        transform var(--t-fast);
 }
+.chip:active { transform: scale(0.95); transition-duration: 80ms; }
 .chip.active { background: var(--text); color: var(--bg); border-color: var(--text); }
 .chip.on { background: var(--on-soft); color: var(--on); border-color: transparent; }
+
+/* Shared press affordance for tappable cards/rows that don't get one from a
+   more specific rule — the §9 squish, kept in one place so every surface
+   answers the finger the same way. */
+.pressable { transition: transform var(--t-fast), background var(--t-med), border-color var(--t-med); }
+.pressable:active { transform: scale(0.98); transition-duration: 80ms; }
+
+/* A view whose only content is an empty state shouldn't strand it at the top
+   of an otherwise blank screen — center it in the leftover space instead. */
+.empty-fill { min-height: min(54vh, 540px); justify-content: center; }
+
+/* Scene-run pulse: a quick amber ring that washes over each affected tile.
+   Global so any card surface can flash without growing its own copy. */
+@keyframes scene-flash {
+    0% { box-shadow: 0 0 0 0 var(--on-glow); }
+    100% { box-shadow: 0 0 0 22px transparent; }
+}
+.scene-flash { animation: scene-flash 620ms ease-out; }
+
+/* Pull-to-refresh indicator — a small glass pill with an amber dot that
+   rides the pull gesture (lib/pull-refresh.ts). Hidden above the viewport
+   edge until the drag slides it in. */
+.ptr-indicator {
+    position: fixed;
+    top: 0;
+    left: 50%;
+    transform: translate(-50%, -56px);
+    z-index: var(--z-menu);
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: var(--card);
+    border: 1px solid var(--hairline);
+    box-shadow: var(--shadow-md);
+    display: grid;
+    place-items: center;
+    transition: transform 180ms ease-out;
+    pointer-events: none;
+}
+.ptr-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--card-3);
+    transition: background 150ms ease, box-shadow 150ms ease, transform 150ms var(--spring);
+}
+.ptr-indicator.armed .ptr-dot {
+    background: var(--on);
+    box-shadow: 0 0 12px 2px var(--on-glow);
+    transform: scale(1.25);
+}
+.ptr-indicator.busy .ptr-dot {
+    background: var(--on);
+    animation: ptr-breathe 800ms ease-in-out infinite;
+}
+@keyframes ptr-breathe {
+    0%, 100% { transform: scale(1); opacity: 1; }
+    50% { transform: scale(1.4); opacity: 0.75; }
+}
 
 /* device tile */
 .tile {

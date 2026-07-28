@@ -100,8 +100,8 @@ function createDataStore() {
     pingHealth,
     applySocket,
     socketById: (id: string) => data.sockets.find(s => s.id === id),
-    groupById:  (id: string) => data.groups.find(g => g.id === id),
-    sceneById:  (id: string) => data.scenes.find(s => s.id === id),
+    groupById: (id: string) => data.groups.find(g => g.id === id),
+    sceneById: (id: string) => data.scenes.find(s => s.id === id),
   };
 }
 
@@ -126,10 +126,10 @@ function createToastStore() {
     get items() { return items; },
     dismiss,
     show,
-    info:    (title: string, message?: string) => show({ title, message, tone: "info" }),
+    info: (title: string, message?: string) => show({ title, message, tone: "info" }),
     success: (title: string, message?: string) => show({ title, message, tone: "success" }),
-    warn:    (title: string, message?: string) => show({ title, message, tone: "warn" }),
-    error:   (title: string, message?: string) => show({ title, message, tone: "error" }),
+    warn: (title: string, message?: string) => show({ title, message, tone: "warn" }),
+    error: (title: string, message?: string) => show({ title, message, tone: "error" }),
   };
 }
 
@@ -404,3 +404,15 @@ export const sidebar = createSidebarStore();
 export const uiPrefs = createUIPrefsStore();
 export const bottomBar = createBottomBarStore();
 export const assistant = createAssistantStore();
+
+// One-shot signal that a scene just fired on a set of socket IDs. Cards
+// watching it wash an amber ring across themselves (see .scene-flash in
+// app.css). Reassigned per run so back-to-back scenes re-trigger.
+function createScenePulseStore() {
+  let pulse = $state<{ ids: string[]; ts: number } | null>(null);
+  return {
+    get current() { return pulse; },
+    fire(ids: string[]) { pulse = { ids, ts: Date.now() }; },
+  };
+}
+export const scenePulse = createScenePulseStore();

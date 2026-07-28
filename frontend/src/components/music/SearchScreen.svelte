@@ -751,7 +751,7 @@
     .sp-more:disabled { opacity: 0.4; }
 
     .overflow-menu {
-        position: absolute; right: 8px; top: 46px; z-index: 12;
+        position: absolute; right: 8px; top: 46px; z-index: var(--z-menu);
         min-width: 180px;
         display: flex; flex-direction: column;
         background: var(--card-2);
