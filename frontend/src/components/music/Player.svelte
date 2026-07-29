@@ -262,7 +262,6 @@
                     artUri={rooms.art(r)}
                     sheetDismissing={dismissing}
                     large={wide}
-                    {origin}
                     onSkip={r.canSkip ? (dir) => rooms.skip(r, dir) : undefined}
                 />
             </div>

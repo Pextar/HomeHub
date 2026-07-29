@@ -10,9 +10,11 @@
      *
      * `onSkip` absent means the source has no skips to give and the art is
      * just art.
+     *
+     * `data-morph` marks it as the piece the sheet's own opening transition
+     * flies in from whatever opened it (DESIGN.md §15.5) — the art is the one
+     * element the dock, the card and this all carry.
      */
-    import { morph, type Origin } from "../../lib/motion";
-
     let {
         artUri = undefined,
         /** Set while the sheet is riding out a committed drag-down: no new
@@ -21,16 +23,11 @@
         /** The desktop stage's size: the art is the left column's whole job,
          *  so it grows past the phone layout's cap. */
         large = false,
-        /** The frame the sheet grew out of. Its thumbnail is the one element
-         *  both surfaces share, so it flies to this size rather than the two
-         *  arts cutting between each other. */
-        origin = null,
         onSkip = undefined,
     }: {
         artUri?: string;
         sheetDismissing?: boolean;
         large?: boolean;
-        origin?: Origin | null;
         onSkip?: (dir: "next" | "previous") => void;
     } = $props();
 
@@ -95,9 +92,9 @@
     style:opacity={swiping ? Math.max(0.55, 1 - Math.abs(dx) / 200) : undefined}
 >
     {#if artUri}
-        <img use:morph={origin} src={artUri} alt="" draggable="false" />
+        <img data-morph src={artUri} alt="" draggable="false" />
     {:else}
-        <div class="p-art-ph" use:morph={origin}>[ album art ]</div>
+        <div class="p-art-ph" data-morph>[ album art ]</div>
     {/if}
 </div>
 

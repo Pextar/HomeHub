@@ -436,15 +436,19 @@
             height: 100%;
             padding: 0 44px 40px;
         }
-        /* The stage is lit end to end rather than washed from the top. */
+        /* The stage is lit end to end rather than washed from the top — and
+           it is painted at half size and scaled up, which is the same 64px of
+           blur over a quarter of the pixels. At the stage's size the full-res
+           version is a genuinely expensive first paint, and it lands on the
+           frame the sheet is trying to open on. */
         .sheet.stage .sheet-bg {
-            inset: -12%;
-            height: auto;
+            inset: -12% auto auto -12%;
+            width: 62%;
+            height: 62%;
             opacity: 1;
-            /* Its own layer, so the blur is rasterised once rather than on
-               every frame of the sheet's own motion. */
-            transform: translateZ(0);
-            filter: blur(64px) saturate(1.35);
+            transform: scale(2);
+            transform-origin: top left;
+            filter: blur(32px) saturate(1.35);
         }
         .sheet.stage .sheet-wash {
             background: linear-gradient(

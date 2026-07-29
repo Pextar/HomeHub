@@ -75,10 +75,19 @@ export function sheet(
 // the same track, the same art and the same transport, so a cut between them
 // reads as two players rather than one player at two sizes.
 //
-// The frame is animated with `clip-path`, never a scale: scaling a sheet
-// stretches its type and its radii on the way, and the text is the part the
-// eye is on. The window grows, the content is revealed, and the one element
-// both surfaces share — the art — flies between the two positions.
+// The panel travels from the opener's frame to its own and its window opens
+// as it goes: the source's centre is mapped onto the target's, the crop is
+// the source's rect, and both interpolate together. Travel matters most where
+// the two are furthest apart — on desktop the dock is a bar along the bottom
+// edge and the player is a centred stage, so a window that only grew would
+// unroll over content already sitting in its final place, which reads as a
+// panel being wiped in rather than a bar becoming a player.
+//
+// The frame moves by `clip-path` and translation, never a scale: scaling a
+// sheet stretches its type and its radii on the way, and the text is the part
+// the eye is on. The one element both surfaces share — the art — flies
+// between the two positions, discounting the panel's own travel so its path
+// is the one the eye expects rather than that plus the container's.
 
 /** A snapshot of the thing a sheet is growing out of, in viewport pixels. */
 export interface Box {
@@ -94,8 +103,6 @@ export interface Origin {
   art?: Box;
   /** Its corner radius, so the growing window starts the shape it left. */
   radius: number;
-  /** When it was taken. The art only flies if it is still the same gesture. */
-  at: number;
 }
 
 const boxOf = (r: DOMRect): Box => ({
@@ -120,9 +127,11 @@ export function originOf(el: HTMLElement | null | undefined): Origin | null {
     box: boxOf(box),
     art: art?.width ? boxOf(art) : undefined,
     radius: parseFloat(getComputedStyle(el).borderTopLeftRadius) || 0,
-    at: Date.now(),
   };
 }
+
+/** The shared-element easing, as a CSS curve. Matches `cubicOut` below. */
+const EASE = "cubic-bezier(0.33, 1, 0.68, 1)";
 
 /**
  * The sheet's own half of it: the panel is clipped to `origin` and unfolds to
@@ -163,16 +172,85 @@ export function grow(
   const cs = getComputedStyle(node);
   const rTop = parseFloat(cs.borderTopLeftRadius) || 0;
   const rBottom = parseFloat(cs.borderBottomLeftRadius) || 0;
-  const o = origin.box;
-  // Insets are taken in the sheet's own box. Its only transform is the
-  // desktop centering translate, and a translation preserves distances, so
-  // viewport measurements carry over unchanged.
-  const top = Math.max(0, o.top - to.top);
-  const left = Math.max(0, o.left - to.left);
-  const right = Math.max(0, to.right - (o.left + o.width));
-  const bottom = Math.max(0, to.bottom - (o.top + o.height));
+  // A window can never be bigger than the thing it is cut out of, and the
+  // desktop dock is a full-width bar opening a narrower stage. Cropping that
+  // centrally would drop both ends of the bar — including the end the art is
+  // on, which is then flying in from outside its own window. So an oversized
+  // opener is narrowed to the panel's size around its art first, and the
+  // whole transform is built from the part that is actually being expanded.
+  const o = { ...origin.box };
+  const fit = (span: number, size: number, start: number, mid: number) => {
+    if (size <= span) return start;
+    const want = mid - span / 2;
+    return Math.min(Math.max(want, start), start + size - span);
+  };
+  if (o.width > to.width) {
+    o.left = fit(
+      to.width,
+      o.width,
+      o.left,
+      origin.art ? origin.art.left + origin.art.width / 2 : o.left,
+    );
+    o.width = to.width;
+  }
+  if (o.height > to.height) {
+    o.top = fit(
+      to.height,
+      o.height,
+      o.top,
+      origin.art ? origin.art.top + origin.art.height / 2 : o.top,
+    );
+    o.height = to.height;
+  }
+
+  // The panel is moved so its centre sits on the opener's, and cropped to the
+  // opener's size — which makes the crop symmetric, and means the window and
+  // the panel behind it stay locked together for the whole run. Its own
+  // transform (the desktop centring translate) is kept in front of ours;
+  // percentages are already resolved in the computed matrix, so composing is
+  // exact.
+  const base = cs.transform && cs.transform !== "none" ? `${cs.transform} ` : "";
+  const dx = o.left + o.width / 2 - (to.left + to.width / 2);
+  const dy = o.top + o.height / 2 - (to.top + to.height / 2);
+  // Crop, per side, at progress t: the window is the opener's rect, opening
+  // to the panel's own.
+  const cropX = (t: number) => ((to.width - o.width) * (1 - t)) / 2;
+  const cropY = (t: number) => ((to.height - o.height) * (1 - t)) / 2;
+
   const r0 = origin.radius;
   const ms = out ? Math.round(duration * 0.75) : duration;
+
+  // The shared element: the art the opener carried, flying to (or back to)
+  // the size the panel lays it out at. FLIP, so no layout moves — and the
+  // panel's own travel is taken out of the offset, because the art is inside
+  // the panel and would otherwise be carried by it twice.
+  const art = node.querySelector<HTMLElement>("[data-morph]");
+  if (art && origin.art) {
+    const at = art.getBoundingClientRect();
+    if (at.width && at.height) {
+      const sx = origin.art.width / at.width;
+      const sy = origin.art.height / at.height;
+      const r = parseFloat(getComputedStyle(art).borderTopLeftRadius) || 0;
+      const small = {
+        transformOrigin: "0 0",
+        transform:
+          `translate(${origin.art.left - at.left - dx}px, ${origin.art.top - at.top - dy}px)` +
+          ` scale(${sx}, ${sy})`,
+        // Divided by the scale, so the corners look the size they were at
+        // both ends instead of shrinking with the box.
+        borderRadius: `${Math.min(r / sx, at.width / 2)}px`,
+      };
+      const full = { transformOrigin: "0 0", transform: "none", borderRadius: `${r}px` };
+      // Same curve either way — on the way out the panel's own progress is
+      // the mirror of the intro's, so the art plays its keyframes forward
+      // from full to small rather than running the intro in reverse.
+      art.animate(out ? [full, small] : [small, full], {
+        duration: ms,
+        easing: EASE,
+        fill: out ? "both" : "backwards",
+      });
+    }
+  }
 
   // Everything below is driven imperatively rather than by a class the
   // component toggles: Svelte pauses a removed subtree's effects before the
@@ -221,47 +299,15 @@ export function grow(
     css: (t, u) => {
       const rt = r0 + (rTop - r0) * t;
       const rb = r0 + (rBottom - r0) * t;
+      const x = cropX(t);
+      const y = cropY(t);
       return (
-        `clip-path: inset(${top * u}px ${right * u}px ${bottom * u}px ${left * u}px` +
+        `transform: ${base}translate(${dx * u}px, ${dy * u}px);` +
+        ` clip-path: inset(${y}px ${x}px ${y}px ${x}px` +
         ` round ${rt}px ${rt}px ${rb}px ${rb}px);` +
         // Only the first frames: the window is opaque for the rest of the run.
         ` opacity: ${Math.min(1, t * 6)}`
       );
     },
   };
-}
-
-/**
- * The shared element: the opener's thumbnail flies to where the full-size art
- * has laid out. FLIP, so nothing about the layout moves — the art is drawn at
- * its final size from the first frame and transformed back to the small one.
- *
- * The radius is divided by the scale so the corners look the size they were
- * at both ends rather than shrinking with the box.
- */
-export function morph(node: HTMLElement, origin?: Origin | null): void {
-  const from = origin?.art;
-  // Art that only arrives once the sheet has settled is not part of the
-  // gesture any more; it appears where it is instead of flying in from a
-  // dock the user left behind seconds ago.
-  if (!from || !origin || Date.now() - origin.at > 900) return;
-  if (reducedMotion || typeof node.animate !== "function") return;
-  const to = node.getBoundingClientRect();
-  if (!to.width || !to.height || !from.width) return;
-  const sx = from.width / to.width;
-  const sy = from.height / to.height;
-  const r = parseFloat(getComputedStyle(node).borderTopLeftRadius) || 0;
-  node.animate(
-    [
-      {
-        transformOrigin: "0 0",
-        transform:
-          `translate(${from.left - to.left}px, ${from.top - to.top}px)` +
-          ` scale(${sx}, ${sy})`,
-        borderRadius: `${Math.min(r / sx, to.width / 2)}px`,
-      },
-      { transformOrigin: "0 0", transform: "none", borderRadius: `${r}px` },
-    ],
-    { duration: dur(420), easing: "cubic-bezier(0.33, 1, 0.68, 1)" },
-  );
 }
