@@ -1102,8 +1102,9 @@ Home+Music screen — home control on the left and centre, the player on the
 right, both always visible. The second depth is the panel's **own music
 screen** (`#/panel?music=1`, one tap in through the player's art and
 meta): the featured room's player riding on the right, and a work area on
-the left switched by chip between three panes — **Search** (the catalog
-and the household's favorites), **Queue** (the featured Sonos group's,
+the left switched by chip between three panes — **Search** (the catalog,
+with the room's recent searches and the account's playlists while the box
+is empty), **Queue** (the featured Sonos group's,
 with jump / remove / two-tap clear), **Rooms** (every room, with
 Sonos-native grouping: join the featured room, split one, or step a
 single speaker out). Its back chip returns to the dashboard depth, and
@@ -1188,7 +1189,10 @@ constraint made visible.
   the flat gesture where it's about starting sound: a song found by
   search plays, an album or playlist plays whole — the toast names what
   started and on which room, the featured source being the destination
-  the player column's chips name. An artist row opens the artist's page
+  the player column's chips name. The search answers with §15.9's **top
+  result** first — the one thing the search was almost certainly after,
+  as the same row at full size — then the per-kind shelves. An artist row
+  opens the artist's page
   instead: the app's own §15.9 catalog screens ride in the depth's work
   area — the most-played tracks, the discography shelves, "Fans also
   like" — fetched once per URI and kept for the session. From there a
@@ -1197,6 +1201,14 @@ constraint made visible.
   same ladder. Queueing without interrupting lives behind the row's
   overflow ("Play next", "Add to queue"), only for a Sonos destination,
   exactly like §15.8's rule — and the queue pane is where it lands.
+  **Recent searches live on the wall too**, keyed by the featured room
+  with the app's own key format, so the wall and the phone share one
+  per-room history — a chip re-runs one, an × forgets one, Clear forgets
+  the room's list. A search is remembered when it is submitted (§15.8's
+  Enter) _and_ when a result is acted on, because the wall's flow is
+  type → tap with no Enter in between. The Sonos favorites shelf stays
+  in the full view: recents answer the wall's idle moment better than a
+  static list that never changes.
   Spotify setup stays in the full view: an unconnected depth says so and
   points there, because configuration is the full app's job.
 - **Grouping on the wall is Sonos-native and tap-based.** The app's

@@ -32,7 +32,6 @@ import type {
     SonosSpeakerView,
     SonosGroupState,
     SonosQueueItem,
-    SonosFavorite,
     KEFStatus,
     KEFSource,
     SpotifyItem,
@@ -125,8 +124,6 @@ export interface PanelMusicStore {
 
     // ── Starting something ──
     playItem(item: SpotifyItem): Promise<void>;
-    readonly favorites: SonosFavorite[];
-    playFavorite(fav: SonosFavorite): void;
 
     // ── Grouping (Sonos-native only) ──
     /** Every speaker in src's group joins the featured group. */
@@ -596,33 +593,6 @@ export function createPanelMusic(): PanelMusicStore {
         }
     }
 
-    // ── Favorites ────────────────────────────────────────────────────────
-    // A Sonos household list, so only a Sonos room can take one — the
-    // shelf isn't even offered for a KEF destination (§15). Read once; a
-    // favorite list doesn't move under you.
-    let favorites = $state<SonosFavorite[]>([]);
-    let favsLoaded = false;
-    $effect(() => {
-        const f = featured;
-        if (f?.kind !== "sonos" || favsLoaded) return;
-        favsLoaded = true;
-        void api
-            .sonosFavorites(f.id)
-            .then((list) => (favorites = list))
-            .catch(() => { });
-    });
-
-    function playFavorite(fav: SonosFavorite) {
-        const f = featured;
-        if (!f || f.kind !== "sonos") return;
-        void run(
-            "fav:" + fav.id,
-            () => api.sonosPlayFavorite(f.id, fav),
-            "Couldn't play",
-            () => toasts.success("Playing", `${fav.title} · ${f.title}`),
-        );
-    }
-
     // ── Grouping ─────────────────────────────────────────────────────────
     // Sonos-native only, the daily "play together": joining is the whole
     // card, not one speaker — a room that moves takes its partners with
@@ -744,10 +714,6 @@ export function createPanelMusic(): PanelMusicStore {
         clearQueue,
         enqueue,
         playItem,
-        get favorites() {
-            return favorites;
-        },
-        playFavorite,
         joinSource,
         ungroupFeatured,
         leaveMember,
