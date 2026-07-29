@@ -9,7 +9,7 @@ import type {
 } from "../types";
 import type { Busy } from "./busy.svelte";
 import { clock } from "./clock.svelte";
-import { clampVol } from "./volume";
+import { clampVol, createVolumeThrottle } from "./volume";
 
 /**
  * Zones, as state: the third bridge, and the only one that isn't a bridge.
@@ -94,6 +94,8 @@ export interface ZonesBridge {
   togglePlay(z: MediaZone): Promise<void>;
   skip(z: MediaZone, dir: "next" | "previous"): void;
   stop(z: MediaZone): Promise<void>;
+  /** The live value while a finger is on the slider, sent to the zone on a
+   *  short throttle so a drag doesn't flood it with calls. */
   dragVolume(z: MediaZone, v: number): void;
   setVolume(z: MediaZone, v: number): void;
   toggleMute(z: MediaZone): void;
@@ -132,6 +134,10 @@ export function createZonesBridge(busy: Busy): ZonesBridge {
   const vol = $state<Record<string, number>>({});
   const volAt: Record<string, number> = {};
   const VOL_HOLD_MS = 4000;
+
+  const dragThrottle = createVolumeThrottle((id, level) => {
+    void api.mediaZoneVolume(id, level).catch(() => {}); // a dropped mid-drag frame self-heals on release or the next poll
+  });
 
   function speakersOf(z: MediaZone): MediaZoneSpeaker[] {
     return z.speakers.filter((sp) => !sp.missing);
@@ -376,12 +382,15 @@ export function createZonesBridge(busy: Busy): ZonesBridge {
     },
 
     dragVolume(z, v) {
-      vol[z.id] = v;
+      const level = clampVol(v);
+      vol[z.id] = level;
       volAt[z.id] = Date.now();
+      dragThrottle.schedule(z.id, level);
     },
 
     setVolume(z, v) {
       const level = clampVol(v);
+      dragThrottle.cancel(z.id);
       vol[z.id] = level;
       volAt[z.id] = Date.now();
       void run("zvol:" + z.id, () => api.mediaZoneVolume(z.id, level), "Volume failed");

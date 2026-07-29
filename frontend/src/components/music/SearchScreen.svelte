@@ -47,7 +47,6 @@
         /** True when the screen was opened to type in, rather than to read. */
         autofocus = false,
         onBack,
-        onDisconnect,
         onPlayItem,
         onEnqueue,
         /** An artist row opens their page rather than playing outright — top
@@ -66,7 +65,6 @@
         busy: Busy;
         autofocus?: boolean;
         onBack: () => void;
-        onDisconnect: () => void;
         onPlayItem: (item: SpotifyItem) => void;
         onEnqueue: (item: SpotifyItem, next: boolean) => void;
         onOpenArtist: (uri: string) => void;
@@ -303,8 +301,6 @@
                             <span class="sp-conn-label">Connected</span>
                             <span class="sp-user mono">{spotify.status?.display_name || "Spotify"}</span>
                         </span>
-                        <button class="chip" onclick={onDisconnect}
-                            aria-label="Disconnect Spotify">Disconnect</button>
                     </div>
                 </div>
                 <div class="sp-search">

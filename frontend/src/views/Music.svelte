@@ -802,23 +802,6 @@
         void spotify.load();
     });
 
-    /**
-     * Disconnecting drops the tokens, so the only way forward is the full
-     * OAuth flow again. An accidental tap must not strand the user there.
-     */
-    async function disconnectSpotify() {
-        const who = spotify.status?.display_name
-            ? `"${spotify.status.display_name}"`
-            : "Your Spotify account";
-        const ok = await openModal<boolean>(ConfirmModal, {
-            title: "Disconnect Spotify?",
-            message: `${who} will be unlinked. To search again you'll need to reconnect through Spotify.`,
-            confirmLabel: "Disconnect",
-            danger: true,
-        });
-        if (ok) await spotify.disconnect();
-    }
-
     // ── Devices ──────────────────────────────────────────────────────────
     // One sheet for both bridges — it carries the brand picker when adding and
     // is locked to the owning bridge when editing.
@@ -1016,7 +999,6 @@
             {busy}
             autofocus={searchWantsFocus}
             onBack={leaveScreen}
-            onDisconnect={disconnectSpotify}
             onPlayItem={playItem}
             onEnqueue={(item, next) =>
                 enqueue({ service: "Spotify", uri: item.uri, title: item.name }, next)}

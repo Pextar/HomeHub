@@ -5,6 +5,7 @@ vi.mock("../api", () => ({
   api: {
     mediaZones: vi.fn(async () => zonesFixture),
     mediaEndpoints: vi.fn(async () => []),
+    mediaZoneVolume: vi.fn(async () => {}),
   },
 }));
 

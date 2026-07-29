@@ -11,7 +11,7 @@ import type {
 import type { Busy } from "./busy.svelte";
 import { clock } from "./clock.svelte";
 import { secs, toClock } from "./time";
-import { clampVol } from "./volume";
+import { clampVol, createVolumeThrottle } from "./volume";
 
 /**
  * The Sonos bridge, as state: the topology poll, the optimistic overrides
@@ -90,7 +90,10 @@ export interface SonosBridge {
 
   shownVolume(sp: SonosSpeakerView): number;
   shownGroupVolume(coordinatorId: string): number;
+  /** The live value while a finger is on the slider, sent to the speaker on
+   *  a short throttle so a drag doesn't flood it with SOAP calls. */
   dragVolume(id: string, v: number): void;
+  /** Same, for a group's shared fader. */
   dragGroupVolume(coordinatorId: string, v: number): void;
   setVolume(id: string, v: number): void;
   setGroupVolume(coordinatorId: string, v: number): void;
@@ -155,6 +158,13 @@ export function createSonosBridge(busy: Busy): SonosBridge {
   const volOverride: Record<string, { v: number; at: number }> = {};
   const localVol = $state<Record<string, number>>({});
   const groupVol = $state<Record<string, number>>({});
+
+  const dragThrottle = createVolumeThrottle((id, v) => {
+    api.sonosSetVolume(id, v).catch(() => {}); // a dropped mid-drag frame self-heals on release or the next poll
+  });
+  const dragGroupThrottle = createVolumeThrottle((coordinatorId, v) => {
+    api.sonosSetVolume(coordinatorId, v, true).catch(() => {});
+  });
 
   // A play/pause round-trip plus the refresh behind it takes long enough that
   // an un-flipped button reads as a dropped tap. The new state is applied
@@ -279,15 +289,18 @@ export function createSonosBridge(busy: Busy): SonosBridge {
     }
   }
 
-  // Sliders update the local value live (oninput) and send on release
-  // (onchange), so dragging doesn't flood the speaker with SOAP calls.
+  // Sliders update the local value live (oninput) and throttle a call out to
+  // the speaker as they go, then always send the authoritative value on
+  // release (onchange) — see dragThrottle/dragGroupThrottle above.
   function setVolume(id: string, v: number) {
+    dragThrottle.cancel(id);
     localVol[id] = v;
     volOverride[id] = { v, at: Date.now() };
     api.sonosSetVolume(id, v).catch((e) => toasts.error("Volume failed", (e as Error).message));
   }
 
   function setGroupVolume(coordinatorId: string, v: number) {
+    dragGroupThrottle.cancel(coordinatorId);
     groupVol[coordinatorId] = v;
     volOverride["g:" + coordinatorId] = { v, at: Date.now() };
     api
@@ -406,9 +419,11 @@ export function createSonosBridge(busy: Busy): SonosBridge {
     shownGroupVolume: (coordinatorId) => groupVol[coordinatorId] ?? 0,
     dragVolume(id, v) {
       localVol[id] = v;
+      dragThrottle.schedule(id, v);
     },
     dragGroupVolume(coordinatorId, v) {
       groupVol[coordinatorId] = v;
+      dragGroupThrottle.schedule(coordinatorId, v);
     },
 
     setVolume,

@@ -164,25 +164,54 @@ function createRouteStore() {
   };
 }
 
-function createThemeStore() {
-  const t = $state<{ theme: "dark" | "light" }>({ theme: initial() });
+export type ThemeMode = "dark" | "light" | "auto";
 
-  function initial(): "dark" | "light" {
-    const saved = localStorage.getItem("theme");
-    if (saved === "dark" || saved === "light") return saved;
-    return window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+function createThemeStore() {
+  const media = window.matchMedia("(prefers-color-scheme: light)");
+
+  function resolve(mode: ThemeMode): "dark" | "light" {
+    return mode === "auto" ? (media.matches ? "light" : "dark") : mode;
   }
+  function initialMode(): ThemeMode {
+    const saved = localStorage.getItem("theme");
+    if (saved === "dark" || saved === "light" || saved === "auto") return saved;
+    return "auto";
+  }
+
+  const startMode = initialMode();
+  const t = $state<{ mode: ThemeMode; resolved: "dark" | "light" }>({
+    mode: startMode,
+    resolved: resolve(startMode),
+  });
+
   function apply() {
-    document.documentElement.dataset.theme = t.theme;
+    document.documentElement.dataset.theme = t.resolved;
   }
   apply();
 
+  function setMode(mode: ThemeMode) {
+    t.mode = mode;
+    t.resolved = resolve(mode);
+    localStorage.setItem("theme", mode);
+    apply();
+  }
+
+  // Follow the OS live while in auto mode, rather than only reading it once
+  // at load — a change to the system setting must not need a reload here.
+  media.addEventListener("change", () => {
+    if (t.mode !== "auto") return;
+    t.resolved = resolve("auto");
+    apply();
+  });
+
   return {
-    get current() { return t.theme; },
+    /** The resolved dark/light value — what CSS and icons key off. */
+    get current() { return t.resolved; },
+    /** The stored preference: "dark", "light", or "auto". */
+    get mode() { return t.mode; },
+    setMode,
     toggle() {
-      t.theme = t.theme === "dark" ? "light" : "dark";
-      localStorage.setItem("theme", t.theme);
-      apply();
+      setMode(t.resolved === "dark" ? "light" : "dark");
     },
   };
 }
