@@ -1206,7 +1206,18 @@ constraint made visible.
   per-room history — a chip re-runs one, an × forgets one, Clear forgets
   the room's list. A search is remembered when it is submitted (§15.8's
   Enter) _and_ when a result is acted on, because the wall's flow is
-  type → tap with no Enter in between. The Sonos favorites shelf stays
+  type → tap with no Enter in between. While the box is empty the pane
+  idles on those recents and the account's playlists — the playlists as
+  an art grid (§15.9's rule: everything but songs is a grid), a tap
+  still playing one whole. **The box knows when the software keyboard
+  is up** (measured off `visualViewport`, so a docked, floating or split
+  keyboard all read true, and no keyboard reads as none): the depth
+  re-floors to just above it and the results go dense — single-line
+  rows, no shelf labels, no kind chips, the top-result card folded back
+  into the shelves — because typing should show a handful of matches
+  where one card used to fit. The keyboard is part of the flow: Enter
+  dismisses it, and so does a tap on any result, so the rich layout
+  returns for the choosing. The Sonos favorites shelf stays
   in the full view: recents answer the wall's idle moment better than a
   static list that never changes.
   Spotify setup stays in the full view: an unconnected depth says so and

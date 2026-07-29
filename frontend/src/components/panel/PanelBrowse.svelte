@@ -31,6 +31,7 @@
     import Waveform from "../music/Waveform.svelte";
     import EmptyState from "../EmptyState.svelte";
     import QueuePane from "../music/QueuePane.svelte";
+    import MediaCard from "../music/MediaCard.svelte";
     import ArtistScreen from "../music/ArtistScreen.svelte";
     import ContextScreen from "../music/ContextScreen.svelte";
     import PanelPlayerCard from "./PanelPlayerCard.svelte";
@@ -122,6 +123,7 @@
     async function openArtist(uri: string) {
         if (topLevel?.kind === "artist" && topLevel.uri === uri) return;
         actedOnResult();
+        searchEl?.blur(); // chosen — the keyboard's job is done
         pushLevel("artist", uri);
         if (artistCache[uri]) return; // been here — renders instantly
         artistLoadingUri = uri;
@@ -228,10 +230,46 @@
         void flushDOM().then(() => searchEl?.focus());
     });
 
+    // ── Type mode: the box knows the software keyboard is up ─────────────
+    // The iPad's docked keyboard takes ~350pt off the bottom of the depth,
+    // which used to leave the results a one-row strip. While it is up the
+    // depth re-floors to just above it (--kb) and the results go dense,
+    // and the keyboard is dismissed the moment typing is over — Enter, or
+    // a tap on a result — so the rich layout returns for the choosing.
+    // visualViewport measures the real thing: docked, floating or split,
+    // and it degrades to zero (no type mode) where there is no software
+    // keyboard at all.
+    let kb = $state(0);
+    const kbOpen = $derived(kb > 150);
+    onMount(() => {
+        const vv = window.visualViewport;
+        if (!vv) return;
+        const measure = () => {
+            kb = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
+        };
+        vv.addEventListener("resize", measure);
+        vv.addEventListener("scroll", measure);
+        return () => {
+            vv.removeEventListener("resize", measure);
+            vv.removeEventListener("scroll", measure);
+        };
+    });
+
+    // A fresh page of results while typing starts the dense list from the
+    // top — the first rows are the ones being aimed at.
+    $effect(() => {
+        void spotify.results;
+        if (kbOpen) resultsEl?.scrollTo(0, 0);
+    });
+
     function onQueryKey(e: KeyboardEvent) {
         if (e.key === "Enter") {
             e.preventDefault();
             spotify.runNow();
+            resultsEl?.scrollTo(0, 0);
+            // Submitted — typing is over, so the keyboard leaves with it
+            // and the results get the whole column back.
+            searchEl?.blur();
         } else if (e.key === "Escape" && spotify.query) {
             e.stopPropagation();
             spotify.clearQuery();
@@ -252,10 +290,13 @@
     }
     function runRecent(q: string) {
         spotify.runQuery(q);
-        // Caret back in the box only where a keyboard is already there —
-        // on the iPad a refocus throws the software keyboard over the
-        // results the tap just fetched.
+        // The query was chosen by chip, so typing is over: the software
+        // keyboard leaves if it was up (a no-op blur when it wasn't), and
+        // the caret goes back in the box only where a keyboard is already
+        // there — on the iPad a refocus throws the software keyboard over
+        // the results the tap just fetched.
         if (window.matchMedia("(pointer: fine)").matches) searchEl?.focus();
+        else searchEl?.blur();
     }
 
     // ── Results ──────────────────────────────────────────────────────────
@@ -330,6 +371,7 @@
 
     function pick(item: SpotifyItem) {
         actedOnResult();
+        searchEl?.blur(); // chosen — the keyboard's job is done
         const s = featured;
         if (!s) {
             toasts.error("Couldn't play", "No speaker is reachable right now.");
@@ -400,7 +442,7 @@
     }
 </script>
 
-<div class="browse" in:fade={{ duration: dur(160) }}>
+<div class="browse" class:kb-open={kbOpen} style:--kb="{kb}px" in:fade={{ duration: dur(160) }}>
     <header class="b-head">
         <button class="back" onclick={back} aria-label="Back to the panel">
             <Icon name="chevronLeft" size={16} /><span>Panel</span>
@@ -553,9 +595,12 @@
                                     />
                                 </div>
                             {:else}
-                                {#if spotify.kindFilter === "all" && spotify.topResult}
+                                {#if !kbOpen && spotify.kindFilter === "all" && spotify.topResult}
                                     <!-- The one thing this search was almost
-                                         certainly after, at full size (§15.9). -->
+                                         certainly after, at full size (§15.9).
+                                         Type mode folds it back into the
+                                         shelves: at one row tall the card
+                                         would be the only thing visible. -->
                                     <h3 class="s-label">Top result</h3>
                                     {@render resultRow(spotify.topResult, true)}
                                 {/if}
@@ -568,7 +613,11 @@
                             {/if}
                         {:else}
                             <!-- Idle shelves: the room's recent searches,
-                                 then the account's own playlists. -->
+                                 then the account's own playlists as an art
+                                 grid — §15.9's rule, since a playlist is
+                                 chosen by its cover as much as its name. A
+                                 tap still plays it whole on the featured
+                                 room, like every container on the wall. -->
                             {#if recents.list.length > 0}
                                 <div class="s-shelf-head">
                                     <h3 class="s-label">Recent searches</h3>
@@ -599,9 +648,15 @@
                             {/if}
                             {#if spotify.myPlaylists.length > 0}
                                 <h3 class="s-label">Your playlists</h3>
-                                {#each spotify.myPlaylists as item (item.uri)}
-                                    {@render resultRow(item, false)}
-                                {/each}
+                                <div class="s-pl-grid">
+                                    {#each spotify.myPlaylists as item (item.uri)}
+                                        <MediaCard
+                                            {item}
+                                            sub={sub(item)}
+                                            onOpen={() => pick(item)}
+                                        />
+                                    {/each}
+                                </div>
                             {:else if recents.list.length === 0}
                                 <div class="s-empty">
                                     <EmptyState
@@ -859,6 +914,14 @@
         min-height: 0;
         min-width: 0;
     }
+    /* Type mode: while the iPad's keyboard is up, the depth re-floors to
+       just above it instead of running underneath. --kb is the measured
+       keyboard height; + one panel padding lands the depth's new bottom
+       edge on the keyboard's top edge exactly. */
+    .browse.kb-open {
+        align-self: start;
+        max-height: calc(100% - var(--kb) + var(--space-6));
+    }
 
     .b-head {
         display: flex;
@@ -1031,6 +1094,35 @@
         flex-shrink: 0;
     }
 
+    /* Type mode's dense results: single-line rows and nothing that isn't
+       a match — the shelf labels and kind chips return with the keyboard,
+       because filtering and browsing are what the choosing phase is for. */
+    .kb-open .s-kinds,
+    .kb-open .s-label {
+        display: none;
+    }
+    .kb-open .r-open {
+        min-height: 48px;
+        padding: var(--space-1) var(--space-2);
+    }
+    .kb-open .r-art {
+        width: 36px;
+        height: 36px;
+    }
+    .kb-open .r-sub {
+        display: none;
+    }
+    .kb-open .r-menu {
+        top: 48px;
+    }
+    .kb-open .sk-row {
+        min-height: 48px;
+    }
+    .kb-open .sk-art {
+        width: 36px;
+        height: 36px;
+    }
+
     .s-results {
         flex: 1;
         min-height: 0;
@@ -1123,6 +1215,14 @@
         .s-recent-x:hover {
             color: var(--text);
         }
+    }
+
+    /* The account's playlists, idle: covers on a grid (§15.9 — everything
+       but songs is a grid), three across the work column. */
+    .s-pl-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: var(--space-4) var(--space-3);
     }
 
     /* The row is a container, not a control: a song plays outright, an
