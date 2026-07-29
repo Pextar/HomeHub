@@ -86,11 +86,17 @@
     // the left, everything that drives it on the right, and the queue becomes
     // the right column rather than swapping the whole sheet. Below it, the
     // layout wrappers vanish and nothing about the phone changes.
-    let wide = $state(false);
+    //
+    // Read synchronously rather than starting `false` and correcting in
+    // `onMount`: the sheet's entrance transition starts the instant this
+    // component mounts, and on desktop that used to mean animating in at
+    // phone-dialog size and then jumping to the 1120×740 stage a beat later
+    // — a layout resize fighting a transform/opacity animation on the same
+    // frame, which is what read as laggy.
+    let wide = $state(window.matchMedia("(min-width: 901px)").matches);
     onMount(() => {
         const mq = window.matchMedia("(min-width: 901px)");
         const update = () => (wide = mq.matches);
-        update();
         mq.addEventListener("change", update);
         return () => mq.removeEventListener("change", update);
     });
