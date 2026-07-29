@@ -10,6 +10,10 @@
      *
      * `onSkip` absent means the source has no skips to give and the art is
      * just art.
+     *
+     * `data-morph` marks it as the piece the sheet's own opening transition
+     * flies in from whatever opened it (DESIGN.md §15.5) — the art is the one
+     * element the dock, the card and this all carry.
      */
     let {
         artUri = undefined,
@@ -88,9 +92,9 @@
     style:opacity={swiping ? Math.max(0.55, 1 - Math.abs(dx) / 200) : undefined}
 >
     {#if artUri}
-        <img src={artUri} alt="" draggable="false" />
+        <img data-morph src={artUri} alt="" draggable="false" />
     {:else}
-        <div class="p-art-ph">[ album art ]</div>
+        <div class="p-art-ph" data-morph>[ album art ]</div>
     {/if}
 </div>
 

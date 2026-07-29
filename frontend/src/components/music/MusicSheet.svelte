@@ -22,7 +22,7 @@
     import Icon from "../Icon.svelte";
     import type { ComponentProps } from "svelte";
     import { fade } from "svelte/transition";
-    import { dur, sheet } from "../../lib/motion";
+    import { dur, grow, type Origin } from "../../lib/motion";
 
     /** Icon names come from the shared set, so a typo is a build error. */
     type IconName = ComponentProps<typeof Icon>["name"];
@@ -51,9 +51,14 @@
         /** Desktop-only: a wide stage window instead of the phone-width dialog.
          *  Below 901px it is the same sheet it always was. */
         wide = false,
-        /** The playing track's art — blurred into the stage's ambient backdrop.
-         *  Only consulted in wide mode on desktop. */
+        /** The playing track's art — blurred into the sheet's ambient backdrop:
+         *  a wash behind the head on a phone, the whole stage's light on
+         *  desktop. Absent leaves the sheet on its own flat surface. */
         backdropUri = undefined,
+        /** What the sheet was opened from, measured at the tap: the sheet
+         *  unfolds out of that frame and collapses back into it. Null (a back
+         *  gesture, the keyboard, reduced motion) gets the plain slide. */
+        origin = null,
         /** Backdrop click and the drag-down throw both land here. */
         onDismiss,
         /** Bound so the view can note the scroll offset before a swap, and so
@@ -78,6 +83,7 @@
         docked?: boolean;
         wide?: boolean;
         backdropUri?: string;
+        origin?: Origin | null;
         onDismiss: () => void;
         scrollEl?: HTMLElement | null;
         sheetEl?: HTMLElement | null;
@@ -196,11 +202,19 @@
         pendingBody = false;
         cancelDrag();
     }
+
+    // The head is handed to `grow` along with the scroll body: while the
+    // window is moving, the content is faded with it and the frosted blur
+    // stands down. Both are driven from the transition rather than from a
+    // class here, because a removed subtree's effects are already paused by
+    // the time the sheet closes.
+    let topEl = $state<HTMLElement | null>(null);
 </script>
 
 <div
     class="scrim"
-    transition:fade={{ duration: dur(200) }}
+    in:fade={{ duration: dur(280) }}
+    out:fade={{ duration: dur(200) }}
     onclick={onDismiss}
     aria-hidden="true"
 ></div>
@@ -208,6 +222,7 @@
     class="sheet"
     class:dragging
     class:stage={wide}
+    class:ambient={!!backdropUri}
     role="dialog"
     aria-modal="true"
     aria-label={label}
@@ -220,12 +235,19 @@
         : dragY > 0
           ? "transform 0.22s ease-in, opacity 0.22s ease-in"
           : "transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)"}
-    in:sheet={{}}
-    out:sheet={{ instant: dismissing }}
+    in:grow={{ origin, content: () => scrollEl, bar: () => topEl }}
+    out:grow={{
+        origin,
+        out: true,
+        instant: dismissing,
+        content: () => scrollEl,
+        bar: () => topEl,
+    }}
 >
     {#if backdropUri}
-        <!-- The stage's ambient light: the track's own art, blown up and
-             blurred into the room the sheet is standing in. Desktop only. -->
+        <!-- The sheet's ambient light: the track's own art, blown up and
+             blurred into the room the sheet is standing in. A wash behind the
+             head on a phone; the whole window on the desktop stage. -->
         <div
             class="sheet-bg"
             aria-hidden="true"
@@ -249,6 +271,7 @@
         <div
             class="sheet-top"
             role="none"
+            bind:this={topEl}
             onpointerdown={onTopPointerDown}
             onpointermove={onTopPointerMove}
             onpointerup={onTopPointerUp}
@@ -311,6 +334,50 @@
         overflow: hidden;
         will-change: transform;
     }
+    /* ── The ambient backdrop ─────────────────────────────────────────
+       The player used to open on a flat near-black band: the head, the
+       grabber and the gap above the art were the first thing on screen and
+       the only part of the sheet with nothing in it. It carries the track's
+       own art now — blown up, blurred and washed down until it is light
+       rather than picture. Mobile takes it across the top, where the head
+       is; the stage below takes the whole window. */
+    .sheet-bg,
+    .sheet-wash {
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        pointer-events: none;
+    }
+    .sheet-bg {
+        height: 320px;
+        background-size: cover;
+        background-position: center;
+        filter: blur(44px) saturate(1.45);
+        opacity: 0.62;
+        transform: scale(1.35);
+        transform-origin: top center;
+    }
+    /* Full height, opaque from the stop down: a 44px blur throws light well
+       past the layer that casts it, and a wash that stopped where the art
+       stops would leave a seam across the sheet where it ended. */
+    .sheet-wash {
+        bottom: 0;
+        background: linear-gradient(
+            to bottom,
+            rgba(20, 19, 15, 0.34) 0px,
+            rgba(20, 19, 15, 0.72) 210px,
+            var(--bg) 470px
+        );
+    }
+    :global([data-theme="light"]) .sheet-wash {
+        background: linear-gradient(
+            to bottom,
+            rgba(245, 241, 234, 0.5) 0px,
+            rgba(245, 241, 234, 0.78) 210px,
+            var(--bg) 470px
+        );
+    }
     .grabber {
         width: 38px;
         height: 4px;
@@ -320,6 +387,9 @@
         pointer-events: none;
     }
     .sheet-scroll {
+        /* Above the ambient layers. */
+        position: relative;
+        z-index: 1;
         max-height: 92vh;
         overflow-y: auto;
         overscroll-behavior: contain;
@@ -365,20 +435,22 @@
             max-height: none;
             height: 100%;
             padding: 0 44px 40px;
-            /* Painted above the ambient backdrop. */
-            position: relative;
-            z-index: 1;
         }
+        /* The stage is lit end to end rather than washed from the top — and
+           it is painted at half size and scaled up, which is the same 64px of
+           blur over a quarter of the pixels. At the stage's size the full-res
+           version is a genuinely expensive first paint, and it lands on the
+           frame the sheet is trying to open on. */
         .sheet.stage .sheet-bg {
-            position: absolute;
-            inset: -12%;
-            background-size: cover;
-            background-position: center;
-            filter: blur(64px) saturate(1.35);
+            inset: -12% auto auto -12%;
+            width: 62%;
+            height: 62%;
+            opacity: 1;
+            transform: scale(2);
+            transform-origin: top left;
+            filter: blur(32px) saturate(1.35);
         }
         .sheet.stage .sheet-wash {
-            position: absolute;
-            inset: 0;
             background: linear-gradient(
                 158deg,
                 rgba(20, 19, 15, 0.42) 0%,
@@ -434,6 +506,23 @@
         -webkit-backdrop-filter: blur(18px) saturate(1.3);
         -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - var(--fade)), transparent);
         mask-image: linear-gradient(to bottom, #000 calc(100% - var(--fade)), transparent);
+    }
+    /* Over an ambient backdrop the bar stops being a slab and becomes a
+       scrim: enough to keep the title legible, thin enough that the light
+       behind it is the thing you notice. */
+    .sheet.ambient .sheet-top {
+        background: linear-gradient(
+            to bottom,
+            rgba(20, 19, 15, 0.6) 0%,
+            rgba(20, 19, 15, 0) 100%
+        );
+    }
+    :global([data-theme="light"]) .sheet.ambient .sheet-top {
+        background: linear-gradient(
+            to bottom,
+            rgba(245, 241, 234, 0.68) 0%,
+            rgba(245, 241, 234, 0) 100%
+        );
     }
     .player-head {
         display: flex;

@@ -37,6 +37,7 @@
     import type { SonosBridge } from "../../lib/music/sonos.svelte";
     import type { KEFBridge } from "../../lib/music/kef.svelte";
     import type { Busy } from "../../lib/music/busy.svelte";
+    import type { Origin } from "../../lib/motion";
     import type { Snippet } from "svelte";
 
     let {
@@ -55,6 +56,9 @@
         /** Stop *and* hand the Spotify session back — a zone on the stream route. */
         onStop,
         startSomething,
+        /** The card, hero or dock this was opened from, measured at the tap:
+         *  the sheet unfolds out of it and its art flies up to full size. */
+        origin = null,
         scrollEl = $bindable<HTMLElement | null>(null),
         sheetEl = $bindable<HTMLElement | null>(null),
         dismissing = $bindable(false),
@@ -70,6 +74,7 @@
         onClearQueue: () => void;
         onStop: () => void;
         startSomething: Snippet<[string | null]>;
+        origin?: Origin | null;
         scrollEl?: HTMLElement | null;
         sheetEl?: HTMLElement | null;
         dismissing?: boolean;
@@ -229,6 +234,7 @@
     action={{ icon: "sliders", label: configureLabel, onClick: onConfigure }}
     wide
     backdropUri={rooms.art(r)}
+    {origin}
     bind:scrollEl
     bind:sheetEl
     bind:dismissing

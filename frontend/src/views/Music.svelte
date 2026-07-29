@@ -48,6 +48,7 @@
     import { onLive } from "../lib/live";
     import { openModal } from "../lib/modal.svelte";
     import { lockBodyScroll, unlockBodyScroll } from "../lib/scroll-lock";
+    import { originOf, type Origin } from "../lib/motion";
     import * as sheetRun from "../lib/sheet-run";
     import type { SheetRun } from "../lib/sheet-run";
     import { settleScroll, restoreScroll, toTop } from "../lib/music/scroll";
@@ -423,7 +424,17 @@
     const playerRoom = $derived(rooms.byKey(playerKey));
     const playerOpen = $derived(openSheet === "player" && !!playerRoom);
 
-    function openPlayer(r: Room) {
+    // What the player was opened from — the dock, a room card, the hero —
+    // measured at the tap, because the opener is usually gone by the time the
+    // sheet mounts. The sheet unfolds out of that frame and collapses back
+    // into it, so the two surfaces read as one player at two sizes rather
+    // than a second one arriving over the first. The body's scroll is locked
+    // for the sheet's whole life, so the measurement is still true on the way
+    // out. Reached any other way (the back gesture out of Browse, the
+    // keyboard, reduced motion) it is null and the sheet slides as before.
+    let playerOrigin = $state<Origin | null>(null);
+
+    function openPlayer(r: Room, from?: HTMLElement | null) {
         // A room with nothing in it has no player worth opening — it stores,
         // but the media layer refuses to play to it. Editing it is the useful
         // thing instead.
@@ -431,6 +442,7 @@
         // An unreachable KEF speaker can't answer anything; fixing its address
         // is what the tap actually wants.
         if (r.speaker && !r.reachable) return void openKEFModal(r.speaker);
+        playerOrigin = originOf(from);
         playerKey = r.key;
         destination.focus(r);
         // Opened from Browse, the player *replaces* that screen's sheet and
@@ -565,6 +577,11 @@
 
     function openRoomEditor(z: MediaZone | null) {
         editingZone = z;
+        // A swap is not a close: the player hands over to the editor in place,
+        // so it lets go of the frame it grew out of and leaves the way every
+        // other swapping sheet does rather than collapsing into the dock while
+        // the editor rises through it.
+        playerOrigin = null;
         rememberSheetScroll();
         sheets = sheetRun.swapTo(sheets, "room-edit");
         sheetScroll["room-edit"] = 0;
@@ -1035,7 +1052,7 @@
                 onChange: (v) => rooms.setVolume(d, v),
                 onToggleMute: () => rooms.toggleMute(d),
             }}
-            onOpen={() => openPlayer(d)}
+            onOpen={(from) => openPlayer(d, from)}
         >
             {#snippet transport()}
                 <CardTransport
@@ -1129,6 +1146,7 @@
         onClearQueue={() => clearQueue(r)}
         onStop={() => r.zone && void zones.stop(r.zone)}
         startSomething={startRow}
+        origin={playerOrigin}
         bind:this={player}
         bind:scrollEl
         bind:sheetEl={playerEl}

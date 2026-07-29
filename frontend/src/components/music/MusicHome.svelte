@@ -51,7 +51,7 @@
         readyCount: number;
         dockKey?: string;
         onDockVisible: (visible: boolean) => void;
-        onOpenPlayer: (r: Room) => void;
+        onOpenPlayer: (r: Room, from?: HTMLElement) => void;
         onBrowse: () => void;
         onOpenSpeakers: () => void;
         onNewRoom: () => void;
@@ -65,8 +65,8 @@
      * what you are about to open — which is what makes it safe on a grid where
      * a stray tap used to launch a whole sheet.
      */
-    function select(r: Room) {
-        if (destination.is(r)) onOpenPlayer(r);
+    function select(r: Room, from?: HTMLElement) {
+        if (destination.is(r)) onOpenPlayer(r, from);
         else destination.focus(r);
     }
 
@@ -108,7 +108,7 @@
         {sonos}
         pager={rooms.playing}
         onFocus={(r) => destination.focus(r)}
-        onOpen={() => focused && onOpenPlayer(focused)}
+        onOpen={(from) => focused && onOpenPlayer(focused, from)}
         {onBrowse}
     />
 </div>
@@ -148,7 +148,7 @@
                     dropping={drag.dropKey === r.key}
                     aiming={drag.aiming(r)}
                     grabbedName={drag.grabbedName}
-                    onSelect={() => select(r)}
+                    onSelect={(from) => select(r, from)}
                     onToggle={() => rooms.togglePlay(r)}
                     onPointerDown={(e) => drag.onPointerDown(e, r)}
                     onPointerMove={drag.onPointerMove}
