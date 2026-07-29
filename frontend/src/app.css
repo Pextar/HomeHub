@@ -281,7 +281,11 @@
 
 /* ---------- Base ---------- */
 *, *::before, *::after { box-sizing: border-box; }
-html, body { height: 100%; }
+/* A stray overflowing element (an h-scroll strip, a wide grid) must never
+   let the whole page pan sideways — that scroll offset has nothing to
+   reset it (see App.svelte's route-change effect) and would otherwise
+   persist across every navigation until a hard reload. */
+html, body { height: 100%; overflow-x: hidden; }
 body {
     margin: 0;
     font-family: var(--font-sans);

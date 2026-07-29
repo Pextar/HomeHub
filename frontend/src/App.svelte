@@ -176,10 +176,14 @@
     });
 
     // Reset scroll position to the top whenever the user navigates to a
-    // different page, so the new view always starts at the top.
+    // different page, so the new view always starts at the top. Also reset
+    // horizontal scroll: `scrollTo` leaves an unspecified axis untouched, so
+    // any sideways offset picked up on the previous view (e.g. an h-scroll
+    // strip rubber-banding the whole page) would otherwise carry over
+    // permanently, since nothing else ever resets it.
     $effect(() => {
         effectiveRoute;
-        window.scrollTo({ top: 0, behavior: "instant" });
+        window.scrollTo({ top: 0, left: 0, behavior: "instant" });
     });
 </script>
 
