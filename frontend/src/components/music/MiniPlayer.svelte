@@ -41,6 +41,8 @@
         seek = undefined,
         /** The desktop player bar's volume cluster. */
         volume = undefined,
+        /** Handed the bar itself, so the player can unfold out of it rather
+         *  than arriving over it as a second surface. */
         onOpen,
         transport,
     }: {
@@ -58,9 +60,12 @@
             onChange: (v: number) => void;
             onToggleMute: () => void;
         };
-        onOpen: () => void;
+        onOpen: (from?: HTMLElement) => void;
         transport: Snippet;
     } = $props();
+
+    let bar = $state<HTMLElement | null>(null);
+    const open = () => onOpen(bar ?? undefined);
 </script>
 
 <div
@@ -68,11 +73,14 @@
     class:paused={!playing}
     class:over-sheet={overSheet}
     class:has-scrub={!!seek}
+    bind:this={bar}
     transition:fly={{ y: 20, duration: dur(220), easing: cubicOut }}
 >
-    <button class="mini-open" onclick={onOpen}>
+    <button class="mini-open" onclick={open}>
         {#if artUri}
-            <img class="mini-art" src={artUri} alt="" loading="lazy" />
+            <!-- The one element the dock and the player share: it flies
+                 between the two sizes rather than being redrawn. -->
+            <img class="mini-art" data-morph src={artUri} alt="" loading="lazy" />
         {:else}
             <div class="mini-art placeholder"></div>
         {/if}
@@ -125,7 +133,7 @@
             </div>
             <span class="mini-volnum mono">{volume.value}</span>
         {/if}
-        <button class="icon-btn mini-expand" aria-label="Open the player" onclick={onOpen}>
+        <button class="icon-btn mini-expand" aria-label="Open the player" onclick={open}>
             <Icon name="chevronUp" size={16} />
         </button>
     </div>

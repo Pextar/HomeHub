@@ -41,9 +41,14 @@
         sonos: SonosBridge;
         pager?: Room[];
         onFocus: (r: Room) => void;
-        onOpen: () => void;
+        /** Handed the hero itself: the player unfolds out of the card that
+         *  opened it, and the art carries across. */
+        onOpen: (from?: HTMLElement) => void;
         onBrowse: () => void;
     } = $props();
+
+    let card = $state<HTMLElement | null>(null);
+    const open = () => onOpen(card ?? undefined);
 
     const playing = $derived(!!room && rooms.isPlaying(room));
     const art = $derived(room ? rooms.art(room) : undefined);
@@ -64,14 +69,14 @@
     });
 </script>
 
-<section class="hero" class:on={playing}>
+<section class="hero" class:on={playing} bind:this={card}>
     <div class="hero-head">
         <span class="hero-eyebrow">
             {#if playing}<Waveform />{:else}<Icon name="speaker" size={13} />{/if}
             <span>{playing ? "Playing on" : "Focused"}</span>
         </span>
         {#if room}
-            <button class="hero-room" onclick={onOpen}>
+            <button class="hero-room" onclick={open}>
                 <span>{room.name}</span>
                 <Icon name="chevronDown" size={15} />
             </button>
@@ -85,17 +90,17 @@
             class="hero-art-btn"
             aria-label={room ? `Open the player for ${room.name}` : "Open the player"}
             disabled={!room}
-            onclick={onOpen}
+            onclick={open}
         >
             {#if art}
-                <img class="hero-art" src={art} alt="" />
+                <img class="hero-art" data-morph src={art} alt="" />
             {:else}
                 <span class="hero-art placeholder"><Icon name="musicNotes" size={26} /></span>
             {/if}
         </button>
 
         <div class="hero-meta">
-            <button class="hero-title-btn" disabled={!room} onclick={onOpen}>
+            <button class="hero-title-btn" disabled={!room} onclick={open}>
                 <span class="hero-title" class:idle={!title}>{meta.head}</span>
                 <span class="hero-sub">{meta.sub}</span>
             </button>

@@ -61,7 +61,7 @@
         dropping?: boolean;
         aiming?: boolean;
         grabbedName?: string;
-        onSelect?: () => void;
+        onSelect?: (from?: HTMLElement) => void;
         onToggle?: () => void;
         onPointerDown?: (e: PointerEvent) => void;
         onPointerMove?: (e: PointerEvent) => void;
@@ -126,12 +126,13 @@
             onpointercancel={onPointerCancel}
             onclickcapture={onClickCapture}
             onkeydown={onKeyDown}
-            onclick={onSelect}
+            onclick={(e) =>
+                onSelect?.((e.currentTarget as HTMLElement).closest(".rc") as HTMLElement)}
         ></button>
 
         <div class="rc-top">
             {#if art}
-                <img class="rc-art" src={art} alt="" loading="lazy" />
+                <img class="rc-art" data-morph src={art} alt="" loading="lazy" />
             {:else}
                 <span class="rc-art placeholder">
                     <Icon name={room.kind === "zone" ? "groups" : "speaker"} size={17} />
