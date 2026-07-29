@@ -19,7 +19,7 @@
     import TrackList from "./TrackList.svelte";
     import { dur } from "../../lib/motion";
     import { fmtCount, fmtTotalMs } from "../../lib/music/format";
-    import type { Destination } from "../../lib/music/destination.svelte";
+    import type { Dest } from "../../lib/music/destination.svelte";
     import type { Busy } from "../../lib/music/busy.svelte";
     import type { SpotifyContextDetail, SpotifyItem } from "../../lib/types";
 
@@ -43,7 +43,9 @@
     }: {
         context: SpotifyContextDetail | null;
         loading: boolean;
-        destination: Destination;
+        /** Only the two members a catalog screen reads, so the panel can
+         *  answer them from its own speaker store (§16). */
+        destination: { current: Dest | null; sonosTarget: string | null };
         busy: Busy;
         targetRow: Snippet;
         onBack: () => void;

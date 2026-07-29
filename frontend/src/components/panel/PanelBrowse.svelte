@@ -5,10 +5,13 @@
      * player rides on the right; the left is the work area, switched by
      * chip between three panes:
      *
-     *   Search  Spotify's catalog and the household's favorites. A tap
-     *           plays; queueing without interrupting lives behind the
-     *           row's overflow, and only for a Sonos destination — the
-     *           queue is a Sonos group's.
+     *   Search  Spotify's catalog and the household's favorites. A song
+     *           plays outright; an artist opens their page — the app's own
+     *           catalog screens (§15.9), one level deeper in this same
+     *           column, with a record or a related artist going deeper
+     *           still and back climbing one level. Queueing without
+     *           interrupting lives behind the row's overflow, and only
+     *           for a Sonos destination — the queue is a Sonos group's.
      *   Queue   The featured group's queue: tap to jump, X to remove,
      *           two taps to clear (there is no confirm modal on a kiosk).
      *   Rooms   Every room, with Sonos-native grouping: join the featured
@@ -16,8 +19,9 @@
      *           Cross-vendor HomeHub rooms stay in the full Music view —
      *           making a persistent routed room is configuration.
      *
-     * The back chip returns to the panel dashboard; Escape does the same,
-     * unless a row menu has it first.
+     * The back chip returns to the panel dashboard — or climbs one level
+     * of the catalog stack first; Escape does the same, unless a row menu
+     * has it first.
      */
     import { onMount, tick as flushDOM } from "svelte";
     import { fade, scale } from "svelte/transition";
@@ -26,14 +30,18 @@
     import Waveform from "../music/Waveform.svelte";
     import EmptyState from "../EmptyState.svelte";
     import QueuePane from "../music/QueuePane.svelte";
+    import ArtistScreen from "../music/ArtistScreen.svelte";
+    import ContextScreen from "../music/ContextScreen.svelte";
     import PanelPlayerCard from "./PanelPlayerCard.svelte";
+    import { api } from "../../lib/api";
     import { route, toasts } from "../../lib/stores.svelte";
     import { createSpotify } from "../../lib/music/spotify.svelte";
     import { fmtCount, fmtMs, capFirst } from "../../lib/music/format";
     import { dur } from "../../lib/motion";
     import { kefSourceLabel } from "../../lib/kef";
     import type { PanelMusicStore, PanelSource } from "../../lib/panel-music.svelte";
-    import type { SpotifyItem } from "../../lib/types";
+    import type { Busy } from "../../lib/music/busy.svelte";
+    import type { SpotifyArtistDetail, SpotifyContextDetail, SpotifyItem } from "../../lib/types";
 
     let { music }: { music: PanelMusicStore } = $props();
 
@@ -60,13 +68,138 @@
         route.go("panel");
     }
 
+    // ── The catalog stack: artist and record pages, one level deeper ────
+    // The app's own catalog screens ride in this column (§15.9's stack on
+    // §16's wall): an artist opens from a search row, their records and
+    // the artists their fans also play open from there, and back climbs
+    // one level instead of leaving the depth. Each detail is fetched once
+    // per URI and kept for the session — coming back is instant rather
+    // than a skeleton replaying itself.
+    type Level = { kind: "artist" | "context"; uri: string; scroll: number };
+    let stack = $state<Level[]>([]);
+    const topLevel = $derived(stack.length ? stack[stack.length - 1] : null);
+
+    let artistCache = $state<Record<string, SpotifyArtistDetail>>({});
+    let artistLoadingUri = $state<string | null>(null);
+    const artistUri = $derived(topLevel?.kind === "artist" ? topLevel.uri : null);
+    const artistDetail = $derived(artistUri ? (artistCache[artistUri] ?? null) : null);
+    const artistLoading = $derived(!!artistUri && artistLoadingUri === artistUri);
+
+    let contextCache = $state<Record<string, SpotifyContextDetail>>({});
+    let contextLoadingUri = $state<string | null>(null);
+    const contextUri = $derived(topLevel?.kind === "context" ? topLevel.uri : null);
+    const contextDetail = $derived(contextUri ? (contextCache[contextUri] ?? null) : null);
+    const contextLoading = $derived(!!contextUri && contextLoadingUri === contextUri);
+
+    // Scroll follows the level: pushing stashes where the outgoing list
+    // was, popping puts it back — the search results count as level zero.
+    let resultsEl = $state<HTMLElement | null>(null);
+    let stackEl = $state<HTMLElement | null>(null);
+    let searchScroll = 0;
+
+    function pushLevel(kind: Level["kind"], uri: string) {
+        if (stack.length === 0) searchScroll = resultsEl?.scrollTop ?? 0;
+        else stack[stack.length - 1].scroll = stackEl?.scrollTop ?? 0;
+        stack = [...stack, { kind, uri, scroll: 0 }];
+    }
+
+    async function popLevel() {
+        if (!stack.length) return;
+        stack = stack.slice(0, -1);
+        await flushDOM();
+        if (stack.length === 0) resultsEl?.scrollTo(0, searchScroll);
+        else stackEl?.scrollTo(0, stack[stack.length - 1].scroll);
+    }
+
+    async function openArtist(uri: string) {
+        if (topLevel?.kind === "artist" && topLevel.uri === uri) return;
+        pushLevel("artist", uri);
+        if (artistCache[uri]) return; // been here — renders instantly
+        artistLoadingUri = uri;
+        try {
+            artistCache[uri] = await api.spotifyArtist(uri);
+        } catch (e) {
+            toasts.error("Couldn't load artist", (e as Error).message);
+            if (artistUri === uri) void popLevel();
+        } finally {
+            if (artistLoadingUri === uri) artistLoadingUri = null;
+        }
+    }
+
+    async function openContext(uri: string) {
+        if (topLevel?.kind === "context" && topLevel.uri === uri) return;
+        pushLevel("context", uri);
+        if (contextCache[uri]) return;
+        contextLoadingUri = uri;
+        try {
+            contextCache[uri] = await api.spotifyContext(uri);
+        } catch (e) {
+            toasts.error("Couldn't open it", (e as Error).message);
+            if (contextUri === uri) void popLevel();
+        } finally {
+            if (contextLoadingUri === uri) contextLoadingUri = null;
+        }
+    }
+
+    // The catalog screens were built for the app's stores; these two answer
+    // their props from the panel's own instead — the featured source is the
+    // destination, and `busy` reads the same map the rows disable on.
+    const catalogDest = {
+        get current() {
+            const f = featured;
+            return f ? { kind: f.kind, id: f.id } : null;
+        },
+        get sonosTarget() {
+            const f = featured;
+            return f?.kind === "sonos" ? f.id : null;
+        },
+    };
+    const catalogBusy: Busy = {
+        is: (k) => !!music.busy[k],
+        async claim(k, fn) {
+            if (music.busy[k]) return undefined;
+            music.busy[k] = true;
+            try {
+                return await fn();
+            } finally {
+                music.busy[k] = false;
+            }
+        },
+        async run(k, fn, errTitle, after) {
+            await catalogBusy.claim(k, async () => {
+                try {
+                    await fn();
+                    await after?.();
+                } catch (e) {
+                    toasts.error(errTitle, (e as Error).message);
+                }
+            });
+        },
+    };
+
+    /** The opened record as an item, for the one-tap "Play album/playlist"
+     *  — the same call a tap on its search row makes. */
+    function contextItem(c: SpotifyContextDetail): SpotifyItem {
+        return { kind: c.kind, uri: c.uri, name: c.name, sub: c.sub, art_url: c.art_url };
+    }
+
+    // The screens' row overflow menus answer Escape before the stack does.
+    let artistScr = $state<ArtistScreen | null>(null);
+    let contextScr = $state<ContextScreen | null>(null);
+
     // Escape leaves the depth — a row menu open at the time gets the key
-    // first, and the search box gets it when there is a query to clear.
+    // first, then each level of the catalog stack, and the search box gets
+    // it when there is a query to clear.
     onMount(() => {
         const onKey = (e: KeyboardEvent) => {
             if (e.key !== "Escape") return;
             if (menuFor) {
                 menuFor = null;
+                return;
+            }
+            if (artistScr?.closeMenu() || contextScr?.closeMenu()) return;
+            if (stack.length) {
+                void popLevel();
                 return;
             }
             back();
@@ -173,7 +306,8 @@
     /** An open menu takes focus and answers the arrow keys, so queueing a
      *  result never means tabbing back through the whole list. */
     function menuNav(node: HTMLElement) {
-        const items = () => Array.from(node.querySelectorAll<HTMLButtonElement>("[role='menuitem']"));
+        const items = () =>
+            Array.from(node.querySelectorAll<HTMLButtonElement>("[role='menuitem']"));
         items()[0]?.focus();
         function onKey(e: KeyboardEvent) {
             if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
@@ -219,20 +353,69 @@
 
     <div class="b-body">
         <section class="b-left">
-            <div class="p-panes" role="group" aria-label="Music panes">
-                <button class="k-chip" class:active={pane === "search"} onclick={() => (pane = "search")}>
-                    Search
-                </button>
-                <button class="k-chip" class:active={pane === "queue"} onclick={() => (pane = "queue")}>
-                    Queue{#if featured?.kind === "sonos" && queueCount > 0}
-                        <span class="mono">{queueCount}</span>{/if}
-                </button>
-                <button class="k-chip" class:active={pane === "rooms"} onclick={() => (pane = "rooms")}>
-                    Rooms <span class="mono">{music.sources.length}</span>
-                </button>
-            </div>
+            {#if !topLevel}
+                <div class="p-panes" role="group" aria-label="Music panes">
+                    <button
+                        class="k-chip"
+                        class:active={pane === "search"}
+                        onclick={() => (pane = "search")}
+                    >
+                        Search
+                    </button>
+                    <button
+                        class="k-chip"
+                        class:active={pane === "queue"}
+                        onclick={() => (pane = "queue")}
+                    >
+                        Queue{#if featured?.kind === "sonos" && queueCount > 0}
+                            <span class="mono">{queueCount}</span>{/if}
+                    </button>
+                    <button
+                        class="k-chip"
+                        class:active={pane === "rooms"}
+                        onclick={() => (pane = "rooms")}
+                    >
+                        Rooms <span class="mono">{music.sources.length}</span>
+                    </button>
+                </div>
+            {/if}
 
-            {#if pane === "search"}
+            {#if topLevel}
+                <!-- One level deeper: the app's own artist/record pages ride
+                     in this column; their back chip climbs the stack. -->
+                {@const level = topLevel}
+                <div class="b-stack" bind:this={stackEl}>
+                    {#if level.kind === "artist"}
+                        <ArtistScreen
+                            artist={artistDetail}
+                            loading={artistLoading}
+                            destination={catalogDest}
+                            busy={catalogBusy}
+                            targetRow={playOnRow}
+                            onBack={popLevel}
+                            onPick={pick}
+                            onEnqueue={(item, next) => music.enqueue(item, next)}
+                            onOpenArtist={(uri) => void openArtist(uri)}
+                            onOpenContext={(uri) => void openContext(uri)}
+                            bind:this={artistScr}
+                        />
+                    {:else}
+                        <ContextScreen
+                            context={contextDetail}
+                            loading={contextLoading}
+                            destination={catalogDest}
+                            busy={catalogBusy}
+                            targetRow={playOnRow}
+                            onBack={popLevel}
+                            onPlayAll={() => contextDetail && pick(contextItem(contextDetail))}
+                            onPick={pick}
+                            onEnqueue={(item, next) => music.enqueue(item, next)}
+                            onOpenArtist={(uri) => void openArtist(uri)}
+                            bind:this={contextScr}
+                        />
+                    {/if}
+                </div>
+            {:else if pane === "search"}
                 <div class="b-search">
                     <div class="s-box">
                         <Icon name="search" size={20} />
@@ -271,14 +454,15 @@
                                         class="k-chip"
                                         class:active={spotify.kindFilter === k.id}
                                         onclick={() => (spotify.kindFilter = k.id)}
-                                        >{k.label} <span class="mono">{r[k.id].length}</span></button
+                                        >{k.label}
+                                        <span class="mono">{r[k.id].length}</span></button
                                     >
                                 {/if}
                             {/each}
                         </div>
                     {/if}
 
-                    <div class="s-results">
+                    <div class="s-results" bind:this={resultsEl}>
                         {#if !booted || spotify.searching}
                             <div class="sk-list" aria-hidden="true">
                                 {#each Array(6) as _, i (i)}
@@ -317,26 +501,45 @@
                                         <div class="row">
                                             <button
                                                 class="r-open"
-                                                disabled={music.busy["item:" + item.uri]}
-                                                onclick={() => pick(item)}
+                                                disabled={item.kind !== "artist" &&
+                                                    music.busy["item:" + item.uri]}
+                                                onclick={() =>
+                                                    item.kind === "artist"
+                                                        ? void openArtist(item.uri)
+                                                        : pick(item)}
                                             >
                                                 {#if item.art_url}
-                                                    <img class="r-art" src={item.art_url} alt="" loading="lazy" />
+                                                    <img
+                                                        class="r-art"
+                                                        src={item.art_url}
+                                                        alt=""
+                                                        loading="lazy"
+                                                    />
                                                 {:else}
                                                     <span class="r-art placeholder">[ art ]</span>
                                                 {/if}
                                                 <span class="r-meta">
                                                     <span class="r-name">{item.name}</span>
-                                                    {#if sub(item)}<span class="r-sub">{sub(item)}</span>{/if}
+                                                    {#if sub(item)}<span class="r-sub"
+                                                            >{sub(item)}</span
+                                                        >{/if}
                                                 </span>
                                                 <span class="r-tail">
                                                     {#if item.duration_ms}
-                                                        <span class="r-dur mono">{fmtMs(item.duration_ms)}</span>
+                                                        <span class="r-dur mono"
+                                                            >{fmtMs(item.duration_ms)}</span
+                                                        >
                                                     {/if}
-                                                    <Icon name="play" size={16} />
+                                                    <!-- A song plays; an artist opens — the tail says which. -->
+                                                    <Icon
+                                                        name={item.kind === "artist"
+                                                            ? "chevronRight"
+                                                            : "play"}
+                                                        size={16}
+                                                    />
                                                 </span>
                                             </button>
-                                            {#if featured?.kind === "sonos"}
+                                            {#if featured?.kind === "sonos" && item.kind !== "artist"}
                                                 <button
                                                     class="r-more"
                                                     aria-label="More for {item.name}"
@@ -352,8 +555,18 @@
                                                         class="r-menu"
                                                         role="menu"
                                                         use:menuNav
-                                                        in:scale={{ start: 0.95, duration: dur(140), easing: cubicOut, opacity: 0 }}
-                                                        out:scale={{ start: 0.95, duration: dur(100), easing: cubicOut, opacity: 0 }}
+                                                        in:scale={{
+                                                            start: 0.95,
+                                                            duration: dur(140),
+                                                            easing: cubicOut,
+                                                            opacity: 0,
+                                                        }}
+                                                        out:scale={{
+                                                            start: 0.95,
+                                                            duration: dur(100),
+                                                            easing: cubicOut,
+                                                            opacity: 0,
+                                                        }}
                                                     >
                                                         <button
                                                             class="r-menu-item"
@@ -363,7 +576,9 @@
                                                                 music.enqueue(item, true);
                                                             }}
                                                         >
-                                                            <Icon name="skipNext" size={16} /><span>Play next</span>
+                                                            <Icon name="skipNext" size={16} /><span
+                                                                >Play next</span
+                                                            >
                                                         </button>
                                                         <button
                                                             class="r-menu-item"
@@ -373,7 +588,9 @@
                                                                 music.enqueue(item, false);
                                                             }}
                                                         >
-                                                            <Icon name="queue" size={16} /><span>Add to queue</span>
+                                                            <Icon name="queue" size={16} /><span
+                                                                >Add to queue</span
+                                                            >
                                                         </button>
                                                     </div>
                                                 {/if}
@@ -396,14 +613,21 @@
                                             onclick={() => music.playFavorite(fav)}
                                         >
                                             {#if fav.art_uri}
-                                                <img class="r-art" src={fav.art_uri} alt="" loading="lazy" />
+                                                <img
+                                                    class="r-art"
+                                                    src={fav.art_uri}
+                                                    alt=""
+                                                    loading="lazy"
+                                                />
                                             {:else}
                                                 <span class="r-art placeholder">[ art ]</span>
                                             {/if}
                                             <span class="r-meta">
                                                 <span class="r-name">{fav.title}</span>
                                             </span>
-                                            <span class="r-tail"><Icon name="play" size={16} /></span>
+                                            <span class="r-tail"
+                                                ><Icon name="play" size={16} /></span
+                                            >
                                         </button>
                                     </div>
                                 {/each}
@@ -418,15 +642,23 @@
                                             onclick={() => pick(item)}
                                         >
                                             {#if item.art_url}
-                                                <img class="r-art" src={item.art_url} alt="" loading="lazy" />
+                                                <img
+                                                    class="r-art"
+                                                    src={item.art_url}
+                                                    alt=""
+                                                    loading="lazy"
+                                                />
                                             {:else}
                                                 <span class="r-art placeholder">[ art ]</span>
                                             {/if}
                                             <span class="r-meta">
                                                 <span class="r-name">{item.name}</span>
-                                                {#if sub(item)}<span class="r-sub">{sub(item)}</span>{/if}
+                                                {#if sub(item)}<span class="r-sub">{sub(item)}</span
+                                                    >{/if}
                                             </span>
-                                            <span class="r-tail"><Icon name="play" size={16} /></span>
+                                            <span class="r-tail"
+                                                ><Icon name="play" size={16} /></span
+                                            >
                                         </button>
                                     </div>
                                 {/each}
@@ -451,7 +683,8 @@
                             <EmptyState
                                 icon="queue"
                                 title="Queues are Sonos-only"
-                                message="{featured?.title ?? 'This room'} plays straight through — there is no queue to manage."
+                                message="{featured?.title ??
+                                    'This room'} plays straight through — there is no queue to manage."
                                 compact
                             />
                         </div>
@@ -534,8 +767,8 @@
                         {/each}
                     </div>
                     <p class="rm-note">
-                        Sonos rooms group natively. Playing a KEF speaker together with Sonos takes a
-                        HomeHub room — those are made in the Music view.
+                        Sonos rooms group natively. Playing a KEF speaker together with Sonos takes
+                        a HomeHub room — those are made in the Music view.
                     </p>
                 </div>
             {/if}
@@ -543,7 +776,14 @@
 
         <section class="b-player" aria-label="Now playing">
             {#if featured}
-                <PanelPlayerCard {music} full onShowQueue={() => (pane = "queue")} />
+                <PanelPlayerCard
+                    {music}
+                    full
+                    onShowQueue={() => {
+                        stack = [];
+                        pane = "queue";
+                    }}
+                />
             {:else}
                 <div class="p-nosrc">
                     <Icon name="speaker" size={28} />
@@ -553,6 +793,15 @@
         </section>
     </div>
 </div>
+
+<!-- The catalog screens name where they'll sound; on the wall that's
+     always the featured source — its chips ride on the player column. -->
+{#snippet playOnRow()}
+    <span class="play-on">
+        <Icon name="speaker" size={14} />
+        <span>{featured ? `Plays on ${featured.title}` : "No speaker reachable"}</span>
+    </span>
+{/snippet}
 
 <style>
     .browse {
@@ -675,6 +924,20 @@
         overflow-y: auto;
         padding-bottom: var(--space-2);
     }
+    /* The catalog stack owns the column's scroll the same way. */
+    .b-stack {
+        flex: 1;
+        min-height: 0;
+        overflow-y: auto;
+        padding-bottom: var(--space-2);
+    }
+    .play-on {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 12.5px;
+        color: var(--text-mute);
+    }
     .s-box {
         display: flex;
         align-items: center;
@@ -742,8 +1005,9 @@
         margin-top: 0;
     }
 
-    /* The row is a container, not a control: tapping the body plays now,
-       the trailing overflow queues without interrupting. */
+    /* The row is a container, not a control: a song plays outright, an
+       artist opens their page, and the trailing overflow queues without
+       interrupting. */
     .row {
         position: relative;
         display: flex;
@@ -1070,7 +1334,8 @@
             grid-template-columns: minmax(0, 1fr);
         }
         .s-results,
-        .b-pane {
+        .b-pane,
+        .b-stack {
             overflow: visible;
             flex: none;
         }

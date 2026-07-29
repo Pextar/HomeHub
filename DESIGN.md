@@ -1184,16 +1184,21 @@ constraint made visible.
   under the room-wide one when a group has more than one, the KEF
   input selector, and the Up-next row that names the actual next track
   and opens the queue pane (§15.8's door, same sentence).
-- **On the music depth, every result plays.** A wall has no drill-down,
-  so the catalog's "a tap opens; only a song plays" (§15.9) flattens to
-  one gesture: a song plays, an album or playlist plays whole, and an
-  artist starts their top track — the toast names what started and on
-  which room, the featured source being the destination the player
-  column's chips name. Queueing without interrupting lives behind the
-  row's overflow ("Play next", "Add to queue"), only for a Sonos
-  destination, exactly like §15.8's rule — and the queue pane is where
-  it lands. Spotify setup stays in the full view: an unconnected depth
-  says so and points there, because configuration is the full app's job.
+- **On the music depth, a song plays; an artist opens.** The wall keeps
+  the flat gesture where it's about starting sound: a song found by
+  search plays, an album or playlist plays whole — the toast names what
+  started and on which room, the featured source being the destination
+  the player column's chips name. An artist row opens the artist's page
+  instead: the app's own §15.9 catalog screens ride in the depth's work
+  area — the most-played tracks, the discography shelves, "Fans also
+  like" — fetched once per URI and kept for the session. From there a
+  record or a related artist goes one level deeper still, the back chip
+  climbs one level rather than leaving the depth, and Escape walks the
+  same ladder. Queueing without interrupting lives behind the row's
+  overflow ("Play next", "Add to queue"), only for a Sonos destination,
+  exactly like §15.8's rule — and the queue pane is where it lands.
+  Spotify setup stays in the full view: an unconnected depth says so and
+  points there, because configuration is the full app's job.
 - **Grouping on the wall is Sonos-native and tap-based.** The app's
   drag would be imprecise at arm's length, so the Rooms pane names the
   action instead: every other Sonos room gets "Join {featured}", the
