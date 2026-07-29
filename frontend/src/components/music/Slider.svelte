@@ -20,9 +20,9 @@
         valueText = undefined,
         disabled = false,
         variant = "volume",
-        /** Live, on every movement — update the local value, send nothing. */
+        /** Live, on every movement. */
         onInput,
-        /** On release — this is what goes to the speaker. */
+        /** On release — the authoritative value. */
         onChange,
     }: {
         value: number;

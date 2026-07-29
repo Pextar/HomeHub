@@ -4,7 +4,7 @@ import { kefSourceLabel } from "../kef";
 import type { KEFStatus, KEFSpeakerView, KEFSource } from "../types";
 import type { Busy } from "./busy.svelte";
 import { clock } from "./clock.svelte";
-import { clampVol } from "./volume";
+import { clampVol, createVolumeThrottle } from "./volume";
 
 /**
  * The KEF bridge, as state.
@@ -42,7 +42,8 @@ export interface KEFBridge {
 
   togglePlay(sp: KEFSpeakerView): Promise<void>;
   skip(sp: KEFSpeakerView, dir: "next" | "previous"): void;
-  /** The live value while a finger is on the slider — no call goes out yet. */
+  /** The live value while a finger is on the slider, sent to the speaker on
+   *  a short throttle so a drag doesn't flood it with calls. */
   dragVolume(sp: KEFSpeakerView, v: number): void;
   setVolume(sp: KEFSpeakerView, v: number): void;
   toggleMute(sp: KEFSpeakerView): void;
@@ -68,6 +69,10 @@ export function createKEFBridge(busy: Busy): KEFBridge {
   const vol = $state<Record<string, number>>({});
   const volAt: Record<string, number> = {};
   const VOL_HOLD_MS = 4000;
+
+  const dragThrottle = createVolumeThrottle((id, level) => {
+    void api.kefSetVolume(id, level).catch(() => {}); // a dropped mid-drag frame self-heals on release or the next poll
+  });
 
   const speakers = $derived.by(() => {
     const list = [...(s.status?.speakers ?? [])];
@@ -197,14 +202,17 @@ export function createKEFBridge(busy: Busy): KEFBridge {
     },
 
     dragVolume(sp, v) {
-      vol[sp.id] = v;
+      const level = clampVol(v);
+      vol[sp.id] = level;
       // Stamped, or `shownVolume` would read the finger's own value as stale
       // and hand the slider back the polled one mid-drag.
       volAt[sp.id] = Date.now();
+      dragThrottle.schedule(sp.id, level);
     },
 
     setVolume(sp, v) {
       const level = clampVol(v);
+      dragThrottle.cancel(sp.id);
       vol[sp.id] = level;
       volAt[sp.id] = Date.now();
       void run("kefvol:" + sp.id, () => api.kefSetVolume(sp.id, level), "Volume failed");

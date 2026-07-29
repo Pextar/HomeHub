@@ -6,9 +6,12 @@
     import { openModal } from "../lib/modal.svelte";
     import Icon from "../components/Icon.svelte";
     import Switch from "../components/Switch.svelte";
+    import Segmented from "../components/Segmented.svelte";
     import ShortcutsModal from "../modals/ShortcutsModal.svelte";
     import ConfirmModal from "../components/ConfirmModal.svelte";
     import { pushClient, pushSupported } from "../lib/push.svelte";
+    import { createSpotify } from "../lib/music/spotify.svelte";
+    import type { ThemeMode } from "../lib/stores.svelte";
     import { fly } from "svelte/transition";
     import { cubicOut } from "svelte/easing";
     import { dur, stagger } from "../lib/motion";
@@ -18,6 +21,27 @@
     const username = $derived(session.user?.username ?? "You");
     const initial = $derived(username.charAt(0).toUpperCase());
     const roleLabel = $derived(session.user?.admin ? "Admin · signed in" : "Limited · signed in");
+
+    // Status only — Settings doesn't search, so the history callback is a
+    // no-op. Loaded once on mount; `spotify.status` stays null (hiding the
+    // card) for anyone the backend won't hand Spotify status to.
+    const spotify = createSpotify(() => {});
+    $effect(() => {
+        void spotify.load();
+    });
+
+    async function disconnectSpotify() {
+        const who = spotify.status?.display_name
+            ? `"${spotify.status.display_name}"`
+            : "Your Spotify account";
+        const ok = await openModal<boolean>(ConfirmModal, {
+            title: "Disconnect Spotify?",
+            message: `${who} will be unlinked. To search again you'll need to reconnect through Spotify.`,
+            confirmLabel: "Disconnect",
+            danger: true,
+        });
+        if (ok) await spotify.disconnect();
+    }
 
     async function signOut() {
         const ok = await openModal<boolean>(ConfirmModal, {
@@ -224,10 +248,16 @@
         <div class="who-role">{roleLabel}</div>
     </div>
     <div class="who-actions">
-        <button class="chip" onclick={() => theme.toggle()} aria-label="Toggle theme">
-            <Icon name={theme.current === "dark" ? "moon" : "sun"} size={15} />
-            {theme.current === "dark" ? "Dark" : "Light"}
-        </button>
+        <Segmented
+            name="theme-mode"
+            value={theme.mode}
+            onChange={(v) => theme.setMode(v as ThemeMode)}
+            options={[
+                { value: "light", label: "Light" },
+                { value: "dark", label: "Dark" },
+                { value: "auto", label: "Auto" },
+            ]}
+        />
         <button class="chip danger" onclick={signOut}>
             <Icon name="logout" size={15} /> Sign out
         </button>
@@ -308,8 +338,33 @@
     </div>
 </section>
 
+{#if spotify.status}
+    <section class="card"
+        in:fly={{ y: 10, duration: dur(220), delay: stagger(4), easing: cubicOut }}>
+        <header>
+            <h2>Spotify</h2>
+            <p>The account Music searches and plays from.</p>
+        </header>
+        {#if spotify.connected}
+            <div class="notif-row">
+                <span class="notif-label">
+                    Connected
+                    <span class="field-help">
+                        Signed in as {spotify.status?.display_name || "Spotify"}.
+                    </span>
+                </span>
+                <button type="button" class="chip danger" onclick={disconnectSpotify}>
+                    Disconnect
+                </button>
+            </div>
+        {:else}
+            <p class="hint">Not connected. Set it up from Music &rarr; Browse.</p>
+        {/if}
+    </section>
+{/if}
+
 <section class="card"
-    in:fly={{ y: 10, duration: dur(220), delay: stagger(4), easing: cubicOut }}>
+    in:fly={{ y: 10, duration: dur(220), delay: stagger(5), easing: cubicOut }}>
     <header>
         <h2>Push notifications</h2>
         <p>
@@ -432,7 +487,7 @@
 </section>
 
 <section class="card"
-    in:fly={{ y: 10, duration: dur(220), delay: stagger(5), easing: cubicOut }}>
+    in:fly={{ y: 10, duration: dur(220), delay: stagger(6), easing: cubicOut }}>
     <header>
         <h2>Backup &amp; restore</h2>
         <p>Export your full configuration to a file, or restore it from one. Profiles and passwords are never included.</p>
@@ -455,7 +510,7 @@
 </section>
 
 <section class="card"
-    in:fly={{ y: 10, duration: dur(220), delay: stagger(6), easing: cubicOut }}>
+    in:fly={{ y: 10, duration: dur(220), delay: stagger(7), easing: cubicOut }}>
     <header>
         <h2>System</h2>
         <p>Power-user tools for inspecting and driving the hub directly.</p>
@@ -545,6 +600,7 @@
         flex-wrap: wrap;
     }
     .optional { color: var(--text-mute); font-weight: 400; font-size: 12px; }
+    .hint { margin: 0; color: var(--text-mute); font-size: 13px; }
 
     /* Coordinates are numeric — render them with tabular mono figures. */
     form input[type="number"] {
