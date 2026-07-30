@@ -31,7 +31,6 @@
   async function cancel() {
     try {
       await api.deleteTimer(timer.id);
-      toasts.success("Timer cancelled");
       await data.refresh();
     } catch (e) {
       toasts.error("Failed", (e as Error).message);

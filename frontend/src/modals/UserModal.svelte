@@ -41,14 +41,14 @@
     }
 
     async function copyCode() {
-        if (await copyText(loginCode)) toasts.success("Code copied", loginCode);
-        else toasts.warn("Couldn't copy", "Copy it manually: " + loginCode);
+        // Only the failure is worth saying: a clipboard that took the code
+        // needs no announcement, one that refused leaves the user stuck.
+        if (!(await copyText(loginCode))) toasts.warn("Couldn't copy", "Copy it manually: " + loginCode);
     }
 
     async function copyInviteURL() {
         if (!inviteURL) return;
-        if (await copyText(inviteURL)) toasts.success("Invite link copied");
-        else toasts.warn("Couldn't copy", "Copy it manually");
+        if (!(await copyText(inviteURL))) toasts.warn("Couldn't copy", "Copy it manually");
     }
 
     async function save() {
@@ -73,7 +73,6 @@
                     ...(password.trim() ? { password } : {}),
                     ...(regenerate ? { regenerate_code: true } : {}),
                 });
-                toasts.success("Profile updated", name);
                 closeModal(true);
             } else {
                 const result = await api.createUser({
@@ -88,7 +87,6 @@
                     inviteURL = result.invite_url;
                     inviteUsername = name;
                 } else {
-                    toasts.success("Profile created", "Share their login code with them.");
                     closeModal(true);
                 }
             }

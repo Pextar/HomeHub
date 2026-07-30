@@ -118,7 +118,6 @@
         if (!ok) return;
         try {
             await api.deleteSocket(socket.id);
-            toasts.success("Device deleted", socket.name);
             await data.refresh();
         } catch (e) { toasts.error("Failed", (e as Error).message); }
     }

@@ -139,20 +139,18 @@
     });
 
     // ── Starting something ───────────────────────────────────────────────
-    // Playback is invisible until the next poll lands, so every "play this"
-    // path confirms in words — naming the room, which is the one thing a tap
-    // can't show.
-    async function startPlayback<T>(
+    // The player is the confirmation: the track, the room and the route all
+    // land on it as soon as the re-read below returns. It used to also say so
+    // in a toast, which meant every tap on a search result was followed by a
+    // card repeating what the screen already showed.
+    async function startPlayback(
         key: string,
-        fn: () => Promise<T>,
-        what: string,
-        where: string,
+        fn: () => Promise<unknown>,
         kind: "sonos" | "kef" | "zone" = "sonos",
-        detail?: (res: T) => string,
     ) {
         await busy.claim(key, async () => {
             try {
-                const res = await fn();
+                await fn();
                 await (kind === "kef"
                     ? kef.refresh()
                     : kind === "zone"
@@ -168,7 +166,6 @@
                     const again = kind === "kef" ? kef.refresh : zones.refresh;
                     for (const ms of [1200, 4000]) followUp(ms, again);
                 }
-                toasts.success("Playing", [what, where, detail?.(res)].filter(Boolean).join(" · "));
             } catch (e) {
                 toasts.error("Couldn't play", (e as Error).message);
             }
@@ -205,20 +202,13 @@
             void startPlayback(
                 "item:" + item.uri,
                 () => zones.play(z, { uri: item.uri, title: item.name }),
-                item.name,
-                r.name,
                 "zone",
-                // Said at the moment it becomes true: this room is being decoded
-                // by HomeHub rather than streamed by the speakers themselves.
-                (res) => (res.route === "stream" ? "HomeHub stream" : ""),
             );
             return;
         }
         void startPlayback(
             "item:" + item.uri,
             () => (r.kind === "kef" ? api.kefPlayItem(r.id, body) : api.sonosPlayItem(r.id, body)),
-            item.name,
-            r.name,
             r.kind,
         );
     }
@@ -226,13 +216,7 @@
     /** Favorites are a Sonos household list, so only a Sonos room can take one. */
     function playFavorite(f: SonosFavorite, target: string | null = destination.sonosTarget) {
         if (!target) return;
-        const r = rooms.byKey("sonos:" + target);
-        void startPlayback(
-            "fav:" + f.id,
-            () => api.sonosPlayFavorite(target, f),
-            f.title,
-            r?.name ?? "",
-        );
+        void startPlayback("fav:" + f.id, () => api.sonosPlayFavorite(target, f));
     }
 
     /**
@@ -248,11 +232,6 @@
         if (!target) return;
         const added = await sonos.enqueue(target, item, next);
         if (!added) return;
-        const where = added.track ? `position ${added.track} of ${added.length}` : "the queue";
-        toasts.success(
-            next ? "Playing next" : "Added to queue",
-            `${item.title ?? "Track"} · ${where}`,
-        );
         if (playerRoom?.id === target) void sonos.loadQueue(target);
     }
 
@@ -547,8 +526,10 @@
     async function groupRooms(source: Room, target: Room) {
         const said = await rooms.group(source, target);
         if (!said) return;
+        // `announce` is the screen-reader live region, not a toast — the
+        // grouping rule the drop picked is genuinely new information, and
+        // the cards visibly merge for everyone who can see them.
         announce(said);
-        toasts.success("Grouped", said);
     }
 
     // A room held for grouping that drops off the network can't be dropped
@@ -591,8 +572,7 @@
         void zones.loadEndpoints();
     }
 
-    function zoneSaved(z: MediaZone) {
-        toasts.success(editingZone ? "Room saved" : "Room created", z.name);
+    function zoneSaved(_z: MediaZone) {
         editingZone = null;
         dropSheet();
     }
@@ -607,7 +587,6 @@
         });
         if (!ok) return;
         if (!(await zones.remove(z.id))) return;
-        toasts.success("Room deleted", z.name);
         hideSheet();
     }
 
@@ -808,7 +787,6 @@
         // outcome once, then clean the query off the URL.
         const q = route.query;
         if (q.spotify === "connected") {
-            toasts.success("Spotify connected");
             route.go("music");
         } else if (q.spotify_error) {
             toasts.error("Spotify login failed", q.spotify_error);

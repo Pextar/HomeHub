@@ -99,8 +99,19 @@
   });
 
   function toggleTheme() {
-    theme.toggle();
+    theme.cycle();
   }
+
+  // Dark / Light / Auto each get their own face and word, so the shortcut
+  // says which of the three it just landed on instead of only which way it
+  // flipped. Auto wears the device, not a time of day — it is the setting
+  // that defers to the phone.
+  const themeIcon = $derived(
+    theme.mode === "auto" ? "monitor" : theme.mode === "dark" ? "moon" : "sun",
+  );
+  const themeLabel = $derived(
+    theme.mode === "auto" ? `Auto theme · ${theme.system}` : theme.mode === "dark" ? "Dark theme" : "Light theme",
+  );
 
   function onKey(e: KeyboardEvent) {
     if (e.key === "Escape" && moreOpen) moreOpen = false;
@@ -339,8 +350,8 @@
           <span class="profile-role">{session.user.admin ? "Admin" : "Limited"}</span>
         </div>
         <div class="profile-btns">
-          <button class="profile-btn" aria-label="Toggle theme" onclick={toggleTheme}>
-            <Icon name={theme.current === "dark" ? "moon" : "sun"} size={13} />
+          <button class="profile-btn" aria-label="Theme: {themeLabel}" title={themeLabel} onclick={toggleTheme}>
+            <Icon name={themeIcon} size={13} />
           </button>
           <button class="profile-btn" aria-label="Sign out" onclick={signOut}>
             <Icon name="logout" size={13} />
@@ -430,11 +441,9 @@
           }}
         >
           <span class="drawer-icon">
-            <Icon name={theme.current === "dark" ? "sun" : "moon"} size={20} />
+            <Icon name={themeIcon} size={20} />
           </span>
-          <span class="drawer-label">
-            {theme.current === "dark" ? "Light theme" : "Dark theme"}
-          </span>
+          <span class="drawer-label">{themeLabel}</span>
         </button>
         <button class="drawer-item danger" role="menuitem" onclick={signOut}>
           <span class="drawer-icon"><Icon name="logout" size={20} /></span>

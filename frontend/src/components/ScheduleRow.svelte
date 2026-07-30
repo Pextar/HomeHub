@@ -68,7 +68,6 @@
         if (!ok) return;
         try {
             await api.deleteSchedule(schedule.id);
-            toasts.success("Schedule deleted");
             await data.refresh();
         } catch (e) { toasts.error("Failed", (e as Error).message); }
     }

@@ -105,6 +105,21 @@ function createDataStore() {
   };
 }
 
+/**
+ * Toasts are for what the screen can't say for itself.
+ *
+ * There is no `success` and no `info` here on purpose. A toast after every
+ * save, delete, group, play and toggle meant the app interrupted itself to
+ * announce things the user had just watched happen, and the one toast that
+ * mattered — the failure — arrived looking exactly like the sixty that
+ * didn't. So confirmations live in the UI that changed: a sheet that closes,
+ * a card that goes, a tile that lights, a button that says "Saved".
+ *
+ * What is left: `error` and `warn`, for the outcomes nothing on screen can
+ * show; and `show`, for a toast that carries an action — Undo after the
+ * master switch, Refresh after an update lands. Those aren't announcements,
+ * they're controls with a deadline, and a toast is the right home for them.
+ */
 function createToastStore() {
   const items = $state<ToastSpec[]>([]);
   let nextId = 1;
@@ -126,8 +141,6 @@ function createToastStore() {
     get items() { return items; },
     dismiss,
     show,
-    info: (title: string, message?: string) => show({ title, message, tone: "info" }),
-    success: (title: string, message?: string) => show({ title, message, tone: "success" }),
     warn: (title: string, message?: string) => show({ title, message, tone: "warn" }),
     error: (title: string, message?: string) => show({ title, message, tone: "error" }),
   };
@@ -168,6 +181,9 @@ export type ThemeMode = "dark" | "light" | "auto";
 
 function createThemeStore() {
   const media = window.matchMedia("(prefers-color-scheme: light)");
+  // `--bg` for each theme, restated here because the browser chrome is
+  // painted from a meta tag rather than from CSS. Keep in step with app.css.
+  const BAR_COLOR = { dark: "#14130f", light: "#f5f1ea" } as const;
 
   function resolve(mode: ThemeMode): "dark" | "light" {
     return mode === "auto" ? (media.matches ? "light" : "dark") : mode;
@@ -179,13 +195,21 @@ function createThemeStore() {
   }
 
   const startMode = initialMode();
-  const t = $state<{ mode: ThemeMode; resolved: "dark" | "light" }>({
+  const t = $state<{ mode: ThemeMode; resolved: "dark" | "light"; system: "dark" | "light" }>({
     mode: startMode,
     resolved: resolve(startMode),
+    system: resolve("auto"),
   });
 
   function apply() {
     document.documentElement.dataset.theme = t.resolved;
+    // The status bar / address bar is the one surface CSS can't reach, and
+    // on an installed PWA it is half the screen's edge. Left alone it stayed
+    // the dark value forever, which is what made light — and so auto — look
+    // like it hadn't taken.
+    document
+      .querySelector('meta[name="theme-color"]')
+      ?.setAttribute("content", BAR_COLOR[t.resolved]);
   }
   apply();
 
@@ -198,20 +222,30 @@ function createThemeStore() {
 
   // Follow the OS live while in auto mode, rather than only reading it once
   // at load — a change to the system setting must not need a reload here.
-  media.addEventListener("change", () => {
+  // `addListener` is the Safari < 14 spelling, and an iPhone that old is
+  // exactly the device most likely to be left running this on a shelf.
+  const onSystemChange = () => {
+    t.system = resolve("auto");
     if (t.mode !== "auto") return;
-    t.resolved = resolve("auto");
+    t.resolved = t.system;
     apply();
-  });
+  };
+  if (typeof media.addEventListener === "function") media.addEventListener("change", onSystemChange);
+  else media.addListener?.(onSystemChange);
 
   return {
     /** The resolved dark/light value — what CSS and icons key off. */
     get current() { return t.resolved; },
     /** The stored preference: "dark", "light", or "auto". */
     get mode() { return t.mode; },
+    /** What the system is asking for right now — what "Auto" would pick. */
+    get system() { return t.system; },
     setMode,
-    toggle() {
-      setMode(t.resolved === "dark" ? "light" : "dark");
+    /** The rail's one-tap shortcut. It steps through all three modes rather
+     *  than flipping dark/light, because a binary toggle silently threw away
+     *  an "Auto" the user had chosen and gave no way back to it from here. */
+    cycle() {
+      setMode(t.mode === "dark" ? "light" : t.mode === "light" ? "auto" : "dark");
     },
   };
 }

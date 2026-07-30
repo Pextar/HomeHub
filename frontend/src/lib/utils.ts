@@ -47,13 +47,54 @@ export function roomIcon(name: string): RoomIconName {
   return "home";
 }
 
+// iOS has no Vibration API — `navigator.vibrate` simply isn't there — so on
+// the phone this app is mostly used from, every `haptic()` call used to do
+// nothing at all. What iOS *does* have is the system tick Safari plays when a
+// switch-styled checkbox is flipped, and that is reachable: a hidden
+// `<input type="checkbox" switch>` clicked through its label taps the Taptic
+// engine. It only fires inside a real user gesture, which is the only place
+// this function is ever called from.
+let iosTapper: HTMLLabelElement | null = null;
+function iosTap(): boolean {
+  if (typeof document === "undefined" || !document.body) return false;
+  if (!iosTapper) {
+    const label = document.createElement("label");
+    label.setAttribute("aria-hidden", "true");
+    // Off-screen rather than `display: none` — a control that isn't rendered
+    // has no activation behaviour, and the tick is the activation.
+    label.style.cssText =
+      "position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0;pointer-events:none;";
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.setAttribute("switch", ""); // the attribute that makes it tick
+    input.tabIndex = -1;
+    input.id = "hh-haptic-tap";
+    label.htmlFor = input.id;
+    label.appendChild(input);
+    document.body.appendChild(label);
+    iosTapper = label;
+  }
+  try {
+    iosTapper.click();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // Short, best-effort haptic tap for physical touch feedback — toggles, scene
-// runs, and any moment where the app should answer the finger. A no-op where
-// the Vibration API is unavailable (desktop, iOS Safari).
+// runs, and any moment where the app should answer the finger. Vibration API
+// where there is one (Android), the switch tick where there isn't (iOS), and
+// a silent no-op on a desktop that has neither.
 export function haptic(ms = 15): void {
   if (typeof navigator !== "undefined" && typeof navigator.vibrate === "function") {
-    try { navigator.vibrate(ms); } catch { /* ignore */ }
+    try {
+      // `vibrate` reports false when the platform refused (no motor, a
+      // muted/low-power device) — fall through rather than assume it landed.
+      if (navigator.vibrate(ms) !== false) return;
+    } catch { /* fall through to the switch tick */ }
   }
+  iosTap();
 }
 
 export const PROTOCOLS: { value: string; label: string }[] = [
@@ -160,13 +201,14 @@ export function formatAgo(when: string | undefined): string {
 }
 
 // Wraps an async action, refreshes data, and shows a toast on failure.
-export async function runAction(
-  fn: () => Promise<unknown>,
-  successMessage?: string,
-): Promise<boolean> {
+//
+// Only on failure: an action that worked shows itself — the switch is over,
+// the card is gone, the room is lit — and a toast saying so again was one
+// more thing to dismiss on every single tap. What the UI can't show on its
+// own is that nothing happened, so that is what still speaks.
+export async function runAction(fn: () => Promise<unknown>): Promise<boolean> {
   try {
     await fn();
-    if (successMessage) toasts.success(successMessage);
     await data.refresh();
     return true;
   } catch (e) {
@@ -182,10 +224,10 @@ export async function runAction(
 export async function socketAction(
   socket: Socket,
   action: SocketAction,
-  opts: { successMessage?: string; errorTitle?: string } = {},
+  opts: { errorTitle?: string } = {},
 ): Promise<boolean> {
   haptic();
-  const { successMessage, errorTitle = "Action failed" } = opts;
+  const { errorTitle = "Action failed" } = opts;
   const prev = socket.state;
   const next = action === "toggle" ? !prev : action === "on";
   data.applySocket({ ...socket, state: next });
@@ -196,7 +238,6 @@ export async function socketAction(
         ? await api.socketOff(socket.id)
         : await api.socketToggle(socket.id);
     data.applySocket(updated);
-    if (successMessage) toasts.success(successMessage);
     return true;
   } catch (e) {
     data.applySocket({ ...socket, state: prev });

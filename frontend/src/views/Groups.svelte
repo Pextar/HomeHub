@@ -24,7 +24,7 @@
     }
 
     function toggle(g: typeof v.groups[number], on: boolean) {
-        runAction(() => api.groupAction(g.id, on ? "on" : "off"), `${g.name} ${on ? "on" : "off"}`);
+        runAction(() => api.groupAction(g.id, on ? "on" : "off"));
     }
 
     async function confirmDelete(g: typeof v.groups[number]) {
@@ -40,7 +40,6 @@
         if (!ok) return;
         try {
             await api.deleteGroup(g.id);
-            toasts.success("Group deleted", g.name);
             await data.refresh();
         } catch (e) { toasts.error("Failed", (e as Error).message); }
     }
@@ -104,7 +103,7 @@
                             <Icon name="edit" size={16} /><span>Edit group</span>
                         </button>
                         <button class="overflow-item" role="menuitem"
-                            onclick={() => { openId = null; runAction(() => api.groupAction(g.id, 'toggle'), `${g.name} toggled`); }}>
+                            onclick={() => { openId = null; runAction(() => api.groupAction(g.id, 'toggle')); }}>
                             <Icon name="power" size={16} /><span>Toggle all</span>
                         </button>
                         <button class="overflow-item danger" role="menuitem" onclick={() => confirmDelete(g)}>

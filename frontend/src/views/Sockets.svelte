@@ -126,9 +126,9 @@
                     </h3>
                     <div class="room-actions">
                         <button class="btn btn-ghost"
-                            onclick={() => runAction(() => api.roomOn(room), `${room} on`)}>All on</button>
+                            onclick={() => runAction(() => api.roomOn(room))}>All on</button>
                         <button class="btn btn-ghost"
-                            onclick={() => runAction(() => api.roomOff(room), `${room} off`)}>All off</button>
+                            onclick={() => runAction(() => api.roomOff(room))}>All off</button>
                     </div>
                 </div>
                 <div class="grid">

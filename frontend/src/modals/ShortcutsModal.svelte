@@ -30,10 +30,11 @@
         return origin + path;
     }
 
-    async function copy(text: string, label: string) {
-        const ok = await copyText(text);
-        if (ok) toasts.success("Copied", label);
-        else toasts.warn("Couldn't copy", "Long-press the text to select it manually.");
+    async function copy(text: string) {
+        // Silent on success; only a clipboard that refused needs saying.
+        if (!(await copyText(text))) {
+            toasts.warn("Couldn't copy", "Long-press the text to select it manually.");
+        }
     }
 </script>
 
@@ -55,7 +56,7 @@
             <div class="block">
                 <div class="block-head">
                     <span class="field-label">Authorization header</span>
-                    <button class="act-btn" onclick={() => copy(authHeader, "Authorization header")}>Copy</button>
+                    <button class="act-btn" onclick={() => copy(authHeader)}>Copy</button>
                 </div>
                 <code class="mono">{authHeader}</code>
                 <div class="field-help">
@@ -71,9 +72,9 @@
                     <div class="row">
                         <div class="name" title={s.room || "Unassigned"}>{s.name}</div>
                         <div class="acts">
-                            <button class="act-btn" onclick={() => copy(url(`/api/sockets/${encodeURIComponent(s.id)}/toggle`), `${s.name} · toggle`)}>Toggle</button>
-                            <button class="act-btn" onclick={() => copy(url(`/api/sockets/${encodeURIComponent(s.id)}/on`), `${s.name} · on`)}>On</button>
-                            <button class="act-btn" onclick={() => copy(url(`/api/sockets/${encodeURIComponent(s.id)}/off`), `${s.name} · off`)}>Off</button>
+                            <button class="act-btn" onclick={() => copy(url(`/api/sockets/${encodeURIComponent(s.id)}/toggle`))}>Toggle</button>
+                            <button class="act-btn" onclick={() => copy(url(`/api/sockets/${encodeURIComponent(s.id)}/on`))}>On</button>
+                            <button class="act-btn" onclick={() => copy(url(`/api/sockets/${encodeURIComponent(s.id)}/off`))}>Off</button>
                         </div>
                     </div>
                 {/each}
@@ -87,7 +88,7 @@
                     <div class="row">
                         <div class="name">{sc.name}</div>
                         <div class="acts">
-                            <button class="act-btn" onclick={() => copy(url(`/api/scenes/${encodeURIComponent(sc.id)}/activate`), `${sc.name} · activate`)}>Activate</button>
+                            <button class="act-btn" onclick={() => copy(url(`/api/scenes/${encodeURIComponent(sc.id)}/activate`))}>Activate</button>
                         </div>
                     </div>
                 {/each}
@@ -101,9 +102,9 @@
                     <div class="row">
                         <div class="name">{g.name}</div>
                         <div class="acts">
-                            <button class="act-btn" onclick={() => copy(url(`/api/groups/${encodeURIComponent(g.id)}/toggle`), `${g.name} · toggle`)}>Toggle</button>
-                            <button class="act-btn" onclick={() => copy(url(`/api/groups/${encodeURIComponent(g.id)}/on`), `${g.name} · on`)}>On</button>
-                            <button class="act-btn" onclick={() => copy(url(`/api/groups/${encodeURIComponent(g.id)}/off`), `${g.name} · off`)}>Off</button>
+                            <button class="act-btn" onclick={() => copy(url(`/api/groups/${encodeURIComponent(g.id)}/toggle`))}>Toggle</button>
+                            <button class="act-btn" onclick={() => copy(url(`/api/groups/${encodeURIComponent(g.id)}/on`))}>On</button>
+                            <button class="act-btn" onclick={() => copy(url(`/api/groups/${encodeURIComponent(g.id)}/off`))}>Off</button>
                         </div>
                     </div>
                 {/each}

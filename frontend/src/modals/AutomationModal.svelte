@@ -124,10 +124,8 @@
         try {
             if (existing) {
                 await api.updateAutomation(existing.id, buildPayload());
-                toasts.success("Automation updated");
             } else {
                 await api.createAutomation(buildPayload());
-                toasts.success("Automation created");
             }
             closeModal();
             await data.refresh();
@@ -144,7 +142,6 @@
         runningIdx = i;
         try {
             await api.runAutomationRule(existing.id, i);
-            toasts.success("Rule ran", `${existing.name} · rule ${i + 1}`);
             await data.refresh();
         } catch (e) {
             toasts.error("Run failed", (e as Error).message);

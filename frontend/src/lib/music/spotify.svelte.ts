@@ -206,7 +206,6 @@ export function createSpotify(remember: (q: string) => void): SpotifyStore {
         await api.spotifySetConfig(s.clientId.trim());
         s.setupOpen = false;
         await load();
-        toasts.success("Client ID saved", "Now connect your Spotify account.");
       } catch (e) {
         toasts.error("Save failed", (e as Error).message);
       } finally {
@@ -247,7 +246,6 @@ export function createSpotify(remember: (q: string) => void): SpotifyStore {
       try {
         await api.spotifyExchange(s.pasteUrl);
         s.pasteUrl = "";
-        toasts.success("Spotify connected");
         await load();
       } catch (e) {
         toasts.error("Couldn't finish the login", (e as Error).message);

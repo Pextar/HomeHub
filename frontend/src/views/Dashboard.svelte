@@ -152,14 +152,13 @@
         }));
         await data.refresh();
         if (failed) toasts.error("Undo", `${failed} device${failed === 1 ? "" : "s"} didn't respond.`);
-        else toasts.success("Undone", `${restore.length} device${restore.length === 1 ? "" : "s"} back to how they were.`);
     }
     function toggleAllMaster() {
         bulk(!heroOn);
     }
     // A group's switch means "everything in it", matching the Groups view.
     function toggleGroup(g: { id: string; name: string }, on: boolean) {
-        runAction(() => api.groupAction(g.id, on ? "on" : "off"), `${g.name} ${on ? "on" : "off"}`);
+        runAction(() => api.groupAction(g.id, on ? "on" : "off"));
     }
 </script>
 

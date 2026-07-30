@@ -61,12 +61,6 @@
                         action: { label: "Refresh", onClick: () => updateSW?.(true) },
                     });
                 },
-                onOfflineReady() {
-                    toasts.success(
-                        "Ready offline",
-                        "The app is installed and works without network.",
-                    );
-                },
             });
         } catch {
             // Service workers might not be available (e.g. in dev or without HTTPS).

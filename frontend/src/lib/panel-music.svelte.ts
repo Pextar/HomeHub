@@ -25,6 +25,7 @@ import { haptic } from "./utils";
 import { secs, toClock } from "./music/time";
 import { NEXT_REPEAT } from "./music/sonos.svelte";
 import { clock } from "./music/clock.svelte";
+import { clampVol, createVolumeThrottle } from "./music/volume";
 import type { PanelNowPlaying } from "./panel";
 import type {
     SonosStatus,
@@ -90,13 +91,15 @@ export interface PanelMusicStore {
     seek(sec: number): void;
 
     // ── Volume ──
-    /** Group (or single-speaker) fader value — local while dragging. */
-    vol: number;
-    dragging: boolean;
+    /** Group (or single-speaker) fader value — the finger's while it's down. */
+    readonly vol: number;
+    /** Live, on every movement: shows at once, sends on a short throttle. */
+    dragVolume(s: PanelSource, level: number): void;
+    /** On release — the authoritative value. */
     setVolume(s: PanelSource, level: number): void;
     /** Per-member faders, when a Sonos group has more than one speaker. */
     readonly memVol: Record<string, number>;
-    memDragging(id: string, on: boolean): void;
+    dragMemberVolume(id: string, level: number): void;
     setMemberVolume(id: string, level: number): void;
     /** No memberId mutes the whole group; one mutes that speaker. */
     toggleMute(s: PanelSource, memberId?: string): void;
@@ -391,38 +394,89 @@ export function createPanelMusic(): PanelMusicStore {
     }
 
     // ── Volume ───────────────────────────────────────────────────────────
-    // Group fader: local while dragging, sent on release; group volume for
-    // Sonos so the whole zone answers, not just the coordinator. `dragging`
-    // is deliberately not reactive — the sync effect must re-run when the
-    // speaker's volume moves, never when the finger lifts, or the slider
-    // would flinch back to the stale value before the send lands.
+    // The room answers the finger while it moves, not when it lifts: the
+    // local value shows at once and a throttled send goes out as the drag
+    // runs (`lib/music/volume.ts`, the same helper the Music view's faders
+    // use), with the authoritative value on release. Group volume for Sonos,
+    // so the whole zone answers rather than just the coordinator.
+    //
+    // The drag flags are deliberately not reactive — the sync effects must
+    // re-run when the speaker's reported volume moves, never when the finger
+    // lifts. `…At` extends the same claim past release: for a moment after
+    // the send, a poll that hasn't caught up yet must not flinch the slider
+    // back to the value the speaker was last read at.
+    const VOL_HOLD_MS = 2500;
     let vol = $state(0);
     let dragging = false;
+    let volAt = 0;
+    let dragSource: PanelSource | null = null;
     $effect(() => {
-        if (!dragging && featured) vol = featured.volume;
+        const level = featured?.volume;
+        if (level === undefined) return;
+        if (dragging || Date.now() - volAt < VOL_HOLD_MS) return;
+        vol = level;
     });
+
+    const volThrottle = createVolumeThrottle((id, level) => {
+        const s = dragSource;
+        if (!s || s.id !== id) return;
+        // A dropped mid-drag frame self-heals on release or the next poll.
+        void (s.kind === "sonos"
+            ? api.sonosSetVolume(id, level, true)
+            : api.kefSetVolume(id, level)
+        ).catch(() => {});
+    });
+
+    function dragVolume(s: PanelSource, level: number) {
+        const v = clampVol(level);
+        dragging = true;
+        dragSource = s;
+        vol = v;
+        volAt = Date.now();
+        volThrottle.schedule(s.id, v);
+    }
     function setVolume(s: PanelSource, level: number) {
+        const v = clampVol(level);
+        volThrottle.cancel(s.id);
+        dragging = false;
+        vol = v;
+        volAt = Date.now();
         void run(
             "vol:" + s.id,
-            () => (s.kind === "sonos" ? api.sonosSetVolume(s.id, level, true) : api.kefSetVolume(s.id, level)),
+            () => (s.kind === "sonos" ? api.sonosSetVolume(s.id, v, true) : api.kefSetVolume(s.id, v)),
             "Volume failed",
         );
     }
 
     // Per-member faders, one per speaker in a multi-speaker group. Same
-    // local-while-dragging contract, keyed by speaker id.
+    // contract, keyed by speaker id — and always Sonos, since a group is.
     const memVol = $state<Record<string, number>>({});
     const memDrag: Record<string, boolean> = {};
+    const memAt: Record<string, number> = {};
     $effect(() => {
+        const now = Date.now();
         for (const m of featured?.members ?? []) {
-            if (!memDrag[m.id]) memVol[m.id] = m.volume;
+            if (memDrag[m.id] || now - (memAt[m.id] ?? 0) < VOL_HOLD_MS) continue;
+            memVol[m.id] = m.volume;
         }
     });
-    function memDragging(id: string, on: boolean) {
-        memDrag[id] = on;
+    const memThrottle = createVolumeThrottle((id, level) => {
+        void api.sonosSetVolume(id, level).catch(() => {});
+    });
+    function dragMemberVolume(id: string, level: number) {
+        const v = clampVol(level);
+        memDrag[id] = true;
+        memVol[id] = v;
+        memAt[id] = Date.now();
+        memThrottle.schedule(id, v);
     }
     function setMemberVolume(id: string, level: number) {
-        void run("vol:" + id, () => api.sonosSetVolume(id, level), "Volume failed");
+        const v = clampVol(level);
+        memThrottle.cancel(id);
+        memDrag[id] = false;
+        memVol[id] = v;
+        memAt[id] = Date.now();
+        void run("vol:" + id, () => api.sonosSetVolume(id, v), "Volume failed");
     }
 
     function toggleMute(s: PanelSource, memberId?: string) {
@@ -546,10 +600,8 @@ export function createPanelMusic(): PanelMusicStore {
         void run(
             "q:" + item.uri,
             async () => {
-                const added = await api.sonosQueueAdd(f.id, { service: "Spotify", uri: item.uri, title: item.name, next });
+                await api.sonosQueueAdd(f.id, { service: "Spotify", uri: item.uri, title: item.name, next });
                 await loadQueue(f.id);
-                const where = added.track ? `position ${added.track} of ${added.length}` : "the queue";
-                toasts.success(next ? "Playing next" : "Added to queue", `${item.name} · ${where}`);
             },
             "Couldn't add to the queue",
         );
@@ -568,15 +620,13 @@ export function createPanelMusic(): PanelMusicStore {
         haptic();
         try {
             let body = { service: "Spotify", uri: item.uri, title: item.name };
-            let what = item.name;
             if (item.kind === "artist") {
                 // No speaker takes an artist URI (DESIGN.md §15), so an
-                // artist starts their top track — and the toast says which.
+                // artist starts their top track — which the player then names.
                 const d = await api.spotifyArtist(item.uri);
                 const top = d.top_tracks[0];
                 if (!top) throw new Error(`No tracks found for ${item.name}`);
                 body = { service: "Spotify", uri: top.uri, title: top.name };
-                what = `${item.name} — ${top.name}`;
             }
             if (s.kind === "sonos") await api.sonosPlayItem(s.id, body);
             else await api.kefPlayItem(s.id, body);
@@ -585,7 +635,6 @@ export function createPanelMusic(): PanelMusicStore {
             // audio goes out to the cloud and comes back — so the read
             // above can still say "stopped". Backstops for that gap.
             if (s.kind === "kef") for (const ms of [1200, 4000]) setTimeout(() => void refresh(), ms);
-            toasts.success("Playing", `${what} · ${s.title}`);
         } catch (e) {
             toasts.error("Couldn't play", (e as Error).message);
         } finally {
@@ -611,7 +660,6 @@ export function createPanelMusic(): PanelMusicStore {
             "Grouping failed",
             () => {
                 selected = f.key; // the group stays featured through the reshuffle
-                toasts.success("Grouped", `${src.title} now plays with ${f.title}.`);
             },
         );
     }
@@ -627,20 +675,13 @@ export function createPanelMusic(): PanelMusicStore {
                 for (const m of members) await api.sonosLeave(m.id);
             },
             "Ungrouping failed",
-            () => toasts.success("Ungrouped", `${f.title} split into separate rooms.`),
         );
     }
 
     function leaveMember(memberId: string) {
         const f = featured;
         if (!f || f.kind !== "sonos") return;
-        const name = f.members?.find((m) => m.id === memberId)?.name ?? "Speaker";
-        void run(
-            "leave:" + memberId,
-            () => api.sonosLeave(memberId),
-            "Ungrouping failed",
-            () => toasts.success("Ungrouped", `${name} left ${f.title}.`),
-        );
+        void run("leave:" + memberId, () => api.sonosLeave(memberId), "Ungrouping failed");
     }
 
     return {
@@ -678,20 +719,12 @@ export function createPanelMusic(): PanelMusicStore {
         get vol() {
             return vol;
         },
-        set vol(v: number) {
-            vol = v;
-        },
-        get dragging() {
-            return dragging;
-        },
-        set dragging(v: boolean) {
-            dragging = v;
-        },
+        dragVolume,
         setVolume,
         get memVol() {
             return memVol;
         },
-        memDragging,
+        dragMemberVolume,
         setMemberVolume,
         toggleMute,
         togglePlay,

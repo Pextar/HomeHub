@@ -94,10 +94,8 @@
         try {
             if (existing) {
                 await api.updateSchedule(existing.id, payload);
-                toasts.success("Schedule updated");
             } else {
                 await api.createSchedule(payload);
-                toasts.success("Schedule added");
             }
             closeModal();
             await data.refresh();

@@ -59,7 +59,6 @@
             // watchers a moment, then read.
             await new Promise((r) => setTimeout(r, 1200));
             await refresh();
-            if (health?.live) toasts.success("Live updates on", subtitle);
         } catch (e) {
             toasts.error("Couldn't retry", (e as Error).message);
         } finally {
@@ -69,9 +68,9 @@
 
     async function copyCallback() {
         if (!health?.callback) return;
-        const ok = await copyText(health.callback);
-        if (ok) toasts.success("Copied", "Callback address");
-        else toasts.warn("Couldn't copy", "Long-press the address to select it.");
+        if (!(await copyText(health.callback))) {
+            toasts.warn("Couldn't copy", "Long-press the address to select it.");
+        }
     }
 
     // ── The headline ─────────────────────────────────────────────────────

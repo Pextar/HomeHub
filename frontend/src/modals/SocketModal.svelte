@@ -33,11 +33,18 @@
     let publishing   = $state(false);
     let saving       = $state(false);
     let errors       = $state<{ name?: string; code?: string }>({});
+    // What the last pair / probe / test-signal attempt said. These three
+    // buttons ask the hardware a question, so their answer belongs under the
+    // button that asked it and has to stay readable while the user walks over
+    // to the socket — a toast that clears itself after 3.5s is the wrong
+    // shape for that, and was the only reason they were toasts.
+    let probeResult  = $state<{ ok: boolean; text: string } | null>(null);
     const clear = (k: "name" | "code") => { if (errors[k]) errors = { ...errors, [k]: undefined }; };
 
     async function pair() {
         if (pairing) return;
         pairing = true;
+        probeResult = null;
         try {
             // Pass the current code if one was already generated — the backend
             // will resend it instead of picking a new one. This lets the user
@@ -46,14 +53,14 @@
             const isRetry = !!code;
             const r = await api.learnSocket({ protocol, code: code || undefined });
             code = r.code;
-            toasts.success(
-                "Signal sent (×2)",
-                isRetry
-                    ? "Sent the same code again. Did your socket click on this time?"
-                    : "Did your socket click on? If not, long-press its button again and tap Pair — the same code will be resent."
-            );
+            probeResult = {
+                ok: true,
+                text: isRetry
+                    ? "Signal sent (×2). Sent the same code again — did your socket click on this time?"
+                    : "Signal sent (×2). Did your socket click on? If not, long-press its button again and tap Pair — the same code will be resent.",
+            };
         } catch (e) {
-            toasts.error("Pairing failed", (e as Error).message);
+            probeResult = { ok: false, text: `Pairing failed: ${(e as Error).message}` };
         } finally {
             pairing = false;
         }
@@ -75,11 +82,12 @@
             return;
         }
         probing = true;
+        probeResult = null;
         try {
             await api.tasmotaProbe(ip);
-            toasts.success("Device found", `Tasmota is responding at ${ip}.`);
+            probeResult = { ok: true, text: `Device found — Tasmota is responding at ${ip}.` };
         } catch (e) {
-            toasts.error("No device found", (e as Error).message);
+            probeResult = { ok: false, text: `No device found: ${(e as Error).message}` };
         } finally {
             probing = false;
         }
@@ -93,11 +101,12 @@
             return;
         }
         publishing = true;
+        probeResult = null;
         try {
             await api.mqttPublish({ topic, payload: "ON" });
-            toasts.success("Sent ON", `Published to ${topic}. Did the device react?`);
+            probeResult = { ok: true, text: `Sent ON to ${topic}. Did the device react?` };
         } catch (e) {
-            toasts.error("Publish failed", (e as Error).message);
+            probeResult = { ok: false, text: `Publish failed: ${(e as Error).message}` };
         } finally {
             publishing = false;
         }
@@ -119,10 +128,8 @@
         try {
             if (existing) {
                 await api.updateSocket(existing.id, payload);
-                toasts.success("Socket updated", payload.name);
             } else {
                 await api.createSocket(payload);
-                toasts.success("Socket added", payload.name);
             }
             closeModal();
             await data.refresh();
@@ -133,6 +140,15 @@
         }
     }
 </script>
+
+<!-- The answer to whichever of the three hardware questions was asked. One
+     snippet, because only one of those buttons is ever on screen. Declared
+     out here rather than inside <Modal>, where it would read as a prop. -->
+{#snippet probeLine()}
+    {#if probeResult}
+        <p class="probe" class:bad={!probeResult.ok} role="status">{probeResult.text}</p>
+    {/if}
+{/snippet}
 
 <Modal
     title={isEdit ? "Edit socket" : "Add socket"}
@@ -253,6 +269,7 @@
                             Pings the device to confirm Tasmota is running at that IP.
                             Find the IP in your router's DHCP list or the Tasmota web UI.
                         </div>
+                        {@render probeLine()}
                     </div>
                 {:else if isMqtt}
                     <div class="field" style="margin-top:var(--space-3)">
@@ -264,6 +281,7 @@
                             device reacts. The controller sends <code>ON</code>/<code>OFF</code> to
                             this exact topic — e.g. <code>cmnd/plug/POWER</code> for Tasmota.
                         </div>
+                        {@render probeLine()}
                     </div>
                 {:else if !isEdit}
                     <div class="field" style="margin-top:var(--space-3)">
@@ -274,6 +292,7 @@
                             Long-press the button on your socket until its indicator flashes,
                             then tap Pair. I'll pick a random code and broadcast it.
                         </div>
+                        {@render probeLine()}
                     </div>
                 {/if}
             </form>
@@ -293,6 +312,16 @@
 
 <style>
     .opt { color: var(--text-muted); font-weight: 400; font-size: 12px; }
+    /* The hardware's answer, under the button that asked. Same size as the
+       help text it follows — it's the same kind of sentence — with the tone
+       carried by a colour rather than a badge. */
+    .probe {
+        margin: 6px 0 0;
+        font-size: 13px;
+        line-height: 1.5;
+        color: var(--good);
+    }
+    .probe.bad { color: var(--bad); }
     .field-checkbox {
         display: flex; align-items: center; gap: 10px;
         font-size: 14px; cursor: pointer; padding: 2px 0;

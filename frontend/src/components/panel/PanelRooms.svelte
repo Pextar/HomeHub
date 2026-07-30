@@ -34,22 +34,16 @@
         if (busy[name]) return;
         busy[name] = true;
         haptic();
-        void runAction(
-            () => (on ? api.roomOn(name) : api.roomOff(name)),
-            `${name} ${on ? "on" : "off"}`,
-        ).finally(() => {
+        void runAction(() => (on ? api.roomOn(name) : api.roomOff(name))).finally(() => {
             busy[name] = false;
         });
     }
 
-    function toggleDevice(id: string, name: string, on: boolean) {
+    function toggleDevice(id: string, on: boolean) {
         if (busy[id]) return;
         busy[id] = true;
         haptic();
-        void runAction(
-            () => (on ? api.socketOn(id) : api.socketOff(id)),
-            `${name} ${on ? "on" : "off"}`,
-        ).finally(() => {
+        void runAction(() => (on ? api.socketOn(id) : api.socketOff(id))).finally(() => {
             busy[id] = false;
         });
     }
@@ -91,7 +85,7 @@
                     class:on={s.state}
                     disabled={busy[s.id]}
                     aria-pressed={s.state}
-                    onclick={() => toggleDevice(s.id, s.name, !s.state)}
+                    onclick={() => toggleDevice(s.id, !s.state)}
                 >
                     <span class="r-top">
                         <span class="r-ico" class:on={s.state}>
