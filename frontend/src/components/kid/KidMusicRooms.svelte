@@ -228,8 +228,8 @@
     }
     .kmr-lead { font-size: 0.9rem; }
     .kmr-x {
-        width: 36px;
-        height: 36px;
+        width: 44px;
+        height: 44px;
         border-radius: 50%;
         border: none;
         background: var(--surface-hover);

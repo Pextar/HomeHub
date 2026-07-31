@@ -20,6 +20,7 @@
     import { haptic } from "../lib/utils";
     import { fmtSecs } from "../lib/music/time";
     import { repeatLabel } from "../lib/music/sonos.svelte";
+    import { dur } from "../lib/motion";
     import KidSlider from "../components/kid/KidSlider.svelte";
     import KidMusicSearch from "../components/kid/KidMusicSearch.svelte";
     import KidMusicQueue from "../components/kid/KidMusicQueue.svelte";
@@ -62,13 +63,43 @@
         gs?.repeat === "all" ? "Repeat all" : gs?.repeat === "one" ? "Repeat one" : "Repeat",
     );
 
+    // ── The mini bar: the phone's dock (§15.5's rule, kid form) ─────────
+    // The player card is taller than a phone screen, so a kid deep in the
+    // search results has no way to pause. The mini bar carries the same
+    // track and transport at the bottom of the screen — and, like the
+    // app's dock, it is a fallback and never a duplicate: it appears only
+    // once the card has scrolled entirely away (threshold 0, so even a
+    // sliver of card keeps it hidden), and tapping its text scrolls home.
+    let playerEl = $state<HTMLElement | null>(null);
+    let rootEl = $state<HTMLElement | null>(null);
+    let playerInView = $state(true);
+
+    $effect(() => {
+        const el = playerEl;
+        if (!el) {
+            playerInView = true;
+            return;
+        }
+        const io = new IntersectionObserver(([entry]) => {
+            playerInView = entry.isIntersecting;
+        });
+        io.observe(el);
+        return () => io.disconnect();
+    });
+
+    const miniUp = $derived(!!featured && !playerInView);
+
+    function scrollToPlayer() {
+        haptic();
+        playerEl?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+
     // The seek rail: draggable when the track has a length behind it, an
     // honest "live" line when it doesn't (a radio stream has no position).
     const showRail = $derived(!!featured && (featured.playing || !!featured.trackTitle));
-    const seekPct = $derived(music.durSec > 0 ? Math.min(100, (music.posSec / music.durSec) * 100) : 0);
 </script>
 
-<div class="km" in:fly={{ y: 40, duration: 320, easing: backOut }}>
+<div class="km" class:has-mini={miniUp} bind:this={rootEl} in:fly={{ y: 40, duration: dur(320), easing: backOut }}>
     <header class="km-head">
         <button class="km-back" onclick={back} aria-label="Back to my lamps">‹ Back</button>
         <h2>🎵 Music</h2>
@@ -106,7 +137,7 @@
         {/if}
 
         {#if featured}
-            <section class="km-player" class:playing={featured.playing}>
+            <section class="km-player" class:playing={featured.playing} bind:this={playerEl}>
                 <div class="km-now">
                     <span class="km-artwrap">
                         {#if featured.art}
@@ -312,6 +343,40 @@
                 <KidMusicRooms {music} />
             </div>
         {/if}
+    {/if}
+
+    {#if miniUp && featured}
+        <div class="km-mini" class:playing={featured.playing} transition:fly={{ y: 96, duration: dur(260) }}>
+            <button class="km-mini-open" onclick={scrollToPlayer} aria-label="Show the player">
+                {#if featured.art}
+                    <img class="km-mini-art" src={featured.art} alt="" />
+                {:else}
+                    <span class="km-mini-art km-mini-art-none" aria-hidden="true">🎵</span>
+                {/if}
+                <span class="km-mini-meta">
+                    <span class="km-mini-title">
+                        {featured.trackTitle ?? (featured.playing ? "Playing" : "Nothing playing")}
+                    </span>
+                    <span class="km-mini-sub">{featured.trackSub || featured.title}</span>
+                </span>
+            </button>
+            <button
+                class="km-mini-btn km-mini-play"
+                aria-label={featured.playing ? "Pause" : "Play"}
+                disabled={music.busy["play:" + featured.id]}
+                onclick={() => music.togglePlay(featured)}
+            >
+                {featured.playing ? "⏸️" : "▶️"}
+            </button>
+            <button
+                class="km-mini-btn"
+                aria-label="Next song"
+                disabled={music.busy["next:" + featured.id]}
+                onclick={() => music.skip(featured, "next")}
+            >
+                ⏭️
+            </button>
+        </div>
     {/if}
 </div>
 
@@ -657,12 +722,18 @@
         display: flex;
         gap: var(--space-2);
         margin-bottom: var(--space-4);
+        /* Content-sized chips that scroll sideways on a narrow phone rather
+           than wrapping to two lines, and stretch to fill on wider screens. */
+        overflow-x: auto;
+        scrollbar-width: none;
     }
+    .km-panes::-webkit-scrollbar { display: none; }
     .km-pane-chip {
-        flex: 1;
+        flex: 1 0 auto;
+        white-space: nowrap;
         font-size: 1rem;
         font-weight: 800;
-        padding: 12px 10px;
+        padding: 12px 16px;
         min-height: 54px;
         border-radius: 999px;
         border: 2px solid var(--border);
@@ -680,6 +751,99 @@
         box-shadow: 0 0 0 3px var(--kid-ring);
     }
     .km-pane[hidden] { display: none; }
+
+    /* ── The mini bar — the phone's now-playing dock ── */
+    .km.has-mini {
+        padding-bottom: calc(148px + env(safe-area-inset-bottom));
+    }
+    .km-mini {
+        position: fixed;
+        z-index: 10;
+        left: var(--space-3);
+        right: var(--space-3);
+        bottom: calc(var(--space-3) + env(safe-area-inset-bottom));
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        padding: var(--space-2);
+        border-radius: 999px;
+        border: 3px solid var(--border);
+        background: var(--bg-elevated);
+        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+    }
+    .km-mini.playing {
+        border-color: var(--kid-accent);
+        box-shadow: 0 0 0 4px var(--kid-ring), 0 12px 40px var(--kid-glow);
+    }
+    .km-mini-open {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        align-items: center;
+        gap: var(--space-3);
+        padding: 4px;
+        border: none;
+        border-radius: 999px;
+        background: transparent;
+        cursor: pointer;
+        text-align: left;
+        -webkit-tap-highlight-color: transparent;
+    }
+    .km-mini-art {
+        width: 52px;
+        height: 52px;
+        border-radius: 50%;
+        object-fit: cover;
+        flex-shrink: 0;
+    }
+    .km-mini-art-none {
+        background: var(--surface-hover);
+        display: grid;
+        place-items: center;
+        font-size: 1.5rem;
+    }
+    .km-mini-meta {
+        display: flex;
+        flex-direction: column;
+        gap: 1px;
+        min-width: 0;
+    }
+    .km-mini-title {
+        font-size: 0.98rem;
+        font-weight: 800;
+        color: var(--text);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .km-mini-sub {
+        font-size: 0.78rem;
+        font-weight: 600;
+        color: var(--text-muted);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .km-mini-btn {
+        width: 54px;
+        height: 54px;
+        border-radius: 50%;
+        border: 2px solid var(--border);
+        background: var(--surface);
+        font-size: 1.3rem;
+        display: grid;
+        place-items: center;
+        cursor: pointer;
+        flex-shrink: 0;
+        transition: transform 0.12s ease;
+        -webkit-tap-highlight-color: transparent;
+    }
+    .km-mini-btn:active { transform: scale(0.88); }
+    .km-mini-btn:disabled { opacity: 0.5; }
+    .km-mini.playing .km-mini-play {
+        background: var(--kid-accent-grad);
+        border-color: var(--kid-accent);
+    }
 
     @media (min-width: 700px) {
         .km { padding: var(--space-6) var(--space-7); }

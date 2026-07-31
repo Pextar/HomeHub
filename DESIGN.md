@@ -1324,7 +1324,16 @@ play-together grouping.
   top (art, rail, transport, modes, faders, the Up-next row that opens the
   queue); below it three big chips — 🔎 Find, 🎶 Up next, 🔊 Rooms — swap
   the pane. The panes never unmount, so a search halfway typed survives a
-  peek at the queue.
+  peek at the queue. The chips never wrap: they size to their words and
+  scroll sideways on a narrow phone.
+- **The mini bar is the phone's dock, and §15.5's rule is its rule.** The
+  player card is taller than a phone screen, so once it has scrolled
+  _entirely_ away a pill docks at the bottom — art, track, play/pause,
+  next — with the same "fallback, never a duplicate" discipline as the
+  app's dock (even a sliver of card keeps it hidden; its text taps back to
+  the player). A song tapped deep in the results gets its "starting"
+  feedback twice: the row's cover breathes until the poll lands, and the
+  mini bar answers with the new track.
 - **The words stay the module's words.** The mode chips keep §15.5's one
   word across surfaces — Shuffle, Repeat, Crossfade, Play similar — with an
   emoji in front, not a rename. Numbers stay mono. Copy that only a kid

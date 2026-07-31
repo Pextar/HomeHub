@@ -290,6 +290,7 @@
     <div class="kms-row">
         <button
             class="kms-main"
+            class:starting={!!music.busy["item:" + item.uri]}
             disabled={!!music.busy["item:" + item.uri]}
             onclick={() => pick(item)}
         >
@@ -548,7 +549,12 @@
                          only thing visible. -->
                     {@const top = spotify.topResult}
                     {@render shelfLabel("⭐ Best match")}
-                    <button class="kms-top" onclick={() => act(top)}>
+                    <button
+                        class="kms-top"
+                        class:starting={!!music.busy["item:" + top.uri]}
+                        disabled={!!music.busy["item:" + top.uri]}
+                        onclick={() => act(top)}
+                    >
                         {#if top.art_url}
                             <img class="kms-top-art" class:round={top.kind === "artist"} src={top.art_url} alt="" />
                         {:else}
@@ -751,7 +757,15 @@
         -webkit-tap-highlight-color: transparent;
     }
     .kms-main:active { transform: scale(0.98); border-color: var(--kid-accent); }
-    .kms-main:disabled { opacity: 0.6; }
+    .kms-main:disabled { opacity: 0.75; }
+    /* A tapped song can take a moment to reach the speaker — the cover
+       breathes until the player (or the mini bar) names it. */
+    .kms-main.starting .kms-art,
+    .kms-top.starting .kms-top-art { animation: kms-start 0.9s ease-in-out infinite; }
+    @keyframes kms-start {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.4; }
+    }
     .kms-num {
         font-family: var(--font-mono);
         font-feature-settings: "tnum" 1;
@@ -920,6 +934,7 @@
         -webkit-tap-highlight-color: transparent;
     }
     .kms-top:active { transform: scale(0.98); }
+    .kms-top:disabled { opacity: 0.75; }
     .kms-top-art {
         width: 92px;
         height: 92px;
@@ -1107,5 +1122,7 @@
 
     @media (prefers-reduced-motion: reduce) {
         .kms-skel, .kms-skel-hero { animation: none; }
+        .kms-main.starting .kms-art,
+        .kms-top.starting .kms-top-art { animation: none; }
     }
 </style>
