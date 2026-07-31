@@ -218,14 +218,8 @@
                     value={music.vol}
                     label="Volume"
                     valueText="{music.vol}%"
-                    onInput={(v) => {
-                        music.dragging = true;
-                        music.vol = v;
-                    }}
-                    onChange={(v) => {
-                        music.dragging = false;
-                        music.setVolume(featured, v);
-                    }}
+                    onInput={(v) => music.dragVolume(featured, v)}
+                    onChange={(v) => music.setVolume(featured, v)}
                 />
                 <span class="v-val mono">{music.vol}</span>
             </div>
@@ -250,14 +244,8 @@
                                 value={music.memVol[m.id] ?? m.volume}
                                 label="Volume {m.name}"
                                 valueText="{music.memVol[m.id] ?? m.volume}%"
-                                onInput={(v) => {
-                                    music.memDragging(m.id, true);
-                                    music.memVol[m.id] = v;
-                                }}
-                                onChange={(v) => {
-                                    music.memDragging(m.id, false);
-                                    music.setMemberVolume(m.id, v);
-                                }}
+                                onInput={(v) => music.dragMemberVolume(m.id, v)}
+                                onChange={(v) => music.setMemberVolume(m.id, v)}
                             />
                             <span class="v-val mono">{music.memVol[m.id] ?? m.volume}</span>
                         </div>

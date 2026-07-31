@@ -22,10 +22,8 @@
         try {
             if (isEdit) {
                 await api.updateRoom(existing!.id, { name: name.trim() });
-                toasts.success("Room renamed", name.trim());
             } else {
                 await api.createRoom({ name: name.trim() });
-                toasts.success("Room added", name.trim());
             }
             closeModal();
             await data.refresh();

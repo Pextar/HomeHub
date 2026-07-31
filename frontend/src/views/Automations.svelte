@@ -50,9 +50,7 @@
         pausing = true;
         const enable = !anySchedEnabled;
         try {
-            const r = await api.setAllSchedules(enable);
-            toasts.success(enable ? "Schedules resumed" : "Schedules paused",
-                `${r.changed} schedule${r.changed === 1 ? "" : "s"} ${enable ? "enabled" : "disabled"}.`);
+            await api.setAllSchedules(enable);
             await data.refresh();
         } catch (e) {
             toasts.error("Failed", (e as Error).message);
@@ -164,7 +162,6 @@
         openId = null;
         try {
             await api.runAutomation(a.id);
-            toasts.success("Automation ran", a.name);
             await data.refresh();
         } catch (e) { toasts.error("Run failed", (e as Error).message); }
     }
@@ -179,7 +176,6 @@
         if (!ok) return;
         try {
             await api.deleteAutomation(a.id);
-            toasts.success("Automation deleted", a.name);
             await data.refresh();
         } catch (e) { toasts.error("Failed", (e as Error).message); }
     }

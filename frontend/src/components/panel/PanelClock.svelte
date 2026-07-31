@@ -32,13 +32,8 @@
         haptic();
         const on = !anyOn;
         try {
-            const r = on ? await api.allOn() : await api.allOff();
+            await (on ? api.allOn() : api.allOff());
             await data.refresh();
-            toasts.show({
-                title: on ? "All on" : "All off",
-                message: `${r.updated} updated${r.failures.length ? `, ${r.failures.length} failed` : ""}.`,
-                tone: "success",
-            });
         } catch (e) {
             toasts.error("Failed", (e as Error).message);
         } finally {

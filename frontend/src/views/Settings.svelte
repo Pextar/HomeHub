@@ -89,7 +89,6 @@
                 longitude:     Number(longitude),
                 location_name: locationName.trim() || undefined,
             });
-            toasts.success("Settings saved");
             await data.refresh();
         } catch (e) {
             toasts.error("Save failed", (e as Error).message);
@@ -129,8 +128,7 @@
         importing = true;
         try {
             const bundle = JSON.parse(await file.text());
-            const r = await api.importConfig(bundle);
-            toasts.success("Backup restored", `${r.sockets} devices, ${r.schedules} schedules, ${r.scenes} scenes.`);
+            await api.importConfig(bundle);
             await data.refresh();
         } catch (e) {
             toasts.error("Import failed", (e as Error).message);
@@ -180,23 +178,29 @@
         if (!pushSupported || pushClient.loading) return;
         if (pushClient.isSubscribed) {
             await pushClient.unsubscribe();
-            toasts.info("Notifications disabled");
         } else {
             const ok = await pushClient.subscribe();
-            if (ok) {
-                toasts.success("Notifications enabled", "You'll receive alerts even when the app is closed.");
-            } else if (pushClient.permission === "denied") {
+            if (!ok && pushClient.permission === "denied") {
                 toasts.warn("Permission denied", "Enable notifications in your browser settings.");
             }
         }
     }
+
+    // The controller form above answers by going un-dirty — its Save greys
+    // out the moment the fields match what's stored. This form has no dirty
+    // state to lean on, so the button says so itself for a beat. Either way
+    // the answer stays inside the control that was pressed.
+    let notifSaved = $state(false);
+    let notifSavedTimer: ReturnType<typeof setTimeout> | undefined;
 
     async function saveNotifPrefs() {
         if (notifSaving) return;
         notifSaving = true;
         try {
             await api.updatePushPrefs(notifPrefs);
-            toasts.success("Notification preferences saved");
+            notifSaved = true;
+            clearTimeout(notifSavedTimer);
+            notifSavedTimer = setTimeout(() => (notifSaved = false), 2000);
         } catch (e) {
             toasts.error("Save failed", (e as Error).message);
         } finally {
@@ -208,8 +212,8 @@
         if (testing) return;
         testing = true;
         try {
+            // The notification arriving is the confirmation.
             await api.testPush();
-            toasts.info("Test sent", "A notification should appear shortly.");
         } catch (e) {
             toasts.error("Test failed", (e as Error).message);
         } finally {
@@ -229,7 +233,6 @@
                 latitude  = Math.round(pos.coords.latitude  * 10000) / 10000;
                 longitude = Math.round(pos.coords.longitude * 10000) / 10000;
                 locating = false;
-                toasts.info("Location filled", "Click Save to apply.");
             },
             (err) => { locating = false; toasts.error("Location denied", err.message); },
             { enableHighAccuracy: false, timeout: 8000 },
@@ -248,16 +251,26 @@
         <div class="who-role">{roleLabel}</div>
     </div>
     <div class="who-actions">
-        <Segmented
-            name="theme-mode"
-            value={theme.mode}
-            onChange={(v) => theme.setMode(v as ThemeMode)}
-            options={[
-                { value: "light", label: "Light" },
-                { value: "dark", label: "Dark" },
-                { value: "auto", label: "Auto" },
-            ]}
-        />
+        <div class="theme-pick">
+            <Segmented
+                name="theme-mode"
+                value={theme.mode}
+                onChange={(v) => theme.setMode(v as ThemeMode)}
+                options={[
+                    { value: "light", label: "Light" },
+                    { value: "dark", label: "Dark" },
+                    { value: "auto", label: "Auto" },
+                ]}
+            />
+            <!-- Auto is the one setting whose effect you can't read off the
+                 control itself: the switch happens on the phone, not here. So
+                 it says which way the system is currently pointing. -->
+            {#if theme.mode === "auto"}
+                <span class="theme-note">
+                    Following this device — currently {theme.system}
+                </span>
+            {/if}
+        </div>
         <button class="chip danger" onclick={signOut}>
             <Icon name="logout" size={15} /> Sign out
         </button>
@@ -478,7 +491,7 @@
 
                 <div class="actions">
                     <button type="submit" class="btn btn-primary" disabled={notifSaving}>
-                        {notifSaving ? "Saving…" : "Save preferences"}
+                        {notifSaving ? "Saving…" : notifSaved ? "Saved" : "Save preferences"}
                     </button>
                 </div>
             </form>
@@ -577,7 +590,9 @@
     .who { flex: 1; min-width: 0; }
     .who-name { font-weight: 600; font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .who-role { color: var(--text-mute); font-size: 12.5px; }
-    .who-actions { display: flex; gap: var(--space-2); flex-shrink: 0; flex-wrap: wrap; justify-content: flex-end; }
+    .who-actions { display: flex; gap: var(--space-2); flex-shrink: 0; flex-wrap: wrap; justify-content: flex-end; align-items: flex-start; }
+    .theme-pick { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+    .theme-note { font-size: 12px; color: var(--text-mute); text-align: right; }
     .chip.danger { color: var(--bad); }
 
     .card {

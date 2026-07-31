@@ -78,10 +78,8 @@
         try {
             if (existing) {
                 await api.updateSensor(existing.id, payload);
-                toasts.success("Sensor updated");
             } else {
                 await api.createSensor(payload);
-                toasts.success("Sensor added");
             }
             closeModal();
             await data.refresh();
@@ -105,7 +103,6 @@
         if (!ok) return;
         try {
             await api.deleteSensor(existing.id);
-            toasts.success("Sensor deleted");
             closeModal();
             await data.refresh();
         } catch (e) {

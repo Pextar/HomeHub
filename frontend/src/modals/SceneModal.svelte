@@ -178,9 +178,6 @@
         for (const s of shownSockets) {
             step.perSocket[s.id] = s.state ? "on" : "off";
         }
-        const n = shownSockets.length;
-        toasts.info("Captured current state",
-            `${n} device${n === 1 ? "" : "s"} set to their current on/off state`);
     }
 
     function buildSteps() {
@@ -220,9 +217,7 @@
         if (!existing || testing) return;
         testing = true;
         try {
-            const res = await api.activateScene(existing.id);
-            toasts.success("Scene activated",
-                `${res.updated} device${res.updated === 1 ? "" : "s"} updated`);
+            await api.activateScene(existing.id);
             await data.refresh();
         } catch (e) {
             toasts.error("Test failed", (e as Error).message);
@@ -249,7 +244,6 @@
                 await api.createScene(payload);
             }
 
-            toasts.success(isEdit ? "Scene updated" : "Scene created", sceneName);
             closeModal();
             await data.refresh();
         } catch (e) {

@@ -407,6 +407,16 @@ add-device, command palette — popovers anchored to their trigger.
 
 Hover lift is **`@media (hover: hover)` only.** Don't apply on touch.
 
+**Haptics are part of motion.** Anything that flips state under a finger —
+a toggle, a switch, a scene run, an armed pull-to-refresh — calls
+`haptic()` from `lib/utils.ts` in the handler itself. It has two backends
+because the platforms don't agree: `navigator.vibrate` on Android, and on
+iOS (which has no Vibration API at all) a hidden `<input type="checkbox"
+switch>` clicked through its label, which is the one way to reach the
+Taptic engine from the web. Both need a real user gesture, so never call
+it from a timer, an effect, or a network callback — call it on the tap,
+before the round trip.
+
 ---
 
 ## 10. State patterns
@@ -422,6 +432,23 @@ Hover lift is **`@media (hover: hover)` only.** Don't apply on touch.
 - **Toast:** floats above tab bar, 16px from bottom edges. 280ms slide-up.
   Icon dot left, message, optional action right. Tone via icon color:
   `info → --cool`, `warn → --warn`, `error → --bad`, `success → --good`.
+
+  **A toast is never a confirmation.** There is no `toasts.success` and no
+  `toasts.info` — the store doesn't expose them. An action that worked is
+  shown by the thing that changed: the sheet closes, the card goes, the tile
+  lights, the player names the track, a form's Save greys out or says
+  "Saved". Announcing it again in a card the user has to dismiss is noise,
+  and it buried the one toast that mattered under sixty that didn't.
+
+  Two things still earn one. **Failures** (`error`, `warn`), because nothing
+  on screen can show that nothing happened. And **a control with a
+  deadline** (`show` with an `action`) — Undo after the master switch,
+  Refresh after an update lands. Those aren't announcements; the toast is
+  the only place the affordance exists.
+
+  When an action asks the hardware a question — pair, probe, send a test
+  signal — the answer goes **inline, under the button that asked it**, and
+  stays there. It has to survive the walk over to the socket.
 
 ---
 
@@ -490,6 +517,10 @@ Is it a list of things?
 - [ ] Reduced-motion media query collapses your animations to 0.001ms
 - [ ] Hit areas ≥ 44×44 on touch
 - [ ] Light theme verified (toggle via `[data-theme="light"]` on `<html>`)
+- [ ] Nothing announces its own success — no `toasts.success` / `toasts.info`
+      (they don't exist); confirmation is the UI that changed
+- [ ] Theme reads `theme.current` (resolved dark/light), never `theme.mode`
+      — which can be `"auto"`, and follows the OS live
 
 ---
 
@@ -650,8 +681,8 @@ _which device_. Nothing appears on two of them.
 - **The user never picks the mechanism.** Two Sonos rooms group natively,
   because that is what the household is for and it is sample-locked. Anything
   with a KEF or an existing HomeHub room in it becomes a HomeHub room,
-  because that is the only thing that can span makes. The toast says which
-  happened; the gesture doesn't ask.
+  because that is the only thing that can span makes. The merged card says
+  which happened; the gesture doesn't ask.
 - **The whole card moves.** What was dragged was a room, so every speaker in
   it goes. (Contrast the old puck grid, where only the dragged _speaker_
   moved — correct when the object was a speaker, wrong now that it's a room.)
@@ -922,7 +953,7 @@ _up one_.
       was wrong. Making the user choose the mechanism made them learn a
       vendor boundary to do a domestic thing. So the drop decides:
       Sonos-native where both sides can take it, a HomeHub room where they
-      can't, said out loud in the toast either way.
+      can't, and the card the rooms merged into names which either way.
     - **The route note is the backend's sentence, never the UI's guess**
       (`ZoneRoute`). `stream` gets a mono `HomeHub stream · buffered` tag
       plus the `reason`; `exact` sync gets one quiet `In sync` line; a zone
@@ -1187,7 +1218,7 @@ constraint made visible.
   and opens the queue pane (§15.8's door, same sentence).
 - **On the music depth, a song plays; an artist opens.** The wall keeps
   the flat gesture where it's about starting sound: a song found by
-  search plays, an album or playlist plays whole — the toast names what
+  search plays, an album or playlist plays whole — the player names what
   started and on which room, the featured source being the destination
   the player column's chips name. The search answers with §15.9's **top
   result** first — the one thing the search was almost certainly after,
@@ -1235,7 +1266,8 @@ constraint made visible.
   devices appear only there — the room grid is rooms, not clutter.
 - **Everything else is stock.** Same tokens, same `.tile.on` gradient on
   room tiles / master / playing card, same mono numerals, same runAction
-  toasts. The panel should read as the app, quieter — not a redesign of it.
+  silence-on-success. The panel should read as the app, quieter — not a
+  redesign of it.
 
 ---
 

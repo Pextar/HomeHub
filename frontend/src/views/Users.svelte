@@ -63,8 +63,9 @@
 
     async function copyCode(u: User) {
         if (!u.login_code) return;
-        if (await copyText(u.login_code)) toasts.success("Code copied", u.login_code);
-        else toasts.warn("Couldn't copy", "Copy it manually: " + u.login_code);
+        if (!(await copyText(u.login_code))) {
+            toasts.warn("Couldn't copy", "Copy it manually: " + u.login_code);
+        }
     }
 
     async function regenerate(u: User) {
@@ -75,9 +76,8 @@
         });
         if (!ok) return;
         try {
-            const updated = await api.updateUser(u.id, { regenerate_code: true });
+            await api.updateUser(u.id, { regenerate_code: true });
             await load();
-            toasts.success("New code generated", updated.login_code ?? "");
         } catch (e) {
             toasts.error("Couldn't regenerate", (e as Error).message);
         }
@@ -94,7 +94,6 @@
         if (!ok) return;
         try {
             await api.deleteUser(u.id);
-            toasts.success("Profile deleted", u.username);
             await load();
         } catch (e) {
             toasts.error("Delete failed", (e as Error).message);

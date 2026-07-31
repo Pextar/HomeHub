@@ -417,12 +417,20 @@ export function createSonosBridge(busy: Busy): SonosBridge {
 
     shownVolume: (sp) => localVol[sp.id] ?? sp.state?.volume ?? 0,
     shownGroupVolume: (coordinatorId) => groupVol[coordinatorId] ?? 0,
+    // Both stamp `volOverride` as well as writing the local value. Without
+    // that stamp the very next status poll wrote `sp.state.volume` straight
+    // back over the finger's position — the slider sprang back to where the
+    // speaker had last been read, mid-drag, once a second. The override
+    // window is "this value is the user's, not the poll's", and a finger on
+    // the slider is the clearest case of that there is.
     dragVolume(id, v) {
       localVol[id] = v;
+      volOverride[id] = { v, at: Date.now() };
       dragThrottle.schedule(id, v);
     },
     dragGroupVolume(coordinatorId, v) {
       groupVol[coordinatorId] = v;
+      volOverride["g:" + coordinatorId] = { v, at: Date.now() };
       dragGroupThrottle.schedule(coordinatorId, v);
     },
 

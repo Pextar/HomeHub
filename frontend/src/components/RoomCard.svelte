@@ -32,8 +32,8 @@
     }
 
     // ── Management (only rendered when `manage` is set) ───────────────────
-    function allOn()  { moreOpen = false; runAction(() => api.roomOn(room.name), `${room.name} on`); }
-    function allOff() { moreOpen = false; runAction(() => api.roomOff(room.name), `${room.name} off`); }
+    function allOn()  { moreOpen = false; runAction(() => api.roomOn(room.name)); }
+    function allOff() { moreOpen = false; runAction(() => api.roomOff(room.name)); }
     function rename() { moreOpen = false; openModal(RoomModal, { existing: { id: room.id, name: room.name } }); }
     async function confirmDelete() {
         moreOpen = false;
@@ -46,7 +46,6 @@
         if (!ok) return;
         try {
             await api.deleteRoom(room.id);
-            toasts.success("Room deleted", room.name);
             await data.refresh();
         } catch (e) {
             toasts.error("Delete failed", (e as Error).message);

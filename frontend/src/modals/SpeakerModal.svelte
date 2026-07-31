@@ -120,7 +120,6 @@
                 } else {
                     await api.sonosUpdateSpeaker(existing.id, { name, ip, room });
                 }
-                toasts.success("Speaker updated");
             } else {
                 // Name/room may be blank — the backend fills them from what
                 // the speaker calls itself.
@@ -129,7 +128,6 @@
                 } else {
                     await api.sonosCreateSpeaker({ ip, name, room });
                 }
-                toasts.success("Speaker added");
             }
             closeModal(true);
         } catch (e) {
@@ -154,7 +152,6 @@
             } else {
                 await api.sonosDeleteSpeaker(existing.id);
             }
-            toasts.success("Speaker removed");
             closeModal(true);
         } catch (e) {
             toasts.error("Remove failed", (e as Error).message);

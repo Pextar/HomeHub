@@ -229,7 +229,6 @@
         saving = true;
         try {
             await api.createSocket(payload);
-            toasts.success("Device added", payload.name);
             closeModal();
             await data.refresh();
         } catch (e) {

@@ -87,7 +87,7 @@
         haptic(25);
         // Flash every tile the scene touches, so the room visibly answers.
         scenePulse.fire([...new Set(allActions.map(a => a.socket_id))]);
-        runAction(() => api.activateScene(scene.id), `Scene activated: ${scene.name}`);
+        runAction(() => api.activateScene(scene.id));
     }
     function openEdit() { moreOpen = false; openModal(SceneModal, { existing: scene }); }
     async function confirmDelete() {
@@ -103,7 +103,6 @@
         if (!ok) return;
         try {
             await api.deleteScene(scene.id);
-            toasts.success("Scene deleted", scene.name);
             await data.refresh();
         } catch (e) { toasts.error("Failed", (e as Error).message); }
     }

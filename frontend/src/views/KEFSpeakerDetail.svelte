@@ -26,6 +26,7 @@
     import { toasts } from "../lib/stores.svelte";
     import { dur } from "../lib/motion";
     import { KEF_SOURCES, kefSourceLabel } from "../lib/kef";
+    import { clampVol, createVolumeThrottle } from "../lib/music/volume";
     import type {
         KEFSpeakerView,
         KEFSettings,
@@ -157,11 +158,25 @@
         ).catch(() => {});
     }
 
+    // The speaker follows the finger down the slider rather than waiting for
+    // it to lift — the same throttled send the Music view's faders use, so
+    // one drag is a handful of calls instead of one per pixel.
+    const volThrottle = createVolumeThrottle((_id, level) => {
+        void api.kefSetVolume(speaker.id, level).catch(() => {});
+    });
+
+    function dragVolume(v: number) {
+        volDrag = clampVol(v);
+        volSentAt = Date.now();
+        volThrottle.schedule(speaker.id, volDrag);
+    }
+
     function setVolume(v: number) {
-        volDrag = v;
+        volDrag = clampVol(v);
+        volThrottle.cancel(speaker.id);
         volSentAt = Date.now();
         const sentAt = volSentAt;
-        void run("volume", () => api.kefSetVolume(speaker.id, v), "Couldn't set the volume")
+        void run("volume", () => api.kefSetVolume(speaker.id, volDrag!), "Couldn't set the volume")
             .catch(() => {})
             .finally(() => {
                 // Hand the slider back to the poll, unless the user has moved
@@ -243,13 +258,7 @@
         connectBusy = true;
         void api
             .kefSetSpotifyDevice(speaker.id, d?.id ?? "", d?.name ?? "")
-            .then(() => {
-                toasts.success(
-                    d ? "Spotify device set" : "Matching by name again",
-                    d ? `${speaker.name} starts on "${d.name}"` : `Uses the name "${speaker.name}"`,
-                );
-                return loadConnect(speaker.id);
-            })
+            .then(() => loadConnect(speaker.id))
             .catch((e) => toasts.error("Couldn't set the Spotify device", (e as Error).message))
             .finally(() => (connectBusy = false));
     }
@@ -478,12 +487,14 @@
                     >
                         <Icon name={now?.muted ? "volumeOff" : "volume"} size={18} />
                     </button>
+                    <!-- Not disabled while a send is in flight: with a call
+                         going out every throttle window, that would grey the
+                         slider out under the finger holding it. -->
                     <input
                         type="range" min="0" max="100" step="1"
                         aria-label="Volume"
-                        disabled={busy.volume}
                         value={volume}
-                        oninput={(e) => (volDrag = e.currentTarget.valueAsNumber)}
+                        oninput={(e) => dragVolume(e.currentTarget.valueAsNumber)}
                         onchange={(e) => setVolume(e.currentTarget.valueAsNumber)}
                     />
                     <span class="r-num mono">{volume}</span>

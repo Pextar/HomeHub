@@ -61,7 +61,6 @@
         try {
             await api.deleteSchedule(id);
             await data.refresh();
-            toasts.success("Schedule removed!");
         } catch (e) {
             toasts.error("Couldn't delete", (e as Error).message);
         }
@@ -110,7 +109,6 @@
             // Backend scopes /sockets/all/off to this kid's own sockets.
             await api.allOff();
             await data.refresh();
-            toasts.success("Night night! 🌙", "All your lamps are off.");
         } catch (e) {
             toasts.error("Oops!", (e as Error).message);
         } finally {

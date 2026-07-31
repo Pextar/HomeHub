@@ -31,10 +31,8 @@
         try {
             if (existing) {
                 await api.updateGroup(existing.id, payload);
-                toasts.success("Group updated", payload.name);
             } else {
                 await api.createGroup(payload);
-                toasts.success("Group created", payload.name);
             }
             closeModal();
             await data.refresh();

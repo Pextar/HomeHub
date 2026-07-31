@@ -25,7 +25,6 @@
     async function fire(seconds: number, label: string) {
         try {
             await api.socketTimer(socket.id, { action: action as SocketAction, in_seconds: seconds, note: `Quick: ${label}` });
-            toasts.success("Timer set", `${socket.name}: ${action} in ${label}`);
             closeModal();
             await data.refresh();
         } catch (e) {

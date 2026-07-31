@@ -67,10 +67,8 @@
             };
             if (existing) {
                 await api.updateSchedule(existing.id, payload);
-                toasts.success("Schedule saved!");
             } else {
                 await api.createSchedule(payload);
-                toasts.success("Schedule added!");
             }
             await data.refresh();
             onClose();
