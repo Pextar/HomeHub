@@ -59,11 +59,27 @@ export interface SpotifyStore {
 const DEBOUNCE_MS = 400;
 
 /**
+ * The same "one thing this search was almost certainly after" pick the top
+ * result card uses — shared so a history chip's picture always matches the
+ * card the search itself led with.
+ */
+function topOf(r: SpotifyResults, q: string): SpotifyItem | null {
+  const { tracks, artists, albums, playlists } = r;
+  const ql = q.trim().toLowerCase();
+  if (artists[0] && artists[0].name.toLowerCase() === ql) return artists[0];
+  return tracks[0] ?? artists[0] ?? albums[0] ?? playlists[0] ?? null;
+}
+
+/**
  * `remember` is how a run gets into the history — passed in because the
  * history is keyed by destination, which this module has no business knowing
- * about.
+ * about. Called once when the query is submitted (no `art` yet — the search
+ * hasn't answered), and again once it has, so a chip's picture arrives as
+ * soon as it can rather than waiting a whole extra search to show up.
  */
-export function createSpotify(remember: (q: string) => void): SpotifyStore {
+export function createSpotify(
+  remember: (q: string, art?: { art_url?: string; round?: boolean }) => void,
+): SpotifyStore {
   const s = $state({
     status: null as SpotifyStatus | null,
     query: "",
@@ -95,7 +111,12 @@ export function createSpotify(remember: (q: string) => void): SpotifyStore {
     }
   }
 
-  async function search() {
+  /**
+   * `committed` marks a search worth remembering — Enter or a history/chip
+   * run, as opposed to the live-typing debounce, which would otherwise
+   * flood the history with every partial word typed on the way to one.
+   */
+  async function search(committed: boolean) {
     const q = s.query.trim();
     const mine = ++seq;
     if (!q) {
@@ -113,6 +134,10 @@ export function createSpotify(remember: (q: string) => void): SpotifyStore {
       const r = await api.spotifySearch(q, 10);
       if (mine !== seq) return;
       s.results = r;
+      if (committed) {
+        const top = topOf(r, q);
+        remember(q, top?.art_url ? { art_url: top.art_url, round: top.kind === "artist" } : undefined);
+      }
     } catch (e) {
       if (mine !== seq) return;
       toasts.error("Search failed", (e as Error).message);
@@ -148,14 +173,10 @@ export function createSpotify(remember: (q: string) => void): SpotifyStore {
       return s.results[s.kindFilter];
     },
     get topResult() {
-      if (!s.results) return null;
-      const { tracks, artists, albums, playlists } = s.results;
-      const q = s.query.trim().toLowerCase();
       // An artist whose name is the query outright is what a search for a
       // name is almost always after — otherwise the top track wins, since
       // playing a song is the most common reason to search at all.
-      if (artists[0] && artists[0].name.toLowerCase() === q) return artists[0];
-      return tracks[0] ?? artists[0] ?? albums[0] ?? playlists[0] ?? null;
+      return s.results ? topOf(s.results, s.query) : null;
     },
     get query() {
       return s.query;
@@ -269,21 +290,21 @@ export function createSpotify(remember: (q: string) => void): SpotifyStore {
 
     onQueryInput() {
       clearTimeout(timer);
-      timer = setTimeout(search, DEBOUNCE_MS);
+      timer = setTimeout(() => search(false), DEBOUNCE_MS);
     },
 
     runNow() {
       clearTimeout(timer);
       const q = s.query.trim();
       if (q) remember(q);
-      void search();
+      void search(true);
     },
 
     runQuery(q) {
       clearTimeout(timer);
       s.query = q;
       remember(q);
-      void search();
+      void search(true);
     },
 
     clearQuery() {

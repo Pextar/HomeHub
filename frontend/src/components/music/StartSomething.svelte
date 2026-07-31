@@ -17,6 +17,7 @@
     import type { Snippet } from "svelte";
     import Icon from "../Icon.svelte";
     import type { SonosFavorite } from "../../lib/types";
+    import type { SearchHistoryEntry } from "../../lib/music/history.svelte";
 
     let {
         /** Null when Spotify isn't set up at all — then the row isn't shown. */
@@ -35,7 +36,7 @@
     }: {
         spotifyAvailable: boolean;
         spotifyConnected: boolean;
-        recents: string[];
+        recents: SearchHistoryEntry[];
         favorites?: SonosFavorite[];
         /** `q` runs that search straight away rather than only opening the box. */
         onSearch: (q?: string) => void;
@@ -56,9 +57,12 @@
                     <span>{spotifyConnected ? "Search Spotify" : "Set up Spotify"}</span>
                 </button>
                 {#if spotifyConnected}
-                    {#each recents as h (h)}
-                        <button class="chip start-recent" onclick={() => onSearch(h)}>
-                            <span>{h}</span>
+                    {#each recents as h (h.q)}
+                        <button class="chip start-recent" onclick={() => onSearch(h.q)}>
+                            {#if h.art_url}
+                                <img class="start-recent-art" class:round={h.round} src={h.art_url} alt="" />
+                            {/if}
+                            <span>{h.q}</span>
                         </button>
                     {/each}
                 {/if}
@@ -83,6 +87,10 @@
     /* A recent search is whatever was typed, so it is capped rather than
        trusted to be short. */
     .start-recent > span { display: block; max-width: 52vw; overflow: hidden; text-overflow: ellipsis; }
+    /* The query's own top result, once the search behind it has answered —
+       round for an artist's photo, square for everything else's cover art. */
+    .start-recent-art { width: 18px; height: 18px; border-radius: var(--r-sm); object-fit: cover; flex-shrink: 0; margin-left: -4px; }
+    .start-recent-art.round { border-radius: 50%; }
     .favs { display: flex; gap: var(--space-3); padding-bottom: var(--space-1); }
     @media (pointer: coarse) {
         .start-row .chip { min-height: 44px; padding-inline: 14px; }
