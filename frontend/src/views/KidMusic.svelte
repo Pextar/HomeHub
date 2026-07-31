@@ -1,0 +1,693 @@
+<script lang="ts">
+    /**
+     * The kid music player (DESIGN.md §17): a full-screen takeover from
+     * KidHome, speaking the same playful language as the lamps — big emoji,
+     * fat targets, two taps for anything destructive — while driving exactly
+     * the same speaker brain as the grown-up panel (lib/panel-music), with
+     * Sonos as the only make a kid can reach.
+     *
+     * One screen holds the whole module: the featured room's player up top
+     * (art, transport, play modes, volume — one fader per speaker when the
+     * room is a group), and three chip-switched panes below: Find (the
+     * Spotify catalog), Up next (the queue), Rooms (play-together grouping).
+     * The panes stay mounted once opened so a search in progress survives a
+     * trip to the queue and back.
+     */
+    import { onMount } from "svelte";
+    import { fly } from "svelte/transition";
+    import { backOut } from "svelte/easing";
+    import { createPanelMusic } from "../lib/panel-music.svelte";
+    import { haptic } from "../lib/utils";
+    import { fmtSecs } from "../lib/music/time";
+    import { repeatLabel } from "../lib/music/sonos.svelte";
+    import KidSlider from "../components/kid/KidSlider.svelte";
+    import KidMusicSearch from "../components/kid/KidMusicSearch.svelte";
+    import KidMusicQueue from "../components/kid/KidMusicQueue.svelte";
+    import KidMusicRooms from "../components/kid/KidMusicRooms.svelte";
+
+    let { onClose }: { onClose: () => void } = $props();
+
+    const music = createPanelMusic({ sonosOnly: true });
+
+    // The first poll decides between the skeleton and the "no speakers"
+    // empty state — without it an empty house would shimmer forever.
+    let booted = $state(false);
+    onMount(() => {
+        void music.refresh().finally(() => {
+            booted = true;
+        });
+    });
+
+    const featured = $derived(music.featured);
+    const gs = $derived(featured?.groupState);
+    const members = $derived(featured?.members ?? []);
+    const multi = $derived(members.length > 1);
+    const queueCount = $derived(gs?.queue_length ?? 0);
+
+    type Pane = "search" | "queue" | "rooms";
+    let pane = $state<Pane>("search");
+
+    function pickPane(p: Pane) {
+        if (pane === p) return;
+        haptic();
+        pane = p;
+    }
+
+    function back() {
+        haptic();
+        onClose();
+    }
+
+    const repeatText = $derived(
+        gs?.repeat === "all" ? "Repeat all" : gs?.repeat === "one" ? "Repeat one" : "Repeat",
+    );
+
+    // The seek rail: draggable when the track has a length behind it, an
+    // honest "live" line when it doesn't (a radio stream has no position).
+    const showRail = $derived(!!featured && (featured.playing || !!featured.trackTitle));
+    const seekPct = $derived(music.durSec > 0 ? Math.min(100, (music.posSec / music.durSec) * 100) : 0);
+</script>
+
+<div class="km" in:fly={{ y: 40, duration: 320, easing: backOut }}>
+    <header class="km-head">
+        <button class="km-back" onclick={back} aria-label="Back to my lamps">‹ Back</button>
+        <h2>🎵 Music</h2>
+        <span class="km-head-spacer" aria-hidden="true"></span>
+    </header>
+
+    {#if !booted}
+        <div class="km-skel-player" aria-hidden="true"></div>
+        <div class="km-skel-rows" aria-hidden="true">
+            {#each Array(3) as _, i (i)}
+                <div class="km-skel-row"></div>
+            {/each}
+        </div>
+    {:else if music.sources.length === 0}
+        <div class="km-none">
+            <div class="km-none-emoji">🔇</div>
+            <p>No speakers yet!<br />Ask a grown-up to add one.</p>
+        </div>
+    {:else}
+        {#if music.sources.length > 1}
+            <div class="km-rooms" role="group" aria-label="Pick a room">
+                {#each music.sources as s (s.key)}
+                    <button
+                        class="km-room-chip"
+                        class:active={featured?.key === s.key}
+                        onclick={() => {
+                            haptic();
+                            music.selected = s.key;
+                        }}
+                    >
+                        🔊 {s.title}
+                    </button>
+                {/each}
+            </div>
+        {/if}
+
+        {#if featured}
+            <section class="km-player" class:playing={featured.playing}>
+                <div class="km-now">
+                    <span class="km-artwrap">
+                        {#if featured.art}
+                            <img class="km-art" src={featured.art} alt="" loading="lazy" />
+                        {:else}
+                            <span class="km-art km-art-none">🎵</span>
+                        {/if}
+                    </span>
+                    <span class="km-meta">
+                        <span class="km-title">
+                            {featured.trackTitle ?? (featured.playing ? "Playing" : "Nothing playing")}
+                        </span>
+                        <span class="km-sub">{featured.trackSub || featured.title}</span>
+                    </span>
+                </div>
+
+                {#if showRail}
+                    {#if music.durSec > 0}
+                        <div class="km-rail">
+                            <span class="km-time mono">{fmtSecs(music.posSec)}</span>
+                            <KidSlider
+                                value={music.posSec}
+                                max={music.durSec}
+                                disabled={!music.seekable}
+                                label="Where in the song"
+                                valueText="{fmtSecs(music.posSec)} of {fmtSecs(music.durSec)}"
+                                onInput={() => {}}
+                                onChange={(sec) => music.seek(sec)}
+                            />
+                            <span class="km-time mono">{fmtSecs(music.durSec)}</span>
+                        </div>
+                    {:else}
+                        <p class="km-live">📻 Live radio — it just keeps going!</p>
+                    {/if}
+                {/if}
+
+                <div class="km-transport">
+                    <button
+                        class="km-tbtn"
+                        aria-label="Previous song"
+                        disabled={music.busy["previous:" + featured.id]}
+                        onclick={() => music.skip(featured, "previous")}
+                    >
+                        ⏮️
+                    </button>
+                    <button
+                        class="km-tbtn km-tplay"
+                        aria-label={featured.playing ? "Pause" : "Play"}
+                        disabled={music.busy["play:" + featured.id]}
+                        onclick={() => music.togglePlay(featured)}
+                    >
+                        {featured.playing ? "⏸️" : "▶️"}
+                    </button>
+                    <button
+                        class="km-tbtn"
+                        aria-label="Next song"
+                        disabled={music.busy["next:" + featured.id]}
+                        onclick={() => music.skip(featured, "next")}
+                    >
+                        ⏭️
+                    </button>
+                </div>
+
+                {#if gs}
+                    <div class="km-modes" role="group" aria-label="Play modes">
+                        <button
+                            class="km-mode"
+                            class:on={gs.shuffle}
+                            aria-pressed={gs.shuffle}
+                            disabled={music.busy["mode:" + featured.id]}
+                            onclick={() => music.toggleShuffle()}
+                        >
+                            🔀 Shuffle
+                        </button>
+                        <button
+                            class="km-mode"
+                            class:on={gs.repeat !== "off"}
+                            aria-pressed={gs.repeat !== "off"}
+                            aria-label={repeatLabel(gs.repeat)}
+                            disabled={music.busy["mode:" + featured.id]}
+                            onclick={() => music.cycleRepeat()}
+                        >
+                            {gs.repeat === "one" ? "🔂" : "🔁"} {repeatText}
+                        </button>
+                        <button
+                            class="km-mode"
+                            class:on={gs.crossfade}
+                            aria-pressed={gs.crossfade}
+                            disabled={music.busy["xfade:" + featured.id]}
+                            onclick={() => music.toggleCrossfade()}
+                        >
+                            ✨ Crossfade
+                        </button>
+                        <button
+                            class="km-mode"
+                            class:on={!!featured.autoplay}
+                            aria-pressed={!!featured.autoplay}
+                            disabled={music.busy["autoplay:" + featured.id]}
+                            onclick={() => music.toggleAutoplay()}
+                        >
+                            🎈 Play similar
+                        </button>
+                    </div>
+                    <p class="km-modenote">
+                        {featured.autoplay
+                            ? "When the songs run out, more like them keep playing 🎶"
+                            : "When the songs run out, the music stops."}
+                    </p>
+                {/if}
+
+                {#if music.nextInQueue}
+                    <button class="km-upnext" onclick={() => pickPane("queue")}>
+                        <span class="km-upnext-label">🎶 Up next</span>
+                        <span class="km-upnext-title">{music.nextInQueue.title ?? "A mystery song"}</span>
+                        <span class="km-upnext-go" aria-hidden="true">›</span>
+                    </button>
+                {/if}
+
+                <div class="km-volume">
+                    <button
+                        class="km-vol-btn"
+                        class:mute={featured.muted}
+                        aria-label={featured.muted ? "Unmute" : "Mute"}
+                        disabled={music.busy["mute:" + featured.id]}
+                        onclick={() => music.toggleMute(featured)}
+                    >
+                        {featured.muted ? "🔇" : "🔊"}
+                    </button>
+                    <KidSlider
+                        value={music.vol}
+                        label="Volume"
+                        valueText="{music.vol}%"
+                        onInput={(v) => music.dragVolume(featured, v)}
+                        onChange={(v) => music.setVolume(featured, v)}
+                    />
+                    <span class="km-vol-val mono">{music.vol}</span>
+                </div>
+
+                {#if multi}
+                    <!-- One fader per speaker under the room-wide one — the
+                         balance question a group always raises. -->
+                    <div class="km-members">
+                        {#each members as m (m.id)}
+                            <div class="km-member">
+                                <button
+                                    class="km-vol-btn small"
+                                    class:mute={m.muted}
+                                    aria-label="{m.muted ? 'Unmute' : 'Mute'} {m.name}"
+                                    disabled={music.busy["mute:" + m.id]}
+                                    onclick={() => music.toggleMute(featured, m.id)}
+                                >
+                                    {m.muted ? "🔇" : "🔊"}
+                                </button>
+                                <span class="km-member-name">{m.name}</span>
+                                <KidSlider
+                                    value={music.memVol[m.id] ?? m.volume}
+                                    label="Volume {m.name}"
+                                    valueText="{music.memVol[m.id] ?? m.volume}%"
+                                    onInput={(v) => music.dragMemberVolume(m.id, v)}
+                                    onChange={(v) => music.setMemberVolume(m.id, v)}
+                                />
+                                <span class="km-vol-val mono">{music.memVol[m.id] ?? m.volume}</span>
+                            </div>
+                        {/each}
+                    </div>
+                {/if}
+            </section>
+
+            <nav class="km-panes" role="group" aria-label="Music sections">
+                <button
+                    class="km-pane-chip"
+                    class:active={pane === "search"}
+                    onclick={() => pickPane("search")}
+                >
+                    🔎 Find
+                </button>
+                <button
+                    class="km-pane-chip"
+                    class:active={pane === "queue"}
+                    onclick={() => pickPane("queue")}
+                >
+                    🎶 Up next{#if queueCount > 0}&nbsp;<span class="mono">{queueCount}</span>{/if}
+                </button>
+                <button
+                    class="km-pane-chip"
+                    class:active={pane === "rooms"}
+                    onclick={() => pickPane("rooms")}
+                >
+                    🔊 Rooms <span class="mono">{music.sources.length}</span>
+                </button>
+            </nav>
+
+            <!-- The panes never unmount: a search halfway typed survives a
+                 peek at the queue, and the rooms pane keeps its two-tap arms
+                 from resetting on a pane hop. -->
+            <div class="km-pane" hidden={pane !== "search"}>
+                <KidMusicSearch {music} />
+            </div>
+            <div class="km-pane" hidden={pane !== "queue"}>
+                <KidMusicQueue {music} onFindMusic={() => pickPane("search")} />
+            </div>
+            <div class="km-pane" hidden={pane !== "rooms"}>
+                <KidMusicRooms {music} />
+            </div>
+        {/if}
+    {/if}
+</div>
+
+<style>
+    .km {
+        position: fixed;
+        inset: 0;
+        z-index: var(--z-modal);
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+        background: var(--kid-bg);
+        padding: var(--space-5);
+        padding-bottom: calc(var(--space-7) + env(safe-area-inset-bottom));
+    }
+
+    .km-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-3);
+        margin-bottom: var(--space-5);
+    }
+    .km-head h2 {
+        font-size: clamp(1.5rem, 5vw, 2.25rem);
+        font-weight: 800;
+        letter-spacing: -0.02em;
+    }
+    .km-back {
+        font-size: 1.05rem;
+        font-weight: 800;
+        padding: 12px 18px;
+        min-height: 48px;
+        border-radius: 999px;
+        border: none;
+        background: var(--surface-hover);
+        color: var(--text);
+        cursor: pointer;
+        transition: transform 0.12s ease;
+        -webkit-tap-highlight-color: transparent;
+    }
+    .km-back:active { transform: scale(0.93); }
+    .km-head-spacer { width: 76px; flex-shrink: 0; }
+
+    /* Skeletons while the first speaker poll lands. */
+    .km-skel-player {
+        height: 240px;
+        border-radius: var(--radius-xl);
+        background: linear-gradient(90deg, var(--surface) 0%, var(--surface-hover) 50%, var(--surface) 100%);
+        background-size: 200% 100%;
+        animation: shimmer 1.5s linear infinite;
+        margin-bottom: var(--space-4);
+    }
+    .km-skel-rows { display: flex; flex-direction: column; gap: var(--space-3); }
+    .km-skel-row {
+        height: 76px;
+        border-radius: var(--radius-lg);
+        background: linear-gradient(90deg, var(--surface) 0%, var(--surface-hover) 50%, var(--surface) 100%);
+        background-size: 200% 100%;
+        animation: shimmer 1.5s linear infinite;
+    }
+    @keyframes shimmer {
+        0% { background-position: 200% 0; }
+        100% { background-position: -200% 0; }
+    }
+
+    .km-none {
+        text-align: center;
+        color: var(--text-muted);
+        margin-top: 16vh;
+    }
+    .km-none-emoji { font-size: 4rem; margin-bottom: var(--space-3); }
+    .km-none p { font-size: 1.25rem; font-weight: 700; line-height: 1.5; }
+
+    /* Room picker — where the music plays. */
+    .km-rooms {
+        display: flex;
+        gap: var(--space-2);
+        overflow-x: auto;
+        padding-bottom: var(--space-2);
+        margin-bottom: var(--space-3);
+        scrollbar-width: none;
+    }
+    .km-rooms::-webkit-scrollbar { display: none; }
+    .km-room-chip {
+        flex-shrink: 0;
+        font-size: 1rem;
+        font-weight: 800;
+        padding: 12px 20px;
+        min-height: 52px;
+        border-radius: 999px;
+        border: 2px solid var(--border);
+        background: var(--bg-elevated);
+        color: var(--text-muted);
+        cursor: pointer;
+        transition: transform 0.12s ease, border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+        -webkit-tap-highlight-color: transparent;
+    }
+    .km-room-chip:active { transform: scale(0.94); }
+    .km-room-chip.active {
+        background: var(--kid-accent-grad);
+        border-color: var(--kid-accent);
+        color: var(--kid-on-text);
+        box-shadow: 0 0 0 3px var(--kid-ring);
+    }
+
+    /* ── The player card ── */
+    .km-player {
+        background: var(--bg-elevated);
+        border: 3px solid var(--border);
+        border-radius: var(--radius-xl);
+        padding: var(--space-5);
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-4);
+        margin-bottom: var(--space-5);
+        transition: border-color 0.25s ease, box-shadow 0.25s ease;
+    }
+    .km-player.playing {
+        border-color: var(--kid-accent);
+        box-shadow: 0 0 0 4px var(--kid-ring), 0 12px 40px var(--kid-glow);
+        animation: km-glow 2.2s ease-in-out infinite;
+    }
+    @keyframes km-glow {
+        0%, 100% { box-shadow: 0 0 0 4px var(--kid-ring), 0 12px 40px var(--kid-glow); }
+        50% { box-shadow: 0 0 0 7px var(--kid-ring-strong), 0 16px 52px var(--kid-glow-strong); }
+    }
+
+    .km-now {
+        display: flex;
+        align-items: center;
+        gap: var(--space-4);
+        min-width: 0;
+    }
+    .km-artwrap { flex-shrink: 0; }
+    .km-art {
+        width: 104px;
+        height: 104px;
+        border-radius: var(--radius-lg);
+        object-fit: cover;
+        display: block;
+    }
+    .km-art-none {
+        background: var(--surface-hover);
+        display: grid;
+        place-items: center;
+        font-size: 3rem;
+    }
+    .km-meta {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        min-width: 0;
+    }
+    .km-title {
+        font-size: clamp(1.15rem, 4vw, 1.5rem);
+        font-weight: 800;
+        letter-spacing: -0.02em;
+        color: var(--text);
+        line-height: 1.15;
+    }
+    .km-sub {
+        font-size: 0.95rem;
+        font-weight: 600;
+        color: var(--text-muted);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .km-rail {
+        display: flex;
+        align-items: center;
+        gap: var(--space-3);
+    }
+    .km-time {
+        font-family: var(--font-mono);
+        font-feature-settings: "tnum" 1;
+        font-size: 0.85rem;
+        font-weight: 700;
+        color: var(--text-muted);
+        flex-shrink: 0;
+        min-width: 3ch;
+        text-align: center;
+    }
+    .km-live {
+        font-size: 0.95rem;
+        font-weight: 700;
+        color: var(--text-muted);
+        text-align: center;
+    }
+
+    .km-transport {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: var(--space-5);
+    }
+    .km-tbtn {
+        width: 62px;
+        height: 62px;
+        border-radius: 50%;
+        border: 2px solid var(--border);
+        background: var(--surface);
+        font-size: 1.5rem;
+        display: grid;
+        place-items: center;
+        cursor: pointer;
+        transition: transform 0.12s ease, border-color 0.15s ease;
+        -webkit-tap-highlight-color: transparent;
+    }
+    .km-tbtn:active { transform: scale(0.9); }
+    .km-tbtn:disabled { opacity: 0.5; }
+    .km-tplay {
+        width: 84px;
+        height: 84px;
+        font-size: 2.1rem;
+        background: var(--kid-accent-grad);
+        border-color: var(--kid-accent);
+        box-shadow: 0 0 0 4px var(--kid-ring), 0 10px 30px var(--kid-glow);
+    }
+
+    .km-modes {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--space-2);
+        justify-content: center;
+    }
+    .km-mode {
+        font-size: 0.95rem;
+        font-weight: 800;
+        padding: 10px 16px;
+        min-height: 48px;
+        border-radius: 999px;
+        border: 2px solid var(--border);
+        background: var(--surface);
+        color: var(--text-muted);
+        cursor: pointer;
+        transition: transform 0.12s ease, border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+        -webkit-tap-highlight-color: transparent;
+    }
+    .km-mode:active { transform: scale(0.94); }
+    .km-mode.on {
+        background: var(--kid-accent-soft);
+        border-color: var(--kid-accent);
+        color: var(--kid-accent);
+    }
+    .km-mode:disabled { opacity: 0.5; }
+    .km-modenote {
+        font-size: 0.85rem;
+        font-weight: 600;
+        color: var(--text-faint);
+        text-align: center;
+    }
+
+    .km-upnext {
+        display: flex;
+        align-items: center;
+        gap: var(--space-3);
+        padding: 14px 18px;
+        min-height: 56px;
+        border-radius: var(--radius-lg);
+        border: 2px solid var(--border);
+        background: var(--surface);
+        cursor: pointer;
+        text-align: left;
+        transition: transform 0.12s ease, border-color 0.15s ease;
+        -webkit-tap-highlight-color: transparent;
+    }
+    .km-upnext:active { transform: scale(0.98); border-color: var(--kid-accent); }
+    .km-upnext-label {
+        font-size: 0.8rem;
+        font-weight: 800;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--text-muted);
+        flex-shrink: 0;
+    }
+    .km-upnext-title {
+        flex: 1;
+        min-width: 0;
+        font-size: 1rem;
+        font-weight: 800;
+        color: var(--text);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .km-upnext-go { font-size: 1.4rem; font-weight: 800; color: var(--text-muted); }
+
+    .km-volume,
+    .km-member {
+        display: flex;
+        align-items: center;
+        gap: var(--space-3);
+    }
+    .km-vol-btn {
+        width: 52px;
+        height: 52px;
+        border-radius: 50%;
+        border: 2px solid var(--border);
+        background: var(--surface);
+        font-size: 1.3rem;
+        display: grid;
+        place-items: center;
+        cursor: pointer;
+        flex-shrink: 0;
+        transition: transform 0.12s ease, border-color 0.15s ease;
+        -webkit-tap-highlight-color: transparent;
+    }
+    .km-vol-btn.small { width: 46px; height: 46px; font-size: 1.1rem; }
+    .km-vol-btn:active { transform: scale(0.9); }
+    .km-vol-btn.mute { border-color: var(--kid-pink); }
+    .km-member-name {
+        width: 88px;
+        flex-shrink: 0;
+        font-size: 0.9rem;
+        font-weight: 800;
+        color: var(--text-muted);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .km-members {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-2);
+        border-top: 2px dashed var(--border);
+        padding-top: var(--space-3);
+    }
+    .km-vol-val {
+        font-family: var(--font-mono);
+        font-feature-settings: "tnum" 1;
+        font-size: 0.95rem;
+        font-weight: 700;
+        color: var(--text-muted);
+        min-width: 3ch;
+        text-align: right;
+        flex-shrink: 0;
+    }
+
+    /* ── Pane chips ── */
+    .km-panes {
+        display: flex;
+        gap: var(--space-2);
+        margin-bottom: var(--space-4);
+    }
+    .km-pane-chip {
+        flex: 1;
+        font-size: 1rem;
+        font-weight: 800;
+        padding: 12px 10px;
+        min-height: 54px;
+        border-radius: 999px;
+        border: 2px solid var(--border);
+        background: var(--bg-elevated);
+        color: var(--text-muted);
+        cursor: pointer;
+        transition: transform 0.12s ease, border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+        -webkit-tap-highlight-color: transparent;
+    }
+    .km-pane-chip:active { transform: scale(0.95); }
+    .km-pane-chip.active {
+        background: var(--kid-accent-grad);
+        border-color: var(--kid-accent);
+        color: var(--kid-on-text);
+        box-shadow: 0 0 0 3px var(--kid-ring);
+    }
+    .km-pane[hidden] { display: none; }
+
+    @media (min-width: 700px) {
+        .km { padding: var(--space-6) var(--space-7); }
+        .km-player, .km-panes, .km-pane, .km-rooms, .km-head { max-width: 720px; margin-left: auto; margin-right: auto; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        .km-player.playing { animation: none; }
+        .km-skel-player, .km-skel-row { animation: none; }
+    }
+</style>

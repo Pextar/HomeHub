@@ -8,6 +8,7 @@
     import { formatDays, isSmartProtocol, socketAction, lampEmoji, haptic } from "../lib/utils";
     import type { Socket, Schedule } from "../lib/types";
     import KidLampPanel from "./KidLampPanel.svelte";
+    import KidMusic from "./KidMusic.svelte";
     import KidScheduleSheet from "../modals/KidScheduleSheet.svelte";
 
     // Matter/Tasmota bulbs get the colour + brightness playground; plain RF
@@ -15,6 +16,19 @@
     const isSmart = (lamp: Socket) => isSmartProtocol(lamp.protocol);
     let active = $state<Socket | null>(null);
     let confirmExit = $state(false);
+
+    // ── Music (DESIGN.md §17) ────────────────────────────────────────────
+    let showMusic = $state(false);
+    // One probe decides whether the Music door shows at all — a house
+    // without Sonos speakers never gets a button that leads to an empty
+    // room, and a refusal (music not allowed for this profile, or an older
+    // backend) hides it just the same.
+    let hasMusic = $state(false);
+    onMount(() => {
+        api.sonosStatus()
+            .then((s) => (hasMusic = s.groups.length > 0))
+            .catch(() => (hasMusic = false));
+    });
 
     // ── Schedules ──────────────────────────────────────────────────────────
     let showScheduleSheet = $state(false);
@@ -232,6 +246,15 @@
         </div>
     {/if}
 
+    <!-- ── Music door (DESIGN.md §17) ────────────────────────────────── -->
+    {#if hasMusic}
+        <button class="music-door" onclick={() => { haptic(); showMusic = true; }}>
+            <span class="music-door-emoji" aria-hidden="true">🎵</span>
+            <span class="music-door-text">My music</span>
+            <span class="music-door-go" aria-hidden="true">›</span>
+        </button>
+    {/if}
+
     <!-- ── Schedules section ─────────────────────────────────────────── -->
     {#if lamps.length > 0}
         <div class="sched-section">
@@ -283,6 +306,10 @@
 
 {#if active}
     <KidLampPanel socket={active} onClose={() => (active = null)} />
+{/if}
+
+{#if showMusic}
+    <KidMusic onClose={() => (showMusic = false)} />
 {/if}
 
 {#if showScheduleSheet}
@@ -358,6 +385,35 @@
     .goodnight:active { transform: scale(0.97); }
     .goodnight:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
     .goodnight-moon { font-size: 1.4rem; line-height: 1; }
+
+    /* ── Music door — the way into the kid music player (DESIGN.md §17) ── */
+    .music-door {
+        width: 100%;
+        margin-top: var(--space-4);
+        padding: 18px 22px;
+        min-height: 64px;
+        display: flex;
+        align-items: center;
+        gap: var(--space-3);
+        border-radius: var(--radius-xl);
+        border: 3px solid var(--kid-accent);
+        background: var(--kid-accent-grad);
+        color: var(--kid-on-text);
+        box-shadow: 0 0 0 4px var(--kid-ring), 0 12px 36px var(--kid-glow);
+        cursor: pointer;
+        transition: transform 0.12s ease;
+        -webkit-tap-highlight-color: transparent;
+    }
+    .music-door:active { transform: scale(0.97); }
+    .music-door-emoji { font-size: 1.7rem; line-height: 1; }
+    .music-door-text {
+        flex: 1;
+        text-align: left;
+        font-size: 1.25rem;
+        font-weight: 800;
+        letter-spacing: -0.01em;
+    }
+    .music-door-go { font-size: 1.7rem; font-weight: 800; line-height: 1; }
 
     .grid {
         display: grid;

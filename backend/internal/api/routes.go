@@ -156,9 +156,11 @@ func (s *Server) registerTasmotaRoutes(api *mux.Router) {
 }
 
 // registerSonosRoutes mounts local UPnP control (playback, volume, grouping,
-// favorites). Admin-gated like the other whole-home surfaces.
+// favorites). Browse + playback control is open to admins and kid profiles —
+// the kid surface is a music player too — while discovery, device management,
+// settings and the event monitor stay admin-only.
 func (s *Server) registerSonosRoutes(api *mux.Router) {
-	api.HandleFunc("/sonos/status", s.requireAdmin(s.sonosStatus)).Methods("GET")
+	api.HandleFunc("/sonos/status", s.requireAdminOrKid(s.sonosStatus)).Methods("GET")
 	api.HandleFunc("/sonos/discover", s.requireAdmin(s.sonosDiscover)).Methods("GET")
 	// Registered ahead of the /sonos/{id}/… routes so "events" is never
 	// mistaken for a speaker id.
@@ -167,29 +169,29 @@ func (s *Server) registerSonosRoutes(api *mux.Router) {
 	api.HandleFunc("/sonos/speakers", s.requireAdmin(s.sonosCreateSpeaker)).Methods("POST")
 	api.HandleFunc("/sonos/speakers/{id}", s.requireAdmin(s.sonosUpdateSpeaker)).Methods("PUT")
 	api.HandleFunc("/sonos/speakers/{id}", s.requireAdmin(s.sonosDeleteSpeaker)).Methods("DELETE")
-	api.HandleFunc("/sonos/{id}/play", s.requireAdmin(s.sonosTransport(sonos.Play))).Methods("POST")
-	api.HandleFunc("/sonos/{id}/pause", s.requireAdmin(s.sonosTransport(sonos.Pause))).Methods("POST")
-	api.HandleFunc("/sonos/{id}/next", s.requireAdmin(s.sonosTransport(sonos.Next))).Methods("POST")
-	api.HandleFunc("/sonos/{id}/previous", s.requireAdmin(s.sonosTransport(sonos.Previous))).Methods("POST")
-	api.HandleFunc("/sonos/{id}/leave", s.requireAdmin(s.sonosTransport(sonos.Leave))).Methods("POST")
-	api.HandleFunc("/sonos/{id}/join", s.requireAdmin(s.sonosJoin)).Methods("POST")
-	api.HandleFunc("/sonos/{id}/volume", s.requireAdmin(s.sonosSetVolume)).Methods("PUT")
-	api.HandleFunc("/sonos/{id}/mute", s.requireAdmin(s.sonosSetMute)).Methods("PUT")
+	api.HandleFunc("/sonos/{id}/play", s.requireAdminOrKid(s.sonosTransport(sonos.Play))).Methods("POST")
+	api.HandleFunc("/sonos/{id}/pause", s.requireAdminOrKid(s.sonosTransport(sonos.Pause))).Methods("POST")
+	api.HandleFunc("/sonos/{id}/next", s.requireAdminOrKid(s.sonosTransport(sonos.Next))).Methods("POST")
+	api.HandleFunc("/sonos/{id}/previous", s.requireAdminOrKid(s.sonosTransport(sonos.Previous))).Methods("POST")
+	api.HandleFunc("/sonos/{id}/leave", s.requireAdminOrKid(s.sonosTransport(sonos.Leave))).Methods("POST")
+	api.HandleFunc("/sonos/{id}/join", s.requireAdminOrKid(s.sonosJoin)).Methods("POST")
+	api.HandleFunc("/sonos/{id}/volume", s.requireAdminOrKid(s.sonosSetVolume)).Methods("PUT")
+	api.HandleFunc("/sonos/{id}/mute", s.requireAdminOrKid(s.sonosSetMute)).Methods("PUT")
 	api.HandleFunc("/sonos/{id}/favorites", s.requireAdmin(s.sonosFavorites)).Methods("GET")
 	api.HandleFunc("/sonos/{id}/favorites/play", s.requireAdmin(s.sonosPlayFavorite)).Methods("POST")
-	api.HandleFunc("/sonos/{id}/art", s.requireAdmin(s.sonosArt)).Methods("GET")
+	api.HandleFunc("/sonos/{id}/art", s.requireAdminOrKid(s.sonosArt)).Methods("GET")
 	api.HandleFunc("/sonos/{id}/image", s.requireAdmin(s.sonosImage)).Methods("GET")
 	api.HandleFunc("/sonos/{id}/settings", s.requireAdmin(s.sonosSettings)).Methods("GET")
 	api.HandleFunc("/sonos/{id}/settings", s.requireAdmin(s.sonosUpdateSettings)).Methods("PUT")
-	api.HandleFunc("/sonos/{id}/play-item", s.requireAdmin(s.sonosPlayItem)).Methods("POST")
-	api.HandleFunc("/sonos/{id}/seek", s.requireAdmin(s.sonosSeek)).Methods("PUT")
-	api.HandleFunc("/sonos/{id}/playmode", s.requireAdmin(s.sonosSetPlayMode)).Methods("PUT")
-	api.HandleFunc("/sonos/{id}/crossfade", s.requireAdmin(s.sonosSetCrossfade)).Methods("PUT")
-	api.HandleFunc("/sonos/{id}/autoplay", s.requireAdmin(s.sonosSetAutoplay)).Methods("PUT")
-	api.HandleFunc("/sonos/{id}/queue", s.requireAdmin(s.sonosQueue)).Methods("GET")
-	api.HandleFunc("/sonos/{id}/queue", s.requireAdmin(s.sonosQueueAdd)).Methods("POST")
-	api.HandleFunc("/sonos/{id}/queue", s.requireAdmin(s.sonosQueueClear)).Methods("DELETE")
-	api.HandleFunc("/sonos/{id}/queue/{track}", s.requireAdmin(s.sonosQueueRemove)).Methods("DELETE")
+	api.HandleFunc("/sonos/{id}/play-item", s.requireAdminOrKid(s.sonosPlayItem)).Methods("POST")
+	api.HandleFunc("/sonos/{id}/seek", s.requireAdminOrKid(s.sonosSeek)).Methods("PUT")
+	api.HandleFunc("/sonos/{id}/playmode", s.requireAdminOrKid(s.sonosSetPlayMode)).Methods("PUT")
+	api.HandleFunc("/sonos/{id}/crossfade", s.requireAdminOrKid(s.sonosSetCrossfade)).Methods("PUT")
+	api.HandleFunc("/sonos/{id}/autoplay", s.requireAdminOrKid(s.sonosSetAutoplay)).Methods("PUT")
+	api.HandleFunc("/sonos/{id}/queue", s.requireAdminOrKid(s.sonosQueue)).Methods("GET")
+	api.HandleFunc("/sonos/{id}/queue", s.requireAdminOrKid(s.sonosQueueAdd)).Methods("POST")
+	api.HandleFunc("/sonos/{id}/queue", s.requireAdminOrKid(s.sonosQueueClear)).Methods("DELETE")
+	api.HandleFunc("/sonos/{id}/queue/{track}", s.requireAdminOrKid(s.sonosQueueRemove)).Methods("DELETE")
 }
 
 // registerKEFRoutes mounts local HTTP control (transport, volume, source, DSP
@@ -249,18 +251,21 @@ func (s *Server) registerMediaRoutes(api *mux.Router) {
 
 // registerSpotifyRoutes mounts search/browse for the Music view. OAuth is the
 // user's own account (PKCE); Sonos playback stays local via the play-item
-// route above, while KEF's goes back out through Connect.
+// route above, while KEF's goes back out through Connect. Search/browse is
+// shared with kid profiles (their music player searches the same account);
+// connecting and configuring the account stays admin-only, like every setup
+// surface.
 func (s *Server) registerSpotifyRoutes(api *mux.Router) {
-	api.HandleFunc("/spotify/status", s.requireAdmin(s.spotifyStatus)).Methods("GET")
+	api.HandleFunc("/spotify/status", s.requireAdminOrKid(s.spotifyStatus)).Methods("GET")
 	api.HandleFunc("/spotify/config", s.requireAdmin(s.spotifySetConfig)).Methods("PUT")
 	api.HandleFunc("/spotify/login", s.requireAdmin(s.spotifyLogin)).Methods("GET")
 	api.HandleFunc("/spotify/callback", s.requireAdmin(s.spotifyCallback)).Methods("GET")
 	api.HandleFunc("/spotify/exchange", s.requireAdmin(s.spotifyExchange)).Methods("POST")
 	api.HandleFunc("/spotify/disconnect", s.requireAdmin(s.spotifyDisconnect)).Methods("POST")
-	api.HandleFunc("/spotify/search", s.requireAdmin(s.spotifySearch)).Methods("GET")
-	api.HandleFunc("/spotify/playlists", s.requireAdmin(s.spotifyPlaylists)).Methods("GET")
-	api.HandleFunc("/spotify/artist", s.requireAdmin(s.spotifyArtist)).Methods("GET")
-	api.HandleFunc("/spotify/context", s.requireAdmin(s.spotifyContext)).Methods("GET")
+	api.HandleFunc("/spotify/search", s.requireAdminOrKid(s.spotifySearch)).Methods("GET")
+	api.HandleFunc("/spotify/playlists", s.requireAdminOrKid(s.spotifyPlaylists)).Methods("GET")
+	api.HandleFunc("/spotify/artist", s.requireAdminOrKid(s.spotifyArtist)).Methods("GET")
+	api.HandleFunc("/spotify/context", s.requireAdminOrKid(s.spotifyContext)).Methods("GET")
 }
 
 func (s *Server) registerMatterRoutes(api *mux.Router) {

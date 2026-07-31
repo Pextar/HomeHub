@@ -5,6 +5,11 @@
 // from search lands on the room the chips name. Created by
 // views/Panel.svelte, which keeps it alive across depth swaps.
 //
+// The kid surface (views/KidMusic.svelte, DESIGN.md §17) drives its own
+// instance with { sonosOnly: true }: a kid profile may only drive Sonos —
+// the backend gates the bridges to match — so the KEF poll never fires
+// and no KEF source ever appears.
+//
 // Same data deal as Home's "Playing now" card: speaker state isn't in the
 // shared store, so it arrives pushed on the "music" SSE topic with a slow
 // poll behind. The queue rides the same cadence — it only changes on a
@@ -146,6 +151,11 @@ export interface PanelMusicStore {
 const POLL_MS = 15_000;
 const LIVE_POLL_MS = 45_000;
 
+export interface PanelMusicOptions {
+    /** The kid surface: never poll KEF, never list a KEF source. */
+    sonosOnly?: boolean;
+}
+
 function seenSpeakers(): boolean {
     try {
         return localStorage.getItem("speakers-seen") === "true";
@@ -154,7 +164,7 @@ function seenSpeakers(): boolean {
     } // private browsing
 }
 
-export function createPanelMusic(): PanelMusicStore {
+export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore {
     let status = $state<SonosStatus | null>(null);
     let kef = $state<KEFStatus | null>(null);
     let failed = $state(false);
@@ -167,15 +177,17 @@ export function createPanelMusic(): PanelMusicStore {
     async function refresh() {
         const mine = ++seq;
         // Both bridges in one pass, settled: one brand being absent or down
-        // must not blank the other.
-        const [sonosRes, kefRes] = await Promise.allSettled([api.sonosStatus(), api.kefStatus()]);
+        // must not blank the other. (sonosOnly: the one bridge it is.)
+        const [sonosRes, kefRes] = await Promise.allSettled(
+            opts.sonosOnly ? [api.sonosStatus()] : [api.sonosStatus(), api.kefStatus()],
+        );
         if (mine !== seq) return;
         if (sonosRes.status === "fulfilled") {
             status = sonosRes.value;
             polledAt = Date.now();
         }
-        if (kefRes.status === "fulfilled") kef = kefRes.value;
-        failed = sonosRes.status === "rejected" && kefRes.status === "rejected";
+        if (kefRes?.status === "fulfilled") kef = kefRes.value;
+        failed = sonosRes.status === "rejected" && kefRes?.status !== "fulfilled";
         // Keep the "speakers-seen" memory fresh — the panel sizes its grid
         // from it before the first poll lands (NowPlaying is the other
         // writer).
@@ -189,13 +201,15 @@ export function createPanelMusic(): PanelMusicStore {
         }
     }
 
-    // The Sonos endpoints are admin-only. Derived, not read straight off
-    // `status`: this effect calls refresh(), which reassigns `status` —
-    // reading it here directly would retrigger the effect forever.
+    // The speaker endpoints answer admins and kid profiles (the backend's
+    // requireAdminOrKid); anyone else would just poll a 403. Derived, not
+    // read straight off `status`: this effect calls refresh(), which
+    // reassigns `status` — reading it here directly would retrigger the
+    // effect forever.
     const livePush = $derived(!!status?.live);
 
     $effect(() => {
-        if (!session.isAdmin) return;
+        if (!session.isAdmin && !session.user?.kid) return;
         void refresh();
         const onVisible = () => {
             if (!document.hidden) void refresh();
@@ -440,7 +454,7 @@ export function createPanelMusic(): PanelMusicStore {
         void (s.kind === "sonos"
             ? api.sonosSetVolume(id, level, true)
             : api.kefSetVolume(id, level)
-        ).catch(() => {});
+        ).catch(() => { });
     });
 
     function dragVolume(s: PanelSource, level: number) {
@@ -477,7 +491,7 @@ export function createPanelMusic(): PanelMusicStore {
         }
     });
     const memThrottle = createVolumeThrottle((id, level) => {
-        void api.sonosSetVolume(id, level).catch(() => {});
+        void api.sonosSetVolume(id, level).catch(() => { });
     });
     function dragMemberVolume(id: string, level: number) {
         const v = clampVol(level);

@@ -20,7 +20,8 @@ over decoration.
 ## 2. Hard rules (don't bend these)
 
 - **No emoji** anywhere. (One exception: the Kid module — `KidHome.svelte`,
-  `KidLampPanel.svelte`, and `KidScheduleSheet.svelte`.)
+  `KidLampPanel.svelte`, `KidMusic.svelte`, `KidScheduleSheet.svelte`, and
+  `components/kid/`.)
 - **No decorative SVG.** Icons only when functional. For missing imagery use
   the `.placeholder` striped fill with a monospace caption — never invent a
   picture.
@@ -489,7 +490,8 @@ Is it a list of things?
 - Spinner → use skeleton
 - Brand gradient (purple/blue/teal) → warm-only palette
 - Pure black surface → `--bg` is the floor (Console is the only exception)
-- Emoji outside the Kid module (KidHome / KidLampPanel / KidScheduleSheet)
+- Emoji outside the Kid module (KidHome / KidLampPanel / KidMusic /
+  KidScheduleSheet / components/kid/)
 - Icon-only button smaller than 44×44 hit area
 - Numbers in sans → must be mono
 - Tab bar visible on detail/form/Matter step/Console screens
@@ -512,7 +514,8 @@ Is it a list of things?
       literal bar height; anything reserving room for the assistant FAB uses
       `--fab-clear`
 - [ ] Notification indicator is exactly 7×7 amber (`--on`)
-- [ ] No emoji outside the Kid module (KidHome / KidLampPanel / KidScheduleSheet)
+- [ ] No emoji outside the Kid module (KidHome / KidLampPanel / KidMusic /
+      KidScheduleSheet / components/kid/)
 - [ ] No new colors invented — only tokens from §3
 - [ ] Reduced-motion media query collapses your animations to 0.001ms
 - [ ] Hit areas ≥ 44×44 on touch
@@ -1288,7 +1291,70 @@ constraint made visible.
 
 ---
 
-## 17. When in doubt
+## 17. The kid surface — lamps, schedules, and now music
+
+The kid module is the one place the quiet rules lift: emoji are the
+language, targets run bigger than 44px, weights run 800, and anything
+destructive is a **two-tap arm** (the button turns pink and asks "really?"
+for three seconds) rather than a confirm modal. It lives in
+`views/KidHome.svelte` (lamps + schedules), `views/KidLampPanel.svelte`
+(the colour playground), `modals/KidScheduleSheet.svelte`, and
+`views/KidMusic.svelte` with `components/kid/` (the music player). It is
+rendered chromeless for `kid` profiles, exactly like the panel is for the
+wall.
+
+**Kid music is the panel's feature set, spoken kid, over Sonos only.** A
+kid profile may browse and control the household's Sonos groups and search
+the same Spotify account — the backend gate is `requireAdminOrKid`, and
+discovery, speaker management, settings, KEF, the media layer and the
+Spotify account itself stay admin-only, because configuration is the full
+app's job (the kid pane says "ask a grown-up", the way the wall points at
+the full Music view). Everything the wall's music depth does, the kid
+player does: room pick, transport, seek rail, play modes, per-speaker
+faders, queue, search with recents, artist/album drill-down, and
+play-together grouping.
+
+- **Same brain, same search, same memory.** The player drives its own
+  `createPanelMusic({ sonosOnly: true })` — the KEF poll never fires and no
+  KEF source can appear — and the search reuses `createSpotify` and
+  `createSearchHistory` keyed `sonos:{coordinator}`, so a search run on the
+  kid's tablet lands in the same per-room recents as one from the wall or a
+  phone. New music state belongs in those factories, not in a kid copy.
+- **One screen, chip-switched panes.** The featured room's player rides on
+  top (art, rail, transport, modes, faders, the Up-next row that opens the
+  queue); below it three big chips — 🔎 Find, 🎶 Up next, 🔊 Rooms — swap
+  the pane. The panes never unmount, so a search halfway typed survives a
+  peek at the queue.
+- **The words stay the module's words.** The mode chips keep §15.5's one
+  word across surfaces — Shuffle, Repeat, Crossfade, Play similar — with an
+  emoji in front, not a rename. Numbers stay mono. Copy that only a kid
+  reads ("Really split up?", "A mystery song") is allowed to be playful;
+  errors keep "Oops!".
+- **A song plays, a container plays whole, an artist opens.** Same gesture
+  map as the wall — but the drill-down pages are kid-native (hero art, a big
+  Play button that names what it will start, popular songs, album grids,
+  more-like-them), not the app's §15.9 screens, which speak the app's quiet
+  language. Back climbs one level. Queueing without interrupting is a row's
+  big ＋ → "Play next" / "Add to the end", and it says 🎉, because a kid
+  can't watch a count change a pane away.
+- **Grouping is the star system.** The featured room wears a ⭐; every
+  other card's one button is "🤝 Join {star}"; the star's card lists its
+  speakers with a ✕ to step one out and a two-tap "Split up" for all.
+  Cross-vendor rooms are never created here — with Sonos the only make a
+  kid can reach, there is nothing to explain.
+- **The seek rail and faders are one primitive** (`components/kid/
+KidSlider.svelte`) — a real range input over a painted track and fill,
+  `onInput` for the live drag, `onChange` for the authoritative send, the
+  same contract as the Music module's Slider. A source with no duration
+  gets the honest line ("📻 Live radio"), never a fabricated position.
+- **The software keyboard is part of the flow**, same as the wall: measured
+  off `visualViewport`, the results go dense while it's up, and Enter or a
+  tap on a result dismisses it. The search input is 18px, so iOS never
+  zooms.
+
+---
+
+## 18. When in doubt
 
 1. Open `index.html` in the design project — it's the source of truth.
 2. Pick the nearest existing screen and copy its skeleton.

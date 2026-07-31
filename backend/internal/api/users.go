@@ -114,6 +114,21 @@ func (s *Server) requireAdmin(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+// requireAdminOrKid wraps a handler so admins and kid profiles may reach it.
+// Kid profiles get the household's music (browse + playback control) for
+// their playful surface; configuration and device management stay admin-only.
+// A limited profile that isn't a kid keeps its 403.
+func (s *Server) requireAdminOrKid(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		u := currentUser(r)
+		if !isAdmin(u) && !u.Kid {
+			writeError(w, http.StatusForbidden, "admin access required")
+			return
+		}
+		next(w, r)
+	}
+}
+
 // requireSocketAccess returns true if the request's user may act on the
 // given socket; otherwise it writes 403 and returns false.
 func (s *Server) requireSocketAccess(w http.ResponseWriter, r *http.Request, socketID string) bool {
