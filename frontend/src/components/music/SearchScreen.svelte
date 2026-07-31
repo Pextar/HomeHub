@@ -332,15 +332,19 @@
                             <button type="button" class="chip sp-hist-clear" onclick={() => recents.clear()}>Clear</button>
                         </div>
                         <div class="sp-history-list">
-                            {#each recents.list as h (h)}
+                            {#each recents.list as h (h.q)}
                                 <div class="sp-hist-chip">
-                                    <button type="button" class="sp-hist-run" onclick={() => runHistoryQuery(h)}>
-                                        <Icon name="search" size={12} />
-                                        <span>{h}</span>
+                                    <button type="button" class="sp-hist-run" onclick={() => runHistoryQuery(h.q)}>
+                                        {#if h.art_url}
+                                            <img class="sp-hist-art" class:round={h.round} src={h.art_url} alt="" />
+                                        {:else}
+                                            <Icon name="search" size={12} />
+                                        {/if}
+                                        <span>{h.q}</span>
                                     </button>
                                     <button type="button" class="icon-btn sp-hist-x"
-                                        aria-label={`Remove "${h}" from recent searches`}
-                                        onclick={() => recents.remove(h)}>
+                                        aria-label={`Remove "${h.q}" from recent searches`}
+                                        onclick={() => recents.remove(h.q)}>
                                         <Icon name="close" size={10} />
                                     </button>
                                 </div>
@@ -689,6 +693,10 @@
     }
     @media (hover: hover) { .sp-hist-run:hover { color: var(--text); } }
     .sp-hist-chip .sp-hist-x { width: 26px; height: 26px; margin-right: 3px; color: var(--text-dim); }
+    /* The query's own top result, once the search behind it has answered —
+       round for an artist's photo, square for everything else's cover art. */
+    .sp-hist-art { width: 20px; height: 20px; border-radius: var(--r-sm); object-fit: cover; flex-shrink: 0; background: var(--card-3); }
+    .sp-hist-art.round { border-radius: 50%; }
 
     /* ── Results ── */
     .sp-groups { display: flex; flex-direction: column; gap: var(--space-6); }

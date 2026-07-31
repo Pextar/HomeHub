@@ -55,7 +55,7 @@
         const f = music.featured;
         return f ? `${f.kind}:${f.id}` : null;
     });
-    const spotify = createSpotify((q) => recents.add(q));
+    const spotify = createSpotify((q, art) => recents.add(q, art));
     // `status` is null both while loading and when the endpoint refuses
     // (the Spotify routes are admin-only); `booted` separates the two so a
     // refusal doesn't hang on skeletons.
@@ -120,9 +120,9 @@
         else stackEl?.scrollTo(0, stack[stack.length - 1].scroll);
     }
 
-    async function openArtist(uri: string) {
+    async function openArtist(uri: string, art?: { art_url?: string; round?: boolean }) {
         if (topLevel?.kind === "artist" && topLevel.uri === uri) return;
-        actedOnResult();
+        actedOnResult(art);
         searchEl?.blur(); // chosen — the keyboard's job is done
         pushLevel("artist", uri);
         if (artistCache[uri]) return; // been here — renders instantly
@@ -363,14 +363,15 @@
     /** A search that led somewhere is worth remembering. The store's own
      *  remembering is §15.8's submission — Enter, or a chip re-run — but
      *  the wall's flow is type → tap the result, with no Enter in between,
-     *  so acting on a result remembers the query behind it too. */
-    function actedOnResult() {
+     *  so acting on a result remembers the query behind it too — picture
+     *  included, straight from the row that was tapped. */
+    function actedOnResult(art?: { art_url?: string; round?: boolean }) {
         const q = spotify.query.trim();
-        if (q) recents.add(q);
+        if (q) recents.add(q, art);
     }
 
     function pick(item: SpotifyItem) {
-        actedOnResult();
+        actedOnResult(item.art_url ? { art_url: item.art_url, round: false } : undefined);
         searchEl?.blur(); // chosen — the keyboard's job is done
         const s = featured;
         if (!s) {
@@ -626,19 +627,28 @@
                                     </button>
                                 </div>
                                 <div class="s-recents">
-                                    {#each recents.list as h (h)}
+                                    {#each recents.list as h (h.q)}
                                         <span class="s-recent">
                                             <button
                                                 class="s-recent-run"
-                                                onclick={() => runRecent(h)}
+                                                onclick={() => runRecent(h.q)}
                                             >
-                                                <Icon name="search" size={14} />
-                                                <span>{h}</span>
+                                                {#if h.art_url}
+                                                    <img
+                                                        class="s-recent-art"
+                                                        class:round={h.round}
+                                                        src={h.art_url}
+                                                        alt=""
+                                                    />
+                                                {:else}
+                                                    <Icon name="search" size={14} />
+                                                {/if}
+                                                <span>{h.q}</span>
                                             </button>
                                             <button
                                                 class="s-recent-x"
-                                                aria-label="Remove “{h}” from recent searches"
-                                                onclick={() => recents.remove(h)}
+                                                aria-label="Remove “{h.q}” from recent searches"
+                                                onclick={() => recents.remove(h.q)}
                                             >
                                                 <Icon name="close" size={13} />
                                             </button>
@@ -809,7 +819,10 @@
         <button
             class="r-open"
             disabled={item.kind !== "artist" && music.busy["item:" + item.uri]}
-            onclick={() => (item.kind === "artist" ? void openArtist(item.uri) : pick(item))}
+            onclick={() =>
+                item.kind === "artist"
+                    ? void openArtist(item.uri, item.art_url ? { art_url: item.art_url, round: true } : undefined)
+                    : pick(item)}
         >
             {#if item.art_url}
                 <img
@@ -1191,6 +1204,19 @@
     .s-recent-run :global(svg) {
         color: var(--text-dim);
         flex-shrink: 0;
+    }
+    /* The query's own top result, once the search behind it has answered —
+       round for an artist's photo, square for everything else's cover art. */
+    .s-recent-art {
+        width: 28px;
+        height: 28px;
+        border-radius: var(--r-sm);
+        object-fit: cover;
+        flex-shrink: 0;
+        background: var(--card-3);
+    }
+    .s-recent-art.round {
+        border-radius: 50%;
     }
     .s-recent-run span {
         max-width: 240px;

@@ -780,7 +780,7 @@
     // Recent searches are keyed by the focused room, so the kitchen's aren't
     // the bedroom's. A single-room home only ever has one key.
     const recents = createSearchHistory(() => destination.key);
-    const spotify = createSpotify((q) => recents.add(q));
+    const spotify = createSpotify((q, art) => recents.add(q, art));
 
     onMount(() => {
         // The OAuth callback bounces back to /#/music?spotify=… — surface the
