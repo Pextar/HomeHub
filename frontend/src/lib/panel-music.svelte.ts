@@ -238,6 +238,20 @@ export function createPanelMusic(): PanelMusicStore {
             const c = coordinatorOf(g);
             if (!c?.reachable) continue;
             const st = c.state;
+            const members = g.member_ids
+                .map((id) => byId.get(id))
+                .filter((x): x is SonosSpeakerView => !!x);
+            // Group volume isn't reported by the status poll — only each
+            // member's own — so the fader's value is the members' average,
+            // same as the full Music view's Sonos bridge (sonos.svelte.ts).
+            // Reading the coordinator's own volume here would desync the
+            // fader the moment a group's members sit at different levels.
+            const memberVols = members
+                .map((x) => x.state?.volume)
+                .filter((v): v is number => v !== undefined);
+            const groupVolume = memberVols.length
+                ? Math.round(memberVols.reduce((a, b) => a + b, 0) / memberVols.length)
+                : (st?.volume ?? 0);
             out.push({
                 key: "s:" + g.coordinator_id,
                 kind: "sonos",
@@ -245,21 +259,18 @@ export function createPanelMusic(): PanelMusicStore {
                 title: groupTitle(g),
                 playing: !!st?.playing,
                 standby: false,
-                volume: st?.volume ?? 0,
+                volume: groupVolume,
                 muted: !!st?.muted,
                 trackTitle: st?.track?.title,
                 trackSub: [st?.track?.artist, st?.track?.album].filter(Boolean).join(" · "),
                 art: st?.track?.art_uri,
-                members: g.member_ids
-                    .map((id) => byId.get(id))
-                    .filter((x): x is SonosSpeakerView => !!x)
-                    .map((x) => ({
-                        id: x.id,
-                        name: x.name,
-                        volume: x.state?.volume ?? 0,
-                        muted: !!x.state?.muted,
-                        coordinator: x.id === g.coordinator_id,
-                    })),
+                members: members.map((x) => ({
+                    id: x.id,
+                    name: x.name,
+                    volume: x.state?.volume ?? 0,
+                    muted: !!x.state?.muted,
+                    coordinator: x.id === g.coordinator_id,
+                })),
                 groupState: c.group_state,
                 autoplay: c.autoplay,
                 queueTrack: st?.queue_track,
