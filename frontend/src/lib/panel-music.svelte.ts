@@ -63,6 +63,8 @@ export interface PanelSource {
     // Sonos extras — the group's, so only on a Sonos source.
     members?: PanelMember[];
     groupState?: SonosGroupState;
+    /** HomeHub's own "keep going with similar music" preference (§15.5). */
+    autoplay?: boolean;
     queueTrack?: number; // 1-based position in the queue, when playing from it
     position?: string; // H:MM:SS — the wire form, parsed by the position deriveds
     duration?: string;
@@ -110,6 +112,8 @@ export interface PanelMusicStore {
     toggleShuffle(): void;
     cycleRepeat(): void;
     toggleCrossfade(): void;
+    /** "Play similar": keep the room going once the queue runs out (§15.5). */
+    toggleAutoplay(): void;
 
     // ── KEF ──
     setKefSource(s: PanelSource, source: KEFSource): void;
@@ -257,6 +261,7 @@ export function createPanelMusic(): PanelMusicStore {
                         coordinator: x.id === g.coordinator_id,
                     })),
                 groupState: c.group_state,
+                autoplay: c.autoplay,
                 queueTrack: st?.queue_track,
                 position: st?.position,
                 duration: st?.duration,
@@ -520,6 +525,18 @@ export function createPanelMusic(): PanelMusicStore {
         if (!f || !gs) return;
         void run("xfade:" + f.id, () => api.sonosSetCrossfade(f.id, !gs.crossfade), "Couldn't change crossfade");
     }
+    // "Play similar" is the hub's own preference rather than something the
+    // speaker reports (§15.5), but it hangs off a coordinator exactly like
+    // crossfade does, so it rides with the play modes.
+    function toggleAutoplay() {
+        const f = featured;
+        if (!f || f.kind !== "sonos") return;
+        void run(
+            "autoplay:" + f.id,
+            () => api.sonosSetAutoplay(f.id, !f.autoplay),
+            "Couldn't change what plays next",
+        );
+    }
 
     // ── KEF input — the "play this" control a KEF raises that nothing
     // else does (§15). Every model shows the same list; a model without
@@ -732,6 +749,7 @@ export function createPanelMusic(): PanelMusicStore {
         toggleShuffle,
         cycleRepeat,
         toggleCrossfade,
+        toggleAutoplay,
         setKefSource,
         get queue() {
             return queue;

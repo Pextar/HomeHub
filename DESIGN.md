@@ -743,6 +743,19 @@ _which device_. Nothing appears on two of them.
   and surface immediately and the local state wins until the poll agrees —
   or for 6s, so a command a speaker quietly ignored can't leave a button
   lying about its state forever. Rolled back if the call fails.
+- **"Play similar" is HomeHub's preference, not the speaker's.** A Sonos group
+  goes quiet when its queue runs out; the setting that keeps a room going —
+  topping the queue up with tracks like the ones it has been playing, through
+  `AddToQueue` so nothing interrupts what is already going — is the hub's own
+  (`api/sonos_autoplay.go`), held per coordinator in memory. It renders as one
+  more play-mode chip beside Crossfade because that is what it reads as, and
+  three things follow from it being ours rather than the speaker's: it is
+  **off again after a restart**, it needs a Spotify account to find anything
+  to add, and it exists only for a Sonos coordinator — there is no queue to
+  top up anywhere else. Name it for the choice it settles: the room either
+  continues with its queue or continues with something like it. **One word
+  across surfaces** — the chip is `Play similar` in the player and on the
+  panel, never `Autoplay` in one place and something else in the other.
 - **Progress rides on the playing surface.** A 2px hairline along a card's
   bottom edge (`ProgressLine`), extrapolated between polls by `clock.beat`
   so it creeps rather than stepping. Zero duration renders nothing at all
@@ -1215,7 +1228,11 @@ constraint made visible.
   dashboard's glance surface hasn't room for: one fader per speaker
   under the room-wide one when a group has more than one, the KEF
   input selector, and the Up-next row that names the actual next track
-  and opens the queue pane (§15.8's door, same sentence).
+  and opens the queue pane (§15.8's door, same sentence). The mode row
+  carries §15.5's **Play similar** with the rest, since "what happens
+  when this song is the last one" is exactly the question a wall gets
+  asked; the depth's card adds one line naming which way it will go,
+  because that choice shows itself only once the queue has run out.
 - **On the music depth, a song plays; an artist opens.** The wall keeps
   the flat gesture where it's about starting sound: a song found by
   search plays, an album or playlist plays whole — the player names what

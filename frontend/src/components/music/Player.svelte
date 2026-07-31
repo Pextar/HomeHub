@@ -383,7 +383,7 @@
                                     disabled={!c || busy.is("autoplay:" + c?.id)}
                                     onclick={() => r.group && sonos.toggleAutoplay(r.group)}
                                 >
-                                    Autoplay
+                                    Play similar
                                 </button>
                             </div>
                             {#if queueLength > 0}
