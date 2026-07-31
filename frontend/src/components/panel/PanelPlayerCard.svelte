@@ -161,37 +161,64 @@
             {#if gs}
                 <!-- Preferences, not device states, so chips rather than
                      switches — the same shape the full player gives them. -->
-                <div class="p-modes">
-                    <button
-                        class="p-mode"
-                        class:on={gs.shuffle}
-                        aria-pressed={gs.shuffle}
-                        disabled={music.busy["mode:" + featured.id]}
-                        onclick={() => music.toggleShuffle()}
-                    >
-                        <Icon name="shuffle" size={16} /><span>Shuffle</span>
-                    </button>
-                    <button
-                        class="p-mode"
-                        class:on={gs.repeat !== "off"}
-                        aria-pressed={gs.repeat !== "off"}
-                        aria-label={repeatLabel(gs.repeat)}
-                        disabled={music.busy["mode:" + featured.id]}
-                        onclick={() => music.cycleRepeat()}
-                    >
-                        <Icon name={gs.repeat === "one" ? "repeatOne" : "repeat"} size={16} /><span
-                            >{repeatText}</span
+                <div class="p-modeblock">
+                    <div class="p-modes">
+                        <button
+                            class="p-mode"
+                            class:on={gs.shuffle}
+                            aria-pressed={gs.shuffle}
+                            disabled={music.busy["mode:" + featured.id]}
+                            onclick={() => music.toggleShuffle()}
                         >
-                    </button>
-                    <button
-                        class="p-mode"
-                        class:on={gs.crossfade}
-                        aria-pressed={gs.crossfade}
-                        disabled={music.busy["xfade:" + featured.id]}
-                        onclick={() => music.toggleCrossfade()}
-                    >
-                        <span>Crossfade</span>
-                    </button>
+                            <Icon name="shuffle" size={16} /><span>Shuffle</span>
+                        </button>
+                        <button
+                            class="p-mode"
+                            class:on={gs.repeat !== "off"}
+                            aria-pressed={gs.repeat !== "off"}
+                            aria-label={repeatLabel(gs.repeat)}
+                            disabled={music.busy["mode:" + featured.id]}
+                            onclick={() => music.cycleRepeat()}
+                        >
+                            <Icon
+                                name={gs.repeat === "one" ? "repeatOne" : "repeat"}
+                                size={16}
+                            /><span>{repeatText}</span>
+                        </button>
+                        <button
+                            class="p-mode"
+                            class:on={gs.crossfade}
+                            aria-pressed={gs.crossfade}
+                            disabled={music.busy["xfade:" + featured.id]}
+                            onclick={() => music.toggleCrossfade()}
+                        >
+                            <span>Crossfade</span>
+                        </button>
+                        <!-- What happens after the last queued song: carry
+                             on with the queue, or keep the room going with
+                             music like it (§15.5). The hub's preference,
+                             not the speaker's, but it reads as one more
+                             play mode. -->
+                        <button
+                            class="p-mode"
+                            class:on={!!featured.autoplay}
+                            aria-pressed={!!featured.autoplay}
+                            disabled={music.busy["autoplay:" + featured.id]}
+                            onclick={() => music.toggleAutoplay()}
+                        >
+                            <span>Play similar</span>
+                        </button>
+                    </div>
+                    {#if full}
+                        <!-- The choice only shows itself once the queue runs
+                             out, so the depth's card says which way it will
+                             go. -->
+                        <p class="p-modenote">
+                            {featured.autoplay
+                                ? "When the queue ends, similar music keeps playing."
+                                : "When the queue ends, playback stops."}
+                        </p>
+                    {/if}
                 </div>
             {/if}
 
@@ -459,11 +486,24 @@
         color: var(--primary-fg);
     }
 
-    .p-modes {
+    .p-modeblock {
         display: flex;
-        justify-content: center;
+        flex-direction: column;
+        align-items: center;
         gap: var(--space-2);
         flex-shrink: 0;
+    }
+    .p-modes {
+        display: flex;
+        flex-wrap: wrap; /* four chips don't fit the 352px column on one line */
+        justify-content: center;
+        gap: var(--space-2);
+    }
+    .p-modenote {
+        margin: 0;
+        font-size: 12.5px;
+        color: var(--text-dim);
+        text-align: center;
     }
     .p-mode {
         display: inline-flex;
