@@ -181,9 +181,10 @@ func (c *Client) For(accountKey string) *Account {
 	return &Account{c: c, key: accountKey}
 }
 
-// Household shims — every pre-multi-account caller (the Music view's
+// Household shims below — every pre-multi-account caller (the Music view's
 // handlers, KEF Connect, the autoplay engine) rides the household account
 // and keeps working unchanged.
+
 func (c *Client) Status() Status { return c.For("").Status() }
 func (c *Client) Disconnect() error {
 	return c.For("").Disconnect()
