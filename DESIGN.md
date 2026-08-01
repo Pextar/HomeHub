@@ -809,6 +809,26 @@ large, so the module never swallows keys the rest of the app might want.
   tappable thing on the hero and it opens the biggest surface.
 - **The sheet drags down like every other sheet.** The top bar always drags;
   the body drags only from a scroll position of zero.
+- **It unfolds out of whatever opened it** — the dock, a room card, the hero —
+  rather than arriving over it (`grow` in `lib/motion.ts`): the panel travels
+  from that frame to its own, its window opens by `clip-path` as it goes, and
+  the art the two surfaces share flies between the two sizes. One player at two
+  sizes, not two players. Reached any other way — a back gesture, the keyboard,
+  reduced motion — it is the plain slide.
+  **The moving window is a hard budget, and it is spent.** An animating clip
+  only stays on the compositor while nothing inside it has to be redrawn, so
+  the three things that would are handled by the transition itself rather than
+  left in the CSS: the frosted head stands down, the content is faded by an
+  animation rather than a per-frame style write, and **the ambient light waits
+  for the window** — the blurred art is the single most expensive thing that
+  can sit inside a moving clip, so the player opens on its own surface and the
+  room lights a beat later, as the window settles. Anything new inside this
+  sheet that blurs, filters or writes style per frame belongs on the same list.
+  Two corollaries worth stating because both were bugs: a corner that is
+  divided by a scale must be **solved per frame, never interpolated** — a
+  linear radius against an eased box swells to three times its size halfway
+  across — and the window must open a little **past** the panel's own frame, or
+  the panel's shadow arrives in the one frame the clip is dropped.
 - **The scrubber is a real control where the source allows it** and a
   read-only rail where it isn't (`TrackRail`). A source reporting no duration
   gets one honest line instead of a fabricated position.

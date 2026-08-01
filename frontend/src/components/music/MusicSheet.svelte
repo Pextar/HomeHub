@@ -203,12 +203,15 @@
         cancelDrag();
     }
 
-    // The head is handed to `grow` along with the scroll body: while the
-    // window is moving, the content is faded with it and the frosted blur
-    // stands down. Both are driven from the transition rather than from a
-    // class here, because a removed subtree's effects are already paused by
-    // the time the sheet closes.
+    // The head and the ambient backdrop are handed to `grow` along with the
+    // scroll body: while the window is moving, the content is faded with it,
+    // the frosted blur stands down and the blurred art waits. All three are
+    // driven from the transition rather than from a class here, because a
+    // removed subtree's effects are already paused by the time the sheet
+    // closes — and because they are the three things a moving clip cannot
+    // afford to redraw (see `lib/motion.ts`).
     let topEl = $state<HTMLElement | null>(null);
+    let bgEl = $state<HTMLElement | null>(null);
 </script>
 
 <div
@@ -235,13 +238,14 @@
         : dragY > 0
           ? "transform 0.22s ease-in, opacity 0.22s ease-in"
           : "transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)"}
-    in:grow={{ origin, content: () => scrollEl, bar: () => topEl }}
+    in:grow={{ origin, content: () => scrollEl, bar: () => topEl, ambient: () => bgEl }}
     out:grow={{
         origin,
         out: true,
         instant: dismissing,
         content: () => scrollEl,
         bar: () => topEl,
+        ambient: () => bgEl,
     }}
 >
     {#if backdropUri}
@@ -251,6 +255,7 @@
         <div
             class="sheet-bg"
             aria-hidden="true"
+            bind:this={bgEl}
             style:background-image={`url("${backdropUri}")`}
         ></div>
         <div class="sheet-wash" aria-hidden="true"></div>
@@ -457,6 +462,17 @@
                 rgba(20, 19, 15, 0.66) 55%,
                 rgba(20, 19, 15, 0.85) 100%
             );
+        }
+        /* The stage's head takes the scrim and drops the frost. A
+           `backdrop-filter` over an already-blurred wash adds nothing you can
+           see, and it is not free: it repaints the whole band on every frame
+           of a scroll *and* on every frame of the opening clip, which is why
+           the transition has to switch it off and hand it back — a hand-back
+           that reads as a pop against a lit backdrop. On a phone the head sits
+           over real content and the frost is doing work, so it stays there. */
+        .sheet.stage .sheet-top {
+            backdrop-filter: none;
+            -webkit-backdrop-filter: none;
         }
         :global([data-theme="light"]) .sheet.stage .sheet-wash {
             background: linear-gradient(
