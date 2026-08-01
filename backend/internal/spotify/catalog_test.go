@@ -187,7 +187,7 @@ func TestDiscographyPaginatesByTen(t *testing.T) {
 	}))
 	c.p.Country = "SE"
 
-	albums, singles, err := c.artistDiscography(context.Background(), "ar1")
+	albums, singles, err := c.For("").artistDiscography(context.Background(), "ar1")
 	if err != nil {
 		t.Fatal(err)
 	}

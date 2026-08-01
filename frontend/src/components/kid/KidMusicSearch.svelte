@@ -531,15 +531,64 @@
                 {/each}
             </div>
         {:else if !spotify.connected}
-            <div class="kms-empty">
-                <div class="kms-empty-emoji">🎵</div>
-                <p>Music isn't set up yet —<br />ask a grown-up!</p>
-            </div>
+            {#if spotify.status?.configured}
+                <!-- The kid's own account links here (DESIGN.md §17): a
+                     grown-up does the sign-in once, on this device, and
+                     from then on the kid's searches run as that account —
+                     with its own settings, explicit filter included. Over
+                     plain HTTP the flow can't bounce back on its own, so
+                     the last hop is pasted back by hand. -->
+                <div class="kms-empty kms-connect">
+                    <div class="kms-empty-emoji">🎧</div>
+                    <p>Connect your Spotify to find songs!<br />A grown-up signs in with the kid's account.</p>
+                    <ol class="kms-steps">
+                        <li>
+                            <button class="kms-connect-btn" onclick={() => spotify.connect()}>
+                                1. Connect Spotify
+                            </button>
+                        </li>
+                        {#if spotify.status?.manual}
+                            <li>
+                                <span class="kms-paste-label">Paste the web address it sends you to:</span>
+                                <span class="kms-paste">
+                                    <input
+                                        type="url"
+                                        placeholder="http://127.0.0.1…"
+                                        aria-label="The web address Spotify sent you to"
+                                        autocapitalize="off"
+                                        autocomplete="off"
+                                        spellcheck="false"
+                                        enterkeyhint="done"
+                                        bind:value={spotify.pasteUrl}
+                                        onkeydown={(e) => {
+                                            if (e.key === "Enter") void spotify.finishConnect();
+                                        }}
+                                    />
+                                    <button
+                                        class="kms-paste-btn"
+                                        disabled={spotify.finishing || !spotify.pasteUrl.trim()}
+                                        onclick={() => void spotify.finishConnect()}
+                                    >
+                                        {spotify.finishing ? "…" : "Done"}
+                                    </button>
+                                </span>
+                            </li>
+                        {/if}
+                    </ol>
+                </div>
+            {:else}
+                <!-- No developer app configured at all — that part is the
+                     grown-ups', in the full app. -->
+                <div class="kms-empty">
+                    <div class="kms-empty-emoji">🎵</div>
+                    <p>Music isn't set up yet —<br />ask a grown-up!</p>
+                </div>
+            {/if}
         {:else if spotify.results}
             {#if sections.length === 0}
                 <div class="kms-empty">
-                    <div class="kms-empty-emoji">🙈</div>
-                    <p>Nothing found for “{spotify.query}”<br />Try another name!</p>
+                    <div class="kms-empty-emoji">�</div>
+                    <p>No matches for “{spotify.query}”<br />Try something else!</p>
                 </div>
             {:else}
                 {#if !kbOpen && spotify.kindFilter === "all" && spotify.topResult}
@@ -1108,6 +1157,71 @@
     }
     .kms-empty-emoji { font-size: 3rem; margin-bottom: var(--space-3); }
     .kms-empty p { font-size: 1.05rem; font-weight: 700; line-height: 1.5; }
+
+    /* ── Connect Spotify ── */
+    .kms-connect { display: flex; flex-direction: column; align-items: center; gap: var(--space-4); }
+    .kms-steps {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: var(--space-4);
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        width: 100%;
+    }
+    .kms-steps li { display: flex; flex-direction: column; align-items: center; gap: var(--space-2); width: 100%; }
+    .kms-connect-btn {
+        font-size: 1.1rem;
+        font-weight: 800;
+        padding: 16px 32px;
+        min-height: 60px;
+        border-radius: 999px;
+        border: none;
+        background: var(--kid-accent-grad);
+        color: var(--kid-on-text);
+        box-shadow: 0 0 0 4px var(--kid-ring), 0 10px 30px var(--kid-glow);
+        cursor: pointer;
+        transition: transform 0.12s ease;
+        -webkit-tap-highlight-color: transparent;
+    }
+    .kms-connect-btn:active { transform: scale(0.94); }
+    .kms-paste-label { font-size: 0.95rem; font-weight: 700; }
+    .kms-paste {
+        display: flex;
+        gap: var(--space-2);
+        width: 100%;
+        max-width: 420px;
+    }
+    .kms-paste input {
+        flex: 1;
+        min-width: 0;
+        padding: 14px 18px;
+        border-radius: 999px;
+        border: 3px solid var(--border);
+        background: var(--bg-elevated);
+        color: var(--text);
+        font-size: 1.05rem;
+        font-weight: 600;
+        outline: none;
+    }
+    .kms-paste input:focus { border-color: var(--kid-accent); }
+    .kms-paste input::placeholder { color: var(--text-faint); }
+    .kms-paste-btn {
+        font-size: 1rem;
+        font-weight: 800;
+        padding: 14px 22px;
+        min-height: 52px;
+        border-radius: 999px;
+        border: 2px solid var(--kid-accent);
+        background: var(--kid-accent-soft);
+        color: var(--kid-accent);
+        cursor: pointer;
+        flex-shrink: 0;
+        -webkit-tap-highlight-color: transparent;
+    }
+    .kms-paste-btn:active { transform: scale(0.94); }
+    .kms-paste-btn:disabled { opacity: 0.5; }
 
     /* ── Type mode: the software keyboard is up, so results go dense —
          no sub-lines, no labels, no kind chips — and more matches fit. ── */

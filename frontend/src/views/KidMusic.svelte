@@ -63,6 +63,11 @@
         gs?.repeat === "all" ? "Repeat all" : gs?.repeat === "one" ? "Repeat one" : "Repeat",
     );
 
+    // The kid's faders top out here (DESIGN.md §17) — loud enough to enjoy,
+    // not enough to upset the house. A speaker already louder (a grown-up
+    // turned it up) reads its real number and can only be turned down.
+    const VOL_MAX = 50;
+
     // ── The mini bar: the phone's dock (§15.5's rule, kid form) ─────────
     // The player card is taller than a phone screen, so a kid deep in the
     // search results has no way to pause. The mini bar carries the same
@@ -170,7 +175,7 @@
                             <span class="km-time mono">{fmtSecs(music.durSec)}</span>
                         </div>
                     {:else}
-                        <p class="km-live">📻 Live radio — it just keeps going!</p>
+                        <p class="km-live">📻 Live radio</p>
                     {/if}
                 {/if}
 
@@ -251,7 +256,7 @@
                 {#if music.nextInQueue}
                     <button class="km-upnext" onclick={() => pickPane("queue")}>
                         <span class="km-upnext-label">🎶 Up next</span>
-                        <span class="km-upnext-title">{music.nextInQueue.title ?? "A mystery song"}</span>
+                        <span class="km-upnext-title">{music.nextInQueue.title ?? "Unknown song"}</span>
                         <span class="km-upnext-go" aria-hidden="true">›</span>
                     </button>
                 {/if}
@@ -267,7 +272,8 @@
                         {featured.muted ? "🔇" : "🔊"}
                     </button>
                     <KidSlider
-                        value={music.vol}
+                        value={Math.min(VOL_MAX, music.vol)}
+                        max={VOL_MAX}
                         label="Volume"
                         valueText="{music.vol}%"
                         onInput={(v) => music.dragVolume(featured, v)}
@@ -293,7 +299,8 @@
                                 </button>
                                 <span class="km-member-name">{m.name}</span>
                                 <KidSlider
-                                    value={music.memVol[m.id] ?? m.volume}
+                                    value={Math.min(VOL_MAX, music.memVol[m.id] ?? m.volume)}
+                                    max={VOL_MAX}
                                     label="Volume {m.name}"
                                     valueText="{music.memVol[m.id] ?? m.volume}%"
                                     onInput={(v) => music.dragMemberVolume(m.id, v)}

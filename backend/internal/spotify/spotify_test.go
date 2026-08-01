@@ -14,25 +14,25 @@ func TestExchangeRedirectParsing(t *testing.T) {
 	c := &Client{pending: map[string]pendingAuth{}}
 	ctx := context.Background()
 
-	if err := c.ExchangeRedirect(ctx, ""); err == nil {
+	if _, err := c.ExchangeRedirect(ctx, ""); err == nil {
 		t.Error("empty paste should error")
 	}
-	if err := c.ExchangeRedirect(ctx, "http://127.0.0.1:8080/api/spotify/callback"); err == nil ||
+	if _, err := c.ExchangeRedirect(ctx, "http://127.0.0.1:8080/api/spotify/callback"); err == nil ||
 		!strings.Contains(err.Error(), "no login code") {
 		t.Errorf("code-less URL should say the code is missing, got %v", err)
 	}
-	if err := c.ExchangeRedirect(ctx, "http://127.0.0.1:8080/cb?error=access_denied"); err == nil ||
+	if _, err := c.ExchangeRedirect(ctx, "http://127.0.0.1:8080/cb?error=access_denied"); err == nil ||
 		!strings.Contains(err.Error(), "refused") {
 		t.Errorf("error param should surface as refusal, got %v", err)
 	}
 	// A valid-shaped paste with an unknown state fails the pending lookup —
 	// proof the query string was parsed and the flow guard works.
-	err := c.ExchangeRedirect(ctx, "http://127.0.0.1:8080/api/spotify/callback?code=abc&state=nope")
+	_, err := c.ExchangeRedirect(ctx, "http://127.0.0.1:8080/api/spotify/callback?code=abc&state=nope")
 	if err == nil || !strings.Contains(err.Error(), "expired") {
 		t.Errorf("unknown state should report an expired/foreign login, got %v", err)
 	}
 	// Bare query strings are accepted too.
-	err = c.ExchangeRedirect(ctx, "?code=abc&state=nope")
+	_, err = c.ExchangeRedirect(ctx, "?code=abc&state=nope")
 	if err == nil || !strings.Contains(err.Error(), "expired") {
 		t.Errorf("bare query paste should parse, got %v", err)
 	}
@@ -44,7 +44,11 @@ func TestSetClientIDClearsTokensOnChange(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c.p = persisted{ClientID: "old", RefreshToken: "tok", DisplayName: "petter"}
+	c.p = persisted{
+		ClientID:  "old",
+		Household: &accountState{RefreshToken: "tok", DisplayName: "petter"},
+		Accounts:  map[string]*accountState{"user_kid": {RefreshToken: "kid-tok"}},
+	}
 	if err := c.SetClientID("new-id"); err != nil {
 		t.Fatal(err)
 	}
@@ -52,8 +56,11 @@ func TestSetClientIDClearsTokensOnChange(t *testing.T) {
 	if st.Connected || st.DisplayName != "" {
 		t.Errorf("changing client id should drop tokens, got %+v", st)
 	}
+	if c.For("user_kid").Status().Connected {
+		t.Error("changing client id should drop every account's tokens, the kids' too")
+	}
 	// Same ID again is a no-op for tokens.
-	c.p.RefreshToken = "tok2"
+	c.account("").RefreshToken = "tok2"
 	if err := c.SetClientID("new-id"); err != nil {
 		t.Fatal(err)
 	}
@@ -75,17 +82,17 @@ func TestMarketBackfillsFromMe(t *testing.T) {
 		return jsonResponse(http.StatusOK, `{"country":"SE"}`)
 	}))
 
-	if m := c.market(); m != nil {
+	if m := c.For("").market(); m != nil {
 		t.Errorf("market() before backfill should be nil, got %v", m)
 	}
 
-	c.ensureCountry(context.Background())
+	c.For("").ensureCountry(context.Background())
 
-	if got := c.market().Get("market"); got != "SE" {
+	if got := c.For("").market().Get("market"); got != "SE" {
 		t.Errorf("market() after backfill = %q, want SE", got)
 	}
-	if c.p.Country != "SE" {
-		t.Errorf("Country not persisted, got %q", c.p.Country)
+	if c.p.Household.Country != "SE" {
+		t.Errorf("Country not persisted, got %q", c.p.Household.Country)
 	}
 
 	// Already-known country must not trigger another /me round trip.
@@ -93,5 +100,5 @@ func TestMarketBackfillsFromMe(t *testing.T) {
 		t.Fatal("ensureCountry should be a no-op once Country is known")
 		return nil
 	})}
-	c.ensureCountry(context.Background())
+	c.For("").ensureCountry(context.Background())
 }

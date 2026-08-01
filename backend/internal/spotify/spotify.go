@@ -65,9 +65,9 @@ var ErrNotConnected = errors.New("spotify: not connected")
 // is not something the backend can fix on its own.
 var ErrPlaybackScope = errors.New("spotify: reconnect Spotify to let HomeHub start playback — this login was granted before that permission existed")
 
-// persisted is the on-disk shape. Everything in here survives restarts.
-type persisted struct {
-	ClientID     string    `json:"client_id,omitempty"`
+// accountState is one connected Spotify account: its tokens, the "connected
+// as" label, and the two facts about the grant worth remembering.
+type accountState struct {
 	RefreshToken string    `json:"refresh_token,omitempty"`
 	AccessToken  string    `json:"access_token,omitempty"`
 	Expiry       time.Time `json:"expiry,omitempty"`
@@ -89,17 +89,44 @@ type persisted struct {
 	Country string `json:"country,omitempty"`
 }
 
+// persisted is the on-disk shape. Everything in here survives restarts.
+type persisted struct {
+	ClientID string `json:"client_id,omitempty"`
+	// Household is the grown-up account ("" key): the Music view, KEF
+	// Connect and autoplay all ride on it. Accounts holds each kid
+	// profile's own account, keyed by user ID — the kid surface searches
+	// as the kid, so the account's own settings (explicit filtering for a
+	// Spotify Kids account) apply to what it finds.
+	Household *accountState            `json:"household,omitempty"`
+	Accounts  map[string]*accountState `json:"accounts,omitempty"`
+
+	// Legacy flat fields: files written before multi-account carried the
+	// household tokens here. Folded into Household on load, never written
+	// back out.
+	RefreshToken string    `json:"refresh_token,omitempty"`
+	AccessToken  string    `json:"access_token,omitempty"`
+	Expiry       time.Time `json:"expiry,omitempty"`
+	DisplayName  string    `json:"display_name,omitempty"`
+	Scope        string    `json:"scope,omitempty"`
+	Country      string    `json:"country,omitempty"`
+}
+
 // pendingAuth is one in-flight PKCE authorization, keyed by state. The
-// redirect URI is captured at start so the token exchange always uses
-// exactly what the authorize request carried — regardless of which path
-// (automatic callback or pasted URL) finishes the flow.
+// account and redirect URI are captured at start so the token exchange
+// always uses exactly what the authorize request carried — regardless of
+// which path (automatic callback or pasted URL) finishes the flow, and
+// regardless of whose login it was.
 type pendingAuth struct {
+	accountKey  string
 	verifier    string
 	redirectURI string
 	expires     time.Time
 }
 
-// Client is the Spotify Web API client. Safe for concurrent use.
+// Client is the Spotify Web API client's shared root: the developer app's
+// client ID, the in-flight authorizations, and every connected account.
+// Account-scoped work happens on *Account (see For). Safe for concurrent
+// use.
 type Client struct {
 	mu      sync.Mutex
 	dataDir string
@@ -123,8 +150,102 @@ func New(dataDir string) (*Client, error) {
 	if err := json.Unmarshal(raw, &c.p); err != nil {
 		return nil, fmt.Errorf("spotify: parse state: %w", err)
 	}
+	// Fold a pre-multi-account file's flat tokens into the household
+	// account, then drop the legacy fields so they can't be read twice.
+	if c.p.Household == nil && (c.p.RefreshToken != "" || c.p.AccessToken != "" || c.p.DisplayName != "") {
+		c.p.Household = &accountState{
+			RefreshToken: c.p.RefreshToken,
+			AccessToken:  c.p.AccessToken,
+			Expiry:       c.p.Expiry,
+			DisplayName:  c.p.DisplayName,
+			Scope:        c.p.Scope,
+			Country:      c.p.Country,
+		}
+	}
+	c.p.RefreshToken, c.p.AccessToken, c.p.DisplayName, c.p.Scope, c.p.Country = "", "", "", "", ""
+	c.p.Expiry = time.Time{}
 	return c, nil
 }
+
+// Account is one connected Spotify account's handle: the catalog and
+// Connect methods live here, reading and refreshing that account's own
+// tokens. The zero-value key ("") is the household account.
+type Account struct {
+	c   *Client
+	key string
+}
+
+// For returns the handle for one account: "" for the household account, a
+// user ID for a kid profile's own.
+func (c *Client) For(accountKey string) *Account {
+	return &Account{c: c, key: accountKey}
+}
+
+// Household shims — every pre-multi-account caller (the Music view's
+// handlers, KEF Connect, the autoplay engine) rides the household account
+// and keeps working unchanged.
+func (c *Client) Status() Status { return c.For("").Status() }
+func (c *Client) Disconnect() error {
+	return c.For("").Disconnect()
+}
+func (c *Client) Search(ctx context.Context, query string, limit int) (*Results, error) {
+	return c.For("").Search(ctx, query, limit)
+}
+func (c *Client) Artist(ctx context.Context, uri string) (*ArtistDetail, error) {
+	return c.For("").Artist(ctx, uri)
+}
+func (c *Client) SimilarTracks(ctx context.Context, artistName string, exclude map[string]bool, limit int) ([]Item, error) {
+	return c.For("").SimilarTracks(ctx, artistName, exclude, limit)
+}
+func (c *Client) Context(ctx context.Context, uri string) (*ContextDetail, error) {
+	return c.For("").Context(ctx, uri)
+}
+func (c *Client) MyPlaylists(ctx context.Context, limit int) ([]Item, error) {
+	return c.For("").MyPlaylists(ctx, limit)
+}
+func (c *Client) Devices(ctx context.Context) ([]Device, error) {
+	return c.For("").Devices(ctx)
+}
+func (c *Client) PlayOn(ctx context.Context, deviceID, uri string) error {
+	return c.For("").PlayOn(ctx, deviceID, uri)
+}
+
+// account returns the state for key, creating and attaching it on first
+// use. Caller must hold mu.
+func (c *Client) account(key string) *accountState {
+	if key == "" {
+		if c.p.Household == nil {
+			c.p.Household = &accountState{}
+		}
+		return c.p.Household
+	}
+	if c.p.Accounts == nil {
+		c.p.Accounts = make(map[string]*accountState)
+	}
+	a := c.p.Accounts[key]
+	if a == nil {
+		a = &accountState{}
+		c.p.Accounts[key] = a
+	}
+	return a
+}
+
+// accountPeek returns the state for key without creating it; nil means the
+// account was never connected.
+func (c *Client) accountPeek(key string) *accountState {
+	if key == "" {
+		return c.p.Household
+	}
+	return c.p.Accounts[key]
+}
+
+// state returns the account's live token state, attaching it on first
+// write. Caller must hold c.mu.
+func (a *Account) state() *accountState { return a.c.account(a.key) }
+
+// peek returns the account's state without creating it — the read paths,
+// where a never-connected account is simply "not connected".
+func (a *Account) peek() *accountState { return a.c.accountPeek(a.key) }
 
 // save persists credentials. Caller must hold mu. 0600 — it holds tokens.
 func (c *Client) save() error {
@@ -158,16 +279,19 @@ type Status struct {
 	Playback bool `json:"playback"`
 }
 
-// Status returns the current connection state.
-func (c *Client) Status() Status {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return Status{
-		Configured:  c.p.ClientID != "",
-		Connected:   c.p.RefreshToken != "",
-		DisplayName: c.p.DisplayName,
-		Playback:    c.p.RefreshToken != "" && grantsPlayback(c.p.Scope),
+// Status returns the account's connection state. Configured describes the
+// shared developer app (the client ID), the rest the account itself.
+func (a *Account) Status() Status {
+	a.c.mu.Lock()
+	defer a.c.mu.Unlock()
+	st := a.peek()
+	s := Status{Configured: a.c.p.ClientID != ""}
+	if st != nil {
+		s.Connected = st.RefreshToken != ""
+		s.DisplayName = st.DisplayName
+		s.Playback = st.RefreshToken != "" && grantsPlayback(st.Scope)
 	}
+	return s
 }
 
 // grantsPlayback reports whether a granted-scope string carries both player
@@ -197,18 +321,20 @@ func (c *Client) SetClientID(id string) error {
 	return c.save()
 }
 
-// Disconnect drops the tokens but keeps the client ID.
-func (c *Client) Disconnect() error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.p = persisted{ClientID: c.p.ClientID}
-	return c.save()
+// Disconnect drops this account's tokens. The shared client ID and every
+// other account are untouched.
+func (a *Account) Disconnect() error {
+	a.c.mu.Lock()
+	defer a.c.mu.Unlock()
+	*a.state() = accountState{}
+	return a.c.save()
 }
 
-// AuthURL starts a PKCE authorization: it returns the Spotify authorize URL
-// to send the browser to. The generated state/verifier pair is held for ten
+// AuthURL starts a PKCE authorization for one account: it returns the
+// Spotify authorize URL to send the browser to. The generated
+// state/verifier pair — and the account being connected — are held for ten
 // minutes for HandleCallback to consume.
-func (c *Client) AuthURL(redirectURI string) (string, error) {
+func (c *Client) AuthURL(accountKey, redirectURI string) (string, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.p.ClientID == "" {
@@ -232,7 +358,7 @@ func (c *Client) AuthURL(redirectURI string) (string, error) {
 			delete(c.pending, k)
 		}
 	}
-	c.pending[state] = pendingAuth{verifier: verifier, redirectURI: redirectURI, expires: now.Add(10 * time.Minute)}
+	c.pending[state] = pendingAuth{accountKey: accountKey, verifier: verifier, redirectURI: redirectURI, expires: now.Add(10 * time.Minute)}
 
 	q := url.Values{
 		"client_id":             {c.p.ClientID},
@@ -247,9 +373,11 @@ func (c *Client) AuthURL(redirectURI string) (string, error) {
 }
 
 // HandleCallback finishes the PKCE flow: verifies state, exchanges the code
-// for tokens, fetches the profile for the "connected as" label, persists.
-// The redirect URI stored when the flow started is used for the exchange.
-func (c *Client) HandleCallback(ctx context.Context, code, state string) error {
+// for tokens, and connects the account the flow was started for — returned
+// so the caller can route the landing page (a kid's login lands back in the
+// kid app, the household's in the Music view). The redirect URI stored when
+// the flow started is used for the exchange.
+func (c *Client) HandleCallback(ctx context.Context, code, state string) (string, error) {
 	c.mu.Lock()
 	pa, ok := c.pending[state]
 	if ok {
@@ -258,7 +386,7 @@ func (c *Client) HandleCallback(ctx context.Context, code, state string) error {
 	clientID := c.p.ClientID
 	c.mu.Unlock()
 	if !ok || time.Now().After(pa.expires) {
-		return errors.New("spotify: login expired or was not started here — try again")
+		return "", errors.New("spotify: login expired or was not started here — try again")
 	}
 
 	tok, err := c.tokenRequest(ctx, url.Values{
@@ -269,16 +397,26 @@ func (c *Client) HandleCallback(ctx context.Context, code, state string) error {
 		"code_verifier": {pa.verifier},
 	})
 	if err != nil {
-		return err
+		return "", err
 	}
 
-	c.mu.Lock()
-	c.p.AccessToken = tok.AccessToken
-	c.p.RefreshToken = tok.RefreshToken
-	c.p.Scope = tok.Scope
-	c.p.Expiry = time.Now().Add(time.Duration(tok.ExpiresIn) * time.Second)
-	saveErr := c.save()
-	c.mu.Unlock()
+	if err := c.For(pa.accountKey).finishConnect(ctx, tok); err != nil {
+		return "", err
+	}
+	return pa.accountKey, nil
+}
+
+// finishConnect stores a fresh grant on the account and labels it from the
+// profile. Shared by the automatic callback and the pasted-URL exchange.
+func (a *Account) finishConnect(ctx context.Context, tok *tokenResponse) error {
+	a.c.mu.Lock()
+	st := a.state()
+	st.AccessToken = tok.AccessToken
+	st.RefreshToken = tok.RefreshToken
+	st.Scope = tok.Scope
+	st.Expiry = time.Now().Add(time.Duration(tok.ExpiresIn) * time.Second)
+	saveErr := a.c.save()
+	a.c.mu.Unlock()
 	if saveErr != nil {
 		return saveErr
 	}
@@ -289,15 +427,16 @@ func (c *Client) HandleCallback(ctx context.Context, code, state string) error {
 		ID          string `json:"id"`
 		Country     string `json:"country"`
 	}
-	if err := c.apiGet(ctx, "/me", nil, &me); err == nil {
-		c.mu.Lock()
-		c.p.DisplayName = me.DisplayName
-		if c.p.DisplayName == "" {
-			c.p.DisplayName = me.ID
+	if err := a.apiGet(ctx, "/me", nil, &me); err == nil {
+		a.c.mu.Lock()
+		st := a.state()
+		st.DisplayName = me.DisplayName
+		if st.DisplayName == "" {
+			st.DisplayName = me.ID
 		}
-		c.p.Country = me.Country
-		_ = c.save()
-		c.mu.Unlock()
+		st.Country = me.Country
+		_ = a.c.save()
+		a.c.mu.Unlock()
 	}
 	return nil
 }
@@ -307,10 +446,10 @@ func (c *Client) HandleCallback(ctx context.Context, code, state string) error {
 // a parked loopback address the browser can't load. The user copies the
 // address Spotify sent them to and pastes it back; the code and state are
 // in its query string.
-func (c *Client) ExchangeRedirect(ctx context.Context, rawURL string) error {
+func (c *Client) ExchangeRedirect(ctx context.Context, rawURL string) (string, error) {
 	raw := strings.TrimSpace(rawURL)
 	if raw == "" {
-		return errors.New("spotify: paste the full address from the browser's address bar")
+		return "", errors.New("spotify: paste the full address from the browser's address bar")
 	}
 	// Accept a bare query string too ("?code=…" or "code=…").
 	if !strings.Contains(raw, "://") {
@@ -318,15 +457,15 @@ func (c *Client) ExchangeRedirect(ctx context.Context, rawURL string) error {
 	}
 	u, err := url.Parse(raw)
 	if err != nil {
-		return errors.New("spotify: that doesn't look like a web address — paste the full address from the browser's address bar")
+		return "", errors.New("spotify: that doesn't look like a web address — paste the full address from the browser's address bar")
 	}
 	q := u.Query()
 	if e := q.Get("error"); e != "" {
-		return fmt.Errorf("spotify: login was refused (%s)", e)
+		return "", fmt.Errorf("spotify: login was refused (%s)", e)
 	}
 	code, state := q.Get("code"), q.Get("state")
 	if code == "" || state == "" {
-		return errors.New("spotify: no login code in that address — paste the full address, including everything after the question mark")
+		return "", errors.New("spotify: no login code in that address — paste the full address, including everything after the question mark")
 	}
 	return c.HandleCallback(ctx, code, state)
 }
@@ -369,23 +508,25 @@ func (c *Client) tokenRequest(ctx context.Context, form url.Values) (*tokenRespo
 	return &tok, nil
 }
 
-// accessToken returns a valid access token, refreshing when necessary.
-func (c *Client) accessToken(ctx context.Context) (string, error) {
-	c.mu.Lock()
-	if c.p.RefreshToken == "" {
-		c.mu.Unlock()
+// accessToken returns a valid access token for the account, refreshing
+// when necessary.
+func (a *Account) accessToken(ctx context.Context) (string, error) {
+	a.c.mu.Lock()
+	st := a.peek()
+	if st == nil || st.RefreshToken == "" {
+		a.c.mu.Unlock()
 		return "", ErrNotConnected
 	}
-	if c.p.AccessToken != "" && time.Until(c.p.Expiry) > 30*time.Second {
-		tok := c.p.AccessToken
-		c.mu.Unlock()
+	if st.AccessToken != "" && time.Until(st.Expiry) > 30*time.Second {
+		tok := st.AccessToken
+		a.c.mu.Unlock()
 		return tok, nil
 	}
-	refresh := c.p.RefreshToken
-	clientID := c.p.ClientID
-	c.mu.Unlock()
+	refresh := st.RefreshToken
+	clientID := a.c.p.ClientID
+	a.c.mu.Unlock()
 
-	tok, err := c.tokenRequest(ctx, url.Values{
+	tok, err := a.c.tokenRequest(ctx, url.Values{
 		"grant_type":    {"refresh_token"},
 		"refresh_token": {refresh},
 		"client_id":     {clientID},
@@ -393,62 +534,68 @@ func (c *Client) accessToken(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	c.mu.Lock()
-	c.p.AccessToken = tok.AccessToken
+	a.c.mu.Lock()
+	st = a.state()
+	st.AccessToken = tok.AccessToken
 	// PKCE refreshes rotate the refresh token; keep the old one if the
 	// response omitted it.
 	if tok.RefreshToken != "" {
-		c.p.RefreshToken = tok.RefreshToken
+		st.RefreshToken = tok.RefreshToken
 	}
 	// A refresh reports the grant too, which is how a login stored by an
 	// older build (no recorded scope) learns what it actually has.
 	if tok.Scope != "" {
-		c.p.Scope = tok.Scope
+		st.Scope = tok.Scope
 	}
-	c.p.Expiry = time.Now().Add(time.Duration(tok.ExpiresIn) * time.Second)
-	_ = c.save()
-	token := c.p.AccessToken
-	c.mu.Unlock()
+	st.Expiry = time.Now().Add(time.Duration(tok.ExpiresIn) * time.Second)
+	_ = a.c.save()
+	token := st.AccessToken
+	a.c.mu.Unlock()
 	return token, nil
 }
 
-// ensureCountry backfills c.p.Country for a login stored before it was
-// recorded (HandleCallback now captures it up front, but an account
+// ensureCountry backfills the account's Country for a login stored before
+// it was recorded (finishConnect now captures it up front, but an account
 // connected by an older build never ran that code). Best-effort: a
 // failure just leaves market lookups empty, same as before this existed.
 // Since February 2026 /me no longer answers "country" for Development
 // Mode apps at all, so for them this is a no-op — logins that captured
 // a country before the removal keep it, and that is the only source
 // left.
-func (c *Client) ensureCountry(ctx context.Context) {
-	c.mu.Lock()
-	known := c.p.Country != ""
-	c.mu.Unlock()
+func (a *Account) ensureCountry(ctx context.Context) {
+	a.c.mu.Lock()
+	st := a.peek()
+	known := st != nil && st.Country != ""
+	a.c.mu.Unlock()
 	if known {
 		return
 	}
 	var me struct {
 		Country string `json:"country"`
 	}
-	if err := c.apiGet(ctx, "/me", nil, &me); err != nil || me.Country == "" {
+	if err := a.apiGet(ctx, "/me", nil, &me); err != nil || me.Country == "" {
 		return
 	}
-	c.mu.Lock()
-	c.p.Country = me.Country
-	_ = c.save()
-	c.mu.Unlock()
+	a.c.mu.Lock()
+	a.state().Country = me.Country
+	_ = a.c.save()
+	a.c.mu.Unlock()
 }
 
-// market returns a "market" query value for the connected account's
-// country, or nil if it isn't known yet (a login stored by an older
-// build, before this was recorded). Several catalog endpoints treat a
-// request with no market as scoped to no market at all and answer with
-// an empty list rather than an error, so this is worth sending whenever
-// we have it even though Spotify's docs call the parameter optional.
-func (c *Client) market() url.Values {
-	c.mu.Lock()
-	country := c.p.Country
-	c.mu.Unlock()
+// market returns a "market" query value for the account's country, or nil
+// if it isn't known yet (a login stored by an older build, before this was
+// recorded). Several catalog endpoints treat a request with no market as
+// scoped to no market at all and answer with an empty list rather than an
+// error, so this is worth sending whenever we have it even though
+// Spotify's docs call the parameter optional.
+func (a *Account) market() url.Values {
+	a.c.mu.Lock()
+	st := a.peek()
+	var country string
+	if st != nil {
+		country = st.Country
+	}
+	a.c.mu.Unlock()
 	if country == "" {
 		return nil
 	}
@@ -456,8 +603,8 @@ func (c *Client) market() url.Values {
 }
 
 // apiGet performs an authenticated GET against the Web API.
-func (c *Client) apiGet(ctx context.Context, path string, q url.Values, out interface{}) error {
-	tok, err := c.accessToken(ctx)
+func (a *Account) apiGet(ctx context.Context, path string, q url.Values, out interface{}) error {
+	tok, err := a.accessToken(ctx)
 	if err != nil {
 		return err
 	}
@@ -470,7 +617,7 @@ func (c *Client) apiGet(ctx context.Context, path string, q url.Values, out inte
 		return err
 	}
 	req.Header.Set("Authorization", "Bearer "+tok)
-	resp, err := c.httpClient().Do(req)
+	resp, err := a.c.httpClient().Do(req)
 	if err != nil {
 		return fmt.Errorf("spotify: %w", err)
 	}
@@ -650,7 +797,7 @@ func artistLine(artists []wireArtist) string {
 }
 
 // Search queries the catalog for tracks, albums, playlists and artists.
-func (c *Client) Search(ctx context.Context, query string, limit int) (*Results, error) {
+func (a *Account) Search(ctx context.Context, query string, limit int) (*Results, error) {
 	// Spotify quietly tightened /search's cap from the documented 50 down to
 	// 10 — anything higher is answered 400 "Invalid limit", so the clamp has
 	// to be theirs, not the docs'.
@@ -671,7 +818,7 @@ func (c *Client) Search(ctx context.Context, query string, limit int) (*Results,
 			Items []wireArtistFull `json:"items"`
 		} `json:"artists"`
 	}
-	err := c.apiGet(ctx, "/search", url.Values{
+	err := a.apiGet(ctx, "/search", url.Values{
 		"q":     {query},
 		"type":  {"track,album,playlist,artist"},
 		"limit": {fmt.Sprint(limit)},
@@ -731,16 +878,16 @@ type ArtistDetail struct {
 // artist with no answer for one still has a name, a picture and the other
 // sections worth showing, the same "render only what the service answered
 // for" discipline the Sonos side follows for its own capability probes.
-func (c *Client) Artist(ctx context.Context, uri string) (*ArtistDetail, error) {
+func (a *Account) Artist(ctx context.Context, uri string) (*ArtistDetail, error) {
 	id, err := artistIDFromURI(uri)
 	if err != nil {
 		return nil, err
 	}
 	var raw wireArtistFull
-	if err := c.apiGet(ctx, "/artists/"+url.PathEscape(id), nil, &raw); err != nil {
+	if err := a.apiGet(ctx, "/artists/"+url.PathEscape(id), nil, &raw); err != nil {
 		return nil, err
 	}
-	c.ensureCountry(ctx)
+	a.ensureCountry(ctx)
 	det := &ArtistDetail{
 		URI: uri, Name: raw.Name, ArtURL: artOfLarge(raw.Images),
 		Genres: raw.Genres, Followers: raw.Followers.Total, Popularity: raw.Popularity,
@@ -753,19 +900,19 @@ func (c *Client) Artist(ctx context.Context, uri string) (*ArtistDetail, error) 
 	wg.Add(3)
 	go func() {
 		defer wg.Done()
-		if tt, err := c.artistPopularTracks(ctx, raw.Name); err == nil {
+		if tt, err := a.artistPopularTracks(ctx, raw.Name); err == nil {
 			det.TopTracks = tt
 		}
 	}()
 	go func() {
 		defer wg.Done()
-		if al, si, err := c.artistDiscography(ctx, id); err == nil {
+		if al, si, err := a.artistDiscography(ctx, id); err == nil {
 			det.Albums, det.Singles = al, si
 		}
 	}()
 	go func() {
 		defer wg.Done()
-		if rel, err := c.relatedArtists(ctx, id); err == nil {
+		if rel, err := a.relatedArtists(ctx, id); err == nil {
 			det.Related = rel
 		}
 	}()
@@ -778,13 +925,13 @@ func (c *Client) Artist(ctx context.Context, uri string) (*ArtistDetail, error) 
 // the February 2026 tightening. Search ranking still weighs listens, so an
 // artist-scoped track query comes back in roughly most-played order — the
 // same section, fed through the one ranked catalog read left open.
-func (c *Client) artistPopularTracks(ctx context.Context, name string) ([]Item, error) {
+func (a *Account) artistPopularTracks(ctx context.Context, name string) ([]Item, error) {
 	var raw struct {
 		Tracks struct {
 			Items []wireTrack `json:"items"`
 		} `json:"tracks"`
 	}
-	err := c.apiGet(ctx, "/search", url.Values{
+	err := a.apiGet(ctx, "/search", url.Values{
 		"q":     {`artist:"` + strings.ReplaceAll(name, `"`, "") + `"`},
 		"type":  {"track"},
 		"limit": {"10"},
@@ -810,7 +957,7 @@ func (c *Client) artistPopularTracks(ctx context.Context, name string) ([]Item, 
 // arrives in pages of ten and is walked with offset until Spotify runs out
 // or the shelf has what the old single call used to bring back. A page that
 // fails mid-walk keeps what arrived rather than costing the section.
-func (c *Client) artistDiscography(ctx context.Context, id string) (albums, singles []Item, err error) {
+func (a *Account) artistDiscography(ctx context.Context, id string) (albums, singles []Item, err error) {
 	albums, singles = []Item{}, []Item{}
 	seen := make(map[string]bool)
 	for offset := 0; offset < 50; offset += 10 {
@@ -822,10 +969,10 @@ func (c *Client) artistDiscography(ctx context.Context, id string) (albums, sing
 			"limit":          {"10"},
 			"offset":         {fmt.Sprint(offset)},
 		}
-		if m := c.market(); m != nil {
+		if m := a.market(); m != nil {
 			q.Set("market", m.Get("market"))
 		}
-		if err := c.apiGet(ctx, "/artists/"+url.PathEscape(id)+"/albums", q, &raw); err != nil {
+		if err := a.apiGet(ctx, "/artists/"+url.PathEscape(id)+"/albums", q, &raw); err != nil {
 			if offset == 0 {
 				return nil, nil, err
 			}
@@ -856,11 +1003,11 @@ func (c *Client) artistDiscography(ctx context.Context, id string) (albums, sing
 // section rather than the page — the caller keeps the error to itself and
 // renders without it. The call stays for extended-quota apps, which still
 // get an answer.
-func (c *Client) relatedArtists(ctx context.Context, id string) ([]Item, error) {
+func (a *Account) relatedArtists(ctx context.Context, id string) ([]Item, error) {
 	var raw struct {
 		Artists []wireArtistFull `json:"artists"`
 	}
-	if err := c.apiGet(ctx, "/artists/"+url.PathEscape(id)+"/related-artists", nil, &raw); err != nil {
+	if err := a.apiGet(ctx, "/artists/"+url.PathEscape(id)+"/related-artists", nil, &raw); err != nil {
 		return nil, err
 	}
 	out := make([]Item, 0, len(raw.Artists))
@@ -878,12 +1025,12 @@ func (c *Client) relatedArtists(ctx context.Context, id string) ([]Item, error) 
 // catalog read left. exclude drops URIs queued recently, so a short
 // discography doesn't loop the same handful of songs every time the queue
 // runs out.
-func (c *Client) SimilarTracks(ctx context.Context, artistName string, exclude map[string]bool, limit int) ([]Item, error) {
+func (a *Account) SimilarTracks(ctx context.Context, artistName string, exclude map[string]bool, limit int) ([]Item, error) {
 	artistName = strings.TrimSpace(artistName)
 	if artistName == "" {
 		return nil, errors.New("spotify: no artist to seed similar tracks from")
 	}
-	tracks, err := c.artistPopularTracks(ctx, artistName)
+	tracks, err := a.artistPopularTracks(ctx, artistName)
 	if err != nil {
 		return nil, err
 	}
@@ -919,12 +1066,12 @@ type ContextDetail struct {
 }
 
 // Context browses a playlist or album's tracks.
-func (c *Client) Context(ctx context.Context, uri string) (*ContextDetail, error) {
+func (a *Account) Context(ctx context.Context, uri string) (*ContextDetail, error) {
 	switch {
 	case strings.HasPrefix(uri, "spotify:playlist:"):
-		return c.playlistContext(ctx, uri)
+		return a.playlistContext(ctx, uri)
 	case strings.HasPrefix(uri, "spotify:album:"):
-		return c.albumContext(ctx, uri)
+		return a.albumContext(ctx, uri)
 	default:
 		return nil, fmt.Errorf("spotify: %q is not a playlist or album URI", uri)
 	}
@@ -951,7 +1098,7 @@ func (e wirePlaylistEntry) track() *wireTrack {
 	return e.Track
 }
 
-func (c *Client) playlistContext(ctx context.Context, uri string) (*ContextDetail, error) {
+func (a *Account) playlistContext(ctx context.Context, uri string) (*ContextDetail, error) {
 	id := strings.TrimPrefix(uri, "spotify:playlist:")
 	var raw struct {
 		Name        string      `json:"name"`
@@ -966,7 +1113,7 @@ func (c *Client) playlistContext(ctx context.Context, uri string) (*ContextDetai
 		Tracks wirePlaylistPage `json:"tracks"` // pre-February-2026 shape
 		Items  wirePlaylistPage `json:"items"`  // current shape
 	}
-	err := c.apiGet(ctx, "/playlists/"+url.PathEscape(id), url.Values{
+	err := a.apiGet(ctx, "/playlists/"+url.PathEscape(id), url.Values{
 		"fields": {"name,description,images,owner.display_name,followers.total," +
 			"items.total,items.items(item(uri,name,duration_ms,explicit,artists,album(name,images)))," +
 			"tracks.total,tracks.items(track(uri,name,duration_ms,explicit,artists,album(name,images)))"},
@@ -994,7 +1141,7 @@ func (c *Client) playlistContext(ctx context.Context, uri string) (*ContextDetai
 	return det, nil
 }
 
-func (c *Client) albumContext(ctx context.Context, uri string) (*ContextDetail, error) {
+func (a *Account) albumContext(ctx context.Context, uri string) (*ContextDetail, error) {
 	id := strings.TrimPrefix(uri, "spotify:album:")
 	var raw struct {
 		Name        string       `json:"name"`
@@ -1006,7 +1153,7 @@ func (c *Client) albumContext(ctx context.Context, uri string) (*ContextDetail, 
 			Items []wireTrack `json:"items"`
 		} `json:"tracks"`
 	}
-	if err := c.apiGet(ctx, "/albums/"+url.PathEscape(id), nil, &raw); err != nil {
+	if err := a.apiGet(ctx, "/albums/"+url.PathEscape(id), nil, &raw); err != nil {
 		return nil, err
 	}
 	det := &ContextDetail{
@@ -1033,14 +1180,14 @@ func (c *Client) albumContext(ctx context.Context, uri string) (*ContextDetail, 
 }
 
 // MyPlaylists lists the connected account's playlists.
-func (c *Client) MyPlaylists(ctx context.Context, limit int) ([]Item, error) {
+func (a *Account) MyPlaylists(ctx context.Context, limit int) ([]Item, error) {
 	if limit <= 0 || limit > 50 {
 		limit = 30
 	}
 	var raw struct {
 		Items []*wirePlaylist `json:"items"`
 	}
-	err := c.apiGet(ctx, "/me/playlists", url.Values{"limit": {fmt.Sprint(limit)}}, &raw)
+	err := a.apiGet(ctx, "/me/playlists", url.Values{"limit": {fmt.Sprint(limit)}}, &raw)
 	if err != nil {
 		return nil, err
 	}
@@ -1086,8 +1233,8 @@ type Device struct {
 // Devices lists the account's currently visible Connect endpoints. A speaker
 // only appears while it is awake and on the network, which is why the KEF
 // bridge wakes the speaker before asking.
-func (c *Client) Devices(ctx context.Context) ([]Device, error) {
-	if err := c.requirePlayback(); err != nil {
+func (a *Account) Devices(ctx context.Context) ([]Device, error) {
+	if err := a.requirePlayback(); err != nil {
 		return nil, err
 	}
 	var raw struct {
@@ -1100,7 +1247,7 @@ func (c *Client) Devices(ctx context.Context) ([]Device, error) {
 			VolumePercent *int   `json:"volume_percent"`
 		} `json:"devices"`
 	}
-	if err := c.apiGet(ctx, "/me/player/devices", nil, &raw); err != nil {
+	if err := a.apiGet(ctx, "/me/player/devices", nil, &raw); err != nil {
 		return nil, err
 	}
 	out := make([]Device, 0, len(raw.Devices))
@@ -1120,7 +1267,7 @@ func (c *Client) Devices(ctx context.Context) ([]Device, error) {
 // PlayOn starts a Spotify URI on one Connect device, moving playback there if
 // it was somewhere else. A track plays on its own; an album, playlist or
 // artist plays as a context, so the rest of it follows.
-func (c *Client) PlayOn(ctx context.Context, deviceID, uri string) error {
+func (a *Account) PlayOn(ctx context.Context, deviceID, uri string) error {
 	if strings.TrimSpace(deviceID) == "" {
 		return errors.New("spotify: no Connect device to play on")
 	}
@@ -1128,20 +1275,20 @@ func (c *Client) PlayOn(ctx context.Context, deviceID, uri string) error {
 	if err != nil {
 		return err
 	}
-	if err := c.requirePlayback(); err != nil {
+	if err := a.requirePlayback(); err != nil {
 		return err
 	}
 	// 202 means the device was reachable but not ready yet — a speaker that
 	// has just woken says this. One retry is what the difference between
 	// "didn't work" and "took a second" costs.
-	err = c.apiPut(ctx, "/me/player/play", url.Values{"device_id": {deviceID}}, body)
+	err = a.apiPut(ctx, "/me/player/play", url.Values{"device_id": {deviceID}}, body)
 	if errors.Is(err, errDeviceNotReady) {
 		select {
 		case <-time.After(700 * time.Millisecond):
 		case <-ctx.Done():
 			return ctx.Err()
 		}
-		err = c.apiPut(ctx, "/me/player/play", url.Values{"device_id": {deviceID}}, body)
+		err = a.apiPut(ctx, "/me/player/play", url.Values{"device_id": {deviceID}}, body)
 		if errors.Is(err, errDeviceNotReady) {
 			return errors.New("spotify: the speaker didn't pick it up — wake it and try again")
 		}
@@ -1166,13 +1313,14 @@ func playBody(uri string) ([]byte, error) {
 
 // requirePlayback fails early when the stored grant can't reach the player
 // endpoints, so the user gets "reconnect" instead of Spotify's 403.
-func (c *Client) requirePlayback() error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.p.RefreshToken == "" {
+func (a *Account) requirePlayback() error {
+	a.c.mu.Lock()
+	defer a.c.mu.Unlock()
+	st := a.peek()
+	if st == nil || st.RefreshToken == "" {
 		return ErrNotConnected
 	}
-	if !grantsPlayback(c.p.Scope) {
+	if !grantsPlayback(st.Scope) {
 		return ErrPlaybackScope
 	}
 	return nil
@@ -1184,8 +1332,8 @@ var errDeviceNotReady = errors.New("spotify: device not ready")
 
 // apiPut performs an authenticated PUT with a JSON body. The player endpoints
 // answer 204 with no body on success.
-func (c *Client) apiPut(ctx context.Context, path string, q url.Values, body []byte) error {
-	tok, err := c.accessToken(ctx)
+func (a *Account) apiPut(ctx context.Context, path string, q url.Values, body []byte) error {
+	tok, err := a.accessToken(ctx)
 	if err != nil {
 		return err
 	}
@@ -1199,7 +1347,7 @@ func (c *Client) apiPut(ctx context.Context, path string, q url.Values, body []b
 	}
 	req.Header.Set("Authorization", "Bearer "+tok)
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := c.httpClient().Do(req)
+	resp, err := a.c.httpClient().Do(req)
 	if err != nil {
 		return fmt.Errorf("spotify: %w", err)
 	}

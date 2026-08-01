@@ -1,13 +1,32 @@
 package api
 
 import (
+	"context"
+	"encoding/json"
+	"io"
 	"net/http"
+	"net/url"
+	"strings"
 	"testing"
 
 	"golang.org/x/crypto/bcrypt"
 
+	"homehub/internal/spotify"
 	"homehub/internal/store"
 )
+
+// roundTripFunc lets a test stand in for Spotify's API without a server.
+type roundTripFunc func(*http.Request) *http.Response
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r), nil }
+
+func jsonResponse(status int, body string) *http.Response {
+	return &http.Response{
+		StatusCode: status,
+		Body:       io.NopCloser(strings.NewReader(body)),
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+	}
+}
 
 // Kid profiles get the household's music: browse + playback control on Sonos
 // and Spotify search, so their playful surface is a real music player. What
@@ -67,6 +86,11 @@ func TestKidReachesMusicBrowseAndControl(t *testing.T) {
 		{http.MethodGet, "/api/spotify/playlists", ""},
 		{http.MethodGet, "/api/spotify/artist?uri=spotify:artist:x", ""},
 		{http.MethodGet, "/api/spotify/context?uri=spotify:album:x", ""},
+		// Linking their own Spotify account is a kid-allowed job; the
+		// developer app's client ID stays admin-only (below).
+		{http.MethodGet, "/api/spotify/login", ""},
+		{http.MethodPost, "/api/spotify/exchange", `{"url":"x"}`},
+		{http.MethodPost, "/api/spotify/disconnect", ""},
 	} {
 		got := doAs(t, srv, kid, kidPass, tc.method, tc.path, tc.body)
 		if got.Code == http.StatusForbidden {
@@ -98,11 +122,9 @@ func TestKidIsRefusedConfigurationAndOtherBridges(t *testing.T) {
 		{http.MethodPut, "/api/sonos/sp1/settings", `{}`},
 		{http.MethodGet, "/api/sonos/sp1/image", ""},
 		{http.MethodGet, "/api/sonos/sp1/favorites", ""},
-		// The Spotify account is the grown-ups' to connect and drop.
+		// The developer app is the grown-ups' to point at — every account,
+		// the household's and the kids', shares one client ID.
 		{http.MethodPut, "/api/spotify/config", `{"client_id":"x"}`},
-		{http.MethodGet, "/api/spotify/login", ""},
-		{http.MethodPost, "/api/spotify/exchange", `{"url":"x"}`},
-		{http.MethodPost, "/api/spotify/disconnect", ""},
 		// KEF and the vendor-neutral media layer stay out of the kid surface.
 		{http.MethodGet, "/api/kef/status", ""},
 		{http.MethodPost, "/api/kef/k1/play", ""},
@@ -132,5 +154,68 @@ func TestLimitedNonKidKeepsIts403OnMusic(t *testing.T) {
 		if rec.Code != http.StatusForbidden {
 			t.Errorf("%s %s as a limited profile = %d, want 403", tc.method, tc.path, rec.Code)
 		}
+	}
+}
+
+// TestSpotifyStatusAnswersEachCallerTheirOwnAccount: with a Spotify client
+// wired, a kid's status describes the kid's own connected account while an
+// admin's describes the household's — the split every browse handler makes.
+func TestSpotifyStatusAnswersEachCallerTheirOwnAccount(t *testing.T) {
+	srv, _ := actionServer(t)
+	admin, adminPass := seedAdmin(t, srv)
+	kid, kidPass := seedKid(t, srv, "u_kid", "Ebbe")
+
+	sp, err := spotify.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sp.SetClientID("cid"); err != nil {
+		t.Fatal(err)
+	}
+	sp.HTTP = &http.Client{Transport: roundTripFunc(func(r *http.Request) *http.Response {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/api/token"):
+			return jsonResponse(200, `{"access_token":"at","refresh_token":"rt","expires_in":3600,"scope":"user-read-private"}`)
+		case strings.HasSuffix(r.URL.Path, "/me"):
+			return jsonResponse(200, `{"display_name":"Ebbe","country":"SE"}`)
+		default:
+			t.Fatalf("unexpected request to %s", r.URL.Path)
+			return nil
+		}
+	})}
+
+	// Connect the kid's account through the real OAuth finish; the
+	// household account stays unconnected on purpose — the statuses must
+	// differ, or the routing proves nothing.
+	authURL, err := sp.AuthURL("u_kid", "http://127.0.0.1:8080/api/spotify/callback")
+	if err != nil {
+		t.Fatal(err)
+	}
+	u, err := url.Parse(authURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sp.HandleCallback(context.Background(), "code-1", u.Query().Get("state")); err != nil {
+		t.Fatal(err)
+	}
+	srv.Spotify = sp
+
+	statusOf := func(user, pass string) map[string]interface{} {
+		rec := doAs(t, srv, user, pass, http.MethodGet, "/api/spotify/status", "")
+		mustStatus(t, rec, http.StatusOK)
+		var body map[string]interface{}
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		return body
+	}
+
+	kidStatus := statusOf(kid, kidPass)
+	if kidStatus["connected"] != true || kidStatus["display_name"] != "Ebbe" {
+		t.Errorf("kid's status = %+v, want connected as Ebbe", kidStatus)
+	}
+	adminStatus := statusOf(admin, adminPass)
+	if adminStatus["connected"] != false {
+		t.Errorf("admin's status = %+v, want the (unconnected) household account", adminStatus)
 	}
 }

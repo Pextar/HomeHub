@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"homehub/internal/spotify"
 	"net/http"
 	"os"
 	"strconv"
@@ -9,12 +10,25 @@ import (
 	"time"
 )
 
-// Spotify integration: search/browse via the Web API (user's own account,
-// PKCE — no client secret), playback via the speakers' linked account (see
-// internal/sonos/services.go). All handlers are admin-gated in server.go
-// and nil-safe when the Spotify client isn't wired.
+// Spotify integration: search/browse via the Web API (the caller's own
+// account, PKCE — no client secret), playback via the speakers' linked
+// account (see internal/sonos/services.go). Search/browse is open to admins
+// and kid profiles: a kid searches as their own connected account, everyone
+// else as the household's (see internal/spotify). Connecting an account is
+// the same split — a kid's login links their profile's account, an admin's
+// the household one — while the developer app's client ID stays admin-only.
+// All handlers are nil-safe when the Spotify client isn't wired.
 
 const spotifyTimeout = 10 * time.Second
+
+// spotifyAccount resolves which connected account serves this caller: a kid
+// profile always gets its own, everyone else gets the household's.
+func (s *Server) spotifyAccount(r *http.Request) *spotify.Account {
+	if u := currentUser(r); u != nil && u.Kid {
+		return s.Spotify.For(u.ID)
+	}
+	return s.Spotify.For("")
+}
 
 // spotifyRedirectURI computes the OAuth redirect URI to use for the origin
 // the request arrived on. It must be registered verbatim in the Spotify
@@ -51,12 +65,14 @@ func (s *Server) requireSpotify(w http.ResponseWriter) bool {
 	return true
 }
 
-// spotifyStatus handles GET /api/spotify/status.
+// spotifyStatus handles GET /api/spotify/status — the caller's own
+// account's state (a kid's login is a different connection from the
+// household's).
 func (s *Server) spotifyStatus(w http.ResponseWriter, r *http.Request) {
 	if !s.requireSpotify(w) {
 		return
 	}
-	st := s.Spotify.Status()
+	st := s.spotifyAccount(r).Status()
 	uri, manual := spotifyRedirectURI(r)
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"configured":   st.Configured,
@@ -95,13 +111,19 @@ func (s *Server) spotifySetConfig(w http.ResponseWriter, r *http.Request) {
 }
 
 // spotifyLogin handles GET /api/spotify/login — returns the authorize URL
-// the frontend should navigate to.
+// the frontend should navigate to. Which account the flow connects is the
+// caller's: a kid's login links the kid profile's account, an admin's the
+// household one.
 func (s *Server) spotifyLogin(w http.ResponseWriter, r *http.Request) {
 	if !s.requireSpotify(w) {
 		return
 	}
 	uri, _ := spotifyRedirectURI(r)
-	u, err := s.Spotify.AuthURL(uri)
+	key := ""
+	if u := currentUser(r); u != nil && u.Kid {
+		key = u.ID
+	}
+	u, err := s.Spotify.AuthURL(key, uri)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -111,7 +133,8 @@ func (s *Server) spotifyLogin(w http.ResponseWriter, r *http.Request) {
 
 // spotifyCallback handles GET /api/spotify/callback — the browser lands
 // here from Spotify's consent page. On success it bounces back into the
-// Music view; errors are shown by redirecting with a query the view toasts.
+// app — the Music view for the household account, the kid app for a kid's
+// own; errors are shown by redirecting with a query the view toasts.
 func (s *Server) spotifyCallback(w http.ResponseWriter, r *http.Request) {
 	if !s.requireSpotify(w) {
 		return
@@ -128,8 +151,15 @@ func (s *Server) spotifyCallback(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), spotifyTimeout)
 	defer cancel()
-	if err := s.Spotify.HandleCallback(ctx, code, state); err != nil {
+	accountKey, err := s.Spotify.HandleCallback(ctx, code, state)
+	if err != nil {
 		http.Redirect(w, r, "/#/music?spotify_error="+err.Error(), http.StatusFound)
+		return
+	}
+	if accountKey != "" {
+		// A kid profile connected its own account — land back on the kid
+		// app, which has no Music route to toast into.
+		http.Redirect(w, r, "/", http.StatusFound)
 		return
 	}
 	http.Redirect(w, r, "/#/music?spotify=connected", http.StatusFound)
@@ -150,19 +180,20 @@ func (s *Server) spotifyExchange(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), spotifyTimeout)
 	defer cancel()
-	if err := s.Spotify.ExchangeRedirect(ctx, body.URL); err != nil {
+	if _, err := s.Spotify.ExchangeRedirect(ctx, body.URL); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// spotifyDisconnect handles POST /api/spotify/disconnect.
+// spotifyDisconnect handles POST /api/spotify/disconnect — drops the
+// caller's own account's tokens; every other account is untouched.
 func (s *Server) spotifyDisconnect(w http.ResponseWriter, r *http.Request) {
 	if !s.requireSpotify(w) {
 		return
 	}
-	if err := s.Spotify.Disconnect(); err != nil {
+	if err := s.spotifyAccount(r).Disconnect(); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -182,7 +213,7 @@ func (s *Server) spotifySearch(w http.ResponseWriter, r *http.Request) {
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	ctx, cancel := context.WithTimeout(r.Context(), spotifyTimeout)
 	defer cancel()
-	res, err := s.Spotify.Search(ctx, q, limit)
+	res, err := s.spotifyAccount(r).Search(ctx, q, limit)
 	if err != nil {
 		writeError(w, spotifyErrStatus(err), err.Error())
 		return
@@ -198,7 +229,7 @@ func (s *Server) spotifyPlaylists(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), spotifyTimeout)
 	defer cancel()
-	items, err := s.Spotify.MyPlaylists(ctx, 30)
+	items, err := s.spotifyAccount(r).MyPlaylists(ctx, 30)
 	if err != nil {
 		writeError(w, spotifyErrStatus(err), err.Error())
 		return
@@ -220,7 +251,7 @@ func (s *Server) spotifyArtist(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), spotifyTimeout)
 	defer cancel()
-	det, err := s.Spotify.Artist(ctx, uri)
+	det, err := s.spotifyAccount(r).Artist(ctx, uri)
 	if err != nil {
 		writeError(w, spotifyErrStatus(err), err.Error())
 		return
@@ -242,7 +273,7 @@ func (s *Server) spotifyContext(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), spotifyTimeout)
 	defer cancel()
-	det, err := s.Spotify.Context(ctx, uri)
+	det, err := s.spotifyAccount(r).Context(ctx, uri)
 	if err != nil {
 		writeError(w, spotifyErrStatus(err), err.Error())
 		return

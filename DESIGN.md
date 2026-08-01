@@ -1304,15 +1304,25 @@ rendered chromeless for `kid` profiles, exactly like the panel is for the
 wall.
 
 **Kid music is the panel's feature set, spoken kid, over Sonos only.** A
-kid profile may browse and control the household's Sonos groups and search
-the same Spotify account — the backend gate is `requireAdminOrKid`, and
-discovery, speaker management, settings, KEF, the media layer and the
-Spotify account itself stay admin-only, because configuration is the full
-app's job (the kid pane says "ask a grown-up", the way the wall points at
-the full Music view). Everything the wall's music depth does, the kid
+kid profile may browse and control the household's Sonos groups — the
+backend gate is `requireAdminOrKid`, and discovery, speaker management,
+settings, KEF and the media layer stay admin-only, because configuration
+is the full app's job. Everything the wall's music depth does, the kid
 player does: room pick, transport, seek rail, play modes, per-speaker
 faders, queue, search with recents, artist/album drill-down, and
 play-together grouping.
+
+**Spotify is per-account: a kid searches as the kid.** `internal/spotify`
+holds one household account (the "" key — the Music view, KEF Connect and
+autoplay ride on it) plus one account per kid profile, all sharing the
+developer app's client ID (which stays admin-set, and changing it wipes
+every account). A kid links their own account from the search pane itself —
+"Connect Spotify", the same PKCE flow, landing back in the kid app — so the
+account's own settings (a Spotify Kids account's explicit filter) apply to
+what the kid can find, and no grown-up's listening history leaks into the
+kid's results. Only when no client ID exists at all does the pane say "ask
+a grown-up". `spotifyAccount()` in `internal/api/spotify.go` is the split:
+kid caller → their account, everyone else → the household's.
 
 - **Same brain, same search, same memory.** The player drives its own
   `createPanelMusic({ sonosOnly: true })` — the KEF poll never fires and no
@@ -1356,6 +1366,13 @@ KidSlider.svelte`) — a real range input over a painted track and fill,
   `onInput` for the live drag, `onChange` for the authoritative send, the
   same contract as the Music module's Slider. A source with no duration
   gets the honest line ("📻 Live radio"), never a fabricated position.
+  **The kid's volume faders cap at 50** (`VOL_MAX` in `KidMusic.svelte`) —
+  loud enough to enjoy, not enough to upset the house; a speaker already
+  louder reads its real number and can only be turned down.
+- **The copy is older-kid, not toddler.** The reader is about eleven: real
+  music words everywhere (queue, shuffle, repeat, crossfade), no baby talk
+  ("Unknown song", not "a mystery song"; "No matches", not a 🙈), and the
+  two-tap "really?" stays — it's about accidents, not age.
 - **The software keyboard is part of the flow**, same as the wall: measured
   off `visualViewport`, the results go dense while it's up, and Enter or a
   tap on a result dismisses it. The search input is 18px, so iOS never

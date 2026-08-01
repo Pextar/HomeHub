@@ -249,19 +249,18 @@ func (s *Server) registerMediaRoutes(api *mux.Router) {
 	api.HandleFunc("/media/zones/{id}/mute", s.requireAdmin(s.mediaZoneMute)).Methods("PUT")
 }
 
-// registerSpotifyRoutes mounts search/browse for the Music view. OAuth is the
-// user's own account (PKCE); Sonos playback stays local via the play-item
-// route above, while KEF's goes back out through Connect. Search/browse is
-// shared with kid profiles (their music player searches the same account);
-// connecting and configuring the account stays admin-only, like every setup
-// surface.
+// registerSpotifyRoutes mounts search/browse and account linking. OAuth is
+// the caller's own account (PKCE): a kid profile links and searches as its
+// own account, an admin as the household's. Sonos playback stays local via
+// the play-item route above, while KEF's goes back out through Connect.
+// The developer app's client ID stays admin-only, like every setup surface.
 func (s *Server) registerSpotifyRoutes(api *mux.Router) {
 	api.HandleFunc("/spotify/status", s.requireAdminOrKid(s.spotifyStatus)).Methods("GET")
 	api.HandleFunc("/spotify/config", s.requireAdmin(s.spotifySetConfig)).Methods("PUT")
-	api.HandleFunc("/spotify/login", s.requireAdmin(s.spotifyLogin)).Methods("GET")
-	api.HandleFunc("/spotify/callback", s.requireAdmin(s.spotifyCallback)).Methods("GET")
-	api.HandleFunc("/spotify/exchange", s.requireAdmin(s.spotifyExchange)).Methods("POST")
-	api.HandleFunc("/spotify/disconnect", s.requireAdmin(s.spotifyDisconnect)).Methods("POST")
+	api.HandleFunc("/spotify/login", s.requireAdminOrKid(s.spotifyLogin)).Methods("GET")
+	api.HandleFunc("/spotify/callback", s.requireAdminOrKid(s.spotifyCallback)).Methods("GET")
+	api.HandleFunc("/spotify/exchange", s.requireAdminOrKid(s.spotifyExchange)).Methods("POST")
+	api.HandleFunc("/spotify/disconnect", s.requireAdminOrKid(s.spotifyDisconnect)).Methods("POST")
 	api.HandleFunc("/spotify/search", s.requireAdminOrKid(s.spotifySearch)).Methods("GET")
 	api.HandleFunc("/spotify/playlists", s.requireAdminOrKid(s.spotifyPlaylists)).Methods("GET")
 	api.HandleFunc("/spotify/artist", s.requireAdminOrKid(s.spotifyArtist)).Methods("GET")

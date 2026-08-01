@@ -32,8 +32,11 @@ func connected(t *testing.T, scope string, rt roundTripFunc) *Client {
 		t.Fatal(err)
 	}
 	c.p = persisted{
-		ClientID: "cid", RefreshToken: "refresh", AccessToken: "access",
-		Expiry: time.Now().Add(time.Hour), Scope: scope,
+		ClientID: "cid",
+		Household: &accountState{
+			RefreshToken: "refresh", AccessToken: "access",
+			Expiry: time.Now().Add(time.Hour), Scope: scope,
+		},
 	}
 	c.HTTP = &http.Client{Transport: rt}
 	return c
@@ -203,11 +206,13 @@ func TestRefreshRecordsTheGrant(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c.p = persisted{ClientID: "cid", RefreshToken: "refresh"} // expired, no scope
+	// Expired, no scope — the legacy flat shape, which New folds into the
+	// household account on the next load; written here directly.
+	c.p = persisted{ClientID: "cid", Household: &accountState{RefreshToken: "refresh"}}
 	c.HTTP = &http.Client{Transport: roundTripFunc(func(*http.Request) *http.Response {
 		return jsonResponse(200, `{"access_token":"fresh","expires_in":3600,"scope":"`+fullScope+`"}`)
 	})}
-	if _, err := c.accessToken(context.Background()); err != nil {
+	if _, err := c.For("").accessToken(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if !c.Status().Playback {

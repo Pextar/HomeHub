@@ -78,7 +78,7 @@
                         <span class="kmq-art kmq-art-none" aria-hidden="true">🎵</span>
                     {/if}
                     <span class="kmq-names">
-                        <span class="kmq-name">{q.title ?? "A mystery song"}</span>
+                        <span class="kmq-name">{q.title ?? "Unknown song"}</span>
                         {#if q.artist}
                             <span class="kmq-sub">{current ? "Playing now! · " : ""}{q.artist}</span>
                         {:else if current}
@@ -93,7 +93,7 @@
                     class="kmq-x"
                     class:armed={armed === "rm:" + q.track}
                     disabled={!!music.busy["qrm:" + q.track]}
-                    aria-label={armed === "rm:" + q.track ? "Really take it out?" : `Take ${q.title ?? "this song"} out of the queue`}
+                    aria-label={armed === "rm:" + q.track ? `Really take ${q.title ?? "this song"} out?` : `Take ${q.title ?? "this song"} out of the queue`}
                     onclick={() => arm("rm:" + q.track, () => music.removeQueued(q.track))}
                 >
                     {armed === "rm:" + q.track ? "?" : "✕"}

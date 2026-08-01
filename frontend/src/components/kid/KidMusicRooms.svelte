@@ -111,7 +111,7 @@
                     disabled={!!music.busy["ungroup:" + s.id]}
                     onclick={() => arm("split", () => music.ungroupFeatured())}
                 >
-                    {armed === "split" ? "Really split up?" : "🧩 Split up"}
+                    {armed === "split" ? "Split up?" : "🧩 Split up"}
                 </button>
             {/if}
         </div>
