@@ -1344,6 +1344,15 @@ kid's results. Only when no client ID exists at all does the pane say "ask
 a grown-up". `spotifyAccount()` in `internal/api/spotify.go` is the split:
 kid caller → their account, everyone else → the household's.
 
+- **Chromeless means the safe area is the surface's own problem.** There is
+  no app shell above a kid profile — `KidHome` renders straight into the
+  document and the music player is a fixed `inset: 0` overlay — and the app
+  ships `viewport-fit=cover`, so nothing else is reserving the notch, the
+  status bar or the home indicator. Every full-screen kid surface pads for
+  all four itself. Portrait had the heading and the Back chip sitting under
+  the clock; landscape had the first column of lamp tiles under the notch.
+  Bottom sheets are exempt at the top only because they are anchored to the
+  bottom edge and capped short of it (`max-height: 92vh`).
 - **Same brain, same search, same memory.** The player drives its own
   `createPanelMusic({ sonosOnly: true })` — the KEF poll never fires and no
   KEF source can appear — and the search reuses `createSpotify` and

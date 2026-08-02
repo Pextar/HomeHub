@@ -486,8 +486,11 @@
         /* The screen's side gutter, published so the two bands that pin to
            the top of the scrollport — the pane chips, and the search box
            while the keyboard is up — can bleed back out to the edges
-           without hardcoding it. */
-        --km-gutter: var(--space-5);
+           without hardcoding it. It clears a landscape notch, and takes the
+           same value on both sides so that bleed stays symmetric: a gutter
+           that differed left from right would need two negative margins and
+           would read as a mistake on the side without the notch. */
+        --km-gutter: max(var(--space-5), env(safe-area-inset-left), env(safe-area-inset-right));
         /* No top padding on the scroller itself — the sticky chips pin to
            the scrollport edge, and any padding above them would be a gap
            content scrolls through. The header carries it instead. */
@@ -916,8 +919,10 @@
     .km-mini {
         position: fixed;
         z-index: 10;
-        left: var(--space-3);
-        right: var(--space-3);
+        /* Fixed, so it answers to the insets itself — and asymmetry is fine
+           here: nothing measures against it. */
+        left: max(var(--space-3), env(safe-area-inset-left));
+        right: max(var(--space-3), env(safe-area-inset-right));
         bottom: calc(var(--space-3) + env(safe-area-inset-bottom));
         display: flex;
         align-items: center;
@@ -1003,7 +1008,7 @@
     }
 
     @media (min-width: 700px) {
-        .km { --km-gutter: var(--space-7); }
+        .km { --km-gutter: max(var(--space-7), env(safe-area-inset-left), env(safe-area-inset-right)); }
         .km-player, .km-pane, .km-head { max-width: 720px; margin-left: auto; margin-right: auto; }
         .km-panes {
             max-width: 720px;

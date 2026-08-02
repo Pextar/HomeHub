@@ -332,8 +332,15 @@
 <style>
     .kid {
         min-height: 100vh;
-        padding: var(--space-5);
-        padding-bottom: calc(var(--space-5) + env(safe-area-inset-bottom));
+        /* Chromeless: a kid profile renders this straight into the document
+           with no app shell above it, and the app ships viewport-fit=cover —
+           so the notch, the status bar and the home indicator are this one
+           rule's problem. Portrait put "Emma's lamps" under the clock;
+           landscape put the first column of tiles under the notch. */
+        padding: calc(var(--space-5) + env(safe-area-inset-top))
+            max(var(--space-5), env(safe-area-inset-right))
+            calc(var(--space-5) + env(safe-area-inset-bottom))
+            max(var(--space-5), env(safe-area-inset-left));
         background: var(--kid-bg);
     }
     .kid-head {
