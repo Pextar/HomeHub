@@ -14,9 +14,12 @@
      * — "Play next" or "Add to the end" — and says so with a 🎉, since a
      * kid can't watch a count change three taps away.
      *
-     * The box knows when the software keyboard is up (visualViewport) and
-     * the results go dense for it — no sub-lines, no shelf labels — and
-     * typing ends with the keyboard leaving: Enter, or a tap on a result.
+     * The results go dense while the software keyboard is up — no sub-lines,
+     * no shelf labels, and the box itself pins to the top of what's left of
+     * the screen, since the pane chips stand down for the duration. Whether
+     * the keyboard is up is measured once, by the view (KidMusic), because
+     * the mini bar and the chips answer to it too. Typing ends with the
+     * keyboard leaving: Enter, or a tap on a result.
      */
     import { onMount } from "svelte";
     import { api } from "../../lib/api";
@@ -28,7 +31,7 @@
     import type { PanelMusicStore } from "../../lib/panel-music.svelte";
     import type { SpotifyArtistDetail, SpotifyContextDetail, SpotifyItem } from "../../lib/types";
 
-    let { music }: { music: PanelMusicStore } = $props();
+    let { music, kbOpen = false }: { music: PanelMusicStore; kbOpen?: boolean } = $props();
 
     // Recent searches, keyed by the featured room with the same key format
     // the app uses — a search run here lands in the same per-room history
@@ -80,23 +83,6 @@
         if (window.matchMedia("(pointer: fine)").matches) searchEl?.focus();
         else searchEl?.blur();
     }
-
-    // ── Type mode: dense results while the software keyboard is up ──────
-    let kb = $state(0);
-    const kbOpen = $derived(kb > 150);
-    onMount(() => {
-        const vv = window.visualViewport;
-        if (!vv) return;
-        const measure = () => {
-            kb = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
-        };
-        vv.addEventListener("resize", measure);
-        vv.addEventListener("scroll", measure);
-        return () => {
-            vv.removeEventListener("resize", measure);
-            vv.removeEventListener("scroll", measure);
-        };
-    });
 
     // ── Results ──────────────────────────────────────────────────────────
     const KINDS = [
@@ -483,6 +469,9 @@
             {/if}
         {/if}
     {:else}
+        <!-- The wrapper only earns its keep while the keyboard is up, when it
+             becomes the band the box pins to (see .kb-open below). -->
+        <div class="kms-boxwrap">
         <div class="kms-box">
             <span class="kms-box-emoji" aria-hidden="true">🔎</span>
             <input
@@ -503,6 +492,7 @@
             {#if spotify.query}
                 <button class="kms-clear" aria-label="Clear search" onclick={clearQuery}>✕</button>
             {/if}
+        </div>
         </div>
 
         {#if spotify.results}
@@ -587,7 +577,7 @@
         {:else if spotify.results}
             {#if sections.length === 0}
                 <div class="kms-empty">
-                    <div class="kms-empty-emoji">�</div>
+                    <div class="kms-empty-emoji">🔎</div>
                     <p>No matches for “{spotify.query}”<br />Try something else!</p>
                 </div>
             {:else}
@@ -869,6 +859,12 @@
         color: var(--text-muted);
         flex-shrink: 0;
     }
+    /* On a phone the length was being paid for by the title and artist you
+       choose a song by — the trade DESIGN.md §15.9 already settled for the
+       app's rows, applied to the kid's. */
+    @media (max-width: 480px) {
+        .kms-dur { display: none; }
+    }
     .kms-plus {
         width: 52px;
         min-height: 52px;
@@ -889,11 +885,14 @@
 
     .kms-qactions {
         display: flex;
+        flex-wrap: wrap;
         gap: var(--space-2);
         padding-left: var(--space-3);
     }
     .kms-qbtn {
-        flex: 1;
+        /* Both on one line where they fit; stacked full-width on a narrow
+           phone rather than wrapping "Add to the end" onto two lines. */
+        flex: 1 1 190px;
         font-size: 1rem;
         font-weight: 800;
         padding: 12px 16px;
@@ -1224,7 +1223,23 @@
     .kms-paste-btn:disabled { opacity: 0.5; }
 
     /* ── Type mode: the software keyboard is up, so results go dense —
-         no sub-lines, no labels, no kind chips — and more matches fit. ── */
+         no sub-lines, no labels, no kind chips — and more matches fit.
+         The view has hidden its pane chips for the duration, which frees
+         the top of the scrollport for the box to pin to: typing is exactly
+         when the thing you must not lose sight of is the box. ── */
+    .kb-open .kms-boxwrap {
+        position: sticky;
+        top: 0;
+        z-index: var(--z-sticky);
+        /* Out to the screen edges, on the gutter the view publishes, so the
+           results pass behind a band rather than around a pill's corners. */
+        margin: 0 calc(-1 * var(--km-gutter, 0px));
+        padding: var(--space-2) var(--km-gutter, 0px);
+        background: var(--dock-fill);
+        backdrop-filter: blur(20px) saturate(1.6);
+        -webkit-backdrop-filter: blur(20px) saturate(1.6);
+        border-bottom: 1px solid var(--dock-edge);
+    }
     .kb-open .kms-sub,
     .kb-open .kms-dur,
     .kb-open .kms-label,

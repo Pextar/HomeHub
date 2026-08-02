@@ -1351,19 +1351,60 @@ kid caller → their account, everyone else → the household's.
   kid's tablet lands in the same per-room recents as one from the wall or a
   phone. New music state belongs in those factories, not in a kid copy.
 - **One screen, chip-switched panes.** The featured room's player rides on
-  top (art, rail, transport, modes, faders, the Up-next row that opens the
-  queue); below it three big chips — 🔎 Find, 🎶 Up next, 🔊 Rooms — swap
-  the pane. The panes never unmount, so a search halfway typed survives a
-  peek at the queue. The chips never wrap: they size to their words and
-  scroll sideways on a narrow phone.
-- **The mini bar is the phone's dock, and §15.5's rule is its rule.** The
-  player card is taller than a phone screen, so once it has scrolled
-  _entirely_ away a pill docks at the bottom — art, track, play/pause,
-  next — with the same "fallback, never a duplicate" discipline as the
-  app's dock (even a sliver of card keeps it hidden; its text taps back to
-  the player). A song tapped deep in the results gets its "starting"
-  feedback twice: the row's cover breathes until the poll lands, and the
-  mini bar answers with the new track.
+  top; below it three big chips — 🔎 Find, 🎶 Up next, 🔊 Rooms — swap the
+  pane. The panes never unmount, so a search halfway typed survives a peek
+  at the queue. The chips never wrap: they size to their words and scroll
+  sideways on a narrow phone.
+- **It is a phone surface and nothing else, so the fold is the budget.**
+  The player, the chips and the top of the pane under them have to fit one
+  screen, or a kid opens the module and cannot see the thing they came for.
+  This is the constraint every layout decision here answers to, and it was
+  lost once already: a player carrying every control the wall's does ran
+  past the bottom of an iPhone on its own, pushing search off-screen behind
+  a scroll the kid had no reason to expect.
+  - **The player card holds what a finger comes back to, and nothing
+    else** — art, title, the seek rail, prev/play/next, one volume fader.
+    Play modes and the per-speaker faders are set-and-forget and together
+    they are half a phone screen, so they fold behind one `🎛️ More
+    controls` row. Nothing was dropped: it is one tap away and it stays
+    open for the session.
+  - **The room is named in the header, not in a chip row.** A radio row of
+    every room in the house sat above the player, so the top of the module
+    was the part that almost never changes — the same fault §15.5 settled
+    for the app, and it gets the same answer. The header states the room;
+    tapping it goes to the Rooms pane, which is the one place that owns
+    rooms and is already where they are joined together. A house with one
+    room gets a plain line, since a control that can't do anything isn't
+    one.
+  - **The pane chips pin.** They are the module's whole navigation and a
+    results list is longer than a phone, so they stick to the top of the
+    scrollport on a glass band, and a tap on the chip you are already on
+    scrolls that pane back to its own top. They stand down while the
+    software keyboard is up — the pane you want is the pane you are in —
+    and the search box takes the pinned band instead, because while you are
+    typing that is the one thing you must not lose.
+  - **No Up-next row in the player.** The pinned chip beside it reads
+    `🎶 Up next 12` from anywhere on the screen, which is the row's whole
+    job; the queue pane says the rest, and drops its own heading for the
+    same reason.
+  - **A row's length is not worth its title.** Below 480px the track
+    duration goes from the search and queue rows — it was being paid for by
+    truncating the song and artist a kid picks by, the trade §15.9 already
+    settled for the app's rows.
+- **The mini bar is the phone's dock, and §15.5's rule is its rule.** Once
+  the _transport_ has scrolled away — the buttons the bar copies, not the
+  card around them — a pill docks at the bottom: art, track, play/pause,
+  next, with the same "fallback, never a duplicate" discipline as the app's
+  dock (its text taps back to the top of the screen, where Back is too). It
+  hides while the software keyboard is up rather than sit behind it. A song
+  tapped deep in the results gets its "starting" feedback twice: the row's
+  cover breathes until the poll lands, and the mini bar answers with the
+  new track.
+- **The playing halo breathes on opacity, never on a box-shadow.** The
+  player card is the size of a phone screen, and animating its own shadow
+  repaints all of it every frame for the whole time music plays. The glow
+  lives on a pseudo-element whose opacity animates instead. Anything else
+  in this module that wants to pulse follows the same rule.
 - **The words stay the module's words.** The mode chips keep §15.5's one
   word across surfaces — Shuffle, Repeat, Crossfade, Play similar — with an
   emoji in front, not a rename. Numbers stay mono. Copy that only a kid
@@ -1380,12 +1421,19 @@ kid caller → their account, everyone else → the household's.
   other card's one button is "🤝 Join {star}"; the star's card lists its
   speakers with a ✕ to step one out and a two-tap "Split up" for all.
   Cross-vendor rooms are never created here — with Sonos the only make a
-  kid can reach, there is nothing to explain.
+  kid can reach, there is nothing to explain. **The two things a card does
+  are stacked, never side by side**: the name row moves the ⭐ and says
+  "Tap to play here", and Join sits full width under it — sharing a row
+  with the name truncated another room's name to "🤝 Join Living Ro…" on
+  every phone, on the one button whose whole content is that name.
 - **The seek rail and faders are one primitive** (`components/kid/
 KidSlider.svelte`) — a real range input over a painted track and fill,
   `onInput` for the live drag, `onChange` for the authoritative send, the
   same contract as the Music module's Slider. A source with no duration
-  gets the honest line ("📻 Live radio"), never a fabricated position.
+  gets the honest line ("📻 Live radio"), never a fabricated position, and
+  a room where nothing has played yet gets neither — it offers "🔎 Find
+  something to play" instead, since the empty rail was the answer to a
+  question nobody had asked yet.
   **The kid's volume faders cap at 50** (`VOL_MAX` in `KidMusic.svelte`) —
   loud enough to enjoy, not enough to upset the house; a speaker already
   louder reads its real number and can only be turned down.
@@ -1396,7 +1444,10 @@ KidSlider.svelte`) — a real range input over a painted track and fill,
 - **The software keyboard is part of the flow**, same as the wall: measured
   off `visualViewport`, the results go dense while it's up, and Enter or a
   tap on a result dismisses it. The search input is 18px, so iOS never
-  zooms.
+  zooms. It is measured **once, by the view**, not by the pane that owns
+  the box — three things answer to it (the dense results, the pane chips
+  standing down, the mini bar hiding rather than sitting behind the keys),
+  and three copies of the same listener would drift.
 
 ---
 

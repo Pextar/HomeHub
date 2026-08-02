@@ -49,8 +49,11 @@
         <button class="kmq-find" onclick={onFindMusic}>🔎 Find a song</button>
     </div>
 {:else}
+    <!-- No heading: the pane's own chip is pinned above it and already says
+         "🎶 Up next {n}". The line here earns its place by saying what a tap
+         on a row does, which nothing else does. -->
     <div class="kmq-head">
-        <h3>🎶 Up next <span class="mono">{music.queue.length}</span></h3>
+        <p class="kmq-hint">Tap a song to play it now</p>
         <button
             class="kmq-clear"
             class:armed={armed === "all"}
@@ -111,10 +114,11 @@
         gap: var(--space-3);
         margin-bottom: var(--space-3);
     }
-    .kmq-head h3 {
-        font-size: 1.05rem;
-        font-weight: 800;
-        letter-spacing: -0.01em;
+    .kmq-hint {
+        font-size: 0.9rem;
+        font-weight: 600;
+        color: var(--text-muted);
+        min-width: 0;
     }
     .kmq-clear {
         font-size: 0.9rem;
@@ -219,6 +223,11 @@
         font-weight: 700;
         color: var(--text-muted);
         flex-shrink: 0;
+    }
+    /* On a phone the length was being paid for by the title you pick the
+       song by — the same trade DESIGN.md §15.9 settled for the app's rows. */
+    @media (max-width: 480px) {
+        .kmq-dur { display: none; }
     }
     .kmq-x {
         width: 52px;
