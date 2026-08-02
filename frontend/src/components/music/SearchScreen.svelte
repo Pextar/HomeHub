@@ -32,7 +32,8 @@
     import TrackList from "./TrackList.svelte";
     import MediaCard from "./MediaCard.svelte";
     import { dur } from "../../lib/motion";
-    import { fmtCount, fmtMs, capFirst } from "../../lib/music/format";
+    import { fmtCount, capFirst } from "../../lib/music/format";
+    import { topLine } from "../../lib/music/catalog";
     import type { SpotifyStore } from "../../lib/music/spotify.svelte";
     import type { SearchHistory } from "../../lib/music/history.svelte";
     import type { Destination } from "../../lib/music/destination.svelte";
@@ -138,33 +139,6 @@
             return [item.sub, n].filter(Boolean).join(" · ");
         }
         return item.sub ?? "";
-    }
-
-    const KIND_LABEL: Record<string, string> = {
-        artist: "Artist",
-        album: "Album",
-        playlist: "Playlist",
-        track: "Song",
-    };
-
-    /**
-     * The top result's own line: what identifies it fastest, and nothing
-     * beyond that. An artist's genres were here and pushed the line past a
-     * phone's width — so the one stat that sizes a name stays and the genres
-     * wait for the artist page, where they have a row of their own.
-     */
-    function topLine(item: SpotifyItem): string {
-        const bits = [KIND_LABEL[item.kind]];
-        if (item.kind === "artist") {
-            if (item.followers) bits.push(`${fmtCount(item.followers)} followers`);
-        } else {
-            if (item.sub) bits.push(item.sub);
-            if (item.year) bits.push(item.year);
-            if (item.album) bits.push(item.album);
-            if (item.duration_ms) bits.push(fmtMs(item.duration_ms));
-            if (item.total_tracks) bits.push(`${item.total_tracks} songs`);
-        }
-        return bits.filter(Boolean).join(" · ");
     }
 
     /** A container can be started outright as well as opened — an album is

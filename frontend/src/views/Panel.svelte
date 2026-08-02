@@ -109,6 +109,11 @@
     const music = createPanelMusic();
     // And what's playing — the ambient face carries it.
     const playing = $derived(music.nowPlaying);
+    // Asleep, the panel is a clock: the speakers only need catching up with
+    // often enough that waking is current, and a pushed change still lands
+    // immediately. An always-on tablet polls for years — this is the one
+    // place that cost can be given back without costing anything.
+    $effect(() => music.setIdle(idle));
 
     // Entering the panel marks this device as panel-homed (the dashboard
     // route renders the panel, idle time walks back here); Exit lifts the

@@ -71,9 +71,30 @@
     /* The scrubber owns its column; `flex: 1` would collapse it there. */
     input[type="range"].scrub { flex: none; width: 100%; }
 
+    /* A range input's hit area is its *box*, not its thumb: a 10px-tall
+       track drawn with a 26px knob still only accepts a 10px band of
+       touches, which is well under the §2 floor and hardest to hit exactly
+       where it matters most — a wall panel, at arm's length. The track
+       keeps its drawn weight; the box grows around it with transparent
+       padding, and the background is clipped to the content box so the
+       rail doesn't fatten with it. */
     @media (pointer: coarse) {
-        input[type="range"] { height: 10px; border-radius: 5px; }
-        input[type="range"]::-webkit-slider-thumb { width: 26px; height: 26px; }
+        input[type="range"] {
+            height: 44px;
+            padding-block: 17px;
+            border-radius: 5px;
+            box-sizing: border-box;
+            background-clip: content-box;
+        }
+        input[type="range"]::-webkit-slider-runnable-track {
+            height: 10px;
+            border-radius: 5px;
+        }
+        input[type="range"]::-moz-range-track {
+            height: 10px;
+            border-radius: 5px;
+        }
+        input[type="range"]::-webkit-slider-thumb { width: 26px; height: 26px; margin-top: -8px; }
         input[type="range"]::-moz-range-thumb { width: 26px; height: 26px; }
     }
 </style>
