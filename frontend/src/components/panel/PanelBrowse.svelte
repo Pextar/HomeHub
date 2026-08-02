@@ -412,6 +412,15 @@
     // depth could start at all. Sonos-only, because the list is.
     const favTarget = $derived(featured?.kind === "sonos");
     const favorites = $derived(favTarget ? music.favorites : []);
+
+    /** Nothing at all to idle on — a different panel from a thin one. */
+    const idleEmpty = $derived(
+        recents.list.length === 0 &&
+            favorites.length === 0 &&
+            spotify.myPlaylists.length === 0 &&
+            spotify.recentTracks.length === 0 &&
+            spotify.topTracks.length === 0,
+    );
 </script>
 
 <div class="browse" class:kb-open={kbOpen} style:--kb="{kb}px" in:fade={{ duration: dur(160) }}>
@@ -656,12 +665,21 @@
                                 {/each}
                             {/if}
                         {:else}
-                            <!-- Idle shelves: the room's recent searches,
-                                 then the account's own playlists as an art
-                                 grid — §15.9's rule, since a playlist is
-                                 chosen by its cover as much as its name. A
-                                 tap still plays it whole on the featured
-                                 room, like every container on the wall. -->
+                            <!-- Idle shelves, in the order they answer "put
+                                 something on" without typing — which is the
+                                 whole job on a wall. What was playing lately
+                                 leads, then this room's recent searches, the
+                                 household's favorites, what the account plays
+                                 most, and its playlists as an art grid
+                                 (§15.9: everything but songs is a grid). A
+                                 tap plays it on the featured room, like
+                                 every container on the wall. -->
+                            {#if spotify.recentTracks.length > 0}
+                                <h3 class="s-label">Played recently</h3>
+                                {#each spotify.recentTracks.slice(0, 6) as item (item.uri)}
+                                    {@render resultRow(item, false)}
+                                {/each}
+                            {/if}
                             {#if recents.list.length > 0}
                                 <div class="s-shelf-head">
                                     <h3 class="s-label">Recent searches</h3>
@@ -700,6 +718,12 @@
                                 </div>
                             {/if}
                             {@render favoriteShelf()}
+                            {#if spotify.topTracks.length > 0}
+                                <h3 class="s-label">You play these most</h3>
+                                {#each spotify.topTracks.slice(0, 6) as item (item.uri)}
+                                    {@render resultRow(item, false)}
+                                {/each}
+                            {/if}
                             {#if spotify.myPlaylists.length > 0}
                                 <h3 class="s-label">Your playlists</h3>
                                 <div class="s-pl-grid">
@@ -711,7 +735,8 @@
                                         />
                                     {/each}
                                 </div>
-                            {:else if recents.list.length === 0 && favorites.length === 0}
+                            {/if}
+                            {#if idleEmpty}
                                 <div class="s-empty">
                                     <EmptyState
                                         icon="search"
@@ -721,6 +746,14 @@
                                         compact
                                     />
                                 </div>
+                            {:else if spotify.needsListeningScope}
+                                <!-- Configuration stays in the full view, so
+                                     the wall names the fix rather than
+                                     offering it. -->
+                                <p class="s-note">
+                                    Reconnect Spotify in the Music view to see what you've been
+                                    playing here — this login was made before HomeHub could ask.
+                                </p>
                             {/if}
                         {/if}
                     </div>

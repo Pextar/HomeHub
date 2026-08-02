@@ -40,6 +40,14 @@ export interface SpotifyStore {
   /** Why the last search didn't land. Cleared when one does. */
   readonly error: string | null;
   readonly myPlaylists: SpotifyItem[];
+  /** What this account played last, newest first and de-duplicated. Empty
+   *  on a new account, and on a login that predates the scope. */
+  readonly recentTracks: SpotifyItem[];
+  /** What it plays most, over roughly the last month. */
+  readonly topTracks: SpotifyItem[];
+  /** Connected, but on a grant that can't be asked what it plays — the one
+   *  case worth offering a reconnect for, since everything else works. */
+  readonly needsListeningScope: boolean;
   query: string;
   kindFilter: SpotifyKind;
 
@@ -130,6 +138,8 @@ export function createSpotify(
     loadingMore: false,
     kindFilter: "all" as SpotifyKind,
     myPlaylists: [] as SpotifyItem[],
+    recentTracks: [] as SpotifyItem[],
+    topTracks: [] as SpotifyItem[],
     setupOpen: false,
     clientId: "",
     saving: false,
@@ -152,6 +162,18 @@ export function createSpotify(
       if (s.status.connected && !playlistsLoaded) {
         playlistsLoaded = true;
         s.myPlaylists = await api.spotifyMyPlaylists().catch(() => []);
+        // What the account has been playing: the shelves that let someone
+        // start music without typing, which is the whole point of them.
+        // Only worth asking for on a grant that carries the scope — an
+        // older login would just answer 409, and the surfaces read
+        // `needsListeningScope` to offer the reconnect that fixes it.
+        if (s.status.listening) {
+          const l = await api.spotifyListening().catch(() => null);
+          if (l) {
+            s.recentTracks = l.recent;
+            s.topTracks = l.top;
+          }
+        }
       }
     } catch {
       s.status = null; // integration unavailable — hide the card
@@ -241,6 +263,15 @@ export function createSpotify(
     },
     get myPlaylists() {
       return s.myPlaylists;
+    },
+    get recentTracks() {
+      return s.recentTracks;
+    },
+    get topTracks() {
+      return s.topTracks;
+    },
+    get needsListeningScope() {
+      return !!s.status?.connected && !s.status.listening;
     },
     // With no query the list browses the account's playlists instead of
     // sitting empty. "all" has no array of its own — it's every kind at
@@ -360,7 +391,11 @@ export function createSpotify(
         await api.spotifyDisconnect();
         s.results = null;
         s.query = "";
+        // Everything read as that account goes with it — a disconnected
+        // Spotify must not leave someone's listening on the screen.
         s.myPlaylists = [];
+        s.recentTracks = [];
+        s.topTracks = [];
         playlistsLoaded = false;
         await load();
       } catch (e) {

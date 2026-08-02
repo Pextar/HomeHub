@@ -83,6 +83,13 @@
 
     /** Nothing typed and nothing returned — the shelf's moment. */
     const idle = $derived(!spotify.query && !spotify.results);
+    /** …and nothing to fill it with, which is a different panel. */
+    const idleEmpty = $derived(
+        spotify.myPlaylists.length === 0 &&
+            spotify.recentTracks.length === 0 &&
+            spotify.topTracks.length === 0 &&
+            !spotify.needsListeningScope,
+    );
 
     let searchEl = $state<HTMLInputElement | null>(null);
     let resultsEl = $state<HTMLDivElement | null>(null);
@@ -390,8 +397,6 @@
                                 </button>
                             {/if}
                         {/each}
-                    {:else if spotify.myPlaylists.length > 0}
-                        <span class="eylabel">Your playlists</span>
                     {/if}
                 </div>
                 <!-- Playing on a KEF speaker goes out through Spotify Connect,
@@ -466,8 +471,8 @@
                                 <button class="chip" onclick={clearQuery}>Clear search</button>
                             {/if}
                         </div>
-                    {:else if !spotify.results && spotify.myPlaylists.length === 0}
-                        <!-- No query and no playlists to browse — say what this
+                    {:else if !spotify.results && idleEmpty}
+                        <!-- No query and nothing to browse — say what this
                              box does rather than leaving a blank panel. -->
                         <div class="sp-none">
                             Search Spotify for a song, album, artist or playlist. Songs play on the
@@ -475,13 +480,64 @@
                             them first.
                         </div>
                     {:else if !spotify.results}
-                        <!-- The account's own playlists, as cards: this is
-                             browsing, not a lookup, so it gets the same grid
-                             the search shelves use. -->
-                        <div class="sp-grid">
-                            {#each spotify.myPlaylists as item (item.uri)}
-                                <MediaCard {item} sub={cardSub(item)} onOpen={() => open(item)} />
-                            {/each}
+                        <!-- The idle shelves, in the order they answer "put
+                             something on": what was playing lately, what this
+                             account plays most, then its playlists. The first
+                             two are the reason the box can be left alone —
+                             starting music shouldn't have to begin with
+                             typing, least of all on a wall. -->
+                        <div class="sp-groups">
+                            {#if spotify.recentTracks.length > 0}
+                                <div class="sp-shelf">
+                                    <span class="eylabel">Played recently</span>
+                                    <TrackList
+                                        items={spotify.recentTracks}
+                                        {busy}
+                                        canPlay={!!destination.current}
+                                        queueTarget={destination.sonosTarget}
+                                        onPick={onPlayItem}
+                                        {onEnqueue}
+                                    />
+                                </div>
+                            {/if}
+                            {#if spotify.topTracks.length > 0}
+                                <div class="sp-shelf">
+                                    <span class="eylabel">You play these most</span>
+                                    <TrackList
+                                        items={spotify.topTracks}
+                                        {busy}
+                                        canPlay={!!destination.current}
+                                        queueTarget={destination.sonosTarget}
+                                        onPick={onPlayItem}
+                                        {onEnqueue}
+                                    />
+                                </div>
+                            {/if}
+                            {#if spotify.myPlaylists.length > 0}
+                                <div class="sp-shelf">
+                                    <span class="eylabel">Your playlists</span>
+                                    <div class="sp-grid">
+                                        {#each spotify.myPlaylists as item (item.uri)}
+                                            <MediaCard {item} sub={cardSub(item)} onOpen={() => open(item)} />
+                                        {/each}
+                                    </div>
+                                </div>
+                            {/if}
+                            {#if spotify.needsListeningScope}
+                                <!-- Said once, quietly, where the shelves
+                                     would have been. A grant can't be widened
+                                     by refreshing, so reconnecting is the
+                                     only thing that fixes this — and nothing
+                                     else about the connection is broken. -->
+                                <p class="sp-note sp-scope">
+                                    <Icon name="info" size={14} />
+                                    <span>
+                                        Reconnect Spotify to see what you've been playing — this
+                                        login was made before HomeHub could ask.
+                                    </span>
+                                    <button class="chip" onclick={() => spotify.connect()}>Reconnect</button>
+                                </p>
+                            {/if}
                         </div>
                     {:else if spotify.kindFilter === "all"}
                         <!-- The overview: best single match up top, then one
@@ -748,6 +804,11 @@
     .sp-fail span { flex: 1; min-width: 140px; }
 
     .sp-more { display: flex; justify-content: center; margin-top: var(--space-4); }
+
+    /* The one thing an older login is missing, said where the shelves it
+       would have filled belong — not as a warning, since nothing here is
+       broken. */
+    .sp-scope { margin: 0; }
 
     @media (prefers-reduced-motion: reduce) {
         .sp-results { transition-duration: 0.001ms; }

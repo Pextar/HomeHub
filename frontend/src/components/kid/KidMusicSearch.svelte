@@ -642,8 +642,16 @@
                 {/each}
             {/if}
         {:else}
-            <!-- Idle: the room's recent searches, then the account's
-                 playlists as a cover grid. -->
+            <!-- Idle: what was on lately, then the room's recent searches,
+                 then the playlists as a cover grid. "Again" leads because
+                 it needs no reading and no typing at all — the shortest
+                 path this screen has to sound coming out. -->
+            {#if spotify.recentTracks.length > 0}
+                {@render shelfLabel("🔁 Play it again")}
+                {#each spotify.recentTracks.slice(0, 6) as item (item.uri)}
+                    {@render trackRow(item, null)}
+                {/each}
+            {/if}
             {#if recents.list.length > 0}
                 <div class="kms-shelf-head">
                     {@render shelfLabel("🕘 Recent searches")}
@@ -679,7 +687,7 @@
                 </div>
             {/if}
 
-            {#if recents.list.length === 0 && spotify.myPlaylists.length === 0}
+            {#if recents.list.length === 0 && spotify.myPlaylists.length === 0 && spotify.recentTracks.length === 0}
                 <div class="kms-empty">
                     <div class="kms-empty-emoji">🔎</div>
                     <p>Type a song or a singer<br />to find them!</p>

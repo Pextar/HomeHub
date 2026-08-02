@@ -915,6 +915,24 @@ _up one_.
 - **The result count is announced.** The list changes under a box that
   still has the caret, so a polite live region says how many matched and
   for what. Nothing else on screen says it out loud.
+- **The box idles on what you already play.** Typing is the most expensive
+  thing this module asks for — worst of all on a wall — so an empty box is
+  not an empty screen: **Played recently** leads (the account's history,
+  newest first and de-duplicated, since Spotify records one entry per
+  *play* and a song on repeat is not a shelf), then **You play these most**
+  (the short-term ranking, because the shelf answers "put something on"
+  today rather than summarising a lifetime), then the account's playlists.
+  On the wall the room's recent searches and the household's favorites
+  slot in between, and on the kid surface "Play it again" is the whole
+  idea: no reading, no typing, one tap to sound.
+  These need two scopes (`user-top-read`, `user-read-recently-played`) that
+  logins made before them don't carry, and **a grant cannot be widened by
+  refreshing** — so `status.listening` says whether this login can be
+  asked, the shelves are *absent* rather than empty when it can't, and the
+  offer to reconnect is made once, quietly, where they would have been. It
+  is not a fault: everything else about that connection works, and the
+  copy says so. The same shape as `status.playback` (§15.5), for the same
+  reason.
 - **What the page has already said, the rows don't repeat.** An album's own
   tracks carry neither its cover nor its artist (a featured artist still
   differs, so that survives), and below 560px the trailing play mark goes —

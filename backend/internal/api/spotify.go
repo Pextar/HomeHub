@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"homehub/internal/spotify"
 	"net/http"
 	"os"
@@ -85,6 +86,12 @@ func (s *Server) spotifyStatus(w http.ResponseWriter, r *http.Request) {
 		// fine and can't play, and only a reconnect fixes that — so the
 		// frontend has to be able to tell the difference.
 		"playback": st.Playback,
+		// Whether this login can be asked what the account has been
+		// playing — the shelves a search box idles on. Same story: an
+		// older grant searches fine and simply has nothing to say here,
+		// so the shelves are absent rather than empty, and the offer to
+		// reconnect is made once, quietly, where they would have been.
+		"listening": st.Listening,
 	})
 }
 
@@ -245,6 +252,41 @@ func (s *Server) spotifyPlaylists(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, items)
 }
 
+// spotifyListening handles GET /api/spotify/listening — what this account
+// has been playing, for the shelves a search box idles on.
+//
+// The two halves are read together and **degrade one at a time** (§15.9): a
+// refusal costs its own shelf and never the response, so a brand-new
+// account with no history still gets its top tracks and vice versa. A login
+// that predates the listening scopes is answered 409, which is the frontend's
+// cue to offer a reconnect rather than to report a fault — this is a
+// convenience, not a capability.
+func (s *Server) spotifyListening(w http.ResponseWriter, r *http.Request) {
+	if !s.requireSpotify(w) {
+		return
+	}
+	acc := s.spotifyAccount(r)
+	ctx, cancel := context.WithTimeout(r.Context(), spotifyTimeout)
+	defer cancel()
+
+	out := spotify.Listening{Recent: []spotify.Item{}, Top: []spotify.Item{}}
+	recent, recentErr := acc.RecentTracks(ctx, 12)
+	top, topErr := acc.TopTracks(ctx, 12)
+	// Both refusing for the same reason is the one case worth reporting:
+	// it means the grant, not the account, is the problem.
+	if recentErr != nil && topErr != nil {
+		writeError(w, spotifyErrStatus(recentErr), recentErr.Error())
+		return
+	}
+	if recentErr == nil {
+		out.Recent = recent
+	}
+	if topErr == nil {
+		out.Top = top
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
 // spotifyArtist handles GET /api/spotify/artist?uri=spotify:artist:… — an
 // artist's page: top tracks and albums, for the screen behind a search
 // result (DESIGN.md §15).
@@ -289,9 +331,14 @@ func (s *Server) spotifyContext(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, det)
 }
 
-// spotifyErrStatus maps "not connected" to 409 so the frontend can prompt
-// re-auth, everything else to bad-gateway.
+// spotifyErrStatus maps the two things the user can act on — no account
+// linked, and an account linked before HomeHub asked for the scope this
+// call needs — to 409 so the frontend can prompt for a (re)connect.
+// Everything else is the service's problem, not theirs: bad gateway.
 func spotifyErrStatus(err error) int {
+	if errors.Is(err, spotify.ErrPlaybackScope) || errors.Is(err, spotify.ErrListeningScope) {
+		return http.StatusConflict
+	}
 	if strings.Contains(err.Error(), "not connected") {
 		return http.StatusConflict
 	}

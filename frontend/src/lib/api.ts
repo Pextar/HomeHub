@@ -47,6 +47,7 @@ import type {
   KEFSpotifyView,
   SpotifyStatus,
   SpotifyItem,
+  SpotifyListening,
   SpotifyResults,
   SpotifyArtistDetail,
   SpotifyContextDetail,
@@ -474,6 +475,9 @@ export const api = {
     return req<SpotifyResults>(`/spotify/search?${p}`, { signal: opts.signal });
   },
   spotifyMyPlaylists() { return req<SpotifyItem[]>("/spotify/playlists"); },
+  // What the account has been playing, for the idle shelves. 409 means the
+  // login predates the listening scopes — a reconnect, not a fault.
+  spotifyListening() { return req<SpotifyListening>("/spotify/listening"); },
   // An artist's page — top tracks and albums, behind a search result.
   spotifyArtist(uri: string) {
     return req<SpotifyArtistDetail>(`/spotify/artist?uri=${encodeURIComponent(uri)}`);

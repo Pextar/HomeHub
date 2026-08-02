@@ -40,11 +40,19 @@ const searchMock = vi.fn(
   },
 );
 
+/** What /spotify/status answers — the grant's shape, in practice. */
+let status = { configured: true, connected: true, playback: true, listening: true };
+const listeningMock = vi.fn(async () => ({
+  recent: [track("Recent")],
+  top: [track("Top")],
+}));
+
 vi.mock("../api", () => ({
   api: {
     spotifySearch: (...args: Parameters<typeof searchMock>) => searchMock(...args),
-    spotifyStatus: vi.fn(async () => ({ connected: true })),
+    spotifyStatus: vi.fn(async () => status),
     spotifyMyPlaylists: vi.fn(async () => []),
+    spotifyListening: () => listeningMock(),
   },
 }));
 vi.mock("../stores.svelte", () => ({ toasts: { error: vi.fn() } }));
@@ -83,7 +91,9 @@ beforeEach(() => {
   pages = {};
   holding = false;
   held = [];
+  status = { configured: true, connected: true, playback: true, listening: true };
   searchMock.mockClear();
+  listeningMock.mockClear();
 });
 afterEach(() => vi.useRealTimers());
 
@@ -228,6 +238,41 @@ describe("typing", () => {
     // And the abandoned request, finishing late, changes nothing.
     await release();
     expect(store.resultsQuery).toBe("beatles");
+  });
+});
+
+// ── The shelves that mean nobody has to type ─────────────────────────────
+
+describe("listening shelves", () => {
+  it("loads what the account has been playing", async () => {
+    const { store } = make();
+    await store.load();
+
+    expect(store.recentTracks.map((t) => t.name)).toEqual(["Recent"]);
+    expect(store.topTracks.map((t) => t.name)).toEqual(["Top"]);
+    expect(store.needsListeningScope).toBe(false);
+  });
+
+  it("doesn't ask on a grant that predates the scope, and says why", async () => {
+    // A login made by an older build searches and plays perfectly well and
+    // simply cannot answer this. Asking anyway would just be a 409 per load.
+    status = { ...status, listening: false };
+    const { store } = make();
+    await store.load();
+
+    expect(listeningMock).not.toHaveBeenCalled();
+    expect(store.recentTracks).toEqual([]);
+    expect(store.needsListeningScope).toBe(true);
+  });
+
+  it("costs nothing when the read fails", async () => {
+    listeningMock.mockRejectedValueOnce(new Error("gateway"));
+    const { store } = make();
+    await store.load();
+
+    // The shelves are a convenience: a refusal loses them, not the screen.
+    expect(store.recentTracks).toEqual([]);
+    expect(store.connected).toBe(true);
   });
 });
 
