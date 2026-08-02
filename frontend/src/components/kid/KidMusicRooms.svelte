@@ -57,31 +57,36 @@
         {@const isStar = featured?.key === s.key}
         {@const members = s.members ?? []}
         <div class="kmr-card" class:star={isStar}>
-            <div class="kmr-row">
-                <button
-                    class="kmr-main"
-                    onclick={() => star(s)}
-                    aria-label={isStar ? `${s.title} — the music plays here` : `Make ${s.title} the star room`}
-                    aria-pressed={isStar}
-                >
-                    <span class="kmr-star-emoji" aria-hidden="true">{isStar ? "⭐" : "🔊"}</span>
-                    <span class="kmr-names">
-                        <span class="kmr-name">{s.title}</span>
-                        <span class="kmr-sub">
-                            {memberWord(members.length)}{#if s.playing} · playing 🎵{/if}
-                        </span>
+            <button
+                class="kmr-main"
+                onclick={() => star(s)}
+                aria-label={isStar ? `${s.title} — the music plays here` : `Play in ${s.title} instead`}
+                aria-pressed={isStar}
+            >
+                <span class="kmr-star-emoji" aria-hidden="true">{isStar ? "⭐" : "🔊"}</span>
+                <span class="kmr-names">
+                    <span class="kmr-name">{s.title}</span>
+                    <span class="kmr-sub">
+                        <!-- The ⭐ and the hint above already say what the
+                             star room is; only the other cards need telling
+                             what a tap on them does. -->
+                        {#if !isStar}Tap to play here · {/if}{memberWord(members.length)}{#if s.playing} · playing 🎵{/if}
                     </span>
+                </span>
+                {#if !isStar}<span class="kmr-go" aria-hidden="true">›</span>{/if}
+            </button>
+            <!-- The join button gets its own full-width line: on a phone it
+                 carries another room's name, and sharing a row with this one
+                 truncated it to "🤝 Join Living Ro…". -->
+            {#if !isStar && featured}
+                <button
+                    class="kmr-join"
+                    disabled={!!music.busy["join:" + s.id]}
+                    onclick={() => music.joinSource(s)}
+                >
+                    🤝 Join {featured.title}
                 </button>
-                {#if !isStar && featured}
-                    <button
-                        class="kmr-join"
-                        disabled={!!music.busy["join:" + s.id]}
-                        onclick={() => music.joinSource(s)}
-                    >
-                        🤝 Join {featured.title}
-                    </button>
-                {/if}
-            </div>
+            {/if}
 
             {#if isStar && members.length > 1}
                 <div class="kmr-members">
@@ -144,13 +149,8 @@
         box-shadow: 0 0 0 4px var(--kid-ring);
     }
 
-    .kmr-row {
-        display: flex;
-        align-items: center;
-        gap: var(--space-3);
-    }
     .kmr-main {
-        flex: 1;
+        width: 100%;
         min-width: 0;
         display: flex;
         align-items: center;
@@ -167,10 +167,17 @@
     .kmr-main:active { transform: scale(0.98); }
     .kmr-star-emoji { font-size: 2rem; line-height: 1; flex-shrink: 0; }
     .kmr-names {
+        flex: 1;
         display: flex;
         flex-direction: column;
         gap: 2px;
         min-width: 0;
+    }
+    .kmr-go {
+        flex-shrink: 0;
+        font-size: 1.5rem;
+        font-weight: 800;
+        color: var(--text-muted);
     }
     .kmr-name {
         font-size: 1.15rem;
@@ -187,7 +194,7 @@
     }
 
     .kmr-join {
-        flex-shrink: 0;
+        width: 100%;
         font-size: 1rem;
         font-weight: 800;
         padding: 12px 18px;
@@ -198,7 +205,6 @@
         color: var(--kid-on-text);
         box-shadow: 0 0 0 3px var(--kid-ring);
         cursor: pointer;
-        max-width: 55%;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
