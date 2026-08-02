@@ -39,8 +39,8 @@
     import PanelPlayerCard from "./PanelPlayerCard.svelte";
     import { api } from "../../lib/api";
     import { route, toasts } from "../../lib/stores.svelte";
-    import { createSpotify } from "../../lib/music/spotify.svelte";
-    import { createSearchHistory } from "../../lib/music/history.svelte";
+    import type { SpotifyStore } from "../../lib/music/spotify.svelte";
+    import type { SearchHistory } from "../../lib/music/history.svelte";
     import { fmtCount, fmtMs, capFirst } from "../../lib/music/format";
     import { SEARCH_KINDS as KINDS, topLine } from "../../lib/music/catalog";
     import { dur } from "../../lib/motion";
@@ -49,7 +49,21 @@
     import type { Busy } from "../../lib/music/busy.svelte";
     import type { SpotifyArtistDetail, SpotifyContextDetail, SpotifyItem } from "../../lib/types";
 
-    let { music }: { music: PanelMusicStore } = $props();
+    // The catalog and the room's history are the panel's, not this
+    // component's: the depth is a route away, and a route away and back
+    // used to throw a half-typed search out with the component.
+    let {
+        music,
+        spotify,
+        recents,
+        booted,
+    }: {
+        music: PanelMusicStore;
+        spotify: SpotifyStore;
+        recents: SearchHistory;
+        /** False until the Spotify status read has answered either way. */
+        booted: boolean;
+    } = $props();
 
     // Arriving in the depth pins the destination. Without it the featured
     // room is only ever a fallback — "whatever is playing" — so a speaker
@@ -57,25 +71,18 @@
     // the queue and the next tap at a room nobody chose.
     onMount(() => music.latchFeatured());
 
-    // Recent searches, keyed by the featured room with the same key format
-    // the app uses — a search run on the wall lands in the same per-room
-    // history as one run from a phone, and follows the room chips.
-    const recents = createSearchHistory(() => {
-        const f = music.featured;
-        return f ? `${f.kind}:${f.id}` : null;
-    });
-    const spotify = createSpotify((q, art) => recents.add(q, art));
-    // `status` is null both while loading and when the endpoint refuses
-    // (the Spotify routes are admin-only); `booted` separates the two so a
-    // refusal doesn't hang on skeletons.
-    let booted = $state(false);
-    onMount(() => {
-        void spotify.load().finally(() => {
-            booted = true;
-        });
-    });
-
     const featured = $derived(music.featured);
+
+    /** What a screen reader is told when the list changes under a box that
+     *  still has the caret. */
+    const liveMessage = $derived.by(() => {
+        if (spotify.pending) return "Searching…";
+        if (spotify.error) return "Search failed.";
+        if (!spotify.results) return "";
+        const n = sections.reduce((sum, s) => sum + s.items.length, 0);
+        if (n === 0) return `No results for ${spotify.resultsQuery}.`;
+        return `${n} result${n === 1 ? "" : "s"} for ${spotify.resultsQuery}.`;
+    });
 
     // ── Panes ────────────────────────────────────────────────────────────
     type Pane = "search" | "queue" | "rooms";
@@ -542,8 +549,21 @@
                         </div>
                     {/if}
 
-                    <div class="s-results" bind:this={resultsEl}>
-                        {#if !booted || spotify.searching}
+                    <p class="sr-only" role="status" aria-live="polite">{liveMessage}</p>
+
+                    <div
+                        class="s-results"
+                        class:stale={spotify.stale}
+                        bind:this={resultsEl}
+                        aria-busy={spotify.searching}
+                    >
+                        {#if !booted || spotify.pending}
+                            <!-- Only with nothing on screen yet. A search
+                                 that runs while results are up keeps them
+                                 and dims them: on a wall the list is read
+                                 from across the room, and blanking it on
+                                 every letter is the worst thing this depth
+                                 could do to someone mid-glance. -->
                             <div class="sk-list" aria-hidden="true">
                                 {#each Array(6) as _, i (i)}
                                     <div class="sk-row">
@@ -554,6 +574,19 @@
                                         </span>
                                     </div>
                                 {/each}
+                            </div>
+                        {:else if spotify.error}
+                            <!-- Sized for the wall: the retry is the point,
+                                 and it is a target, not a line of text. -->
+                            <div class="s-empty">
+                                <div class="s-fail">
+                                    <Icon name="info" size={22} />
+                                    <p class="s-fail-line">Couldn't reach Spotify</p>
+                                    <p class="s-fail-why">{spotify.error}</p>
+                                    <button class="s-retry" onclick={() => spotify.retry()}>
+                                        Try again
+                                    </button>
+                                </div>
                             </div>
                         {:else if !spotify.connected}
                             <!-- Setup stays in the full view, but a wall
@@ -581,8 +614,10 @@
                                 <div class="s-empty">
                                     <EmptyState
                                         icon="search"
-                                        title="Nothing found for “{spotify.query}”"
-                                        message="Try another name, song or album."
+                                        title="Nothing found for “{spotify.resultsQuery}”"
+                                        message={spotify.kindFilter === "all"
+                                            ? "Try another name, song or album."
+                                            : "Nothing of that kind matched — the other chips may have it."}
                                         compact
                                     />
                                 </div>
@@ -601,6 +636,23 @@
                                     {#each sec.items as item (item.uri)}
                                         {@render resultRow(item, false)}
                                     {/each}
+                                    <!-- Spotify answers ten per kind and no
+                                         more, so a shelf pages for the rest
+                                         rather than making its own count a
+                                         number nobody can act on. -->
+                                    {#if spotify.hasMore(sec.id)}
+                                        <div class="s-more">
+                                            <button
+                                                class="k-chip"
+                                                disabled={spotify.loadingMore}
+                                                onclick={() => spotify.loadMore(sec.id)}
+                                            >
+                                                {spotify.loadingMore
+                                                    ? "Loading…"
+                                                    : `More ${sec.label.toLowerCase()}`}
+                                            </button>
+                                        </div>
+                                    {/if}
                                 {/each}
                             {/if}
                         {:else}
@@ -1155,6 +1207,59 @@
         min-height: 0;
         overflow-y: auto;
         padding-bottom: var(--space-2);
+        transition: opacity var(--t-fast);
+    }
+    /* A newer search running behind the list: it stays and dims, and stops
+       taking taps — a row tapped while it is being replaced would play
+       whatever landed in its place. */
+    .s-results.stale {
+        opacity: 0.45;
+        pointer-events: none;
+    }
+
+    .s-more {
+        display: flex;
+        justify-content: center;
+        margin-top: var(--space-3);
+    }
+
+    /* The search didn't get through. On a wall the retry has to be a target
+       rather than a sentence with a link in it. */
+    .s-fail {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: var(--space-2);
+        text-align: center;
+        color: var(--text-dim);
+    }
+    .s-fail-line {
+        margin: 0;
+        font-size: 16px;
+        color: var(--text-mute);
+    }
+    .s-fail-why {
+        margin: 0;
+        font-size: 12.5px;
+        max-width: 42ch;
+    }
+    .s-retry {
+        margin-top: var(--space-2);
+        min-height: 48px;
+        padding: 0 var(--space-5);
+        border-radius: var(--r-pill);
+        border: 1px solid var(--border-strong);
+        background: var(--card-2);
+        color: var(--text);
+        font-family: inherit;
+        font-size: 14px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: transform var(--t-fast);
+    }
+    .s-retry:active {
+        transform: scale(0.96);
+        transition-duration: 80ms;
     }
     .s-label {
         margin: var(--space-4) 0 var(--space-2);
@@ -1717,6 +1822,12 @@
             content: "";
             position: absolute;
             inset: -10px;
+        }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        .s-results {
+            transition-duration: 0.001ms;
         }
     }
 

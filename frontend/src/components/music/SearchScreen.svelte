@@ -23,6 +23,13 @@
      * (Escape does the same from inside the field), and arriving here puts the
      * caret in the box — on `(pointer: fine)` only, since auto-focus on a
      * phone throws the software keyboard over the results.
+     *
+     * Two rules about what the results area may do while a search runs.
+     * Re-searching **keeps the list you were reading** and dims it (the
+     * skeleton is for a screen with nothing on it yet) — typing another
+     * letter used to blank the page twice on the way to a word. And a
+     * search that fails **clears** it and says so: a list from the previous
+     * query, sitting under this query's text, reads as an answer.
      */
     import type { Snippet } from "svelte";
     import { tick as flushDOM } from "svelte";
@@ -34,7 +41,7 @@
     import { dur } from "../../lib/motion";
     import { fmtCount, capFirst } from "../../lib/music/format";
     import { topLine } from "../../lib/music/catalog";
-    import type { SpotifyStore } from "../../lib/music/spotify.svelte";
+    import type { SpotifyStore, SpotifyKind } from "../../lib/music/spotify.svelte";
     import type { SearchHistory } from "../../lib/music/history.svelte";
     import type { Destination } from "../../lib/music/destination.svelte";
     import type { Busy } from "../../lib/music/busy.svelte";
@@ -80,6 +87,26 @@
     let searchEl = $state<HTMLInputElement | null>(null);
     let resultsEl = $state<HTMLDivElement | null>(null);
 
+    /** Recent searches are reachable while results are up, not only from an
+     *  empty box: the moment they are most useful is when this search
+     *  didn't pan out. They ride under the box while it has the caret —
+     *  the shape every search box uses for its suggestions. */
+    let boxFocused = $state(false);
+    const showRecents = $derived(
+        recents.list.length > 0 && (!spotify.results || boxFocused) && !spotify.pending,
+    );
+
+    /** What a screen reader is told when the results change underneath a
+     *  box that still has the caret. Silence was the alternative. */
+    const liveMessage = $derived.by(() => {
+        if (spotify.pending) return "Searching…";
+        if (spotify.error) return "Search failed.";
+        if (!spotify.results) return "";
+        const n = spotify.shownItems.length;
+        if (n === 0) return `No results for ${spotify.resultsQuery}.`;
+        return `${n} result${n === 1 ? "" : "s"} for ${spotify.resultsQuery}.`;
+    });
+
     // Only where a keyboard is already there. On a phone an auto-focus throws
     // up the software keyboard over the results the user came to look at.
     $effect(() => {
@@ -103,6 +130,14 @@
             e.preventDefault();
             resultsEl?.querySelector<HTMLButtonElement>("button")?.focus();
         }
+    }
+    /** ArrowUp off the first result goes back to the box, so the way in and
+     *  the way out of the list are the same gesture. */
+    function onResultsKey(e: KeyboardEvent) {
+        if (e.key !== "ArrowUp" || !resultsEl) return;
+        if (document.activeElement !== resultsEl.querySelector("button")) return;
+        e.preventDefault();
+        searchEl?.focus();
     }
     function runHistoryQuery(q: string) {
         spotify.runQuery(q);
@@ -290,6 +325,8 @@
                         bind:value={spotify.query}
                         oninput={() => spotify.onQueryInput()}
                         onkeydown={onQueryKey}
+                        onfocus={() => (boxFocused = true)}
+                        onblur={() => (boxFocused = false)}
                     />
                     {#if spotify.query}
                         <button class="icon-btn sp-clear" aria-label="Clear search" onclick={clearQuery}>
@@ -297,7 +334,7 @@
                         </button>
                     {/if}
                 </div>
-                {#if !spotify.query && !spotify.results && recents.list.length > 0}
+                {#if showRecents}
                     <div class="sp-history">
                         <div class="sp-history-head">
                             <span class="eylabel">
@@ -308,7 +345,12 @@
                         <div class="sp-history-list">
                             {#each recents.list as h (h.q)}
                                 <div class="sp-hist-chip">
-                                    <button type="button" class="sp-hist-run" onclick={() => runHistoryQuery(h.q)}>
+                                    <!-- pointerdown, not click: the chip is
+                                         shown while the box has the caret, and
+                                         a click would arrive after the blur
+                                         that hides it. -->
+                                    <button type="button" class="sp-hist-run"
+                                        onpointerdown={(e) => { e.preventDefault(); runHistoryQuery(h.q); }}>
                                         {#if h.art_url}
                                             <img class="sp-hist-art" class:round={h.round} src={h.art_url} alt="" />
                                         {:else}
@@ -318,7 +360,7 @@
                                     </button>
                                     <button type="button" class="icon-btn sp-hist-x"
                                         aria-label={`Remove "${h.q}" from recent searches`}
-                                        onclick={() => recents.remove(h.q)}>
+                                        onpointerdown={(e) => { e.preventDefault(); recents.remove(h.q); }}>
                                         <Icon name="close" size={10} />
                                     </button>
                                 </div>
@@ -379,10 +421,17 @@
                     </div>
                 {/if}
 
-                <div bind:this={resultsEl}>
-                    {#if spotify.searching}
+                <!-- Announced, because the list changes under a box that
+                     still has the caret and nothing else says so. -->
+                <p class="sr-only" role="status" aria-live="polite">{liveMessage}</p>
+
+                <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+                <div bind:this={resultsEl} class="sp-results" class:stale={spotify.stale}
+                    onkeydown={onResultsKey} role="region" aria-label="Search results" aria-busy={spotify.searching}>
+                    {#if spotify.pending}
                         <!-- Skeletons in the shape of what is coming: one hero,
-                             then rows. Never a spinner. -->
+                             then rows. Never a spinner — and only when there
+                             is nothing already on screen to keep. -->
                         <div class="sp-groups">
                             <div class="skeleton sk-hero"></div>
                             <div class="sp-shelf">
@@ -391,12 +440,30 @@
                                 <div class="skeleton sk-row"></div>
                             </div>
                         </div>
+                    {:else if spotify.error}
+                        <!-- The search didn't get through. Saying so beats
+                             leaving the last query's results sitting under
+                             this query's text. -->
+                        <div class="sp-fail">
+                            <Icon name="info" size={16} />
+                            <span>Couldn't search Spotify — {spotify.error}</span>
+                            <button class="chip" onclick={() => spotify.retry()}>Try again</button>
+                        </div>
                     {:else if spotify.results && spotify.shownItems.length === 0}
-                        <div class="sp-none">
-                            {#if spotify.kindFilter === "all"}
-                                No results for "{spotify.query.trim()}".
+                        <div class="sp-none sp-none-act">
+                            <span>
+                                {#if spotify.kindFilter === "all"}
+                                    Nothing matched "{spotify.resultsQuery}".
+                                {:else}
+                                    No {spotify.kindFilter} matched "{spotify.resultsQuery}".
+                                {/if}
+                            </span>
+                            {#if spotify.kindFilter !== "all"}
+                                <button class="chip" onclick={() => (spotify.kindFilter = "all")}>
+                                    Search everything
+                                </button>
                             {:else}
-                                No {spotify.kindFilter} matched "{spotify.query.trim()}".
+                                <button class="chip" onclick={clearQuery}>Clear search</button>
                             {/if}
                         </div>
                     {:else if !spotify.results && spotify.myPlaylists.length === 0}
@@ -520,6 +587,7 @@
                             {onEnqueue}
                             bind:this={flatList}
                         />
+                        {@render moreRow("tracks")}
                     {:else}
                         <div class="sp-grid">
                             {#each flatItems as item (item.uri)}
@@ -527,12 +595,26 @@
                                     sub={cardSub(item)} onOpen={() => open(item)} />
                             {/each}
                         </div>
+                        {@render moreRow(spotify.kindFilter)}
                     {/if}
                 </div>
             {/if}
         </section>
     {/if}
 </div>
+
+<!-- Spotify answers ten results per kind and no more, so a shelf that has
+     been narrowed to one kind pages for the rest. Rendered only where there
+     is more behind it — a button that answers "no" is worse than none. -->
+{#snippet moreRow(kind: Exclude<SpotifyKind, "all">)}
+    {#if spotify.hasMore(kind)}
+        <div class="sp-more">
+            <button class="chip" disabled={spotify.loadingMore} onclick={() => spotify.loadMore(kind)}>
+                {spotify.loadingMore ? "Loading…" : "Show more"}
+            </button>
+        </div>
+    {/if}
+{/snippet}
 
 <style>
     /* ── Screen head — the §11 shape, matching Speakers ── */
@@ -614,6 +696,12 @@
         flex: 1; min-width: 0; background: none; border: 0; outline: none;
         color: var(--text); font-size: 14px;
     }
+    /* Scoped styles outrank app.css's global input rule, so the 16px floor
+       that stops iOS zooming the page on focus has to be restated here —
+       this box was the one input in the app still short of it. */
+    @media (max-width: 600px), (pointer: coarse) {
+        .sp-input { font-size: 16px; }
+    }
     .sp-clear { width: 30px; height: 30px; flex-shrink: 0; color: var(--text-mute); }
     /* The box already frames the field, so the ring goes on the container —
        a second rounded shape drawn inside it read as a box in a box. */
@@ -635,6 +723,35 @@
     /* One picker for the screen, at the top of it. */
     .sp-where { display: flex; }
     .sp-none { font-size: 12.5px; color: var(--text-mute); line-height: 1.5; }
+    /* A dead end with a way out of it. */
+    .sp-none-act {
+        display: flex; align-items: center; gap: var(--space-3);
+        flex-wrap: wrap;
+    }
+
+    /* Re-searching keeps the list and dims it. `pointer-events: none` is the
+       other half: a row tapped while it is being replaced would act on
+       whatever landed in its place. */
+    .sp-results { transition: opacity var(--t-fast); }
+    .sp-results.stale { opacity: 0.45; pointer-events: none; }
+
+    /* The search didn't get through — not a toast, because the results area
+       is where the answer was expected. */
+    .sp-fail {
+        display: flex; align-items: center; gap: var(--space-2);
+        flex-wrap: wrap;
+        padding: var(--space-3);
+        background: var(--card-2); border: 1px solid var(--hairline);
+        border-radius: var(--r-md);
+        font-size: 12.5px; color: var(--text-mute);
+    }
+    .sp-fail span { flex: 1; min-width: 140px; }
+
+    .sp-more { display: flex; justify-content: center; margin-top: var(--space-4); }
+
+    @media (prefers-reduced-motion: reduce) {
+        .sp-results { transition-duration: 0.001ms; }
+    }
 
     /* One-line explanation above the results, for a destination that needs
        something before it can play. Quiet: it isn't a fault, it's a step. */

@@ -884,6 +884,37 @@ _up one_.
   carousel: a rail hid half the matches behind a horizontal swipe on the
   screen where they were hardest to reach.
 - **The kind filter counts.** `Albums 7` is a decision; `Albums` is a guess.
+  Spotify answers at most ten per kind, so a count that reads `10` is a
+  page rather than a total, and a narrowed shelf offers **Show more** to
+  page past it with an offset (`SearchPage` in `internal/spotify`). The
+  end of a list announces itself by a page coming back short — there is no
+  total on the wire worth trusting — and a repeat handed back twice is
+  dropped, because the catalog can shift between two requests.
+- **A running search never blanks the screen.** Typing is debounced, so a
+  search fires on the way to a word, and the results already up are the
+  ones being read. They **stay and dim** (`stale`); the skeleton is only
+  for a screen with nothing on it yet (`pending`). The dimmed list also
+  stops taking taps — a row acted on while it is being replaced would act
+  on whatever lands in its place.
+- **A failed search clears the list and says so.** The previous query's
+  results sitting under this query's text read as an answer. The results
+  area carries the failure and the retry, because that is where the answer
+  was expected; the toast was easy to miss and impossible on a kiosk.
+- **Only searches that found something are remembered.** A room's history
+  is eight slots deep, and remembering on the way *in* meant every typo,
+  every zero-result query and every failed request took one from a query
+  that worked. Recents are also reachable **while results are up** — under
+  the box whenever it has the caret — since the moment they are most
+  useful is when this search didn't pan out.
+- **A superseded search is called off.** Each search owns an
+  `AbortController`; the next one aborts it. A fast typist otherwise leaves
+  four requests in flight against the rate limit for answers nobody reads.
+  Below two characters the typing path doesn't search at all — one letter
+  matches everything and costs a round trip to say so — though Enter still
+  runs whatever is in the box, for the names that short.
+- **The result count is announced.** The list changes under a box that
+  still has the caret, so a polite live region says how many matched and
+  for what. Nothing else on screen says it out loud.
 - **What the page has already said, the rows don't repeat.** An album's own
   tracks carry neither its cover nor its artist (a featured artist still
   differs, so that survives), and below 560px the trailing play mark goes —
@@ -1342,6 +1373,18 @@ constraint made visible.
   leads with them and puts the pointer to setup underneath, rather than
   being a dead end with a sentence on it. Spotify setup itself stays in
   the full view, because configuration is the full app's job.
+  **A search survives leaving the depth.** The catalog store and the
+  room's history are the panel's, next to the speakers
+  (`views/Panel.svelte`), not the depth's — the music screen is a route
+  away, and a route away and back used to throw a half-typed search out
+  with the component. Typing is the wall's most expensive gesture; walking
+  off to fetch something must not cost it twice. Falling asleep is where
+  it ends: the ambient face clears the query, because keeping it until the
+  *next* person walks up to the wall is somebody else's half-typed
+  question. §15.9's search rules otherwise apply here unchanged, and matter
+  more: a list blanked on every keystroke is worst when it is being read
+  from across a room, and a failure needs a retry that is a target rather
+  than a sentence with a link in it.
 - **Grouping on the wall is Sonos-native and tap-based.** The app's
   drag would be imprecise at arm's length, so the Rooms pane names the
   action instead: every other Sonos room gets "Join {featured}", the

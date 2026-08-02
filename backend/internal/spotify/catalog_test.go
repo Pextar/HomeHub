@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 )
@@ -289,5 +290,65 @@ func TestYearOf(t *testing.T) {
 		if got := yearOf(in); got != want {
 			t.Errorf("yearOf(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+// A shelf that can't go past its tenth result makes its own count ("Songs
+// 10") a number nobody can act on, so "show more" pages with an offset —
+// the only way past Spotify's limit cap. One kind at a time, since that is
+// what a narrowed shelf is asking for.
+func TestSearchPagePagesOneKind(t *testing.T) {
+	var sent url.Values
+	c := connected(t, "", roundTripFunc(func(r *http.Request) *http.Response {
+		sent = r.URL.Query()
+		return jsonResponse(http.StatusOK, `{}`)
+	}))
+
+	if _, err := c.For("").SearchPage(context.Background(), "adele", "tracks", 10, 10); err != nil {
+		t.Fatal(err)
+	}
+	if got := sent.Get("type"); got != "track" {
+		t.Errorf("type = %q, want the one kind asked for", got)
+	}
+	if got := sent.Get("offset"); got != "10" {
+		t.Errorf("offset = %q, want 10", got)
+	}
+}
+
+// An unknown kind is not a failure: a caller asking for something this
+// version doesn't have gets the broad search rather than an error, and a
+// zero offset is left off the wire entirely.
+func TestSearchPageFallsBackToTheBroadSearch(t *testing.T) {
+	var sent url.Values
+	c := connected(t, "", roundTripFunc(func(r *http.Request) *http.Response {
+		sent = r.URL.Query()
+		return jsonResponse(http.StatusOK, `{}`)
+	}))
+
+	if _, err := c.For("").SearchPage(context.Background(), "adele", "podcasts", 10, 0); err != nil {
+		t.Fatal(err)
+	}
+	if got := sent.Get("type"); got != "track,album,playlist,artist" {
+		t.Errorf("type = %q, want every kind", got)
+	}
+	if _, ok := sent["offset"]; ok {
+		t.Errorf("offset was sent for the first page: %q", sent.Get("offset"))
+	}
+}
+
+// Spotify refuses offset+limit past 1000. A caller paging forever must hit
+// the end of the list, not a 400.
+func TestSearchPageClampsTheDeepEnd(t *testing.T) {
+	var sent url.Values
+	c := connected(t, "", roundTripFunc(func(r *http.Request) *http.Response {
+		sent = r.URL.Query()
+		return jsonResponse(http.StatusOK, `{}`)
+	}))
+
+	if _, err := c.For("").SearchPage(context.Background(), "adele", "tracks", 10, 5000); err != nil {
+		t.Fatal(err)
+	}
+	if got := sent.Get("offset"); got != "990" {
+		t.Errorf("offset = %q, want it clamped to 990", got)
 	}
 }

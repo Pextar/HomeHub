@@ -797,13 +797,50 @@ func artistLine(artists []wireArtist) string {
 	return strings.Join(names, ", ")
 }
 
+// SearchKinds are the catalog kinds a search can be narrowed to. Empty asks
+// for all four at once, which is what an unfiltered search does.
+var searchTypes = map[string]string{
+	"tracks":    "track",
+	"albums":    "album",
+	"playlists": "playlist",
+	"artists":   "artist",
+}
+
 // Search queries the catalog for tracks, albums, playlists and artists.
 func (a *Account) Search(ctx context.Context, query string, limit int) (*Results, error) {
+	return a.SearchPage(ctx, query, "", limit, 0)
+}
+
+// SearchPage is Search with the two knobs a "show more" needs: one kind
+// rather than all four, and an offset into that kind's results.
+//
+// The offset is the whole point. Spotify caps /search's *limit* at 10 —
+// anything higher is answered 400 "Invalid limit" — so paging is the only
+// way past the tenth result, and a shelf that can't go past ten makes its
+// own count ("Songs 10") a number nobody can act on.
+//
+// `kind` is one of the Results field names ("tracks", "albums",
+// "playlists", "artists"); anything else, including empty, asks for all
+// four. An unknown kind is not an error: a caller asking for a kind this
+// version doesn't have gets the broad search rather than a failure.
+func (a *Account) SearchPage(ctx context.Context, query, kind string, limit, offset int) (*Results, error) {
 	// Spotify quietly tightened /search's cap from the documented 50 down to
 	// 10 — anything higher is answered 400 "Invalid limit", so the clamp has
 	// to be theirs, not the docs'.
 	if limit <= 0 || limit > 10 {
 		limit = 10
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	// Spotify refuses offset+limit past 1000. Clamping here keeps a caller
+	// that pages forever from turning into a 400 at the end of the list.
+	if offset > 1000-limit {
+		offset = 1000 - limit
+	}
+	types := "track,album,playlist,artist"
+	if t, ok := searchTypes[kind]; ok {
+		types = t
 	}
 	var raw struct {
 		Tracks struct {
@@ -819,12 +856,15 @@ func (a *Account) Search(ctx context.Context, query string, limit int) (*Results
 			Items []wireArtistFull `json:"items"`
 		} `json:"artists"`
 	}
-	err := a.apiGet(ctx, "/search", url.Values{
+	params := url.Values{
 		"q":     {query},
-		"type":  {"track,album,playlist,artist"},
+		"type":  {types},
 		"limit": {fmt.Sprint(limit)},
-	}, &raw)
-	if err != nil {
+	}
+	if offset > 0 {
+		params.Set("offset", fmt.Sprint(offset))
+	}
+	if err := a.apiGet(ctx, "/search", params, &raw); err != nil {
 		return nil, err
 	}
 	res := &Results{Tracks: []Item{}, Albums: []Item{}, Playlists: []Item{}, Artists: []Item{}}

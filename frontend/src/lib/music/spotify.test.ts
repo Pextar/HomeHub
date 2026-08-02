@@ -1,0 +1,307 @@
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import type { SpotifyResults, SpotifyItem } from "../types";
+
+/**
+ * The search store's contract with the three screens that draw it.
+ *
+ * Each of these is a rule about what a search box may claim, not a detail
+ * of one layout: what stays on screen while a newer search runs, what
+ * happens to a list when the search behind it fails, which queries earn a
+ * place in a room's short history, and how a shelf gets past the tenth
+ * result Spotify will answer with.
+ */
+
+let results: SpotifyResults;
+let fail: Error | null = null;
+let pages: Record<string, SpotifyItem[]> = {};
+
+/**
+ * Requests can be held mid-flight and released later — the only way to
+ * observe what a screen shows *while* a search runs, and the only way to
+ * land a stale answer after a newer one has taken the screen.
+ */
+let holding = false;
+let held: (() => void)[] = [];
+/** Let every held request finish, and settle what they resolve into. */
+async function release() {
+  const waiting = held;
+  held = [];
+  for (const go of waiting) go();
+  await vi.advanceTimersByTimeAsync(0);
+}
+
+const searchMock = vi.fn(
+  async (_q: string, _limit: number, opts: { kind?: string; offset?: number; signal?: AbortSignal } = {}) => {
+    if (holding) await new Promise<void>((r) => held.push(r));
+    if (opts.signal?.aborted) throw Object.assign(new Error("aborted"), { name: "AbortError" });
+    if (fail) throw fail;
+    if (opts.kind) return { ...empty(), [opts.kind]: pages[`${opts.kind}:${opts.offset ?? 0}`] ?? [] };
+    return results;
+  },
+);
+
+vi.mock("../api", () => ({
+  api: {
+    spotifySearch: (...args: Parameters<typeof searchMock>) => searchMock(...args),
+    spotifyStatus: vi.fn(async () => ({ connected: true })),
+    spotifyMyPlaylists: vi.fn(async () => []),
+  },
+}));
+vi.mock("../stores.svelte", () => ({ toasts: { error: vi.fn() } }));
+vi.mock("../clipboard", () => ({ copyText: vi.fn(async () => true) }));
+
+const { createSpotify } = await import("./spotify.svelte");
+
+function empty(): SpotifyResults {
+  return { tracks: [], albums: [], playlists: [], artists: [] };
+}
+function track(name: string): SpotifyItem {
+  return { kind: "track", uri: "spotify:track:" + name, name } as SpotifyItem;
+}
+function withTracks(...names: string[]): SpotifyResults {
+  return { ...empty(), tracks: names.map(track) };
+}
+
+/** A store plus the remembered queries it wrote. */
+function make() {
+  const remembered: string[] = [];
+  const store = createSpotify((q) => remembered.push(q));
+  return { store, remembered };
+}
+
+/** Type `q` and let the debounce fire. */
+async function type(store: ReturnType<typeof make>["store"], q: string) {
+  store.query = q;
+  store.onQueryInput();
+  await vi.advanceTimersByTimeAsync(500);
+}
+
+beforeEach(() => {
+  vi.useFakeTimers();
+  results = withTracks("One", "Two");
+  fail = null;
+  pages = {};
+  holding = false;
+  held = [];
+  searchMock.mockClear();
+});
+afterEach(() => vi.useRealTimers());
+
+// ── What stays on screen ─────────────────────────────────────────────────
+
+describe("a search in flight", () => {
+  it("is pending — not stale — when there is nothing on screen yet", async () => {
+    const { store } = make();
+    holding = true;
+    void type(store, "adele");
+    await vi.advanceTimersByTimeAsync(500);
+
+    expect(store.pending).toBe(true);
+    expect(store.stale).toBe(false);
+
+    holding = false;
+    await release();
+    expect(store.pending).toBe(false);
+  });
+
+  it("keeps the previous results and marks them stale, not pending", async () => {
+    // Typing another letter used to blank the list and replace it with
+    // skeletons — twice on the way to one word.
+    const { store } = make();
+    await type(store, "adele");
+    expect(store.results?.tracks).toHaveLength(2);
+
+    holding = true;
+    void type(store, "adeles");
+    await vi.advanceTimersByTimeAsync(500);
+
+    expect(store.stale).toBe(true);
+    expect(store.pending).toBe(false);
+    expect(store.results?.tracks).toHaveLength(2); // still readable
+
+    holding = false;
+    results = withTracks("Three");
+    await release();
+    expect(store.stale).toBe(false);
+    expect(store.results?.tracks).toHaveLength(1);
+  });
+});
+
+// ── What a failure may leave behind ──────────────────────────────────────
+
+describe("a search that fails", () => {
+  it("clears the previous query's results rather than passing them off", async () => {
+    const { store } = make();
+    await type(store, "adele");
+    expect(store.results).not.toBeNull();
+
+    fail = new Error("network down");
+    await type(store, "adelex");
+
+    expect(store.results).toBeNull();
+    expect(store.error).toBe("network down");
+  });
+
+  it("recovers on retry", async () => {
+    const { store } = make();
+    fail = new Error("network down");
+    await type(store, "adele");
+    expect(store.error).not.toBeNull();
+
+    fail = null;
+    store.retry();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(store.error).toBeNull();
+    expect(store.results?.tracks).toHaveLength(2);
+  });
+});
+
+// ── What earns a place in the history ────────────────────────────────────
+
+describe("recent searches", () => {
+  it("remembers a search that found something", async () => {
+    const { store, remembered } = make();
+    await type(store, "adele");
+    expect(remembered).toEqual(["adele"]);
+  });
+
+  it("does not remember a search that found nothing", async () => {
+    // Eight slots per room: a typo that takes one evicts a query that works.
+    const { store, remembered } = make();
+    results = empty();
+    await type(store, "adelle");
+    expect(remembered).toEqual([]);
+  });
+
+  it("does not remember a search that failed", async () => {
+    const { store, remembered } = make();
+    fail = new Error("network down");
+    await type(store, "adele");
+    expect(remembered).toEqual([]);
+  });
+});
+
+// ── What reaches the wire ────────────────────────────────────────────────
+
+describe("typing", () => {
+  it("does not search a single character", async () => {
+    const { store } = make();
+    await type(store, "a");
+    expect(searchMock).not.toHaveBeenCalled();
+  });
+
+  it("searches a single character when it is submitted outright", async () => {
+    const { store } = make();
+    store.query = "a";
+    store.runNow();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(searchMock).toHaveBeenCalled();
+  });
+
+  it("empties back to the idle shelves without waiting out the debounce", async () => {
+    const { store } = make();
+    await type(store, "adele");
+
+    store.query = "";
+    store.onQueryInput();
+    await vi.advanceTimersByTimeAsync(0); // no debounce to wait out
+
+    expect(store.results).toBeNull();
+  });
+
+  it("calls off the search it supersedes", async () => {
+    // A fast typist otherwise leaves four searches in flight, all counting
+    // against the rate limit for answers nobody will read.
+    const { store } = make();
+    holding = true;
+    void type(store, "adele");
+    await vi.advanceTimersByTimeAsync(500);
+
+    const first = searchMock.mock.calls[0][2]?.signal;
+    holding = false;
+    void type(store, "beatles");
+    await vi.advanceTimersByTimeAsync(500);
+
+    expect(first?.aborted).toBe(true);
+
+    // And the abandoned request, finishing late, changes nothing.
+    await release();
+    expect(store.resultsQuery).toBe("beatles");
+  });
+});
+
+// ── Getting past the tenth result ────────────────────────────────────────
+
+describe("paging", () => {
+  const ten = Array.from({ length: 10 }, (_, i) => `t${i}`);
+
+  it("offers more only while the last page came back full", async () => {
+    const { store } = make();
+    results = withTracks(...ten);
+    await type(store, "adele");
+    expect(store.hasMore("tracks")).toBe(true);
+
+    // A short page is how the end of the list announces itself.
+    pages["tracks:10"] = [track("t10")];
+    store.loadMore("tracks");
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(store.results?.tracks).toHaveLength(11);
+    expect(store.hasMore("tracks")).toBe(false);
+  });
+
+  it("does not offer more when the first page was already short", async () => {
+    const { store } = make();
+    await type(store, "adele"); // two tracks
+    expect(store.hasMore("tracks")).toBe(false);
+  });
+
+  it("asks for the kind and offset the shelf is at", async () => {
+    const { store } = make();
+    results = withTracks(...ten);
+    await type(store, "adele");
+
+    store.loadMore("tracks");
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(searchMock).toHaveBeenLastCalledWith("adele", 10, { kind: "tracks", offset: 10 });
+  });
+
+  it("drops a repeat the catalog hands back twice", async () => {
+    // Spotify's paging can repeat an item when the catalog shifts between
+    // requests, and a repeated key breaks the keyed each blocks.
+    const { store } = make();
+    results = withTracks(...ten);
+    await type(store, "adele");
+
+    pages["tracks:10"] = [track("t9"), track("t10")];
+    store.loadMore("tracks");
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(store.results?.tracks).toHaveLength(11);
+  });
+
+  it("discards a page that lands after a new search took the screen", async () => {
+    const { store } = make();
+    results = withTracks(...ten);
+    await type(store, "adele");
+
+    // "More songs" goes out, and is still in the air…
+    holding = true;
+    pages["tracks:10"] = [track("t10")];
+    store.loadMore("tracks");
+    await vi.advanceTimersByTimeAsync(0);
+
+    // …when a different search answers and takes the screen.
+    holding = false;
+    results = withTracks("Something else");
+    await type(store, "beatles");
+    expect(store.results?.tracks).toHaveLength(1);
+
+    // The page now lands. It belongs to a query nobody is looking at.
+    await release();
+    expect(store.resultsQuery).toBe("beatles");
+    expect(store.results?.tracks).toHaveLength(1);
+  });
+});

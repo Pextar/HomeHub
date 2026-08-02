@@ -200,7 +200,13 @@ func (s *Server) spotifyDisconnect(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// spotifySearch handles GET /api/spotify/search?q=…&limit=…
+// spotifySearch handles GET /api/spotify/search?q=…&limit=…&kind=…&offset=…
+//
+// `kind` narrows the search to one of tracks/albums/playlists/artists and
+// `offset` pages into it — together they are what a shelf's "Show more"
+// needs, since Spotify caps a search's limit at 10 and paging is the only
+// way to an eleventh result. Both are optional: without them this is the
+// broad four-kind search every first query makes.
 func (s *Server) spotifySearch(w http.ResponseWriter, r *http.Request) {
 	if !s.requireSpotify(w) {
 		return
@@ -211,9 +217,11 @@ func (s *Server) spotifySearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+	kind := r.URL.Query().Get("kind")
 	ctx, cancel := context.WithTimeout(r.Context(), spotifyTimeout)
 	defer cancel()
-	res, err := s.spotifyAccount(r).Search(ctx, q, limit)
+	res, err := s.spotifyAccount(r).SearchPage(ctx, q, kind, limit, offset)
 	if err != nil {
 		writeError(w, spotifyErrStatus(err), err.Error())
 		return
