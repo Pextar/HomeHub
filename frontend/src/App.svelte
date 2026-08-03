@@ -53,6 +53,15 @@
                     }
                 },
                 onNeedRefresh() {
+                    // A panel-homed device is a wall kiosk: no chrome, and
+                    // nobody standing at it to tap a "Refresh" toast — it
+                    // would just keep running whatever build it booted with
+                    // indefinitely. Update it itself; a reload it drives on
+                    // its own is far cheaper than a fix that never arrives.
+                    if (uiPrefs.panelHome) {
+                        void updateSW?.(true);
+                        return;
+                    }
                     toasts.show({
                         title: "Update ready",
                         message: "A new version is available.",
