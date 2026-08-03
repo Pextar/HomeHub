@@ -1167,6 +1167,12 @@
         font-family: inherit;
         font-size: 17px; /* ≥16px keeps iOS from auto-zooming on focus */
         outline: none;
+        /* The kiosk root disables selection (user-select: none) so the wall
+           panel can't be text-selected by a stray touch. Safari treats that
+           as inherited focus suppression too: without opting this input back
+           in, a tap never raises the software keyboard. */
+        user-select: text;
+        -webkit-user-select: text;
     }
     input::placeholder {
         color: var(--text-dim);
