@@ -1316,16 +1316,35 @@ constraint made visible.
   in `components/panel/`). Both depths get the scrubber — seek on a
   Sonos track, a read-only rail elsewhere, an honest no-position line
   where there is no duration — and a Sonos coordinator's play-mode
-  chips (shuffle, repeat, crossfade). Cover art is square, because
-  records are — it is the frame that gives when a tall card runs out of
-  room, never the controls. The volume row carries a **−/+ step** either
+  chips (shuffle, repeat, crossfade).
+  **The card is two regions, and which one a control is in is the layout
+  decision.** Below a hairline sits the strip that never moves — the
+  scrubber, prev/play/next, and the room's fader — because a wall is
+  tapped in passing and the tapping half has to be where it was last
+  time. Above it, everything else scrolls: the cover, what is playing,
+  and the room's preferences. There is no room on a 768px panel for both
+  a cover worth looking at and every preference at once, and the cover is
+  the half that is read from across the room, so it takes the scrolling
+  region's height and the preferences take the scroll. When something
+  does ride below it, the cover holds back a sliver of that first row: a
+  kiosk has no scrollbar, and a region whose content stops exactly at its
+  own edge gives no sign that it moves.
+  Cover art is square, because records are — and it gives way as a
+  square, on both axes together. Sizing it from the *column* (a width
+  plus a ratio) is not the same thing and was a bug for four rounds: the
+  height came from the wrong axis, flexbox shrank the box while the image
+  kept its size, and every record rendered as a letterbox strip of its
+  top third. Height is the scarce axis on a wall, so height leads.
+  The volume row carries a **−/+ step** either
   side of the fader: a rail is an imprecise aim at arm's length, and a
   range input's hit area is its box rather than its knob (which is why
   the shared slider grows to a 44px box on a coarse pointer while the
   rail keeps its drawn weight). The depth's card adds what the
   dashboard's glance surface hasn't room for: one fader per speaker
   under the room-wide one when a group or zone has more than one, the KEF
-  input selector, the **sleep timer** — group-scoped like the play modes,
+  input selector (the per-speaker faders name themselves, since the
+  room-wide one is pinned in the strip rather than sitting above them),
+  the **sleep timer** — group-scoped like the play modes,
   and the one setting the wall has more claim to than the phone, since
   "stop in half an hour" is asked at the light switch on the way to bed —
   and the Up-next row that names the actual next track and opens the
@@ -1340,7 +1359,9 @@ constraint made visible.
   A queued track is the one action here that changes nothing visible, so
   the card confirms it in place for a few seconds — not a toast (§10's
   quiet answer stands, and a kiosk has nobody to dismiss cards), just the
-  one line saying what went in and whether it plays next.
+  one line saying what went in and whether it plays next. That line rides
+  in the pinned strip, since a confirmation at the far end of a scroll
+  nobody took is not a confirmation.
 - **On the music depth, a song plays; an artist opens.** The wall keeps
   the flat gesture where it's about starting sound: a song found by
   search plays, an album or playlist plays whole — the player names what
