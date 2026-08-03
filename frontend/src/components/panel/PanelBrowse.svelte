@@ -1119,6 +1119,7 @@
         flex-direction: column;
         gap: var(--space-3);
         min-height: 0;
+        min-width: 0;
         flex: 1;
     }
     .b-pane {
@@ -1238,7 +1239,9 @@
     .s-results {
         flex: 1;
         min-height: 0;
+        min-width: 0;
         overflow-y: auto;
+        overflow-x: hidden;
         padding-bottom: var(--space-2);
         transition: opacity var(--t-fast);
     }
@@ -1477,6 +1480,7 @@
         display: flex;
         align-items: center;
         gap: var(--space-1);
+        min-width: 0;
         border-radius: var(--r-md);
         transition: background var(--t-fast);
     }
