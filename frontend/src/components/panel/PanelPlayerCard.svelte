@@ -523,15 +523,17 @@
     .p-artwrap {
         position: relative;
         display: block;
-        min-height: 0;
-        flex-shrink: 1;
         /* The art shrinks first when the card runs short on room (see
            .p-open above) — but an <img> sized by aspect-ratio doesn't
            actually shrink with its flex box, it just overflows past it
-           and bleeds onto the transport row underneath. Clipping here
-           turns that into a clean crop instead of an overlap. */
+           and bleeds onto the transport row underneath. Clipping turns
+           that into a crop instead of an overlap; the floor keeps the
+           crop from going all the way to nothing — past it, .p-card's
+           own overflow-y:auto takes over instead. */
         overflow: hidden;
         border-radius: var(--r-md);
+        flex-shrink: 1;
+        min-height: 96px;
     }
     /* Cover art is square, so the frame is too — a fixed height in a
        flexible column crops the top and bottom off every record. It gives
