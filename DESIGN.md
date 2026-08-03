@@ -1413,11 +1413,14 @@ constraint made visible.
   like" — fetched once per URI and kept for the session. From there a
   record or a related artist goes one level deeper still, the back chip
   climbs one level rather than leaving the depth, and Escape walks the
-  same ladder. **The results name their own destination**: the room chips
-  ride on the player column, so the search says "Plays on {room}" above
-  its list — the wall is the surface most likely to be used by whoever
-  walked past it last, and it must never be a guess which room a tap
-  reaches. Arriving in the depth also *pins* that room: the featured
+  same ladder. **The results name their own destination**: the search
+  says "Plays on {room}" above its list — the wall is the surface most
+  likely to be used by whoever walked past it last, and it must never be a
+  guess which room a tap reaches. It rides on the pane switcher's own row
+  rather than on a band of its own, because **on a 656px column every band
+  above the results is a result you can't see**: panes, box, destination,
+  kind filter and the top result's label came to five of them, and left
+  room for three songs. Arriving in the depth also *pins* that room: the featured
   source is otherwise a fallback ("whatever is playing"), and a speaker
   starting up elsewhere between typing and tapping would move the
   destination under the finger. Queueing without interrupting is two

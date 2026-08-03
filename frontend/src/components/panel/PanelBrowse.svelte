@@ -441,29 +441,52 @@
     <div class="b-body">
         <section class="b-left">
             {#if !topLevel}
-                <div class="p-panes" role="group" aria-label="Music panes">
-                    <button
-                        class="k-chip"
-                        class:active={pane === "search"}
-                        onclick={() => (pane = "search")}
-                    >
-                        Search
-                    </button>
-                    <button
-                        class="k-chip"
-                        class:active={pane === "queue"}
-                        onclick={() => (pane = "queue")}
-                    >
-                        Queue{#if featured?.kind === "sonos" && queueCount > 0}
-                            <span class="mono">{queueCount}</span>{/if}
-                    </button>
-                    <button
-                        class="k-chip"
-                        class:active={pane === "rooms"}
-                        onclick={() => (pane = "rooms")}
-                    >
-                        Rooms <span class="mono">{music.sources.length}</span>
-                    </button>
+                <!-- The pane switcher and the destination share one band.
+                     They were two stacked rows, and on a 656px column every
+                     band above the results is a result you can't see: five
+                     of them (panes, box, destination, kind filter, the top
+                     result's own label) left room for three songs. -->
+                <div class="p-panerow">
+                    <div class="p-panes" role="group" aria-label="Music panes">
+                        <button
+                            class="k-chip"
+                            class:active={pane === "search"}
+                            onclick={() => (pane = "search")}
+                        >
+                            Search
+                        </button>
+                        <button
+                            class="k-chip"
+                            class:active={pane === "queue"}
+                            onclick={() => (pane = "queue")}
+                        >
+                            Queue{#if featured?.kind === "sonos" && queueCount > 0}
+                                <span class="mono">{queueCount}</span>{/if}
+                        </button>
+                        <button
+                            class="k-chip"
+                            class:active={pane === "rooms"}
+                            onclick={() => (pane = "rooms")}
+                        >
+                            Rooms <span class="mono">{music.sources.length}</span>
+                        </button>
+                    </div>
+                    {#if pane === "search"}
+                        <!-- Where a tap lands, said where the tapping
+                             happens: the results are otherwise the one place
+                             on the wall that never names its own
+                             destination, and a wall is the surface most
+                             likely to be used by whoever walked past it
+                             last. -->
+                        <p class="s-dest">
+                            <Icon name="speaker" size={14} />
+                            <span
+                                >{featured
+                                    ? `Plays on ${featured.title}`
+                                    : "No speaker is answering"}</span
+                            >
+                        </p>
+                    {/if}
                 </div>
             {/if}
 
@@ -527,21 +550,6 @@
                             </button>
                         {/if}
                     </div>
-
-                    <!-- Where a tap lands, said where the tapping happens.
-                         The room chips ride on the player column, so without
-                         this the results are the one place on the wall that
-                         never names its own destination — and the wall is
-                         the surface most likely to be used by whoever walked
-                         past it last. -->
-                    <p class="s-dest">
-                        <Icon name="speaker" size={14} />
-                        <span
-                            >{featured
-                                ? `Plays on ${featured.title}`
-                                : "No speaker is answering"}</span
-                        >
-                    </p>
 
                     {#if spotify.results}
                         {@const r = spotify.results}
@@ -1082,6 +1090,13 @@
         gap: var(--space-3);
         min-height: 0;
         min-width: 0;
+    }
+    .p-panerow {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-3);
+        flex-shrink: 0;
     }
     .p-panes {
         display: flex;
