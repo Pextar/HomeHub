@@ -81,6 +81,28 @@
     const sleepOn = $derived(music.sleepMinutes > 0);
 </script>
 
+<!-- The art, identical either side of the tap-through button, so the two
+     branches can't drift. `.p-artbox` is the square itself — the frame that
+     gives way when the card runs short — and the waveform hangs off it
+     rather than off the flexible full-width slot it sits in, or it would
+     float in the margin beside a shrunk cover. -->
+{#snippet art()}
+    {#if featured}
+        <span class="p-artwrap" class:full>
+            <span class="p-artbox">
+                {#if featured.art}
+                    <img class="p-art" src={featured.art} alt="" loading="lazy" />
+                {:else}
+                    <span class="p-art placeholder">[ art ]</span>
+                {/if}
+                {#if featured.playing}
+                    <span class="p-wave"><Waveform /></span>
+                {/if}
+            </span>
+        </span>
+    {/if}
+{/snippet}
+
 {#if music.sources.length > 1}
     <div class="p-sources" role="group" aria-label="Room">
         {#each music.sources as s (s.key)}
@@ -111,16 +133,7 @@
                 aria-label="Open music — {featured.trackTitle ??
                     (featured.playing ? 'playing' : 'nothing playing')} on {featured.title}"
             >
-                <span class="p-artwrap" class:full>
-                    {#if featured.art}
-                        <img class="p-art" class:full src={featured.art} alt="" loading="lazy" />
-                    {:else}
-                        <span class="p-art placeholder" class:full>[ art ]</span>
-                    {/if}
-                    {#if featured.playing}
-                        <span class="p-wave"><Waveform /></span>
-                    {/if}
-                </span>
+                {@render art()}
 
                 <span class="p-track">
                     <span class="p-title">
@@ -133,16 +146,7 @@
                 </span>
             </button>
         {:else}
-            <div class="p-artwrap" class:full>
-                {#if featured.art}
-                    <img class="p-art" class:full src={featured.art} alt="" loading="lazy" />
-                {:else}
-                    <span class="p-art placeholder" class:full>[ art ]</span>
-                {/if}
-                {#if featured.playing}
-                    <span class="p-wave"><Waveform /></span>
-                {/if}
-            </div>
+            {@render art()}
 
             <div class="p-track">
                 <span class="p-title">
@@ -477,6 +481,9 @@
     }
 
     .p-card {
+        /* How small the cover may get before the card starts scrolling
+           instead. Shared, because .p-open's own floor is built from it. */
+        --art-floor: 96px;
         flex: 1;
         min-height: 0;
         display: flex;
@@ -512,67 +519,73 @@
         border-radius: var(--r-md);
         min-width: 0;
         /* The art is what gives first, so a tall card's controls stay put
-           instead of scrolling off the bottom of the panel. */
-        min-height: 0;
+           instead of scrolling off the bottom of the panel — but only down
+           to .p-artwrap's floor. This deliberately does NOT set
+           `min-height: 0`: that waived the automatic minimum size, so the
+           card squeezed this button below art-floor + text and the clip
+           below sliced the subtitle through the middle of its glyphs.
+           `min-height: auto` can't state the floor either — it would be
+           read off .p-artwrap's *ratio* (a full-width square, ~294px), so
+           the art could never shrink at all and the card scrolled from the
+           first pixel. So the floor is spelled out: the art's own floor,
+           the gap, and the two lines of meta under it. Past that,
+           .p-card's overflow-y takes over, which is the intended
+           hand-off. */
         flex-shrink: 1;
-        /* min-height: 0 lets this whole button — art plus track text — get
-           squeezed thinner than its children's combined min size. .p-artwrap
-           clips its own overflow, but .p-track doesn't, so without clipping
-           here too the title/subtitle bleed straight through onto the
-           transport row underneath instead of handing off to .p-card's
-           scroll like the floor above is supposed to. */
+        min-height: calc(var(--art-floor) + var(--space-4) + 56px);
+        /* Belt to those braces: nothing should reach it now, but a stray
+           overflow crops rather than bleeding onto the transport row. */
         overflow: hidden;
     }
     .p-open:focus-visible {
         box-shadow: var(--focus-ring);
     }
 
+    /* The frame is what gives when the card runs out of room, never the
+       controls (§16) — and it has to give as a *square*, on both axes at
+       once. Sizing the art `width: 100%` + `aspect-ratio` derived its
+       height from the *column* instead, so flexbox shrank the box it sat
+       in while the <img> kept its full height, and the crop that was there
+       to catch the overflow sliced every cover down to a letterbox strip
+       of its top third.
+       Height is the scarce axis on a 768px wall, so height leads: this
+       slot carries the ratio (a full-width square at rest, flex-shrunk
+       from there) and .p-artbox below takes its height from the slot and
+       its width from the ratio. */
     .p-artwrap {
-        position: relative;
-        display: block;
-        /* The art shrinks first when the card runs short on room (see
-           .p-open above) — but an <img> sized by aspect-ratio doesn't
-           actually shrink with its flex box, it just overflows past it
-           and bleeds onto the transport row underneath. Clipping turns
-           that into a crop instead of an overlap; the floor keeps the
-           crop from going all the way to nothing — past it, .p-card's
-           own overflow-y:auto takes over instead. */
-        overflow: hidden;
-        border-radius: var(--r-md);
-        flex-shrink: 1;
-        min-height: 96px;
-    }
-    /* Cover art is square, so the frame is too — a fixed height in a
-       flexible column crops the top and bottom off every record. It gives
-       way before the controls do when the card runs out of room. */
-    .p-art {
-        width: 100%;
+        display: flex;
+        justify-content: center;
+        flex: 0 1 auto;
         aspect-ratio: 1;
         max-height: 340px;
-        /* Mirrors max-height: without it, once the height clamp kicks in
-           the box stops being a square (full-width, capped height) and
-           object-fit: cover crops the top and bottom off the art to fill
-           that wide rectangle instead of showing the whole cover. */
-        max-width: 340px;
-        object-fit: cover;
-        border-radius: var(--r-md);
-        display: block;
-        margin-inline: auto;
+        /* The floor. Past it, .p-card's own overflow-y:auto takes over. */
+        min-height: var(--art-floor);
     }
     /* The music depth's own card (`full`): its column is wider still, so
        the art — the biggest thing on it — grows to match rather than
        sitting at the dashboard's cap with empty margin either side. */
-    .p-art.full {
+    .p-artwrap.full {
         max-height: 420px;
-        max-width: 420px;
+    }
+    /* The square itself — the cover's actual box, so the radius, the crop
+       and the waveform badge all key off it rather than off the slot,
+       which stays column-wide. */
+    .p-artbox {
+        position: relative;
+        height: 100%;
+        aspect-ratio: 1;
+        max-width: 100%;
+        overflow: hidden;
+        border-radius: var(--r-md);
+    }
+    .p-art {
+        display: block;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
     }
     span.p-art {
         font-size: 11px;
-        aspect-ratio: auto;
-        height: 200px;
-    }
-    span.p-art.full {
-        height: 260px;
     }
     .p-wave {
         position: absolute;
@@ -924,15 +937,27 @@
         }
     }
 
+    /* The reference wall panel is a 1024×768 iPad Air 2 (§16), where the
+       card's whole stack — cover, meta, scrubber, transport, play modes,
+       volume — lands within a dozen pixels of the column it has to fit.
+       Tightening the card's own spacing there is what keeps the cover off
+       its floor, and keeps the depth's extra rows from sitting as far
+       under the fold. Nothing that is a touch target shrinks. */
+    @media (max-height: 820px) and (orientation: landscape) {
+        .p-card {
+            gap: var(--space-3);
+            padding: var(--space-4);
+        }
+        .p-transport {
+            gap: var(--space-4);
+        }
+    }
+
     /* Portrait stack: the art shrinks so the transport stays reachable. */
     @media (orientation: portrait), (max-width: 760px) {
-        .p-art {
+        .p-artwrap,
+        .p-artwrap.full {
             max-height: 280px;
-            max-width: 280px;
-        }
-        .p-art.full {
-            max-height: 320px;
-            max-width: 320px;
         }
         .p-card {
             flex: none;
