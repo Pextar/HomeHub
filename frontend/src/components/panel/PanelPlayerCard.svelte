@@ -111,11 +111,11 @@
                 aria-label="Open music — {featured.trackTitle ??
                     (featured.playing ? 'playing' : 'nothing playing')} on {featured.title}"
             >
-                <span class="p-artwrap">
+                <span class="p-artwrap" class:full>
                     {#if featured.art}
-                        <img class="p-art" src={featured.art} alt="" loading="lazy" />
+                        <img class="p-art" class:full src={featured.art} alt="" loading="lazy" />
                     {:else}
-                        <span class="p-art placeholder">[ art ]</span>
+                        <span class="p-art placeholder" class:full>[ art ]</span>
                     {/if}
                     {#if featured.playing}
                         <span class="p-wave"><Waveform /></span>
@@ -133,11 +133,11 @@
                 </span>
             </button>
         {:else}
-            <div class="p-artwrap">
+            <div class="p-artwrap" class:full>
                 {#if featured.art}
-                    <img class="p-art" src={featured.art} alt="" loading="lazy" />
+                    <img class="p-art" class:full src={featured.art} alt="" loading="lazy" />
                 {:else}
-                    <span class="p-art placeholder">[ art ]</span>
+                    <span class="p-art placeholder" class:full>[ art ]</span>
                 {/if}
                 {#if featured.playing}
                     <span class="p-wave"><Waveform /></span>
@@ -548,21 +548,31 @@
     .p-art {
         width: 100%;
         aspect-ratio: 1;
-        max-height: 260px;
+        max-height: 340px;
         /* Mirrors max-height: without it, once the height clamp kicks in
            the box stops being a square (full-width, capped height) and
            object-fit: cover crops the top and bottom off the art to fill
            that wide rectangle instead of showing the whole cover. */
-        max-width: 260px;
+        max-width: 340px;
         object-fit: cover;
         border-radius: var(--r-md);
         display: block;
         margin-inline: auto;
     }
+    /* The music depth's own card (`full`): its column is wider still, so
+       the art — the biggest thing on it — grows to match rather than
+       sitting at the dashboard's cap with empty margin either side. */
+    .p-art.full {
+        max-height: 420px;
+        max-width: 420px;
+    }
     span.p-art {
         font-size: 11px;
         aspect-ratio: auto;
         height: 200px;
+    }
+    span.p-art.full {
+        height: 260px;
     }
     .p-wave {
         position: absolute;
@@ -917,8 +927,12 @@
     /* Portrait stack: the art shrinks so the transport stays reachable. */
     @media (orientation: portrait), (max-width: 760px) {
         .p-art {
-            max-height: 200px;
-            max-width: 200px;
+            max-height: 280px;
+            max-width: 280px;
+        }
+        .p-art.full {
+            max-height: 320px;
+            max-width: 320px;
         }
         .p-card {
             flex: none;
