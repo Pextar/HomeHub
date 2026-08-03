@@ -515,6 +515,13 @@
            instead of scrolling off the bottom of the panel. */
         min-height: 0;
         flex-shrink: 1;
+        /* min-height: 0 lets this whole button — art plus track text — get
+           squeezed thinner than its children's combined min size. .p-artwrap
+           clips its own overflow, but .p-track doesn't, so without clipping
+           here too the title/subtitle bleed straight through onto the
+           transport row underneath instead of handing off to .p-card's
+           scroll like the floor above is supposed to. */
+        overflow: hidden;
     }
     .p-open:focus-visible {
         box-shadow: var(--focus-ring);
