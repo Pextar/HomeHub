@@ -549,6 +549,11 @@
         width: 100%;
         aspect-ratio: 1;
         max-height: 260px;
+        /* Mirrors max-height: without it, once the height clamp kicks in
+           the box stops being a square (full-width, capped height) and
+           object-fit: cover crops the top and bottom off the art to fill
+           that wide rectangle instead of showing the whole cover. */
+        max-width: 260px;
         object-fit: cover;
         border-radius: var(--r-md);
         display: block;
@@ -913,6 +918,7 @@
     @media (orientation: portrait), (max-width: 760px) {
         .p-art {
             max-height: 200px;
+            max-width: 200px;
         }
         .p-card {
             flex: none;
