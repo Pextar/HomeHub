@@ -1173,6 +1173,12 @@
            in, a tap never raises the software keyboard. */
         user-select: text;
         -webkit-user-select: text;
+        /* The kiosk root also disables the touch callout (-webkit-touch-callout:
+           none) to suppress the copy/paste bubble on a stray touch. That's a
+           second, independent suppressor from user-select: with it inherited
+           here, taps focus the input (caret shows) but Safari still withholds
+           the software keyboard. Opt back in to actually raise it. */
+        -webkit-touch-callout: default;
     }
     input::placeholder {
         color: var(--text-dim);
