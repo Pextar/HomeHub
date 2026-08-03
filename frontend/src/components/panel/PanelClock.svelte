@@ -4,8 +4,11 @@
     import { data, toasts } from "../../lib/stores.svelte";
     import { haptic } from "../../lib/utils";
 
-    // The panel's left column: the clock the room reads from a distance,
-    // the two stats that qualify the home, and the master gesture. All
+    // The panel's status strip, across the top: the clock the room reads
+    // from a distance, the two stats that qualify the home, and the master
+    // gesture. It runs horizontally because it is a thing to *read* — the
+    // height it used to take as a left-hand column now belongs to the music
+    // band, which is the thing a wall is used to drive (DESIGN.md §16). All
     // display values arrive as props — Panel owns the single clock tick.
     let {
         timeLabel,
@@ -43,8 +46,10 @@
 </script>
 
 <section class="hero" aria-label="Clock and home status">
-    <div class="clock mono">{timeLabel}</div>
-    <div class="date">{dateLabel}</div>
+    <div class="when">
+        <div class="clock mono">{timeLabel}</div>
+        <div class="date">{dateLabel}</div>
+    </div>
 
     <div class="stats">
         <div class="stat">
@@ -78,34 +83,45 @@
 <style>
     .hero {
         display: flex;
-        flex-direction: column;
-        min-height: 0;
+        align-items: center;
+        gap: var(--space-5);
+        min-width: 0;
+    }
+    .when {
+        display: flex;
+        align-items: baseline;
+        gap: var(--space-3);
+        min-width: 0;
     }
 
     .clock {
-        font-size: 76px;
+        font-size: 54px;
         font-weight: 500;
         letter-spacing: -0.03em;
         line-height: 1;
+        flex-shrink: 0;
     }
     .date {
-        margin-top: var(--space-2);
         font-size: 15px;
         color: var(--text-mute);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
     }
 
+    /* The stats sit between the clock and the master button and give up
+       the leftover width, so the strip stays one line. */
     .stats {
         display: flex;
         gap: var(--space-3);
-        margin-top: var(--space-6);
+        margin-left: auto;
     }
     .stat {
-        flex: 1;
         min-width: 0;
         display: flex;
         flex-direction: column;
-        gap: 6px;
-        padding: var(--space-3) var(--space-4);
+        gap: 4px;
+        padding: var(--space-2) var(--space-4);
         background: var(--card);
         border: 1px solid var(--hairline);
         border-radius: var(--r-md);
@@ -134,16 +150,15 @@
         color: var(--text-dim);
     }
 
-    /* Master gesture — pinned to the bottom of the column, the one control
-       every panel user reaches for. ON wears the sanctioned gradient. */
+    /* Master gesture — the trailing end of the strip, the one control every
+       panel user reaches for. ON wears the sanctioned gradient. */
     .master {
-        margin-top: auto;
         display: flex;
         align-items: center;
-        gap: var(--space-4);
-        width: 100%;
-        min-height: 68px;
-        padding: var(--space-3) var(--space-5);
+        gap: var(--space-3);
+        flex-shrink: 0;
+        min-height: 64px;
+        padding: var(--space-2) var(--space-4);
         border-radius: var(--r-lg);
         border: 1px solid var(--hairline);
         background: var(--card);
@@ -169,8 +184,8 @@
         border-color: var(--tile-on-border);
     }
     .m-ico {
-        width: 48px;
-        height: 48px;
+        width: 44px;
+        height: 44px;
         border-radius: var(--r-md);
         display: grid;
         place-items: center;
@@ -194,12 +209,31 @@
         min-width: 0;
     }
     .m-title {
-        font-size: 19px;
+        font-size: 17px;
         font-weight: 600;
         letter-spacing: -0.02em;
     }
     .m-sub {
         font-size: 12.5px;
         color: var(--text-mute);
+    }
+
+    /* Portrait / narrow: back to a stacked block — a one-line strip needs
+       landscape width to be one line. */
+    @media (orientation: portrait), (max-width: 900px) {
+        .hero {
+            flex-direction: column;
+            align-items: stretch;
+            gap: var(--space-4);
+        }
+        .clock {
+            font-size: 72px;
+        }
+        .stats {
+            margin-left: 0;
+        }
+        .stat {
+            flex: 1;
+        }
     }
 </style>

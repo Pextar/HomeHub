@@ -4,9 +4,17 @@
     import { data } from "../../lib/stores.svelte";
     import { runAction, roomIcon, haptic } from "../../lib/utils";
 
-    // The panel's centre: one big tile per room, tap toggles the room's
-    // lights. No detail screens, no overflow menus — a wall panel does the
-    // one domestic gesture and nothing else.
+    // The panel's room tiles: tap toggles the room's lights. No detail
+    // screens, no overflow menus — a wall panel does the one domestic
+    // gesture and nothing else.
+    //
+    // `band` is the shape it takes when the panel also has music: a single
+    // row along the bottom rather than a grid filling a column. The tiles
+    // are read far more often than they are pressed — the status of the
+    // house at a glance — so on a surface that also carries a player they
+    // give it the height and keep the width (DESIGN.md §16).
+    let { band = false }: { band?: boolean } = $props();
+
     const v = $derived(data.value);
 
     // Live on-counts derived from socket state (same derivation as the
@@ -49,13 +57,13 @@
     }
 </script>
 
-<section class="rooms" aria-label="Room lights">
+<section class="rooms" class:band aria-label="Room lights">
     <header class="rooms-head">
         <h2>Rooms</h2>
     </header>
 
     {#if rooms.length > 0}
-        <div class="rooms-grid">
+        <div class="rooms-grid" class:band>
             {#each rooms as r (r.id)}
                 {@const anyOn = r.on > 0}
                 <button
@@ -78,7 +86,7 @@
             {/each}
         </div>
     {:else if fallbackDevices.length > 0}
-        <div class="rooms-grid">
+        <div class="rooms-grid" class:band>
             {#each fallbackDevices as s (s.id)}
                 <button
                     class="rtile"
@@ -141,6 +149,23 @@
         overflow-y: auto;
         scrollbar-width: none;
     }
+    /* Band: one row across the foot of the panel. Tiles share the width
+       down to a legible floor and the row scrolls sideways past that —
+       the same bargain the grid makes vertically. */
+    /* One row across the foot of the panel, at the height a tile needs and
+       not a pixel more — the band is `auto` in the panel grid, so every row
+       this doesn't claim goes to the music band above it. Tiles share the
+       width down to a legible floor and the row scrolls sideways past
+       that — the same bargain the grid makes vertically. */
+    .rooms-grid.band {
+        flex: none;
+        grid-template-columns: none;
+        grid-auto-flow: column;
+        grid-auto-columns: minmax(150px, 1fr);
+        grid-auto-rows: 96px;
+        overflow-x: auto;
+        overflow-y: hidden;
+    }
     .rooms-grid::-webkit-scrollbar {
         display: none;
     }
@@ -179,6 +204,7 @@
     .r-ico {
         width: 56px;
         height: 56px;
+        flex-shrink: 0;
         border-radius: var(--r-md);
         display: grid;
         place-items: center;
@@ -246,5 +272,32 @@
     .rooms-empty p {
         margin: 0;
         font-size: 14px;
+    }
+
+    /* The band is short and its tiles are narrow, so they trade the grid's
+       generous badge and name for ones that fit. Laying them out as a row
+       instead was tried and was worse: the icon and the count took the
+       width from the middle and every room read as "Li…". The name is what
+       the tile is for. */
+    .rooms.band .rtile {
+        padding: var(--space-3);
+        gap: var(--space-2);
+    }
+    .rooms.band .r-ico {
+        width: 40px;
+        height: 40px;
+    }
+    .rooms.band .r-name {
+        font-size: 17px;
+    }
+
+    /* Portrait / narrow: the band idea does not survive one column. */
+    @media (orientation: portrait), (max-width: 900px) {
+        .rooms-grid.band {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            grid-auto-flow: row;
+            grid-auto-rows: minmax(120px, 1fr);
+            overflow-x: hidden;
+        }
     }
 </style>

@@ -37,6 +37,7 @@
     import ArtistScreen from "../music/ArtistScreen.svelte";
     import ContextScreen from "../music/ContextScreen.svelte";
     import PanelPlayerCard from "./PanelPlayerCard.svelte";
+    import PanelRoomChips from "./PanelRoomChips.svelte";
     import { api } from "../../lib/api";
     import { route, toasts } from "../../lib/stores.svelte";
     import type { SpotifyStore } from "../../lib/music/spotify.svelte";
@@ -429,6 +430,11 @@
             <Icon name="chevronLeft" size={16} /><span>Panel</span>
         </button>
         <h2>Music</h2>
+        <!-- Where a tap plays. Full-width here rather than stacked in the
+             player column, where six rooms cost three rows of the cover's
+             height (§16); the search below still names the same room in
+             its "Plays on {…}" line. -->
+        <PanelRoomChips {music} />
     </header>
 
     <div class="b-body">
@@ -937,7 +943,10 @@
             disabled={item.kind !== "artist" && music.busy["item:" + item.uri]}
             onclick={() =>
                 item.kind === "artist"
-                    ? void openArtist(item.uri, item.art_url ? { art_url: item.art_url, round: true } : undefined)
+                    ? void openArtist(
+                          item.uri,
+                          item.art_url ? { art_url: item.art_url, round: true } : undefined,
+                      )
                     : pick(item)}
         >
             {#if item.art_url}
@@ -1024,6 +1033,9 @@
         gap: var(--space-4);
         flex-shrink: 0;
     }
+    .b-head :global(.p-sources) {
+        flex: 1 1 auto;
+    }
     /* The way back to the dashboard depth — same quiet pill as the
        panel's Exit chip, mirrored to the leading edge like a detail
        screen's back chevron. */
@@ -1061,7 +1073,7 @@
         flex: 1;
         min-height: 0;
         display: grid;
-        grid-template-columns: minmax(0, 1fr) 380px;
+        grid-template-columns: minmax(0, 1fr) 420px;
         gap: var(--space-5);
     }
 

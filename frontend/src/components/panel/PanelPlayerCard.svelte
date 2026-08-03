@@ -25,13 +25,21 @@
         music,
         onOpen = undefined,
         full = false,
+        wide = false,
         onShowQueue = undefined,
     }: {
         music: PanelMusicStore;
-        /** Given, the art + meta are a button into the music depth. */
+        /** Given, the cover is a button into the music depth. */
         onOpen?: () => void;
         /** The depth's richer card: member faders, KEF inputs, sleep, Up next. */
         full?: boolean;
+        /** Landscape: the cover beside the controls rather than above them.
+         *  The dashboard's music zone is a wide, short band, where a stacked
+         *  cover is capped by what the controls leave of the height and a
+         *  beside-cover is capped by the band's full height instead. Which
+         *  way round is bigger is purely the zone's aspect, so the zone
+         *  says. */
+        wide?: boolean;
         /** The Up-next row's destination — the queue pane. */
         onShowQueue?: () => void;
     } = $props();
@@ -54,11 +62,6 @@
     const repeatText = $derived(
         gs?.repeat === "all" ? "Repeat all" : gs?.repeat === "one" ? "Repeat one" : "Repeat",
     );
-
-    /** How a source chip names its make, for the ones that aren't obvious. */
-    function chipTitle(kind: string): string {
-        return kind === "zone" ? "HomeHub room" : kind === "kef" ? "KEF speaker" : "Sonos room";
-    }
 
     // ── The queued confirmation ─────────────────────────────────────────
     // A track dropped into the queue changes nothing on screen — the wall
@@ -116,380 +119,372 @@
     {/if}
 {/snippet}
 
-{#if music.sources.length > 1}
-    <div class="p-sources" role="group" aria-label="Room">
-        {#each music.sources as s (s.key)}
-            <button
-                class="p-chip"
-                class:active={featured?.key === s.key}
-                aria-pressed={featured?.key === s.key}
-                title={chipTitle(s.kind)}
-                onclick={() => (music.selected = s.key)}
-            >
-                <!-- Which room is playing, readable from across the room —
-                     without having to select each one to find out. -->
-                {#if s.playing}<span class="p-chipwave"><Waveform /></span>{/if}
-                {s.title}
-            </button>
-        {/each}
-    </div>
-{/if}
+{#snippet meta(chevron: boolean)}
+    {#if featured}
+        <span class="p-track">
+            <span class="p-title">
+                {featured.trackTitle ?? (featured.playing ? "Playing" : "Not playing")}
+            </span>
+            <span class="p-subrow">
+                <span class="p-sub">{featured.trackSub || featured.title}</span>
+                {#if chevron}
+                    <span class="p-go" aria-hidden="true"
+                        ><Icon name="chevronRight" size={16} /></span
+                    >
+                {/if}
+            </span>
+        </span>
+    {/if}
+{/snippet}
 
 {#if featured}
-    <article class="p-card" class:playing={featured.playing}>
-        <!-- The card is two regions, and which one a control is in is the
-             whole layout decision (§16). This one scrolls: the cover, what
-             is playing, and the room's preferences. The strip below never
-             does. A wall is read from across the room and tapped in
-             passing, so the tapping half has to be where it was last time,
-             and the cover gets whatever height is left over rather than
-             being the first thing squeezed out by a sleep timer. -->
-        <div class="p-scroll" class:has-extras={hasExtras}>
+    {@const openLabel = `Open music — ${featured.trackTitle ?? (featured.playing ? "playing" : "nothing playing")} on ${featured.title}`}
+    <article class="p-card" class:playing={featured.playing} class:wide>
+        {#if wide}
+            <!-- Landscape: the cover takes the band's whole height and the
+                 controls sit beside it, so the two stop competing for the
+                 one axis a 768px wall is short of. The cover carries the
+                 tap-through on its own here — it is the biggest and most
+                 obviously tappable thing on the card (§15.8), and a second
+                 button around the meta would only say the same thing
+                 twice. -->
             {#if onOpen}
-                <!-- Transport and volume stay out of the button so the
-                     player still answers on the panel itself. -->
-                <button
-                    class="p-head p-open"
-                    onclick={onOpen}
-                    aria-label="Open music — {featured.trackTitle ??
-                        (featured.playing ? 'playing' : 'nothing playing')} on {featured.title}"
-                >
+                <button class="p-cover p-open" onclick={onOpen} aria-label={openLabel}>
                     {@render art()}
-
-                    <span class="p-track">
-                        <span class="p-title">
-                            {featured.trackTitle ?? (featured.playing ? "Playing" : "Not playing")}
-                        </span>
-                        <span class="p-subrow">
-                            <span class="p-sub">{featured.trackSub || featured.title}</span>
-                            <span class="p-go" aria-hidden="true"
-                                ><Icon name="chevronRight" size={16} /></span
-                            >
-                        </span>
-                    </span>
                 </button>
             {:else}
-                <div class="p-head">
-                    {@render art()}
-
-                    <div class="p-track">
-                        <span class="p-title">
-                            {featured.trackTitle ?? (featured.playing ? "Playing" : "Not playing")}
-                        </span>
-                        <span class="p-subrow">
-                            <span class="p-sub">{featured.trackSub || featured.title}</span>
-                        </span>
-                    </div>
-                </div>
+                <div class="p-cover">{@render art()}</div>
             {/if}
+        {/if}
 
-            {#if !featured.standby}
-                {#if gs}
-                    <!-- Preferences, not device states, so chips rather than
+        <div class="p-body">
+            <!-- The card is two regions, and which one a control is in is
+                 the layout decision (§16). This one scrolls: what is
+                 playing and the room's preferences — plus the cover, when
+                 the card is stacked. The strip below never does. A wall is
+                 read from across the room and tapped in passing, so the
+                 tapping half has to be where it was last time. -->
+            <div class="p-scroll" class:has-extras={hasExtras}>
+                {#if wide}
+                    {@render meta(false)}
+                {:else if onOpen}
+                    <!-- Transport and volume stay out of the button so the
+                         player still answers on the panel itself. -->
+                    <button class="p-head p-open" onclick={onOpen} aria-label={openLabel}>
+                        {@render art()}
+                        {@render meta(true)}
+                    </button>
+                {:else}
+                    <div class="p-head">
+                        {@render art()}
+                        {@render meta(false)}
+                    </div>
+                {/if}
+
+                {#if !featured.standby}
+                    {#if gs}
+                        <!-- Preferences, not device states, so chips rather than
                      switches — the same shape the full player gives them. -->
-                    <div class="p-modeblock">
-                        <div class="p-modes">
-                            <button
-                                class="p-mode"
-                                class:on={gs.shuffle}
-                                aria-pressed={gs.shuffle}
-                                disabled={music.busy["mode:" + featured.id]}
-                                onclick={() => music.toggleShuffle()}
-                            >
-                                <Icon name="shuffle" size={16} /><span>Shuffle</span>
-                            </button>
-                            <button
-                                class="p-mode"
-                                class:on={gs.repeat !== "off"}
-                                aria-pressed={gs.repeat !== "off"}
-                                aria-label={repeatLabel(gs.repeat)}
-                                disabled={music.busy["mode:" + featured.id]}
-                                onclick={() => music.cycleRepeat()}
-                            >
-                                <Icon
-                                    name={gs.repeat === "one" ? "repeatOne" : "repeat"}
-                                    size={16}
-                                /><span>{repeatText}</span>
-                            </button>
-                            <button
-                                class="p-mode"
-                                class:on={gs.crossfade}
-                                aria-pressed={gs.crossfade}
-                                disabled={music.busy["xfade:" + featured.id]}
-                                onclick={() => music.toggleCrossfade()}
-                            >
-                                <Icon name="activity" size={16} /><span>Crossfade</span>
-                            </button>
-                            <!-- What happens after the last queued song: carry
+                        <div class="p-modeblock">
+                            <div class="p-modes">
+                                <button
+                                    class="p-mode"
+                                    class:on={gs.shuffle}
+                                    aria-pressed={gs.shuffle}
+                                    disabled={music.busy["mode:" + featured.id]}
+                                    onclick={() => music.toggleShuffle()}
+                                >
+                                    <Icon name="shuffle" size={16} /><span>Shuffle</span>
+                                </button>
+                                <button
+                                    class="p-mode"
+                                    class:on={gs.repeat !== "off"}
+                                    aria-pressed={gs.repeat !== "off"}
+                                    aria-label={repeatLabel(gs.repeat)}
+                                    disabled={music.busy["mode:" + featured.id]}
+                                    onclick={() => music.cycleRepeat()}
+                                >
+                                    <Icon
+                                        name={gs.repeat === "one" ? "repeatOne" : "repeat"}
+                                        size={16}
+                                    /><span>{repeatText}</span>
+                                </button>
+                                <button
+                                    class="p-mode"
+                                    class:on={gs.crossfade}
+                                    aria-pressed={gs.crossfade}
+                                    disabled={music.busy["xfade:" + featured.id]}
+                                    onclick={() => music.toggleCrossfade()}
+                                >
+                                    <Icon name="activity" size={16} /><span>Crossfade</span>
+                                </button>
+                                <!-- What happens after the last queued song: carry
                              on with the queue, or keep the room going with
                              music like it (§15.5). The hub's preference,
                              not the speaker's, but it reads as one more
                              play mode. -->
-                            <button
-                                class="p-mode"
-                                class:on={!!featured.autoplay}
-                                aria-pressed={!!featured.autoplay}
-                                disabled={music.busy["autoplay:" + featured.id]}
-                                onclick={() => music.toggleAutoplay()}
-                            >
-                                <Icon name="assistant" size={16} /><span>Play similar</span>
-                            </button>
-                        </div>
-                        {#if full}
-                            <!-- The choice only shows itself once the queue runs
+                                <button
+                                    class="p-mode"
+                                    class:on={!!featured.autoplay}
+                                    aria-pressed={!!featured.autoplay}
+                                    disabled={music.busy["autoplay:" + featured.id]}
+                                    onclick={() => music.toggleAutoplay()}
+                                >
+                                    <Icon name="assistant" size={16} /><span>Play similar</span>
+                                </button>
+                            </div>
+                            {#if full}
+                                <!-- The choice only shows itself once the queue runs
                              out, so the depth's card says which way it will
                              go. -->
-                            <p class="p-modenote">
-                                {featured.autoplay
-                                    ? "When the queue ends, similar music keeps playing."
-                                    : "When the queue ends, playback stops."}
-                            </p>
-                        {/if}
-                    </div>
-                {/if}
+                                <p class="p-modenote">
+                                    {featured.autoplay
+                                        ? "When the queue ends, similar music keeps playing."
+                                        : "When the queue ends, playback stops."}
+                                </p>
+                            {/if}
+                        </div>
+                    {/if}
 
-                {#if full && onShowQueue}
-                    {#if music.nextInQueue}
-                        <!-- The queue's door, named for what's actually next (§15.8). -->
-                        <button class="p-next" onclick={onShowQueue}>
-                            <span class="n-label mono">Up next</span>
-                            <span class="n-title">{music.nextInQueue.title ?? "Unknown track"}</span
-                            >
-                            <span class="p-go" aria-hidden="true"
-                                ><Icon name="chevronRight" size={16} /></span
-                            >
-                        </button>
-                    {:else if gs && gs.queue_length > 0 && !music.queueOrderKnown}
-                        <!-- Shuffle picks its own next track and repeat-one
+                    {#if full && onShowQueue}
+                        {#if music.nextInQueue}
+                            <!-- The queue's door, named for what's actually next (§15.8). -->
+                            <button class="p-next" onclick={onShowQueue}>
+                                <span class="n-label mono">Up next</span>
+                                <span class="n-title"
+                                    >{music.nextInQueue.title ?? "Unknown track"}</span
+                                >
+                                <span class="p-go" aria-hidden="true"
+                                    ><Icon name="chevronRight" size={16} /></span
+                                >
+                            </button>
+                        {:else if gs && gs.queue_length > 0 && !music.queueOrderKnown}
+                            <!-- Shuffle picks its own next track and repeat-one
                          plays this one again, so naming a next track here
                          would be a guess. The door stays; the claim goes. -->
-                        <button class="p-next" onclick={onShowQueue}>
-                            <span class="n-label mono">Queue</span>
-                            <span class="n-title"
-                                >{gs.queue_length} songs — {gs.repeat === "one"
-                                    ? "repeating this one"
-                                    : "shuffled"}</span
-                            >
-                            <span class="p-go" aria-hidden="true"
-                                ><Icon name="chevronRight" size={16} /></span
-                            >
-                        </button>
+                            <button class="p-next" onclick={onShowQueue}>
+                                <span class="n-label mono">Queue</span>
+                                <span class="n-title"
+                                    >{gs.queue_length} songs — {gs.repeat === "one"
+                                        ? "repeating this one"
+                                        : "shuffled"}</span
+                                >
+                                <span class="p-go" aria-hidden="true"
+                                    ><Icon name="chevronRight" size={16} /></span
+                                >
+                            </button>
+                        {/if}
                     {/if}
-                {/if}
 
-                {#if full && multi}
-                    <!-- One fader per speaker. The room-wide fader is pinned in
+                    {#if full && multi}
+                        <!-- One fader per speaker. The room-wide fader is pinned in
                      the strip below rather than sitting directly above
                      these, so the block names itself instead of leaning on
                      that adjacency. -->
-                    <p class="p-sublabel mono">Speakers</p>
-                    <div class="p-members">
-                        {#each members as m (m.id)}
-                            <div class="p-member">
-                                <button
-                                    class="v-ico"
-                                    class:mute={m.muted}
-                                    aria-label="{m.muted ? 'Unmute' : 'Mute'} {m.name}"
-                                    disabled={music.busy["mute:" + m.id]}
-                                    onclick={() => music.toggleMute(featured, m.id)}
-                                >
-                                    <Icon name={m.muted ? "volumeOff" : "volume"} size={16} />
-                                </button>
-                                <span class="m-name">{m.name}</span>
-                                <Slider
-                                    value={music.memVol[m.id] ?? m.volume}
-                                    label="Volume {m.name}"
-                                    valueText="{music.memVol[m.id] ?? m.volume}%"
-                                    onInput={(v) => music.dragMemberVolume(m.id, v)}
-                                    onChange={(v) => music.setMemberVolume(m.id, v)}
-                                />
-                                <span class="v-val mono">{music.memVol[m.id] ?? m.volume}</span>
-                            </div>
-                        {/each}
-                    </div>
-                {/if}
+                        <p class="p-sublabel mono">Speakers</p>
+                        <div class="p-members">
+                            {#each members as m (m.id)}
+                                <div class="p-member">
+                                    <button
+                                        class="v-ico"
+                                        class:mute={m.muted}
+                                        aria-label="{m.muted ? 'Unmute' : 'Mute'} {m.name}"
+                                        disabled={music.busy["mute:" + m.id]}
+                                        onclick={() => music.toggleMute(featured, m.id)}
+                                    >
+                                        <Icon name={m.muted ? "volumeOff" : "volume"} size={16} />
+                                    </button>
+                                    <span class="m-name">{m.name}</span>
+                                    <Slider
+                                        value={music.memVol[m.id] ?? m.volume}
+                                        label="Volume {m.name}"
+                                        valueText="{music.memVol[m.id] ?? m.volume}%"
+                                        onInput={(v) => music.dragMemberVolume(m.id, v)}
+                                        onChange={(v) => music.setMemberVolume(m.id, v)}
+                                    />
+                                    <span class="v-val mono">{music.memVol[m.id] ?? m.volume}</span>
+                                </div>
+                            {/each}
+                        </div>
+                    {/if}
 
-                {#if full && featured.kind === "sonos"}
-                    <!-- Sleep timer: group-scoped like the play modes, and the
+                    {#if full && featured.kind === "sonos"}
+                        <!-- Sleep timer: group-scoped like the play modes, and the
                      one setting the wall has more claim to than the phone. -->
-                    <div class="p-sleep">
-                        <span class="p-sleeplabel">
-                            <Icon name="moon" size={15} />
-                            <span>Sleep</span>
-                            {#if sleepOn}
-                                <span class="p-sleepleft mono">{music.sleepMinutes} min left</span>
-                            {/if}
-                        </span>
-                        <div class="p-sleepchips" role="group" aria-label="Sleep timer">
-                            <!-- No chip is marked "on": the speaker reports the
+                        <div class="p-sleep">
+                            <span class="p-sleeplabel">
+                                <Icon name="moon" size={15} />
+                                <span>Sleep</span>
+                                {#if sleepOn}
+                                    <span class="p-sleepleft mono"
+                                        >{music.sleepMinutes} min left</span
+                                    >
+                                {/if}
+                            </span>
+                            <div class="p-sleepchips" role="group" aria-label="Sleep timer">
+                                <!-- No chip is marked "on": the speaker reports the
                              minutes *left*, not the length that was set, so
                              a highlighted chip would be a guess. The label
                              carries the truth instead. -->
-                            {#each SLEEP_CHOICES as mins (mins)}
-                                <button
-                                    class="p-chip"
-                                    disabled={music.busy["sleep:" + featured.id]}
-                                    onclick={() => music.setSleep(mins)}
-                                >
-                                    {mins}m
-                                </button>
-                            {/each}
-                            {#if sleepOn}
-                                <button
-                                    class="p-chip"
-                                    disabled={music.busy["sleep:" + featured.id]}
-                                    onclick={() => music.setSleep(0)}
-                                >
-                                    Off
-                                </button>
-                            {/if}
+                                {#each SLEEP_CHOICES as mins (mins)}
+                                    <button
+                                        class="p-chip"
+                                        disabled={music.busy["sleep:" + featured.id]}
+                                        onclick={() => music.setSleep(mins)}
+                                    >
+                                        {mins}m
+                                    </button>
+                                {/each}
+                                {#if sleepOn}
+                                    <button
+                                        class="p-chip"
+                                        disabled={music.busy["sleep:" + featured.id]}
+                                        onclick={() => music.setSleep(0)}
+                                    >
+                                        Off
+                                    </button>
+                                {/if}
+                            </div>
                         </div>
-                    </div>
-                {/if}
+                    {/if}
 
-                {#if full && featured.kind === "kef"}
-                    <!-- The input selector is the "play this" control: there is
+                    {#if full && featured.kind === "kef"}
+                        <!-- The input selector is the "play this" control: there is
                      no queue to point somewhere, so switching to the optical
                      input *is* "play the TV" (§15). -->
-                    <div class="p-inputs" role="group" aria-label="Input">
-                        {#each KEF_SOURCES as src (src.value)}
-                            <button
-                                class="p-chip"
-                                class:active={featured.input === src.value}
-                                aria-pressed={featured.input === src.value}
-                                disabled={music.busy["src:" + featured.id]}
-                                onclick={() => music.setKefSource(featured, src.value)}
-                            >
-                                {src.label}
-                            </button>
-                        {/each}
-                    </div>
+                        <div class="p-inputs" role="group" aria-label="Input">
+                            {#each KEF_SOURCES as src (src.value)}
+                                <button
+                                    class="p-chip"
+                                    class:active={featured.input === src.value}
+                                    aria-pressed={featured.input === src.value}
+                                    disabled={music.busy["src:" + featured.id]}
+                                    onclick={() => music.setKefSource(featured, src.value)}
+                                >
+                                    {src.label}
+                                </button>
+                            {/each}
+                        </div>
+                    {/if}
                 {/if}
-            {/if}
-        </div>
+            </div>
 
-        <!-- The pinned strip: where the track is, play/pause and skip, and
+            <!-- The pinned strip: where the track is, play/pause and skip, and
              how loud. These are what a wall gets walked up to for, so they
              hold the same place whatever else the room has to show. -->
-        <div class="p-controls">
-            {#if featured.standby}
-                <!-- A speaker asleep is a speaker one tap from awake: the
+            <div class="p-controls">
+                {#if featured.standby}
+                    <!-- A speaker asleep is a speaker one tap from awake: the
                      wall wakes it rather than sending anyone to the full
                      view. -->
-                <div class="p-standby">
-                    <p>In standby</p>
-                    <button
-                        class="p-wakebtn"
-                        disabled={music.busy["power:" + featured.id]}
-                        onclick={() => music.wake(featured)}
-                    >
-                        <Icon name="power" size={18} /><span>Wake {featured.title}</span>
-                    </button>
-                </div>
-            {:else}
-                {#if queued}
-                    <!-- The one thing queueing changes that can be seen —
+                    <div class="p-standby">
+                        <p>In standby</p>
+                        <button
+                            class="p-wakebtn"
+                            disabled={music.busy["power:" + featured.id]}
+                            onclick={() => music.wake(featured)}
+                        >
+                            <Icon name="power" size={18} /><span>Wake {featured.title}</span>
+                        </button>
+                    </div>
+                {:else}
+                    {#if queued}
+                        <!-- The one thing queueing changes that can be seen —
                          so it belongs where the eye already is, not at the
                          far end of a scroll it may never reach. -->
-                    <p class="p-queued">
-                        <Icon name="check" size={14} />
-                        <span
-                            >{queued.next ? "Playing next" : "Added to the queue"} — {queued.title}</span
-                        >
-                    </p>
-                {/if}
-
-                <TrackRail
-                    position={music.posSec}
-                    duration={music.durSec}
-                    seekable={music.seekable}
-                    idle={railIdle}
-                    liveLabel={railLabel}
-                    onSeek={(sec) => music.seek(sec)}
-                />
-
-                <div class="p-transport">
-                    {#if featured.canSkip}
-                        <button
-                            class="t-btn"
-                            aria-label="Previous track"
-                            disabled={music.busy["previous:" + featured.id]}
-                            onclick={() => music.skip(featured, "previous")}
-                        >
-                            <Icon name="skipPrev" size={24} />
-                        </button>
+                        <p class="p-queued">
+                            <Icon name="check" size={14} />
+                            <span
+                                >{queued.next ? "Playing next" : "Added to the queue"} — {queued.title}</span
+                            >
+                        </p>
                     {/if}
-                    <button
-                        class="t-btn primary"
-                        class:on={featured.playing}
-                        aria-label={featured.playing ? "Pause" : "Play"}
-                        disabled={music.busy["play:" + featured.id]}
-                        onclick={() => music.togglePlay(featured)}
-                    >
-                        <Icon name={featured.playing ? "pause" : "play"} size={30} />
-                    </button>
-                    {#if featured.canSkip}
-                        <button
-                            class="t-btn"
-                            aria-label="Next track"
-                            disabled={music.busy["next:" + featured.id]}
-                            onclick={() => music.skip(featured, "next")}
-                        >
-                            <Icon name="skipNext" size={24} />
-                        </button>
-                    {/if}
-                </div>
 
-                <div class="p-volume">
-                    <button
-                        class="v-ico"
-                        class:mute={featured.muted}
-                        aria-label={featured.muted ? "Unmute" : "Mute"}
-                        disabled={music.busy["mute:" + featured.id]}
-                        onclick={() => music.toggleMute(featured)}
-                    >
-                        <Icon name={featured.muted ? "volumeOff" : "volume"} size={18} />
-                    </button>
-                    <!-- A fader is an imprecise aim at arm's length, so the
-                         wall also gets a discrete step either side of it. -->
-                    <button
-                        class="v-step"
-                        aria-label="Volume down"
-                        disabled={music.busy["vol:" + featured.id]}
-                        onclick={() => music.nudgeVolume(featured, -5)}
-                    >
-                        <Icon name="minus" size={18} />
-                    </button>
-                    <Slider
-                        value={music.vol}
-                        label="Volume"
-                        valueText="{music.vol}%"
-                        onInput={(v) => music.dragVolume(featured, v)}
-                        onChange={(v) => music.setVolume(featured, v)}
+                    <TrackRail
+                        position={music.posSec}
+                        duration={music.durSec}
+                        seekable={music.seekable}
+                        idle={railIdle}
+                        liveLabel={railLabel}
+                        onSeek={(sec) => music.seek(sec)}
                     />
-                    <button
-                        class="v-step"
-                        aria-label="Volume up"
-                        disabled={music.busy["vol:" + featured.id]}
-                        onclick={() => music.nudgeVolume(featured, 5)}
-                    >
-                        <Icon name="plus" size={18} />
-                    </button>
-                    <span class="v-val mono">{music.vol}</span>
-                </div>
-            {/if}
+
+                    <div class="p-transport">
+                        {#if featured.canSkip}
+                            <button
+                                class="t-btn"
+                                aria-label="Previous track"
+                                disabled={music.busy["previous:" + featured.id]}
+                                onclick={() => music.skip(featured, "previous")}
+                            >
+                                <Icon name="skipPrev" size={24} />
+                            </button>
+                        {/if}
+                        <button
+                            class="t-btn primary"
+                            class:on={featured.playing}
+                            aria-label={featured.playing ? "Pause" : "Play"}
+                            disabled={music.busy["play:" + featured.id]}
+                            onclick={() => music.togglePlay(featured)}
+                        >
+                            <Icon name={featured.playing ? "pause" : "play"} size={30} />
+                        </button>
+                        {#if featured.canSkip}
+                            <button
+                                class="t-btn"
+                                aria-label="Next track"
+                                disabled={music.busy["next:" + featured.id]}
+                                onclick={() => music.skip(featured, "next")}
+                            >
+                                <Icon name="skipNext" size={24} />
+                            </button>
+                        {/if}
+                    </div>
+
+                    <div class="p-volume">
+                        <button
+                            class="v-ico"
+                            class:mute={featured.muted}
+                            aria-label={featured.muted ? "Unmute" : "Mute"}
+                            disabled={music.busy["mute:" + featured.id]}
+                            onclick={() => music.toggleMute(featured)}
+                        >
+                            <Icon name={featured.muted ? "volumeOff" : "volume"} size={18} />
+                        </button>
+                        <!-- A fader is an imprecise aim at arm's length, so the
+                         wall also gets a discrete step either side of it. -->
+                        <button
+                            class="v-step"
+                            aria-label="Volume down"
+                            disabled={music.busy["vol:" + featured.id]}
+                            onclick={() => music.nudgeVolume(featured, -5)}
+                        >
+                            <Icon name="minus" size={18} />
+                        </button>
+                        <Slider
+                            value={music.vol}
+                            label="Volume"
+                            valueText="{music.vol}%"
+                            onInput={(v) => music.dragVolume(featured, v)}
+                            onChange={(v) => music.setVolume(featured, v)}
+                        />
+                        <button
+                            class="v-step"
+                            aria-label="Volume up"
+                            disabled={music.busy["vol:" + featured.id]}
+                            onclick={() => music.nudgeVolume(featured, 5)}
+                        >
+                            <Icon name="plus" size={18} />
+                        </button>
+                        <span class="v-val mono">{music.vol}</span>
+                    </div>
+                {/if}
+            </div>
         </div>
     </article>
 {/if}
 
 <style>
-    .p-sources {
-        display: flex;
-        flex-wrap: wrap;
-        gap: var(--space-2);
-        margin-bottom: var(--space-3);
-        flex-shrink: 0;
-    }
     .p-chip {
         display: inline-flex;
         align-items: center;
@@ -521,10 +516,6 @@
     .p-chip:disabled {
         opacity: 0.55;
     }
-    .p-chipwave {
-        display: inline-flex;
-        margin-right: 1px;
-    }
 
     .p-card {
         /* How small the cover may get before the card starts scrolling
@@ -549,6 +540,61 @@
     .p-card.playing {
         background: var(--tile-on-gradient);
         border-color: var(--tile-on-border);
+    }
+
+    /* Landscape. The zone decides (see the `wide` prop): a wide, short band
+       makes the cover as tall as the band, where stacking would cap it at
+       whatever the controls left of the height — on a 1024x768 wall that is
+       the difference between a 360px cover and a 160px one. */
+    .p-card.wide {
+        flex-direction: row;
+        align-items: stretch;
+        gap: var(--space-5);
+    }
+    /* The cover slot: stretched to the card's height, and square from it.
+       Height is definite here (the row stretches it), so the ratio gives
+       the width — the same trick .p-artbox uses one level down, turned
+       through ninety degrees. */
+    .p-cover {
+        flex: 0 1 auto;
+        aspect-ratio: 1;
+        max-width: 55%;
+        min-width: 0;
+        display: flex;
+        padding: 0;
+        border: 0;
+        background: none;
+        color: inherit;
+        font: inherit;
+        cursor: pointer;
+        border-radius: var(--r-md);
+    }
+    .p-cover:focus-visible {
+        box-shadow: var(--focus-ring);
+    }
+    .p-body {
+        flex: 1 1 auto;
+        min-width: 0;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-4);
+    }
+    /* Beside the cover the column is sized by the cover, not by its own
+       content, so it can have slack — a room in standby has a title and a
+       Wake button and nothing else. Centre the pair rather than pinning the
+       strip to a bottom edge it shares with nothing. */
+    .p-card.wide .p-body {
+        justify-content: center;
+    }
+    .p-card.wide .p-scroll {
+        flex: 0 1 auto;
+    }
+    .p-card.wide .p-artwrap {
+        aspect-ratio: auto;
+        max-height: none;
+        min-height: 0;
+        flex: 1 1 auto;
     }
 
     /* Everything but the transport strip. It takes the card's leftover
@@ -1040,6 +1086,7 @@
        under the fold. Nothing that is a touch target shrinks. */
     @media (max-height: 820px) and (orientation: landscape) {
         .p-card,
+        .p-body,
         .p-scroll,
         .p-controls {
             gap: var(--space-3);
@@ -1055,7 +1102,23 @@
     /* Portrait stack: the whole page scrolls, so the card sizes to its
        content and neither region owns a scroll of its own — a pinned strip
        inside a page that already scrolls is just a shorter card. */
-    @media (orientation: portrait), (max-width: 760px) {
+    @media (orientation: portrait), (max-width: 900px) {
+        /* Landscape needs landscape. Stacked again, the `wide` markup falls
+           out as cover-over-controls on its own — .p-cover is simply the
+           first row of the column instead of the first column of the row. */
+        .p-card.wide {
+            flex-direction: column;
+        }
+        .p-cover {
+            flex: none;
+            width: 100%;
+            max-width: 280px;
+            margin-inline: auto;
+        }
+        .p-card.wide .p-artwrap {
+            aspect-ratio: 1;
+            flex: none;
+        }
         .p-artwrap,
         .p-artwrap.full {
             max-height: 280px;

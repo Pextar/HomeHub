@@ -1253,14 +1253,35 @@ The reference hardware is an iPad Air 2 — 1024×768, Safari 15, an A8X that
 drops frames on blur and stacked shadows. Every rule below is that
 constraint made visible.
 
-- **One screen per depth, no chrome.** Landscape grid, three zones:
-  clock/status hero (left, 300px), room lights (centre, flexible), music
-  (right, 352px — present only when speakers exist; the grid is sized from
-  the `speakers-seen` memory so the column doesn't pop in after the first
-  poll). Nothing scrolls: each zone owns its overflow internally. Portrait
-  is a stacked, scrollable fallback — supported, not designed-for. The
-  music depth keeps the same shape: search and its results on the left
-  (the list owns its scroll), the featured player on the right.
+- **One screen per depth, no chrome — and the music band gets the slack.**
+  Three stacked bands, not three columns: a **status strip** across the top
+  (clock, date, the two stats, the master button), the **music band**
+  taking every row the other two don't claim, and a **row of room tiles**
+  along the foot, at the height one tile needs. Present only when speakers
+  exist; the grid is sized from the `speakers-seen` memory so the band
+  doesn't pop in after the first poll, and a home with none gets the room
+  grid back over the whole surface.
+
+  This is the panel's central allocation and it is deliberate. It used to
+  be three columns — clock 300, rooms flexible, music 352 — which gave two
+  thirds of a landscape screen to the two surfaces you only *read* and a
+  phone-shaped slot to the one you actually drive. **The status and the
+  tiles are glance surfaces: they are sized by what they have to say. The
+  music band is a control surface: it is sized by what is left.** A wall
+  panel is walked up to to change the music far more often than to read the
+  time.
+
+  Nothing scrolls: each band owns its overflow internally. Portrait is a
+  stacked, scrollable fallback — supported, not designed-for; every
+  landscape rule here is off below 900px, including the player's own
+  (§16's landscape card falls back to the stacked one). The music depth
+  keeps a two-column shape, because there its left half is a catalog to
+  read: search and its results on the left (the list owns its scroll), the
+  featured player on the right at 420px.
+- **The destination chips ride on the surface's header, not in the card.**
+  Both depths. In a 336px column three rooms wrapped to two rows and six to
+  three — 150px of a 720px panel spent on the control touched least, taken
+  from the cover looked at most. On a full-width header they are one line.
 - **The job is glance + tap.** Room tiles toggle the room; the music card
   transports and sets volume; the master button does all-on/all-off. The
   music depth adds the player's daily jobs — search, the queue, Sonos
@@ -1317,6 +1338,19 @@ constraint made visible.
   Sonos track, a read-only rail elsewhere, an honest no-position line
   where there is no duration — and a Sonos coordinator's play-mode
   chips (shuffle, repeat, crossfade).
+  **The card has two shapes, and the zone picks.** Beside a cover, or above
+  it. Which one fits more cover is pure arithmetic on the zone's aspect: a
+  stacked card caps the cover at what the controls leave of the *height*, a
+  landscape card caps it at the zone's whole height and spends *width* on
+  the controls instead. So the dashboard's wide, short band lays the cover
+  to the left of everything (`wide`), and the depth's tall, narrow column
+  stacks. On a 1024×768 wall that is the difference between a 160px cover
+  and a 360px one, and it is the thing four rounds of fixing the card
+  itself could never have found: the card was a portrait player in a
+  portrait slot on a landscape screen.
+  In the landscape shape the **cover carries the tap-through on its own** —
+  it is the biggest and most obviously tappable thing on the card (§15.8),
+  and a second button around the meta would only say the same thing twice.
   **The card is two regions, and which one a control is in is the layout
   decision.** Below a hairline sits the strip that never moves — the
   scrubber, prev/play/next, and the room's fader — because a wall is

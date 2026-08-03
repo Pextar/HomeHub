@@ -14,9 +14,9 @@
     import { dur } from "../lib/motion";
 
     // The panel is a kiosk surface (DESIGN.md §16): no chrome, no app
-    // shell. The dashboard depth holds three zones — clock/status, room
-    // lights, music — with a music depth one tap in, and an ambient face
-    // it all falls back to when untouched.
+    // shell. The dashboard depth is three stacked bands — a status strip,
+    // the music band, and a row of room tiles — with a music depth one tap
+    // in, and an ambient face it all falls back to when untouched.
 
     // ── Clock ────────────────────────────────────────────────────────────
     // One tick for the whole panel; children take the labels as props.
@@ -106,8 +106,8 @@
     // column and the music depth's player/search read the same poll, the
     // same featured source and the same now-playing line, and it stays
     // alive across depth swaps (§16). It also reports whether any speakers
-    // exist — the third column only exists then; a home without speakers
-    // gets a wider rooms grid.
+    // exist — the music band only exists then; a home without speakers
+    // gives the room tiles the whole surface as a grid again.
     const music = createPanelMusic();
     // And what's playing — the ambient face carries it.
     const playing = $derived(music.nowPlaying);
@@ -165,8 +165,8 @@
         <PanelBrowse {music} {spotify} {recents} {booted} />
     {:else}
         <PanelClock {timeLabel} {dateLabel} {lightsOn} {lightsTotal} {insideTemp} />
-        <PanelRooms />
         <PanelMusic {music} />
+        <PanelRooms band={music.hasSpeakers} />
 
         <button class="exit" onclick={exit}>
             <Icon name="close" size={14} /><span>Exit</span>
@@ -215,13 +215,18 @@
         height: 100dvh;
         box-sizing: border-box;
         display: grid;
-        /* Columns sized so the centre stays wide enough for un-truncated
-           room names even with the music column present (~320px). */
-        grid-template-columns: 280px minmax(0, 1fr);
-        /* The row is capped at the panel's fixed height so each zone owns
+        /* Rows, not columns. The panel used to be three columns — clock,
+           rooms, music — which gave the player a ~336px slot and the two
+           surfaces you only *read* two thirds of a landscape screen. It is
+           the other way round: the status strip and the room tiles are
+           glance surfaces and run the full width at the height they need,
+           and everything left over is the music band, which is what a wall
+           panel is actually used to drive (DESIGN.md §16).
+           The rows are capped at the panel's fixed height so each zone owns
            its overflow — without it an `auto` row sizes to content and the
            page itself spills past the viewport. */
-        grid-template-rows: minmax(0, 1fr);
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-rows: auto minmax(0, 1fr);
         gap: var(--space-5);
         padding: var(--space-6);
         background: var(--bg);
@@ -232,13 +237,18 @@
         -webkit-touch-callout: none;
         touch-action: manipulation;
     }
+    /* With speakers: the status strip and the room row take exactly the
+       height their content asks for, and the music band takes everything
+       that is left. That is the whole allocation, stated once — the two
+       glance surfaces are sized by what they have to say, and the surface
+       that gets driven gets the slack. */
     .panel.has-music {
-        grid-template-columns: 280px minmax(0, 1fr) 336px;
+        grid-template-rows: auto minmax(0, 1fr) auto;
     }
 
     /* Portrait / narrow fallback: stacked single column that scrolls. The
        panel is designed landscape-first but must not break when rotated. */
-    @media (orientation: portrait), (max-width: 760px) {
+    @media (orientation: portrait), (max-width: 900px) {
         .panel,
         .panel.has-music {
             grid-template-columns: minmax(0, 1fr);
