@@ -1221,9 +1221,11 @@ meta): the featured room's player riding on the right, and a work area on
 the left switched by chip between three panes — **Search** (the catalog,
 with the room's recent searches, the household's favorites and the
 account's playlists while the box is empty), **Queue** (the featured
-Sonos group's, with jump / remove / two-tap clear), **Rooms** (every
-room, with Sonos-native grouping: join the featured room, split one, or
-step a single speaker out). Its back chip returns to the dashboard depth,
+Sonos group's, with jump / remove / two-tap clear), **Rooms** (the
+featured room's own settings at the head of it — play modes, per-speaker
+faders, sleep, the KEF input — then every room, with Sonos-native
+grouping: join the featured room, split one, or step a single speaker
+out). Its back chip returns to the dashboard depth,
 and idling there sleeps home to the ambient face like any other panel
 idle. Both depths read one shared speaker store
 (`lib/panel-music.svelte.ts`) — one poll, one featured source, one
@@ -1373,23 +1375,25 @@ constraint made visible.
   side of the fader: a rail is an imprecise aim at arm's length, and a
   range input's hit area is its box rather than its knob (which is why
   the shared slider grows to a 44px box on a coarse pointer while the
-  rail keeps its drawn weight). The depth's card adds what the
-  dashboard's glance surface hasn't room for: one fader per speaker
-  under the room-wide one when a group or zone has more than one, the KEF
-  input selector (the per-speaker faders name themselves, since the
-  room-wide one is pinned in the strip rather than sitting above them),
-  the **sleep timer** — group-scoped like the play modes,
-  and the one setting the wall has more claim to than the phone, since
-  "stop in half an hour" is asked at the light switch on the way to bed —
-  and the Up-next row that names the actual next track and opens the
-  queue pane (§15.8's door, same sentence). **Up next only claims what it
-  knows**: under shuffle the speaker picks its own next track and under
-  repeat-one it plays this one again, so the row keeps the door and drops
-  the claim, naming the queue's length and why instead. The mode row
-  carries §15.5's **Play similar** with the rest, since "what happens
-  when this song is the last one" is exactly the question a wall gets
-  asked; the depth's card adds one line naming which way it will go,
-  because that choice shows itself only once the queue has run out.
+  rail keeps its drawn weight). **The player is a player, and the room's settings are not on it.**
+  Cover, what is playing, scrubber, transport, volume — that is the whole
+  card. Play modes, the sleep timer, one fader per speaker and the KEF
+  input selector live on the **music depth's Rooms pane**
+  (`PanelRoomSettings`), at the head of it, for the featured room. They
+  were stacked under the cover and they were the reason nothing in that
+  column fitted: they came to more height than the column had, so the
+  cover was squeezed to a third of its size and the rest went behind a
+  scroll with half a chip peeking out of it. Rooms is already the depth's
+  "which device" surface (§16.3) — a room's preferences belong with the
+  room. Only the wide band, which has the width to spare, keeps the play
+  modes on the player itself.
+  The mode row carries §15.5's **Play similar** with the rest, since "what
+  happens when this song is the last one" is exactly the question a wall
+  gets asked, plus one line naming which way it will go, because that
+  choice shows itself only once the queue has run out.
+  **No Up-next row on the panel's player.** On the phone that row is the
+  queue's door (§15.8); here the depth's own pane switcher already names
+  Queue, and a second door beside it is a door twice.
   A queued track is the one action here that changes nothing visible, so
   the card confirms it in place for a few seconds — not a toast (§10's
   quiet answer stands, and a kiosk has nobody to dismiss cards), just the

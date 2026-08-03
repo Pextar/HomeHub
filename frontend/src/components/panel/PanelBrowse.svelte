@@ -38,6 +38,7 @@
     import ContextScreen from "../music/ContextScreen.svelte";
     import PanelPlayerCard from "./PanelPlayerCard.svelte";
     import PanelRoomChips from "./PanelRoomChips.svelte";
+    import PanelRoomSettings from "./PanelRoomSettings.svelte";
     import { api } from "../../lib/api";
     import { route, toasts } from "../../lib/stores.svelte";
     import type { SpotifyStore } from "../../lib/music/spotify.svelte";
@@ -796,6 +797,11 @@
                 </div>
             {:else}
                 <div class="b-pane">
+                    <!-- The featured room's own preferences lead the pane:
+                         this is the "which device" surface, and they used to
+                         be stacked under the cover in the player column
+                         where they cost it two thirds of its height. -->
+                    <PanelRoomSettings {music} />
                     <h3 class="s-label">Rooms</h3>
                     <div class="rm-list">
                         {#each music.sources as s (s.key)}
@@ -871,14 +877,7 @@
 
         <section class="b-player" aria-label="Now playing">
             {#if featured}
-                <PanelPlayerCard
-                    {music}
-                    full
-                    onShowQueue={() => {
-                        stack = [];
-                        pane = "queue";
-                    }}
-                />
+                <PanelPlayerCard {music} />
             {:else}
                 <div class="p-nosrc">
                     <Icon name="speaker" size={28} />
@@ -1073,7 +1072,7 @@
         flex: 1;
         min-height: 0;
         display: grid;
-        grid-template-columns: minmax(0, 1fr) 420px;
+        grid-template-columns: minmax(0, 1fr) 360px;
         gap: var(--space-5);
     }
 

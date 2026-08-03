@@ -3,17 +3,22 @@
     import Waveform from "../music/Waveform.svelte";
     import Slider from "../music/Slider.svelte";
     import TrackRail from "../music/TrackRail.svelte";
-    import { kefSourceLabel, KEF_SOURCES } from "../../lib/kef";
+    import { kefSourceLabel } from "../../lib/kef";
     import { repeatLabel } from "../../lib/music/sonos.svelte";
     import { clock } from "../../lib/music/clock.svelte";
     import type { PanelMusicStore } from "../../lib/panel-music.svelte";
 
-    // The featured source's player card, shared by both of the panel's
-    // depths (DESIGN.md §16): the dashboard column shows it with its art as
-    // the tap-through into music; the music depth shows it `full` — per-
-    // member faders, the KEF input selector, the sleep timer and the
-    // Up-next row into the queue — since that is where the wall's music
-    // jobs happen.
+    // The featured source's player, shared by both of the panel's depths
+    // (DESIGN.md §16). It is a player and only a player: cover, what is
+    // playing, scrubber, transport, volume. The room's own settings — play
+    // modes on the depth, the sleep timer, per-speaker faders, the KEF
+    // input — live on the depth's Rooms pane (PanelRoomSettings), because
+    // stacked under the cover in a 360px column they cost more height than
+    // the column had and the cover paid for all of it.
+    //
+    // Two shapes, and the zone picks (`wide`): the dashboard's wide band
+    // puts the cover beside the controls, the depth's tall column above
+    // them.
     //
     // Every capability renders only where the room says it has one (§15):
     // the rail seeks on a Sonos track and is a read-only rail elsewhere,
@@ -24,15 +29,11 @@
     let {
         music,
         onOpen = undefined,
-        full = false,
         wide = false,
-        onShowQueue = undefined,
     }: {
         music: PanelMusicStore;
         /** Given, the cover is a button into the music depth. */
         onOpen?: () => void;
-        /** The depth's richer card: member faders, KEF inputs, sleep, Up next. */
-        full?: boolean;
         /** Landscape: the cover beside the controls rather than above them.
          *  The dashboard's music zone is a wide, short band, where a stacked
          *  cover is capped by what the controls leave of the height and a
@@ -40,15 +41,10 @@
          *  way round is bigger is purely the zone's aspect, so the zone
          *  says. */
         wide?: boolean;
-        /** The Up-next row's destination — the queue pane. */
-        onShowQueue?: () => void;
     } = $props();
 
     const featured = $derived(music.featured);
     const gs = $derived(featured?.groupState);
-    const members = $derived(featured?.members ?? []);
-    const multi = $derived(members.length > 1);
-
     // A rail gets nothing to say when there is no track loaded to describe.
     const railIdle = $derived(!featured?.trackTitle && !featured?.playing);
     const railLabel = $derived(
@@ -76,25 +72,12 @@
         return q;
     });
 
-    // ── Sleep timer (a Sonos group's) ───────────────────────────────────
-    // The wall's own setting: "stop in half an hour" is asked at the light
-    // switch on the way to bed, not on a phone. Chips rather than a form —
-    // there are no forms on a kiosk.
-    const SLEEP_CHOICES = [15, 30, 60] as const;
-    const sleepOn = $derived(music.sleepMinutes > 0);
-
-    /** Whether anything rides below the cover in the scrolling half. The
-     *  cover claims that whole half otherwise, and leaves a sliver of the
-     *  first row showing when it doesn't — a kiosk has no scrollbar, so a
-     *  region whose content stops exactly at its own edge gives no sign
-     *  that it moves at all. */
-    const hasExtras = $derived.by(() => {
-        if (!featured || featured.standby) return false;
-        if (gs) return true; // play modes, and the Up-next row under them
-        if (!full) return false;
-        // The depth's own rows: per-speaker faders, sleep, KEF inputs.
-        return multi || featured.kind === "sonos" || featured.kind === "kef";
-    });
+    /** Whether anything rides below the cover in the scrolling half — only
+     *  ever the wide card's play modes now. The cover claims that whole
+     *  half otherwise, and holds back a sliver of the first row when it
+     *  doesn't: a kiosk has no scrollbar, so a region whose content stops
+     *  exactly at its own edge gives no sign that it moves at all. */
+    const hasExtras = $derived(!!wide && !!gs && !featured?.standby);
 </script>
 
 <!-- The art, identical either side of the tap-through button, so the two
@@ -104,7 +87,7 @@
      float in the margin beside a shrunk cover. -->
 {#snippet art()}
     {#if featured}
-        <span class="p-artwrap" class:full>
+        <span class="p-artwrap">
             <span class="p-artbox">
                 {#if featured.art}
                     <img class="p-art" src={featured.art} alt="" loading="lazy" />
@@ -181,191 +164,58 @@
                     </div>
                 {/if}
 
-                {#if !featured.standby}
-                    {#if gs}
-                        <!-- Preferences, not device states, so chips rather than
-                     switches — the same shape the full player gives them. -->
-                        <div class="p-modeblock">
-                            <div class="p-modes">
-                                <button
-                                    class="p-mode"
-                                    class:on={gs.shuffle}
-                                    aria-pressed={gs.shuffle}
-                                    disabled={music.busy["mode:" + featured.id]}
-                                    onclick={() => music.toggleShuffle()}
-                                >
-                                    <Icon name="shuffle" size={16} /><span>Shuffle</span>
-                                </button>
-                                <button
-                                    class="p-mode"
-                                    class:on={gs.repeat !== "off"}
-                                    aria-pressed={gs.repeat !== "off"}
-                                    aria-label={repeatLabel(gs.repeat)}
-                                    disabled={music.busy["mode:" + featured.id]}
-                                    onclick={() => music.cycleRepeat()}
-                                >
-                                    <Icon
-                                        name={gs.repeat === "one" ? "repeatOne" : "repeat"}
-                                        size={16}
-                                    /><span>{repeatText}</span>
-                                </button>
-                                <button
-                                    class="p-mode"
-                                    class:on={gs.crossfade}
-                                    aria-pressed={gs.crossfade}
-                                    disabled={music.busy["xfade:" + featured.id]}
-                                    onclick={() => music.toggleCrossfade()}
-                                >
-                                    <Icon name="activity" size={16} /><span>Crossfade</span>
-                                </button>
-                                <!-- What happens after the last queued song: carry
-                             on with the queue, or keep the room going with
-                             music like it (§15.5). The hub's preference,
-                             not the speaker's, but it reads as one more
-                             play mode. -->
-                                <button
-                                    class="p-mode"
-                                    class:on={!!featured.autoplay}
-                                    aria-pressed={!!featured.autoplay}
-                                    disabled={music.busy["autoplay:" + featured.id]}
-                                    onclick={() => music.toggleAutoplay()}
-                                >
-                                    <Icon name="assistant" size={16} /><span>Play similar</span>
-                                </button>
-                            </div>
-                            {#if full}
-                                <!-- The choice only shows itself once the queue runs
-                             out, so the depth's card says which way it will
-                             go. -->
-                                <p class="p-modenote">
-                                    {featured.autoplay
-                                        ? "When the queue ends, similar music keeps playing."
-                                        : "When the queue ends, playback stops."}
-                                </p>
-                            {/if}
-                        </div>
-                    {/if}
-
-                    {#if full && onShowQueue}
-                        {#if music.nextInQueue}
-                            <!-- The queue's door, named for what's actually next (§15.8). -->
-                            <button class="p-next" onclick={onShowQueue}>
-                                <span class="n-label mono">Up next</span>
-                                <span class="n-title"
-                                    >{music.nextInQueue.title ?? "Unknown track"}</span
-                                >
-                                <span class="p-go" aria-hidden="true"
-                                    ><Icon name="chevronRight" size={16} /></span
-                                >
-                            </button>
-                        {:else if gs && gs.queue_length > 0 && !music.queueOrderKnown}
-                            <!-- Shuffle picks its own next track and repeat-one
-                         plays this one again, so naming a next track here
-                         would be a guess. The door stays; the claim goes. -->
-                            <button class="p-next" onclick={onShowQueue}>
-                                <span class="n-label mono">Queue</span>
-                                <span class="n-title"
-                                    >{gs.queue_length} songs — {gs.repeat === "one"
-                                        ? "repeating this one"
-                                        : "shuffled"}</span
-                                >
-                                <span class="p-go" aria-hidden="true"
-                                    ><Icon name="chevronRight" size={16} /></span
-                                >
-                            </button>
-                        {/if}
-                    {/if}
-
-                    {#if full && multi}
-                        <!-- One fader per speaker. The room-wide fader is pinned in
-                     the strip below rather than sitting directly above
-                     these, so the block names itself instead of leaning on
-                     that adjacency. -->
-                        <p class="p-sublabel mono">Speakers</p>
-                        <div class="p-members">
-                            {#each members as m (m.id)}
-                                <div class="p-member">
-                                    <button
-                                        class="v-ico"
-                                        class:mute={m.muted}
-                                        aria-label="{m.muted ? 'Unmute' : 'Mute'} {m.name}"
-                                        disabled={music.busy["mute:" + m.id]}
-                                        onclick={() => music.toggleMute(featured, m.id)}
-                                    >
-                                        <Icon name={m.muted ? "volumeOff" : "volume"} size={16} />
-                                    </button>
-                                    <span class="m-name">{m.name}</span>
-                                    <Slider
-                                        value={music.memVol[m.id] ?? m.volume}
-                                        label="Volume {m.name}"
-                                        valueText="{music.memVol[m.id] ?? m.volume}%"
-                                        onInput={(v) => music.dragMemberVolume(m.id, v)}
-                                        onChange={(v) => music.setMemberVolume(m.id, v)}
-                                    />
-                                    <span class="v-val mono">{music.memVol[m.id] ?? m.volume}</span>
-                                </div>
-                            {/each}
-                        </div>
-                    {/if}
-
-                    {#if full && featured.kind === "sonos"}
-                        <!-- Sleep timer: group-scoped like the play modes, and the
-                     one setting the wall has more claim to than the phone. -->
-                        <div class="p-sleep">
-                            <span class="p-sleeplabel">
-                                <Icon name="moon" size={15} />
-                                <span>Sleep</span>
-                                {#if sleepOn}
-                                    <span class="p-sleepleft mono"
-                                        >{music.sleepMinutes} min left</span
-                                    >
-                                {/if}
-                            </span>
-                            <div class="p-sleepchips" role="group" aria-label="Sleep timer">
-                                <!-- No chip is marked "on": the speaker reports the
-                             minutes *left*, not the length that was set, so
-                             a highlighted chip would be a guess. The label
-                             carries the truth instead. -->
-                                {#each SLEEP_CHOICES as mins (mins)}
-                                    <button
-                                        class="p-chip"
-                                        disabled={music.busy["sleep:" + featured.id]}
-                                        onclick={() => music.setSleep(mins)}
-                                    >
-                                        {mins}m
-                                    </button>
-                                {/each}
-                                {#if sleepOn}
-                                    <button
-                                        class="p-chip"
-                                        disabled={music.busy["sleep:" + featured.id]}
-                                        onclick={() => music.setSleep(0)}
-                                    >
-                                        Off
-                                    </button>
-                                {/if}
-                            </div>
-                        </div>
-                    {/if}
-
-                    {#if full && featured.kind === "kef"}
-                        <!-- The input selector is the "play this" control: there is
-                     no queue to point somewhere, so switching to the optical
-                     input *is* "play the TV" (§15). -->
-                        <div class="p-inputs" role="group" aria-label="Input">
-                            {#each KEF_SOURCES as src (src.value)}
-                                <button
-                                    class="p-chip"
-                                    class:active={featured.input === src.value}
-                                    aria-pressed={featured.input === src.value}
-                                    disabled={music.busy["src:" + featured.id]}
-                                    onclick={() => music.setKefSource(featured, src.value)}
-                                >
-                                    {src.label}
-                                </button>
-                            {/each}
-                        </div>
-                    {/if}
+                {#if wide && !featured.standby && gs}
+                    <!-- Play modes ride with the player only where the card
+                         is a wide band and has the room for them. In the
+                         depth's column they belong with the room, on the
+                         Rooms pane (PanelRoomSettings) — stacked under the
+                         cover they cost more height than the column had. -->
+                    <div class="p-modes">
+                        <button
+                            class="p-mode"
+                            class:on={gs.shuffle}
+                            aria-pressed={gs.shuffle}
+                            disabled={music.busy["mode:" + featured.id]}
+                            onclick={() => music.toggleShuffle()}
+                        >
+                            <Icon name="shuffle" size={16} /><span>Shuffle</span>
+                        </button>
+                        <button
+                            class="p-mode"
+                            class:on={gs.repeat !== "off"}
+                            aria-pressed={gs.repeat !== "off"}
+                            aria-label={repeatLabel(gs.repeat)}
+                            disabled={music.busy["mode:" + featured.id]}
+                            onclick={() => music.cycleRepeat()}
+                        >
+                            <Icon
+                                name={gs.repeat === "one" ? "repeatOne" : "repeat"}
+                                size={16}
+                            /><span>{repeatText}</span>
+                        </button>
+                        <button
+                            class="p-mode"
+                            class:on={gs.crossfade}
+                            aria-pressed={gs.crossfade}
+                            disabled={music.busy["xfade:" + featured.id]}
+                            onclick={() => music.toggleCrossfade()}
+                        >
+                            <Icon name="activity" size={16} /><span>Crossfade</span>
+                        </button>
+                        <!-- What happens after the last queued song: carry on
+                             with the queue, or keep the room going with music
+                             like it (§15.5). The hub's preference, not the
+                             speaker's, but it reads as one more play mode. -->
+                        <button
+                            class="p-mode"
+                            class:on={!!featured.autoplay}
+                            aria-pressed={!!featured.autoplay}
+                            disabled={music.busy["autoplay:" + featured.id]}
+                            onclick={() => music.toggleAutoplay()}
+                        >
+                            <Icon name="assistant" size={16} /><span>Play similar</span>
+                        </button>
+                    </div>
                 {/if}
             </div>
 
@@ -485,38 +335,6 @@
 {/if}
 
 <style>
-    .p-chip {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        padding: 8px 14px;
-        border-radius: var(--r-pill);
-        border: 1px solid var(--hairline);
-        background: var(--card-2);
-        color: var(--text-mute);
-        font-family: inherit;
-        font-size: 13px;
-        font-weight: 500;
-        cursor: pointer;
-        transition:
-            background var(--t-fast),
-            color var(--t-fast),
-            border-color var(--t-fast),
-            transform var(--t-fast);
-    }
-    .p-chip:active {
-        transform: scale(0.95);
-        transition-duration: 80ms;
-    }
-    .p-chip.active {
-        background: var(--text);
-        color: var(--bg);
-        border-color: var(--text);
-    }
-    .p-chip:disabled {
-        opacity: 0.55;
-    }
-
     .p-card {
         /* How small the cover may get before the card starts scrolling
            instead. Shared, because .p-open's own floor is built from it. */
@@ -692,12 +510,6 @@
         /* The floor. Past it, .p-scroll takes over. */
         min-height: var(--art-floor);
     }
-    /* The music depth's own card (`full`): its column is wider still, so
-       the art — the biggest thing on it — grows to match rather than
-       sitting at the dashboard's cap with empty margin either side. */
-    .p-artwrap.full {
-        max-height: 420px;
-    }
     /* The square itself — the cover's actual box, so the radius, the crop
        and the waveform badge all key off it rather than off the slot,
        which stays column-wide. */
@@ -841,24 +653,11 @@
         color: var(--primary-fg);
     }
 
-    .p-modeblock {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        gap: var(--space-2);
-        flex-shrink: 0;
-    }
     .p-modes {
         display: flex;
         flex-wrap: wrap; /* four chips don't fit the 352px column on one line */
         justify-content: center;
         gap: var(--space-2);
-    }
-    .p-modenote {
-        margin: 0;
-        font-size: 12.5px;
-        color: var(--text-dim);
-        text-align: center;
     }
     .p-mode {
         display: inline-flex;
@@ -910,44 +709,6 @@
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
-    }
-
-    .p-next {
-        display: flex;
-        align-items: center;
-        gap: var(--space-3);
-        min-height: 48px;
-        padding: 10px var(--space-3);
-        border-radius: var(--r-md);
-        border: 1px solid var(--hairline);
-        background: var(--card-2);
-        color: inherit;
-        font: inherit;
-        cursor: pointer;
-        text-align: left;
-        flex-shrink: 0;
-        transition:
-            background var(--t-fast),
-            transform var(--t-fast);
-    }
-    .p-next:active {
-        transform: scale(0.98);
-        transition-duration: 80ms;
-    }
-    .n-label {
-        font-size: 10.5px;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
-        color: var(--text-dim);
-        flex-shrink: 0;
-    }
-    .n-title {
-        flex: 1;
-        min-width: 0;
-        font-size: 14px;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
     }
 
     .p-volume {
@@ -1008,70 +769,10 @@
 
     /* Names the block the room-wide fader used to introduce by sitting
        right above it. Mono uppercase micro-label, per §4. */
-    .p-sublabel {
-        margin: 0 0 calc(var(--space-2) * -1);
-        font-size: 10.5px;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
-        color: var(--text-dim);
-        flex-shrink: 0;
-    }
-    .p-members {
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-2);
-        flex-shrink: 0;
-    }
-    .p-member {
-        display: flex;
-        align-items: center;
-        gap: var(--space-2);
-    }
-    .m-name {
-        width: 72px;
-        flex-shrink: 0;
-        font-size: 12.5px;
-        color: var(--text-mute);
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-    }
-
-    .p-sleep {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: var(--space-3);
-        flex-wrap: wrap;
-        flex-shrink: 0;
-    }
-    .p-sleeplabel {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        font-size: 12.5px;
-        color: var(--text-mute);
-    }
-    .p-sleepleft {
-        font-size: 11px;
-        color: var(--on);
-    }
-    .p-sleepchips {
-        display: flex;
-        gap: var(--space-2);
-    }
-
-    .p-inputs {
-        display: flex;
-        flex-wrap: wrap;
-        gap: var(--space-2);
-        flex-shrink: 0;
-    }
 
     /* Distance-scaled targets: this is a wall, so every chip on it clears
        the §2 floor rather than inheriting a phone's sizing. */
     @media (pointer: coarse) {
-        .p-chip,
         .p-mode {
             min-height: 44px;
             padding-inline: 16px;
@@ -1119,8 +820,7 @@
             aspect-ratio: 1;
             flex: none;
         }
-        .p-artwrap,
-        .p-artwrap.full {
+        .p-artwrap {
             max-height: 280px;
         }
         .p-card {
