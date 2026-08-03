@@ -885,7 +885,10 @@
 
         <section class="b-player" aria-label="Now playing">
             {#if featured}
-                <PanelPlayerCard {music} />
+                <PanelPlayerCard
+                    {music}
+                    onExpand={() => route.go("panel", { music: "1", player: "1" })}
+                />
             {:else}
                 <div class="p-nosrc">
                     <Icon name="speaker" size={28} />

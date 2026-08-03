@@ -29,11 +29,17 @@
     let {
         music,
         onOpen = undefined,
+        onExpand = undefined,
         wide = false,
     }: {
         music: PanelMusicStore;
         /** Given, the cover is a button into the music depth. */
         onOpen?: () => void;
+        /** Given, the cover carries a control that takes the player full
+         *  screen. Only the depth's column offers it: the dashboard band is
+         *  already the biggest thing on its surface, and its cover is the
+         *  way *into* the depth. */
+        onExpand?: () => void;
         /** Landscape: the cover beside the controls rather than above them.
          *  The dashboard's music zone is a wide, short band, where a stacked
          *  cover is capped by what the controls leave of the height and a
@@ -96,6 +102,14 @@
                 {/if}
                 {#if featured.playing}
                     <span class="p-wave"><Waveform /></span>
+                {/if}
+                {#if onExpand}
+                    <!-- Opposite the waveform, on the biggest thing on the
+                         card. Listening is a different job from browsing,
+                         and it wants the whole screen (§16). -->
+                    <button class="p-expand" aria-label="Full screen player" onclick={onExpand}>
+                        <Icon name="expand" size={20} />
+                    </button>
                 {/if}
             </span>
         </span>
@@ -530,6 +544,29 @@
     span.p-art {
         font-size: 11px;
     }
+    .p-expand {
+        position: absolute;
+        top: var(--space-3);
+        right: var(--space-3);
+        width: 44px;
+        height: 44px;
+        display: grid;
+        place-items: center;
+        border: 0;
+        border-radius: var(--r-sm);
+        background: var(--bg-bar);
+        color: var(--text);
+        cursor: pointer;
+        transition: transform var(--t-fast);
+    }
+    .p-expand:active {
+        transform: scale(0.92);
+        transition-duration: 80ms;
+    }
+    .p-expand:focus-visible {
+        box-shadow: var(--focus-ring);
+    }
+
     .p-wave {
         position: absolute;
         left: var(--space-3);

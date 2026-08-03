@@ -4,6 +4,7 @@
     import PanelRooms from "../components/panel/PanelRooms.svelte";
     import PanelMusic from "../components/panel/PanelMusic.svelte";
     import PanelBrowse from "../components/panel/PanelBrowse.svelte";
+    import PanelFullPlayer from "../components/panel/PanelFullPlayer.svelte";
     import Icon from "../components/Icon.svelte";
     import { route, data, uiPrefs } from "../lib/stores.svelte";
     import { isPanelNight, panelIdleMs } from "../lib/panel";
@@ -16,7 +17,8 @@
     // The panel is a kiosk surface (DESIGN.md §16): no chrome, no app
     // shell. The dashboard depth is three stacked bands — a status strip,
     // the music band, and a row of room tiles — with a music depth one tap
-    // in, and an ambient face it all falls back to when untouched.
+    // in, the full-screen player one further, and an ambient face they all
+    // fall back to when untouched.
 
     // ── Clock ────────────────────────────────────────────────────────────
     // One tick for the whole panel; children take the labels as props.
@@ -67,10 +69,14 @@
     let idle = $state(route.query.idle === "1");
     let lastTouch = Date.now();
 
-    // The music depth is the same route one level in (#/panel?music=1), so
-    // the kiosk coherence around the panel — sticky home, the app-level
-    // idle auto-return — covers it untouched, and back is one hash away.
+    // The music depth is the same route one level in (#/panel?music=1), and
+    // the full-screen player one further (&player=1), so the kiosk coherence
+    // around the panel — sticky home, the app-level idle auto-return —
+    // covers both untouched, and back is one hash away. The ladder is
+    // dashboard → depth → player, and every way back climbs one rung.
     const musicOpen = $derived(route.query.music === "1");
+    const playerOpen = $derived(musicOpen && route.query.player === "1");
+    const deep = $derived(musicOpen || playerOpen);
 
     // Touches feed the activity clock on pointerdown; waking is the face's
     // own click (below), so the tap that wakes can never act on the panel.
@@ -85,9 +91,9 @@
         const id = setInterval(() => {
             if (Date.now() - lastTouch > panelIdleMs(now)) {
                 idle = true;
-                // Sleep means home: idling on the music depth walks back to
-                // the dashboard depth's ambient face (§16).
-                if (musicOpen) route.go("panel", { idle: "1" });
+                // Sleep means home: idling anywhere deeper walks back to the
+                // dashboard depth's ambient face (§16).
+                if (deep) route.go("panel", { idle: "1" });
             }
         }, 1000);
         return () => clearInterval(id);
@@ -161,7 +167,9 @@
      interactive control. -->
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="panel" class:has-music={music.hasSpeakers} onpointerdown={poke}>
-    {#if musicOpen}
+    {#if playerOpen}
+        <PanelFullPlayer {music} onBack={() => route.go("panel", { music: "1" })} />
+    {:else if musicOpen}
         <PanelBrowse {music} {spotify} {recents} {booted} />
     {:else}
         <PanelClock {timeLabel} {dateLabel} {lightsOn} {lightsTotal} {insideTemp} />

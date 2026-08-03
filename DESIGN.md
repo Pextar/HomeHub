@@ -1213,10 +1213,10 @@ sidebar, no tab dock, no assistant FAB, no pull-to-refresh. It is reached
 from the sidebar's last entry and the PWA's "Panel" shortcut, and left
 through one quiet Exit chip, top-right.
 
-**Home and music are one surface with two depths.** The panel is the fused
-Home+Music screen — home control on the left and centre, the player on the
-right, both always visible. The second depth is the panel's **own music
-screen** (`#/panel?music=1`, one tap in through the player's art and
+**Home and music are one surface with three depths.** The panel is the fused
+Home+Music screen — the status strip and room tiles above and below, the
+player band between them, all always visible. The second depth is the
+panel's **own music screen** (`#/panel?music=1`, one tap in through the player's art and
 meta): the featured room's player riding on the right, and a work area on
 the left switched by chip between three panes — **Search** (the catalog,
 with the room's recent searches, the household's favorites and the
@@ -1225,9 +1225,20 @@ Sonos group's, with jump / remove / two-tap clear), **Rooms** (the
 featured room's own settings at the head of it — play modes, per-speaker
 faders, sleep, the KEF input — then every room, with Sonos-native
 grouping: join the featured room, split one, or step a single speaker
-out). Its back chip returns to the dashboard depth,
-and idling there sleeps home to the ambient face like any other panel
-idle. Both depths read one shared speaker store
+out). Its back chip returns to the dashboard depth.
+
+The third is the **full-screen player** (`#/panel?music=1&player=1`,
+`PanelFullPlayer`), reached from the expand control on the depth's cover.
+The three answer three different questions and that is why there are
+three: the band answers *what's on* while you walk past, the depth answers
+*put something on*, and this one answers **I am listening** — you have
+started a record and there is nothing left to browse for, so the cover
+goes to the size a record deserves and the room the search results were
+using goes to the queue, which is finally visible in full. Its back chip
+and Escape climb one rung to the depth.
+
+Idling anywhere on the ladder sleeps home to the ambient face like any
+other panel idle. All three depths read one shared speaker store
 (`lib/panel-music.svelte.ts`) — one poll, one featured source, one
 now-playing line. The full Music view stays for the jobs a wall can't do
 (*arranging* cross-vendor HomeHub rooms, speaker settings, EQ, Spotify
