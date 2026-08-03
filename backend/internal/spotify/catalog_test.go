@@ -2,8 +2,10 @@ package spotify
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 )
@@ -289,5 +291,128 @@ func TestYearOf(t *testing.T) {
 		if got := yearOf(in); got != want {
 			t.Errorf("yearOf(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+// A shelf that can't go past its tenth result makes its own count ("Songs
+// 10") a number nobody can act on, so "show more" pages with an offset —
+// the only way past Spotify's limit cap. One kind at a time, since that is
+// what a narrowed shelf is asking for.
+func TestSearchPagePagesOneKind(t *testing.T) {
+	var sent url.Values
+	c := connected(t, "", roundTripFunc(func(r *http.Request) *http.Response {
+		sent = r.URL.Query()
+		return jsonResponse(http.StatusOK, `{}`)
+	}))
+
+	if _, err := c.For("").SearchPage(context.Background(), "adele", "tracks", 10, 10); err != nil {
+		t.Fatal(err)
+	}
+	if got := sent.Get("type"); got != "track" {
+		t.Errorf("type = %q, want the one kind asked for", got)
+	}
+	if got := sent.Get("offset"); got != "10" {
+		t.Errorf("offset = %q, want 10", got)
+	}
+}
+
+// An unknown kind is not a failure: a caller asking for something this
+// version doesn't have gets the broad search rather than an error, and a
+// zero offset is left off the wire entirely.
+func TestSearchPageFallsBackToTheBroadSearch(t *testing.T) {
+	var sent url.Values
+	c := connected(t, "", roundTripFunc(func(r *http.Request) *http.Response {
+		sent = r.URL.Query()
+		return jsonResponse(http.StatusOK, `{}`)
+	}))
+
+	if _, err := c.For("").SearchPage(context.Background(), "adele", "podcasts", 10, 0); err != nil {
+		t.Fatal(err)
+	}
+	if got := sent.Get("type"); got != "track,album,playlist,artist" {
+		t.Errorf("type = %q, want every kind", got)
+	}
+	if _, ok := sent["offset"]; ok {
+		t.Errorf("offset was sent for the first page: %q", sent.Get("offset"))
+	}
+}
+
+// Spotify refuses offset+limit past 1000. A caller paging forever must hit
+// the end of the list, not a 400.
+func TestSearchPageClampsTheDeepEnd(t *testing.T) {
+	var sent url.Values
+	c := connected(t, "", roundTripFunc(func(r *http.Request) *http.Response {
+		sent = r.URL.Query()
+		return jsonResponse(http.StatusOK, `{}`)
+	}))
+
+	if _, err := c.For("").SearchPage(context.Background(), "adele", "tracks", 10, 5000); err != nil {
+		t.Fatal(err)
+	}
+	if got := sent.Get("offset"); got != "990" {
+		t.Errorf("offset = %q, want it clamped to 990", got)
+	}
+}
+
+// The listening shelves exist so that putting music on doesn't have to
+// begin with typing. Both are gated on scopes a login made by an older
+// build never asked for — and since a grant can't be widened by refreshing,
+// the answer has to be "reconnect", not Spotify's 403.
+func TestListeningNeedsItsOwnGrant(t *testing.T) {
+	c := connected(t, "", roundTripFunc(func(*http.Request) *http.Response {
+		t.Error("a request went out on a grant that doesn't carry the scope")
+		return jsonResponse(http.StatusOK, `{}`)
+	}))
+	// connected() stores whatever scope the token response carried; an old
+	// login carries none of these.
+	if _, err := c.For("").RecentTracks(context.Background(), 10); !errors.Is(err, ErrListeningScope) {
+		t.Errorf("RecentTracks on an old grant = %v, want ErrListeningScope", err)
+	}
+	if _, err := c.For("").TopTracks(context.Background(), 10); !errors.Is(err, ErrListeningScope) {
+		t.Errorf("TopTracks on an old grant = %v, want ErrListeningScope", err)
+	}
+	if st := c.For("").Status(); st.Listening {
+		t.Error("Status claims listening on a grant without the scopes")
+	}
+}
+
+// Spotify's history is one entry per *play*, so a song left on repeat comes
+// back five times. A shelf of the same track five times is not a shelf.
+func TestRecentTracksDropsRepeats(t *testing.T) {
+	c := connected(t, scopeTop+" "+scopeRecent, roundTripFunc(func(r *http.Request) *http.Response {
+		if got := r.URL.Path; got != "/v1/me/player/recently-played" {
+			t.Fatalf("unexpected path %s", got)
+		}
+		return jsonResponse(http.StatusOK, `{"items":[
+			{"track":{"uri":"spotify:track:a","name":"A"}},
+			{"track":{"uri":"spotify:track:a","name":"A"}},
+			{"track":{"uri":"spotify:track:b","name":"B"}},
+			{"track":{"uri":"spotify:track:a","name":"A"}}
+		]}`)
+	}))
+
+	got, err := c.For("").RecentTracks(context.Background(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0].Name != "A" || got[1].Name != "B" {
+		t.Errorf("recent = %+v, want one A then one B, newest first", got)
+	}
+}
+
+// "Most played" is meant to answer "put something on" today, so it asks for
+// the recent window rather than a lifetime ranking that barely moves.
+func TestTopTracksAsksForTheRecentWindow(t *testing.T) {
+	var sent url.Values
+	c := connected(t, scopeTop+" "+scopeRecent, roundTripFunc(func(r *http.Request) *http.Response {
+		sent = r.URL.Query()
+		return jsonResponse(http.StatusOK, `{"items":[{"uri":"spotify:track:a","name":"A"}]}`)
+	}))
+
+	if _, err := c.For("").TopTracks(context.Background(), 10); err != nil {
+		t.Fatal(err)
+	}
+	if got := sent.Get("time_range"); got != "short_term" {
+		t.Errorf("time_range = %q, want short_term", got)
 	}
 }

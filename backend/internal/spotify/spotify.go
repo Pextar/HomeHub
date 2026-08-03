@@ -46,13 +46,19 @@ const (
 	stateFile = "spotify.json"
 
 	// Scopes: profile for the "connected as" label, playlist/library reads
-	// for browsing, and the two player scopes that Connect playback needs
-	// (KEF speakers — see the Connect section). Search itself needs no scope.
+	// for browsing, the two player scopes that Connect playback needs (KEF
+	// speakers — see the Connect section), and the two listening-history
+	// scopes behind the idle shelves ("Played recently", "You play these
+	// most"), which exist so that starting music doesn't have to begin with
+	// typing. Search itself needs no scope.
 	scopes = "user-read-private playlist-read-private user-library-read " +
-		scopeReadPlayback + " " + scopeModifyPlayback
+		scopeReadPlayback + " " + scopeModifyPlayback + " " +
+		scopeTop + " " + scopeRecent
 
 	scopeReadPlayback   = "user-read-playback-state"
 	scopeModifyPlayback = "user-modify-playback-state"
+	scopeTop            = "user-top-read"
+	scopeRecent         = "user-read-recently-played"
 )
 
 // ErrNotConnected is returned by every call that needs an account when none
@@ -64,6 +70,14 @@ var ErrNotConnected = errors.New("spotify: not connected")
 // needs the user to reconnect once. Refreshing can't widen a grant, so this
 // is not something the backend can fix on its own.
 var ErrPlaybackScope = errors.New("spotify: reconnect Spotify to let HomeHub start playback — this login was granted before that permission existed")
+
+// ErrListeningScope is the same story for the listening history: a login
+// made before HomeHub asked for it can search and play perfectly well and
+// simply cannot say what this account has been playing. A grant can't be
+// widened by refreshing, so the only fix is reconnecting — and since the
+// shelves it feeds are a convenience rather than a capability, every caller
+// treats this as "no shelf", never as a failure.
+var ErrListeningScope = errors.New("spotify: reconnect Spotify to see what you've been playing — this login was granted before that permission existed")
 
 // accountState is one connected Spotify account: its tokens, the "connected
 // as" label, and the two facts about the grant worth remembering.
@@ -278,6 +292,10 @@ type Status struct {
 	// on a login made before the player scopes were requested, which is the
 	// one thing about the connection that a working search doesn't prove.
 	Playback bool `json:"playback"`
+	// Listening reports whether this login can be asked what the account
+	// has been playing — the idle shelves. False on a login that predates
+	// those scopes, in which case the shelves are absent rather than empty.
+	Listening bool `json:"listening"`
 }
 
 // Status returns the account's connection state. Configured describes the
@@ -291,23 +309,33 @@ func (a *Account) Status() Status {
 		s.Connected = st.RefreshToken != ""
 		s.DisplayName = st.DisplayName
 		s.Playback = st.RefreshToken != "" && grantsPlayback(st.Scope)
+		s.Listening = st.RefreshToken != "" && grantsListening(st.Scope)
 	}
 	return s
 }
 
-// grantsPlayback reports whether a granted-scope string carries both player
-// scopes. An empty scope means the grant was stored by a build that didn't
-// record it, which in practice is a build that never asked for them.
-func grantsPlayback(scope string) bool {
-	has := func(want string) bool {
-		for _, s := range strings.Fields(scope) {
-			if s == want {
-				return true
-			}
-		}
-		return false
+// grants reports whether a granted-scope string carries every named scope.
+// An empty scope means the grant was stored by a build that didn't record
+// it, which in practice is a build that never asked for any of these.
+func grants(scope string, want ...string) bool {
+	got := make(map[string]bool, len(strings.Fields(scope)))
+	for _, s := range strings.Fields(scope) {
+		got[s] = true
 	}
-	return has(scopeReadPlayback) && has(scopeModifyPlayback)
+	for _, w := range want {
+		if !got[w] {
+			return false
+		}
+	}
+	return true
+}
+
+func grantsPlayback(scope string) bool {
+	return grants(scope, scopeReadPlayback, scopeModifyPlayback)
+}
+
+func grantsListening(scope string) bool {
+	return grants(scope, scopeTop, scopeRecent)
 }
 
 // SetClientID stores the developer app's client ID. Changing it invalidates
@@ -797,13 +825,50 @@ func artistLine(artists []wireArtist) string {
 	return strings.Join(names, ", ")
 }
 
+// SearchKinds are the catalog kinds a search can be narrowed to. Empty asks
+// for all four at once, which is what an unfiltered search does.
+var searchTypes = map[string]string{
+	"tracks":    "track",
+	"albums":    "album",
+	"playlists": "playlist",
+	"artists":   "artist",
+}
+
 // Search queries the catalog for tracks, albums, playlists and artists.
 func (a *Account) Search(ctx context.Context, query string, limit int) (*Results, error) {
+	return a.SearchPage(ctx, query, "", limit, 0)
+}
+
+// SearchPage is Search with the two knobs a "show more" needs: one kind
+// rather than all four, and an offset into that kind's results.
+//
+// The offset is the whole point. Spotify caps /search's *limit* at 10 —
+// anything higher is answered 400 "Invalid limit" — so paging is the only
+// way past the tenth result, and a shelf that can't go past ten makes its
+// own count ("Songs 10") a number nobody can act on.
+//
+// `kind` is one of the Results field names ("tracks", "albums",
+// "playlists", "artists"); anything else, including empty, asks for all
+// four. An unknown kind is not an error: a caller asking for a kind this
+// version doesn't have gets the broad search rather than a failure.
+func (a *Account) SearchPage(ctx context.Context, query, kind string, limit, offset int) (*Results, error) {
 	// Spotify quietly tightened /search's cap from the documented 50 down to
 	// 10 — anything higher is answered 400 "Invalid limit", so the clamp has
 	// to be theirs, not the docs'.
 	if limit <= 0 || limit > 10 {
 		limit = 10
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	// Spotify refuses offset+limit past 1000. Clamping here keeps a caller
+	// that pages forever from turning into a 400 at the end of the list.
+	if offset > 1000-limit {
+		offset = 1000 - limit
+	}
+	types := "track,album,playlist,artist"
+	if t, ok := searchTypes[kind]; ok {
+		types = t
 	}
 	var raw struct {
 		Tracks struct {
@@ -819,12 +884,15 @@ func (a *Account) Search(ctx context.Context, query string, limit int) (*Results
 			Items []wireArtistFull `json:"items"`
 		} `json:"artists"`
 	}
-	err := a.apiGet(ctx, "/search", url.Values{
+	params := url.Values{
 		"q":     {query},
-		"type":  {"track,album,playlist,artist"},
+		"type":  {types},
 		"limit": {fmt.Sprint(limit)},
-	}, &raw)
-	if err != nil {
+	}
+	if offset > 0 {
+		params.Set("offset", fmt.Sprint(offset))
+	}
+	if err := a.apiGet(ctx, "/search", params, &raw); err != nil {
 		return nil, err
 	}
 	res := &Results{Tracks: []Item{}, Albums: []Item{}, Playlists: []Item{}, Artists: []Item{}}
@@ -1203,6 +1271,96 @@ func (a *Account) MyPlaylists(ctx context.Context, limit int) ([]Item, error) {
 		})
 	}
 	return out, nil
+}
+
+// Listening is what this account has been playing: the two shelves a search
+// box idles on, so that starting music doesn't have to begin with typing.
+// Either half can be empty — a brand-new account has no history, and a
+// refused read costs its own shelf and nothing else (§15.9).
+type Listening struct {
+	Recent []Item `json:"recent"`
+	Top    []Item `json:"top"`
+}
+
+// RecentTracks is what was played last, newest first and de-duplicated:
+// Spotify's history is one entry per *play*, so a song left on repeat comes
+// back as the same track five times, which is not a shelf.
+func (a *Account) RecentTracks(ctx context.Context, limit int) ([]Item, error) {
+	if err := a.requireListening(); err != nil {
+		return nil, err
+	}
+	if limit <= 0 || limit > 50 {
+		limit = 20
+	}
+	var raw struct {
+		Items []struct {
+			Track wireTrack `json:"track"`
+		} `json:"items"`
+	}
+	// Ask for more than we mean to return: the de-dupe below eats into it,
+	// and a heavy repeat listener would otherwise get a shelf of two.
+	ask := limit * 2
+	if ask > 50 {
+		ask = 50
+	}
+	if err := a.apiGet(ctx, "/me/player/recently-played",
+		url.Values{"limit": {fmt.Sprint(ask)}}, &raw); err != nil {
+		return nil, err
+	}
+	out := make([]Item, 0, limit)
+	seen := make(map[string]bool, len(raw.Items))
+	for _, e := range raw.Items {
+		if e.Track.URI == "" || seen[e.Track.URI] {
+			continue
+		}
+		seen[e.Track.URI] = true
+		out = append(out, trackItem(e.Track))
+		if len(out) == limit {
+			break
+		}
+	}
+	return out, nil
+}
+
+// TopTracks is what this account plays most. `short_term` — roughly the
+// last month — because the shelf is meant to answer "put something on"
+// today, and a lifetime ranking barely moves from one week to the next.
+func (a *Account) TopTracks(ctx context.Context, limit int) ([]Item, error) {
+	if err := a.requireListening(); err != nil {
+		return nil, err
+	}
+	if limit <= 0 || limit > 50 {
+		limit = 20
+	}
+	var raw struct {
+		Items []wireTrack `json:"items"`
+	}
+	if err := a.apiGet(ctx, "/me/top/tracks", url.Values{
+		"limit":      {fmt.Sprint(limit)},
+		"time_range": {"short_term"},
+	}, &raw); err != nil {
+		return nil, err
+	}
+	out := make([]Item, 0, len(raw.Items))
+	for _, t := range raw.Items {
+		out = append(out, trackItem(t))
+	}
+	return out, nil
+}
+
+// requireListening fails early when the stored grant predates the listening
+// scopes, so the caller gets "reconnect" rather than Spotify's 403.
+func (a *Account) requireListening() error {
+	a.c.mu.Lock()
+	defer a.c.mu.Unlock()
+	st := a.peek()
+	if st == nil || st.RefreshToken == "" {
+		return ErrNotConnected
+	}
+	if !grantsListening(st.Scope) {
+		return ErrListeningScope
+	}
+	return nil
 }
 
 // ── Spotify Connect ──────────────────────────────────────────────────────

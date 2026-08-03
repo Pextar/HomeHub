@@ -514,11 +514,22 @@
             </div>
         {/if}
 
-        {#if !booted || spotify.searching}
+        <div class="kms-results" class:stale={spotify.stale}>
+        {#if !booted || spotify.pending}
+            <!-- Only when there is nothing on screen yet. A search that runs
+                 while results are up keeps them and dims them instead — a
+                 list that vanishes every time another letter is typed is
+                 hard enough for a grown-up to follow. -->
             <div class="kms-sklist" aria-hidden="true">
                 {#each Array(4) as _, i (i)}
                     <div class="kms-skel"></div>
                 {/each}
+            </div>
+        {:else if spotify.error}
+            <div class="kms-empty">
+                <div class="kms-empty-emoji">📡</div>
+                <p>Couldn't reach the music!<br />Let's try that again.</p>
+                <button class="kms-connect-btn" onclick={() => spotify.retry()}>Try again</button>
             </div>
         {:else if !spotify.connected}
             {#if spotify.status?.configured}
@@ -578,7 +589,7 @@
             {#if sections.length === 0}
                 <div class="kms-empty">
                     <div class="kms-empty-emoji">🔎</div>
-                    <p>No matches for “{spotify.query}”<br />Try something else!</p>
+                    <p>No matches for “{spotify.resultsQuery}”<br />Try something else!</p>
                 </div>
             {:else}
                 {#if !kbOpen && spotify.kindFilter === "all" && spotify.topResult}
@@ -631,8 +642,16 @@
                 {/each}
             {/if}
         {:else}
-            <!-- Idle: the room's recent searches, then the account's
-                 playlists as a cover grid. -->
+            <!-- Idle: what was on lately, then the room's recent searches,
+                 then the playlists as a cover grid. "Again" leads because
+                 it needs no reading and no typing at all — the shortest
+                 path this screen has to sound coming out. -->
+            {#if spotify.recentTracks.length > 0}
+                {@render shelfLabel("🔁 Play it again")}
+                {#each spotify.recentTracks.slice(0, 6) as item (item.uri)}
+                    {@render trackRow(item, null)}
+                {/each}
+            {/if}
             {#if recents.list.length > 0}
                 <div class="kms-shelf-head">
                     {@render shelfLabel("🕘 Recent searches")}
@@ -668,18 +687,28 @@
                 </div>
             {/if}
 
-            {#if recents.list.length === 0 && spotify.myPlaylists.length === 0}
+            {#if recents.list.length === 0 && spotify.myPlaylists.length === 0 && spotify.recentTracks.length === 0}
                 <div class="kms-empty">
                     <div class="kms-empty-emoji">🔎</div>
                     <p>Type a song or a singer<br />to find them!</p>
                 </div>
             {/if}
         {/if}
+        </div>
     {/if}
 </div>
 
 <style>
     .kms { display: flex; flex-direction: column; gap: var(--space-3); }
+
+    /* A newer search running behind the list: it stays, dimmed, and stops
+       taking taps — a row tapped while it is being replaced would play
+       whatever landed in its place. */
+    .kms-results { display: flex; flex-direction: column; gap: var(--space-3); }
+    .kms-results.stale { opacity: 0.45; pointer-events: none; transition: opacity var(--t-fast); }
+    @media (prefers-reduced-motion: reduce) {
+        .kms-results.stale { transition-duration: 0.001ms; }
+    }
 
     /* ── Search box ── */
     .kms-box {

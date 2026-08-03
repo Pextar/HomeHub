@@ -20,6 +20,22 @@ export interface SpotifyStatus {
    * fixes it — so it is worth saying before the tap rather than after.
    */
   playback: boolean;
+  /**
+   * Whether this login may be asked what the account has been playing — the
+   * shelves a search box idles on. Same story as `playback`: an older grant
+   * searches perfectly well and simply has nothing to say here, so the
+   * shelves are absent rather than empty and the offer to reconnect is made
+   * once, quietly, where they would have been.
+   */
+  listening: boolean;
+}
+
+/** What this account has been playing, for the idle shelves. Either half
+ *  can be empty: a new account has no history, and a refused read costs its
+ *  own shelf and nothing else (DESIGN.md §15.9). */
+export interface SpotifyListening {
+  recent: SpotifyItem[];
+  top: SpotifyItem[];
 }
 
 /** One Spotify Connect endpoint the connected account can play to. */

@@ -47,6 +47,7 @@ import type {
   KEFSpotifyView,
   SpotifyStatus,
   SpotifyItem,
+  SpotifyListening,
   SpotifyResults,
   SpotifyArtistDetail,
   SpotifyContextDetail,
@@ -459,10 +460,24 @@ export const api = {
     return req<void>("/spotify/exchange", { method: "POST", body: json({ url }) });
   },
   spotifyDisconnect() { return req<void>("/spotify/disconnect", { method: "POST" }); },
-  spotifySearch(q: string, limit = 8) {
-    return req<SpotifyResults>(`/spotify/search?q=${encodeURIComponent(q)}&limit=${limit}`);
+  // `kind` narrows to one of tracks/albums/playlists/artists and `offset`
+  // pages into it — what a shelf's "Show more" needs, since Spotify caps a
+  // search at ten results per kind. `signal` lets a superseded search be
+  // called off rather than left to finish and be discarded.
+  spotifySearch(
+    q: string,
+    limit = 8,
+    opts: { kind?: string; offset?: number; signal?: AbortSignal } = {},
+  ) {
+    const p = new URLSearchParams({ q, limit: String(limit) });
+    if (opts.kind) p.set("kind", opts.kind);
+    if (opts.offset) p.set("offset", String(opts.offset));
+    return req<SpotifyResults>(`/spotify/search?${p}`, { signal: opts.signal });
   },
   spotifyMyPlaylists() { return req<SpotifyItem[]>("/spotify/playlists"); },
+  // What the account has been playing, for the idle shelves. 409 means the
+  // login predates the listening scopes — a reconnect, not a fault.
+  spotifyListening() { return req<SpotifyListening>("/spotify/listening"); },
   // An artist's page — top tracks and albums, behind a search result.
   spotifyArtist(uri: string) {
     return req<SpotifyArtistDetail>(`/spotify/artist?uri=${encodeURIComponent(uri)}`);

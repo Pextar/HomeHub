@@ -8,6 +8,8 @@
     import { route, data, uiPrefs } from "../lib/stores.svelte";
     import { isPanelNight, panelIdleMs } from "../lib/panel";
     import { createPanelMusic } from "../lib/panel-music.svelte";
+    import { createSpotify } from "../lib/music/spotify.svelte";
+    import { createSearchHistory } from "../lib/music/history.svelte";
     import { fade } from "svelte/transition";
     import { dur } from "../lib/motion";
 
@@ -110,6 +112,41 @@
     // And what's playing — the ambient face carries it.
     const playing = $derived(music.nowPlaying);
 
+    // The catalog lives up here for the same reason the speakers do: the
+    // music depth is a route away, and a route away and back used to throw
+    // the search out with the component. Typing on a wall is the most
+    // expensive thing this surface asks for, so walking off to fetch
+    // something and coming back must not cost it twice. Recents are keyed
+    // by the featured room with the app's own key format, so the wall and
+    // the phone share one per-room history.
+    const recents = createSearchHistory(() => {
+        const f = music.featured;
+        return f ? `${f.kind}:${f.id}` : null;
+    });
+    const spotify = createSpotify((q, art) => recents.add(q, art));
+    // `status` is null both while loading and when the endpoint refuses
+    // (the Spotify routes are admin-only); `booted` separates the two so a
+    // refusal doesn't hang the depth on skeletons.
+    let booted = $state(false);
+    onMount(() => {
+        void spotify.load().finally(() => {
+            booted = true;
+        });
+    });
+
+    $effect(() => {
+        // Asleep, the panel is a clock: the speakers only need catching up
+        // with often enough that waking is current, and a pushed change
+        // still lands immediately. An always-on tablet polls for years —
+        // this is the one place that cost can be given back for free.
+        music.setIdle(idle);
+        // Sleeping also ends the search. Keeping it across a walk to the
+        // kitchen is the point of hoisting it; keeping it until the next
+        // person walks up to the wall is somebody else's half-typed
+        // question.
+        if (idle) spotify.clearQuery();
+    });
+
     // Entering the panel marks this device as panel-homed (the dashboard
     // route renders the panel, idle time walks back here); Exit lifts the
     // mark (§16).
@@ -125,7 +162,7 @@
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="panel" class:has-music={music.hasSpeakers} onpointerdown={poke}>
     {#if musicOpen}
-        <PanelBrowse {music} />
+        <PanelBrowse {music} {spotify} {recents} {booted} />
     {:else}
         <PanelClock {timeLabel} {dateLabel} {lightsOn} {lightsTotal} {insideTemp} />
         <PanelRooms />

@@ -884,6 +884,55 @@ _up one_.
   carousel: a rail hid half the matches behind a horizontal swipe on the
   screen where they were hardest to reach.
 - **The kind filter counts.** `Albums 7` is a decision; `Albums` is a guess.
+  Spotify answers at most ten per kind, so a count that reads `10` is a
+  page rather than a total, and a narrowed shelf offers **Show more** to
+  page past it with an offset (`SearchPage` in `internal/spotify`). The
+  end of a list announces itself by a page coming back short — there is no
+  total on the wire worth trusting — and a repeat handed back twice is
+  dropped, because the catalog can shift between two requests.
+- **A running search never blanks the screen.** Typing is debounced, so a
+  search fires on the way to a word, and the results already up are the
+  ones being read. They **stay and dim** (`stale`); the skeleton is only
+  for a screen with nothing on it yet (`pending`). The dimmed list also
+  stops taking taps — a row acted on while it is being replaced would act
+  on whatever lands in its place.
+- **A failed search clears the list and says so.** The previous query's
+  results sitting under this query's text read as an answer. The results
+  area carries the failure and the retry, because that is where the answer
+  was expected; the toast was easy to miss and impossible on a kiosk.
+- **Only searches that found something are remembered.** A room's history
+  is eight slots deep, and remembering on the way *in* meant every typo,
+  every zero-result query and every failed request took one from a query
+  that worked. Recents are also reachable **while results are up** — under
+  the box whenever it has the caret — since the moment they are most
+  useful is when this search didn't pan out.
+- **A superseded search is called off.** Each search owns an
+  `AbortController`; the next one aborts it. A fast typist otherwise leaves
+  four requests in flight against the rate limit for answers nobody reads.
+  Below two characters the typing path doesn't search at all — one letter
+  matches everything and costs a round trip to say so — though Enter still
+  runs whatever is in the box, for the names that short.
+- **The result count is announced.** The list changes under a box that
+  still has the caret, so a polite live region says how many matched and
+  for what. Nothing else on screen says it out loud.
+- **The box idles on what you already play.** Typing is the most expensive
+  thing this module asks for — worst of all on a wall — so an empty box is
+  not an empty screen: **Played recently** leads (the account's history,
+  newest first and de-duplicated, since Spotify records one entry per
+  *play* and a song on repeat is not a shelf), then **You play these most**
+  (the short-term ranking, because the shelf answers "put something on"
+  today rather than summarising a lifetime), then the account's playlists.
+  On the wall the room's recent searches and the household's favorites
+  slot in between, and on the kid surface "Play it again" is the whole
+  idea: no reading, no typing, one tap to sound.
+  These need two scopes (`user-top-read`, `user-read-recently-played`) that
+  logins made before them don't carry, and **a grant cannot be widened by
+  refreshing** — so `status.listening` says whether this login can be
+  asked, the shelves are *absent* rather than empty when it can't, and the
+  offer to reconnect is made once, quietly, where they would have been. It
+  is not a fault: everything else about that connection works, and the
+  copy says so. The same shape as `status.playback` (§15.5), for the same
+  reason.
 - **What the page has already said, the rows don't repeat.** An album's own
   tracks carry neither its cover nor its artist (a featured artist still
   differs, so that survives), and below 560px the trailing play mark goes —
@@ -1170,16 +1219,17 @@ right, both always visible. The second depth is the panel's **own music
 screen** (`#/panel?music=1`, one tap in through the player's art and
 meta): the featured room's player riding on the right, and a work area on
 the left switched by chip between three panes — **Search** (the catalog,
-with the room's recent searches and the account's playlists while the box
-is empty), **Queue** (the featured Sonos group's,
-with jump / remove / two-tap clear), **Rooms** (every room, with
-Sonos-native grouping: join the featured room, split one, or step a
-single speaker out). Its back chip returns to the dashboard depth, and
-idling there sleeps home to the ambient face like any other panel idle.
-Both depths read one shared speaker store (`lib/panel-music.svelte.ts`) —
-one poll, one featured source, one now-playing line. The full Music view
-stays for the jobs a wall can't do (cross-vendor HomeHub rooms, speaker
-settings, EQ, Spotify setup), reached via Exit. Three behaviours keep the
+with the room's recent searches, the household's favorites and the
+account's playlists while the box is empty), **Queue** (the featured
+Sonos group's, with jump / remove / two-tap clear), **Rooms** (every
+room, with Sonos-native grouping: join the featured room, split one, or
+step a single speaker out). Its back chip returns to the dashboard depth,
+and idling there sleeps home to the ambient face like any other panel
+idle. Both depths read one shared speaker store
+(`lib/panel-music.svelte.ts`) — one poll, one featured source, one
+now-playing line. The full Music view stays for the jobs a wall can't do
+(*arranging* cross-vendor HomeHub rooms, speaker settings, EQ, Spotify
+setup), reached via Exit. Three behaviours keep the
 pair coherent:
 
 - **Sticky home.** Entering the panel marks the device panel-homed
@@ -1236,26 +1286,61 @@ constraint made visible.
   here.
 - **Music is the panel's second satellite** (after Home's "Playing now",
   §6.8) and carries the waveform by the same licence. One source is
-  featured — the user's chip pick, else whatever is playing — with Sonos
-  groups and KEF speakers as equal sources. Transport stays honest per
-  bridge (§15): KEF gets play/pause but no skips, standby renders as a
-  label, and a source that can't be reached is absent rather than dead.
+  featured — the user's chip pick, else whatever is playing — with
+  HomeHub zones, Sonos groups and KEF speakers as equal sources, in that
+  order and under §15.1's rule: a zone outranks the household's own
+  grouping, and the speakers inside one stop appearing under their own
+  names. A zone is *played* from the wall and never built there.
+  Transport stays honest **per source, not per make** (§15): a skip
+  renders where a skip would reach something — always on a Sonos group,
+  on a KEF speaker only on a network input, on a zone unless it is being
+  streamed — and a source that can't be reached is absent rather than
+  dead. Standby is the one refusal that resolves itself: it renders as a
+  **Wake** button, because waking a speaker is not configuring one.
   Art and meta are the tap-through to the music depth; transport,
   volume and the source chips stay on both depths — the player answers
-  on the wall, the library lives one tap in.
+  on the wall, the library lives one tap in. The chips carry the waveform
+  for a room that is playing, so which room is making noise is readable
+  without selecting each one to find out, and the column's header carries
+  **Pause all** whenever anything is: the tap a wall gets asked for on the
+  way to bed.
+- **An outage is reported, not rendered as an absence.** Speakers that
+  stop answering leave the music column in place, at its own size, saying
+  so — a dropped read says nothing about what this home owns, and a wall
+  panel that reflows its three-column grid on one packet is worse than one
+  that waits. Only a home with no speakers registered at all loses the
+  column. The same reasoning runs the poll: while the ambient face is up
+  the panel is a clock, so the backstop drops to two minutes and a pushed
+  change still lands at once.
 - **The player card is one component with two widths** (§16 keeps them
   in `components/panel/`). Both depths get the scrubber — seek on a
   Sonos track, a read-only rail elsewhere, an honest no-position line
   where there is no duration — and a Sonos coordinator's play-mode
-  chips (shuffle, repeat, crossfade). The depth's card adds what the
+  chips (shuffle, repeat, crossfade). Cover art is square, because
+  records are — it is the frame that gives when a tall card runs out of
+  room, never the controls. The volume row carries a **−/+ step** either
+  side of the fader: a rail is an imprecise aim at arm's length, and a
+  range input's hit area is its box rather than its knob (which is why
+  the shared slider grows to a 44px box on a coarse pointer while the
+  rail keeps its drawn weight). The depth's card adds what the
   dashboard's glance surface hasn't room for: one fader per speaker
-  under the room-wide one when a group has more than one, the KEF
-  input selector, and the Up-next row that names the actual next track
-  and opens the queue pane (§15.8's door, same sentence). The mode row
+  under the room-wide one when a group or zone has more than one, the KEF
+  input selector, the **sleep timer** — group-scoped like the play modes,
+  and the one setting the wall has more claim to than the phone, since
+  "stop in half an hour" is asked at the light switch on the way to bed —
+  and the Up-next row that names the actual next track and opens the
+  queue pane (§15.8's door, same sentence). **Up next only claims what it
+  knows**: under shuffle the speaker picks its own next track and under
+  repeat-one it plays this one again, so the row keeps the door and drops
+  the claim, naming the queue's length and why instead. The mode row
   carries §15.5's **Play similar** with the rest, since "what happens
   when this song is the last one" is exactly the question a wall gets
   asked; the depth's card adds one line naming which way it will go,
   because that choice shows itself only once the queue has run out.
+  A queued track is the one action here that changes nothing visible, so
+  the card confirms it in place for a few seconds — not a toast (§10's
+  quiet answer stands, and a kiosk has nobody to dismiss cards), just the
+  one line saying what went in and whether it plays next.
 - **On the music depth, a song plays; an artist opens.** The wall keeps
   the flat gesture where it's about starting sound: a song found by
   search plays, an album or playlist plays whole — the player names what
@@ -1269,9 +1354,19 @@ constraint made visible.
   like" — fetched once per URI and kept for the session. From there a
   record or a related artist goes one level deeper still, the back chip
   climbs one level rather than leaving the depth, and Escape walks the
-  same ladder. Queueing without interrupting lives behind the row's
-  overflow ("Play next", "Add to queue"), only for a Sonos destination,
-  exactly like §15.8's rule — and the queue pane is where it lands.
+  same ladder. **The results name their own destination**: the room chips
+  ride on the player column, so the search says "Plays on {room}" above
+  its list — the wall is the surface most likely to be used by whoever
+  walked past it last, and it must never be a guess which room a tap
+  reaches. Arriving in the depth also *pins* that room: the featured
+  source is otherwise a fallback ("whatever is playing"), and a speaker
+  starting up elsewhere between typing and tapping would move the
+  destination under the finger. Queueing without interrupting is two
+  named buttons on the row — play next, add to queue — only for a Sonos
+  destination, exactly like §15.8's rule, and the queue pane is where it
+  lands. Buttons rather than an overflow menu because this is a wall: a
+  menu costs a tap to open, a tap to choose and a tap to dismiss, and at
+  arm's length two 44px targets beat all three.
   **Recent searches live on the wall too**, keyed by the featured room
   with the app's own key format, so the wall and the phone share one
   per-room history — a chip re-runs one, an × forgets one, Clear forgets
@@ -1288,19 +1383,39 @@ constraint made visible.
   into the shelves — because typing should show a handful of matches
   where one card used to fit. The keyboard is part of the flow: Enter
   dismisses it, and so does a tap on any result, so the rich layout
-  returns for the choosing. The Sonos favorites shelf stays
-  in the full view: recents answer the wall's idle moment better than a
-  static list that never changes.
-  Spotify setup stays in the full view: an unconnected depth says so and
-  points there, because configuration is the full app's job.
+  returns for the choosing. **The household's favorites idle here too**,
+  under the recents: a station is the one thing on this depth that needs
+  no typing at all, and typing is the worst thing a wall asks anyone to
+  do. They earn their place twice over — without a linked Spotify account
+  they are the only thing this depth can start, so an unconnected panel
+  leads with them and puts the pointer to setup underneath, rather than
+  being a dead end with a sentence on it. Spotify setup itself stays in
+  the full view, because configuration is the full app's job.
+  **A search survives leaving the depth.** The catalog store and the
+  room's history are the panel's, next to the speakers
+  (`views/Panel.svelte`), not the depth's — the music screen is a route
+  away, and a route away and back used to throw a half-typed search out
+  with the component. Typing is the wall's most expensive gesture; walking
+  off to fetch something must not cost it twice. Falling asleep is where
+  it ends: the ambient face clears the query, because keeping it until the
+  *next* person walks up to the wall is somebody else's half-typed
+  question. §15.9's search rules otherwise apply here unchanged, and matter
+  more: a list blanked on every keystroke is worst when it is being read
+  from across a room, and a failure needs a retry that is a target rather
+  than a sentence with a link in it.
 - **Grouping on the wall is Sonos-native and tap-based.** The app's
   drag would be imprecise at arm's length, so the Rooms pane names the
   action instead: every other Sonos room gets "Join {featured}", the
   featured group gets a two-tap "Split", and each non-lead member gets
-  an × to step out. Cross-vendor HomeHub rooms are never created here —
+  an × to step out. Cross-vendor HomeHub rooms are never *created* here —
   the route engine, the Spotify-session trade-offs and the persistent
-  naming all belong to the full view — and the pane says so in one
-  honest line rather than offering half of it.
+  naming all belong to the full view — but an existing one is a room like
+  any other in this pane and on the chips, and the pane says exactly that
+  in one honest line. **Playing and chosen are drawn in two registers**:
+  a room making noise gets §6.1's ON gradient, and the chosen room gets a
+  ring. They are independent states, and one glow for both meant a silent
+  focused room wore "on" while a playing room that wasn't chosen looked
+  identical to the one that was.
 - **Rooms, or devices.** With no rooms defined, the centre falls back to a
   device grid; an empty control surface is never acceptable. Unassigned
   devices appear only there — the room grid is rooms, not clutter.
