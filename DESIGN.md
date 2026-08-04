@@ -1475,11 +1475,21 @@ constraint made visible.
   it is the biggest and most obviously tappable thing on the card (§15.8),
   and a second button around the meta would only say the same thing twice.
   **The card is two regions, and which one a control is in is the layout
-  decision.** Below a hairline sits the strip that never moves — the
-  scrubber, prev/play/next, and the room's fader — because a wall is
+  decision.** Below a hairline sits the strip that never moves —
+  prev/play/next and the room's fader — because a wall is
   tapped in passing and the tapping half has to be where it was last
   time. Above it, everything else scrolls: the cover, what is playing,
-  and the room's preferences. There is no room on a 768px panel for both
+  and the room's preferences.
+  **The scrubber goes with the record wherever there is a record column to
+  put it in** — the full-screen player's rule, and the wide band has the
+  same two columns, so it follows it: cover, then the rail at exactly the
+  cover's width, then the controls beside the pair. How far through the
+  song we are is a fact about the song, and above the transport it was a
+  hairline across the top of the *other* column. The height it hands back
+  is what the play modes are drawn in, which is the only shape that keeps
+  them on the card at all (below). Stacked, the two placements are the same
+  place — one column, and the strip is the half that never moves — so the
+  depth's card keeps it there. There is no room on a 768px panel for both
   a cover worth looking at and every preference at once, and the cover is
   the half that is read from across the room, so it takes the scrolling
   region's height and the preferences take the scroll.
