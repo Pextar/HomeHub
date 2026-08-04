@@ -1333,7 +1333,19 @@ constraint made visible.
   **Wake** button, because waking a speaker is not configuring one.
   Art and meta are the tap-through to the music depth; transport,
   volume and the source chips stay on both depths — the player answers
-  on the wall, the library lives one tap in. The chips carry the waveform
+  on the wall, the library lives one tap in. **The band's heading is a
+  door too, and it is the one that always exists.** The cover is the
+  bigger, more obvious way in and stays the primary one, but it is *card*
+  content, and the card is the part of this band that can be missing:
+  nothing answering, nothing ever played, a cover that failed to draw. A
+  wall whose only route to the library rode on one square of album art
+  had no route at all on the day that square didn't render, which is
+  exactly how it was found. So `Music ›` in the section head opens the
+  depth in every one of those states. That is section navigation, not a
+  second copy of the cover's job — the rule it is read against
+  (§16's "a second button around the meta would only say the same thing
+  twice") is about two controls *inside* the card, and still holds.
+  The chips carry the waveform
   for a room that is playing, so which room is making noise is readable
   without selecting each one to find out, and the column's header carries
   **Pause all** whenever anything is: the tap a wall gets asked for on the
@@ -1372,16 +1384,29 @@ constraint made visible.
   and the room's preferences. There is no room on a 768px panel for both
   a cover worth looking at and every preference at once, and the cover is
   the half that is read from across the room, so it takes the scrolling
-  region's height and the preferences take the scroll. When something
-  does ride below it, the cover holds back a sliver of that first row: a
-  kiosk has no scrollbar, and a region whose content stops exactly at its
-  own edge gives no sign that it moves.
+  region's height and the preferences take the scroll.
   Cover art is square, because records are — and it gives way as a
   square, on both axes together. Sizing it from the *column* (a width
   plus a ratio) is not the same thing and was a bug for four rounds: the
   height came from the wrong axis, flexbox shrank the box while the image
   kept its size, and every record rendered as a letterbox strip of its
-  top third. Height is the scarce axis on a wall, so height leads.
+  top third. Height is the scarce axis on a wall, so height leads —
+  and **height leads by measurement, not by a chain of ratios.** Saying
+  it in CSS meant an `aspect-ratio` deriving a flex item's width from the
+  height its row stretched it to, a `height: 100%` resolved against that,
+  and a ratio again on the box inside; every link there is a place an
+  engine can answer `auto`, and one that does collapses the cover to
+  nothing on a screen where the rest of the card looks fine. The reference
+  hardware is a Safari 15 iPad and this is not the layout to be clever in
+  front of it. So the card measures the room the cover may have — boxes
+  the cover cannot itself size, or the reading chases its own tail — and
+  writes the square onto it in pixels, definite on both axes with nothing
+  left to resolve. Only the portrait fallback keeps a ratio, and only in
+  the width-led direction every engine agrees on.
+  **Art that fails to load falls back to the placeholder** (§6.7), keyed
+  to the URL so the next track gets its own try. A broken proxy read used
+  to leave an empty box, which looks exactly like a cover still loading
+  and, on the dashboard, is a tap-through with nothing drawn in it.
   The volume row carries a **−/+ step** either
   side of the fader: a rail is an imprecise aim at arm's length, and a
   range input's hit area is its box rather than its knob (which is why

@@ -19,12 +19,26 @@
     // panel that reflows its grid on a dropped packet is worse than one
     // that says "not answering" and stays where it was.
     let { music }: { music: PanelMusicStore } = $props();
+
+    // The way in. The cover is still the tap-through on the card (§16) and
+    // it is the bigger, more obvious one — but it is *card* content, and the
+    // card is the part of this band that can be absent: no speaker
+    // answering, nothing ever played, a cover that failed to draw. The
+    // section's own name is here in every one of those states, so that is
+    // where the depth's door belongs. It is section navigation, not a
+    // second copy of the cover's job.
+    const open = () => route.go("panel", { music: "1" });
 </script>
 
 {#if music.hasSpeakers}
     <section class="music" aria-label="Now playing">
         <header class="m-head">
-            <h2>Music</h2>
+            <h2>
+                <button class="m-open" onclick={open}>
+                    <span>Music</span>
+                    <Icon name="chevronRight" size={18} />
+                </button>
+            </h2>
             <!-- The destination picker rides here, where the row is as wide
                  as the panel: in the card it wrapped to two and three lines
                  and took that height off the cover (§16). -->
@@ -48,7 +62,7 @@
                 <p class="m-outsub">The panel keeps trying — nothing here has been lost.</p>
             </div>
         {:else}
-            <PanelPlayerCard {music} wide onOpen={() => route.go("panel", { music: "1" })} />
+            <PanelPlayerCard {music} wide onOpen={open} />
         {/if}
     </section>
 {/if}
@@ -77,6 +91,32 @@
         font-size: 17px;
         font-weight: 600;
         letter-spacing: -0.02em;
+    }
+    /* The heading is the door, so it is drawn as the heading and not as a
+       chip: only the chevron says it leads anywhere. A wall poke needs the
+       whole 44px, hence the negative inline margin — the text still lines
+       up with the band under it. */
+    .m-open {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--space-1);
+        min-height: 44px;
+        margin-inline: calc(var(--space-2) * -1);
+        padding-inline: var(--space-2);
+        border: 0;
+        border-radius: var(--r-sm);
+        background: none;
+        color: inherit;
+        font: inherit;
+        letter-spacing: inherit;
+        cursor: pointer;
+        transition: color var(--t-fast);
+    }
+    .m-open :global(svg) {
+        color: var(--text-dim);
+    }
+    .m-open:active {
+        color: var(--on);
     }
     .m-pauseall {
         display: inline-flex;

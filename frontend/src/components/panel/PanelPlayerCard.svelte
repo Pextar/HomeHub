@@ -51,6 +51,63 @@
 
     const featured = $derived(music.featured);
     const gs = $derived(featured?.groupState);
+
+    // ── The cover's size, stated in pixels ──────────────────────────────
+    // The cover is a square and height is the scarce axis on a wall, so the
+    // square has to be sized from the height it is allowed. It used to say
+    // that as a chain — an `aspect-ratio` hanging off a flex item stretched
+    // by its row, a `height: 100%` resolved against that, a ratio again on
+    // the box inside — and a chain is only as good as its weakest link: an
+    // engine that resolves any one of those to `auto` collapses the cover to
+    // nothing. On the dashboard that took the artwork *and* the band's only
+    // way into the music depth with it, since the cover is the tap-through.
+    // So the card measures the room the cover may have and states the square
+    // outright: definite on both axes, nothing to resolve.
+    const ART_FLOOR = 96;
+    const ART_CAP = 420;
+    /** The gap between the cover and the meta under it, stacked. */
+    const HEAD_GAP = 16;
+
+    // Landscape is the designed-for shape and the one that measures; the
+    // portrait fallback lets CSS size the cover from its width, which is the
+    // direction every engine agrees on. Mirrors the media query below.
+    let landscape = $state(true);
+    $effect(() => {
+        const mq = window.matchMedia("(orientation: portrait), (max-width: 900px)");
+        const apply = () => (landscape = !mq.matches);
+        apply();
+        mq.addEventListener("change", apply);
+        return () => mq.removeEventListener("change", apply);
+    });
+
+    // Every measurement below is of a box the cover cannot itself size, or
+    // the reading would chase its own tail: the card's width, the body's
+    // stretched height (the card's height is the band's, not its content's),
+    // the scroll region's leftover after the pinned strip, and the meta,
+    // whose two lines never wrap.
+    let cardW = $state(0);
+    let bodyH = $state(0);
+    let scrollH = $state(0);
+    let scrollW = $state(0);
+    let metaH = $state(0);
+
+    const coverPx = $derived.by(() => {
+        if (!landscape) return 0; // portrait: CSS sizes it from the width
+        const height = wide ? bodyH : scrollH - metaH - HEAD_GAP;
+        // Beside the controls the cover may take about half the band; above
+        // them it may take the column.
+        const width = wide ? cardW * 0.45 : scrollW;
+        if (height <= 0 || width <= 0) return 0; // pre-measure, one frame
+        return Math.max(ART_FLOOR, Math.min(height, width, ART_CAP));
+    });
+    const coverStyle = $derived(coverPx ? `width:${coverPx}px;height:${coverPx}px` : "");
+
+    // Art that 404s (the proxy can't reach the speaker, the service expired
+    // the URL) left an empty box behind — indistinguishable from a cover
+    // that hasn't loaded yet. Fall back to §6.7's placeholder instead, and
+    // key the failure to the URL so the next track gets its own try.
+    let artFailed = $state<string | null>(null);
+    const artSrc = $derived(featured?.art && featured.art !== artFailed ? featured.art : null);
     // A rail gets nothing to say when there is no track loaded to describe.
     const railIdle = $derived(!featured?.trackTitle && !featured?.playing);
     const railLabel = $derived(
@@ -77,48 +134,39 @@
         if (!q || Date.now() - q.at > QUEUED_MS) return null;
         return q;
     });
-
-    /** Whether anything rides below the cover in the scrolling half — only
-     *  ever the wide card's play modes now. The cover claims that whole
-     *  half otherwise, and holds back a sliver of the first row when it
-     *  doesn't: a kiosk has no scrollbar, so a region whose content stops
-     *  exactly at its own edge gives no sign that it moves at all. */
-    const hasExtras = $derived(!!wide && !!gs && !featured?.standby);
 </script>
 
 <!-- The art, identical either side of the tap-through button, so the two
-     branches can't drift. `.p-artbox` is the square itself — the frame that
-     gives way when the card runs short — and the waveform hangs off it
-     rather than off the flexible full-width slot it sits in, or it would
-     float in the margin beside a shrunk cover. -->
+     branches can't drift. `.p-artbox` is the square itself — sized in
+     pixels from what the card measured — and the waveform and the expand
+     control hang off it, so they sit on the cover rather than floating in
+     the margin beside it. -->
 {#snippet art()}
     {#if featured}
-        <span class="p-artwrap">
-            <span class="p-artbox">
-                {#if featured.art}
-                    <img class="p-art" src={featured.art} alt="" loading="lazy" />
-                {:else}
-                    <span class="p-art placeholder">[ art ]</span>
-                {/if}
-                {#if featured.playing}
-                    <span class="p-wave"><Waveform /></span>
-                {/if}
-                {#if onExpand}
-                    <!-- Opposite the waveform, on the biggest thing on the
-                         card. Listening is a different job from browsing,
-                         and it wants the whole screen (§16). -->
-                    <button class="p-expand" aria-label="Full screen player" onclick={onExpand}>
-                        <Icon name="expand" size={20} />
-                    </button>
-                {/if}
-            </span>
+        <span class="p-artbox" style={coverStyle}>
+            {#if artSrc}
+                <img class="p-art" src={artSrc} alt="" onerror={() => (artFailed = artSrc)} />
+            {:else}
+                <span class="p-art placeholder">[ art ]</span>
+            {/if}
+            {#if featured.playing}
+                <span class="p-wave"><Waveform /></span>
+            {/if}
+            {#if onExpand}
+                <!-- Opposite the waveform, on the biggest thing on the
+                     card. Listening is a different job from browsing,
+                     and it wants the whole screen (§16). -->
+                <button class="p-expand" aria-label="Full screen player" onclick={onExpand}>
+                    <Icon name="expand" size={20} />
+                </button>
+            {/if}
         </span>
     {/if}
 {/snippet}
 
 {#snippet meta(chevron: boolean)}
     {#if featured}
-        <span class="p-track">
+        <span class="p-track" bind:clientHeight={metaH}>
             <span class="p-title">
                 {featured.trackTitle ?? (featured.playing ? "Playing" : "Not playing")}
             </span>
@@ -136,7 +184,7 @@
 
 {#if featured}
     {@const openLabel = `Open music — ${featured.trackTitle ?? (featured.playing ? "playing" : "nothing playing")} on ${featured.title}`}
-    <article class="p-card" class:playing={featured.playing} class:wide>
+    <article class="p-card" class:playing={featured.playing} class:wide bind:clientWidth={cardW}>
         {#if wide}
             <!-- Landscape: the cover takes the band's whole height and the
                  controls sit beside it, so the two stop competing for the
@@ -144,7 +192,9 @@
                  tap-through on its own here — it is the biggest and most
                  obviously tappable thing on the card (§15.8), and a second
                  button around the meta would only say the same thing
-                 twice. -->
+                 twice. The band's header carries the way in as well, but
+                 that is section navigation and it is there whether or not
+                 there is a card under it (§16). -->
             {#if onOpen}
                 <button class="p-cover p-open" onclick={onOpen} aria-label={openLabel}>
                     {@render art()}
@@ -154,14 +204,14 @@
             {/if}
         {/if}
 
-        <div class="p-body">
+        <div class="p-body" bind:clientHeight={bodyH}>
             <!-- The card is two regions, and which one a control is in is
                  the layout decision (§16). This one scrolls: what is
                  playing and the room's preferences — plus the cover, when
                  the card is stacked. The strip below never does. A wall is
                  read from across the room and tapped in passing, so the
                  tapping half has to be where it was last time. -->
-            <div class="p-scroll" class:has-extras={hasExtras}>
+            <div class="p-scroll" bind:clientHeight={scrollH} bind:clientWidth={scrollW}>
                 {#if wide}
                     {@render meta(false)}
                 {:else if onOpen}
@@ -350,9 +400,6 @@
 
 <style>
     .p-card {
-        /* How small the cover may get before the card starts scrolling
-           instead. Shared, because .p-open's own floor is built from it. */
-        --art-floor: 96px;
         flex: 1;
         min-height: 0;
         display: flex;
@@ -383,15 +430,12 @@
         align-items: stretch;
         gap: var(--space-5);
     }
-    /* The cover slot: stretched to the card's height, and square from it.
-       Height is definite here (the row stretches it), so the ratio gives
-       the width — the same trick .p-artbox uses one level down, turned
-       through ninety degrees. */
+    /* The cover slot. It has no size of its own any more: the square inside
+       it is stated in pixels (see `coverPx`), so this is just the frame that
+       centres it against the band and carries the focus ring. */
     .p-cover {
-        flex: 0 1 auto;
-        aspect-ratio: 1;
-        max-width: 55%;
-        min-width: 0;
+        flex: none;
+        align-self: center;
         display: flex;
         padding: 0;
         border: 0;
@@ -422,12 +466,6 @@
     .p-card.wide .p-scroll {
         flex: 0 1 auto;
     }
-    .p-card.wide .p-artwrap {
-        aspect-ratio: auto;
-        max-height: none;
-        min-height: 0;
-        flex: 1 1 auto;
-    }
 
     /* Everything but the transport strip. It takes the card's leftover
        height and scrolls what doesn't fit — which, past the cover and the
@@ -453,38 +491,15 @@
         border-top: 1px solid var(--hairline);
     }
 
-    /* Cover + track title, as one block so the cover can never grow to the
-       point of pushing the name of what is playing off the fold: the two
-       together are capped at the scroll area, and .p-artwrap inside gives
-       way to keep them there. Above that cap the cover stops at its own
-       max-height and the preferences below start showing. */
+    /* Cover + track title, stacked. The pair is sized by the cover, which
+       was measured to leave the two lines of meta their room (HEAD_GAP +
+       metaH), so nothing here has to be capped or squeezed. */
     .p-head {
         display: flex;
         flex-direction: column;
         gap: var(--space-4);
-        /* Does not shrink: the cover's size is the scroll area's, not
-           whatever the preferences below leave over. They scroll; this
-           doesn't, so `max-height` is the only thing that sizes it and the
-           cover inside gives way to hold the pair inside that cap. */
         flex: 0 0 auto;
-        max-height: 100%;
         min-width: 0;
-    }
-    /* Something below to reach: hold back a sliver of it, so the half that
-       scrolls looks like it does. */
-    .p-scroll.has-extras .p-head {
-        max-height: calc(100% - var(--space-10));
-        /* The floor, spelled out. `min-height: 0` would waive the automatic
-           minimum size and let this block be squeezed below art-floor +
-           text, which is what used to slice the subtitle through the middle
-           of its glyphs; `min-height: auto` can't state it either, since it
-           would be read off .p-artwrap's *ratio* — a full-width square —
-           and the cover could then never shrink at all. So: the art's own
-           floor, the gap, and the two lines of meta under it. */
-        min-height: calc(var(--art-floor) + var(--space-4) + 56px);
-        /* Belt to those braces: nothing should reach the floor now, but a
-           stray overflow crops rather than bleeding onto the strip. */
-        overflow: hidden;
     }
 
     /* The tap-through button: reset to a plain flex column so it reads as
@@ -504,36 +519,23 @@
         box-shadow: var(--focus-ring);
     }
 
-    /* The frame is what gives when the card runs out of room, never the
-       controls (§16) — and it has to give as a *square*, on both axes at
-       once. Sizing the art `width: 100%` + `aspect-ratio` derived its
-       height from the *column* instead, so flexbox shrank the box it sat
-       in while the <img> kept its full height, and the crop that was there
-       to catch the overflow sliced every cover down to a letterbox strip
-       of its top third.
-       Height is the scarce axis on a 768px wall, so height leads: this
-       slot carries the ratio (a full-width square at rest, flex-shrunk
-       from there) and .p-artbox below takes its height from the slot and
-       its width from the ratio. */
-    .p-artwrap {
-        display: flex;
-        justify-content: center;
-        flex: 0 1 auto;
-        aspect-ratio: 1;
-        max-height: 340px;
-        /* The floor. Past it, .p-scroll takes over. */
-        min-height: var(--art-floor);
-    }
-    /* The square itself — the cover's actual box, so the radius, the crop
-       and the waveform badge all key off it rather than off the slot,
-       which stays column-wide. */
+    /* The square itself. In the landscape shapes the card measures what the
+       cover may have and writes both axes onto this box in pixels, so there
+       is no ratio to resolve and no percentage to chase up through a flex
+       chain — the failure that took the artwork and the band's tap-through
+       with it. The rule below is the portrait fallback and the single frame
+       before the first measurement: a width-led square, which is the one
+       direction every engine agrees on. */
     .p-artbox {
         position: relative;
-        height: 100%;
+        flex: none;
+        width: 100%;
         aspect-ratio: 1;
-        max-width: 100%;
+        margin-inline: auto;
+        min-height: 96px;
         overflow: hidden;
         border-radius: var(--r-md);
+        background: var(--card-2);
     }
     .p-art {
         display: block;
@@ -843,22 +845,21 @@
     @media (orientation: portrait), (max-width: 900px) {
         /* Landscape needs landscape. Stacked again, the `wide` markup falls
            out as cover-over-controls on its own — .p-cover is simply the
-           first row of the column instead of the first column of the row. */
+           first row of the column instead of the first column of the row.
+           `coverPx` stands down here (see `landscape`), so the cover is the
+           width-led square the base rule describes, capped so it can't take
+           a phone's whole screen. */
         .p-card.wide {
             flex-direction: column;
         }
         .p-cover {
-            flex: none;
+            align-self: auto;
             width: 100%;
             max-width: 280px;
             margin-inline: auto;
         }
-        .p-card.wide .p-artwrap {
-            aspect-ratio: 1;
-            flex: none;
-        }
-        .p-artwrap {
-            max-height: 280px;
+        .p-artbox {
+            max-width: 280px;
         }
         .p-card {
             flex: none;
@@ -867,9 +868,6 @@
         .p-scroll {
             flex: none;
             overflow: visible;
-        }
-        .p-head {
-            max-height: none;
         }
     }
 </style>
