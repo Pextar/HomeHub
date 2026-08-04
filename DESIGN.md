@@ -494,6 +494,12 @@ Is it a list of things?
   KidScheduleSheet / components/kid/)
 - Icon-only button smaller than 44×44 hit area
 - Numbers in sans → must be mono
+- A vertical scroll region written as `overflow-y: auto` alone → say
+  `overflow-x: hidden` beside it. The other axis computes to `auto` on its
+  own, and a list of flex rows measures on fractional pixels (a duration
+  is 25.97px wide as readily as 26), so the pane ends up pannable sideways
+  by the pixel rounding invents. Nothing is too wide; it still wobbles
+  under a finger, which on a wall panel is the whole complaint.
 - Tab bar visible on detail/form/Matter step/Console screens
 - Modal on desktop where a popover would do
 - A new color invented inline → if it's not in the token list above, use

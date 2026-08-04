@@ -851,6 +851,16 @@
         flex-direction: column;
         gap: var(--space-3);
         overflow-y: auto;
+        /* One axis, stated. `overflow-y: auto` alone computes the *other*
+           axis to `auto` as well, so a row whose content lands on a
+           fractional pixel — a queue row is a flex line of text, and text
+           measures at 25.97px as readily as at 26 — makes the pane
+           scrollable sideways by the 1px that rounding adds. Nothing is
+           actually too wide: every row's box ends exactly where the pane's
+           does. But the wall doesn't know that, and it wobbles under a
+           finger. `.s-results` in the depth's search column has said this
+           for the same reason. */
+        overflow-x: hidden;
         border-top: 1px solid var(--hairline);
     }
     /* How long the queue is, and Clear, stay put while it scrolls: the pane

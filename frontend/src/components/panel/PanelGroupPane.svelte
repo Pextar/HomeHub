@@ -252,6 +252,10 @@
         flex-direction: column;
         gap: var(--space-2);
         overflow-y: auto;
+        /* Vertically, and only vertically — see `.fp-queue`, which shares
+           both the slot and the rounding: these rows are flex lines of
+           text too. */
+        overflow-x: hidden;
         border-top: 1px solid var(--hairline);
         padding-top: var(--space-3);
     }
