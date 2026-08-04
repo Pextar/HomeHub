@@ -67,8 +67,9 @@
     // the cover is not the layout to be clever in front of.
     //
     // So: measure the boxes the cover cannot itself size — the body's
-    // stretched height and width, and the two lines of meta that ride under
-    // it — then write both axes onto the square outright.
+    // stretched height and width, and the caption riding under it (the two
+    // lines of meta and the scrubber) — then write both axes onto the
+    // square outright.
     const ART_FLOOR = 160;
     const ART_CAP = 720;
     /** The gap between the cover and its caption, and between the columns. */
@@ -91,11 +92,11 @@
 
     let bodyW = $state(0);
     let bodyH = $state(0);
-    let metaH = $state(0);
+    let capH = $state(0);
 
     const coverPx = $derived.by(() => {
         if (!landscape) return 0; // portrait: CSS sizes it from the width
-        const height = bodyH - metaH - HEAD_GAP;
+        const height = bodyH - capH - HEAD_GAP;
         const width = bodyW - SIDE_MIN - COL_GAP;
         if (height <= 0 || width <= 0) return 0; // pre-measure, one frame
         return Math.max(ART_FLOOR, Math.min(height, width, ART_CAP));
@@ -169,14 +170,32 @@
                         <span class="fp-wave"><Waveform /></span>
                     {/if}
                 </span>
-                <!-- Both lines stay on one line each: the cover is measured
-                     against this block's height, so a caption that wrapped
-                     would resize the square that decides its width. -->
-                <div class="fp-meta" bind:clientHeight={metaH}>
-                    <h2 class="fp-title">
-                        {featured.trackTitle ?? (featured.playing ? "Playing" : "Not playing")}
-                    </h2>
-                    <p class="fp-sub">{featured.trackSub || featured.title}</p>
+                <!-- The caption: what the record is, and how far through it
+                     we are. The scrubber belongs to the song and not to the
+                     controls — at the top of the card it was a hairline in
+                     a corner, describing something in the other column;
+                     under the cover it is as wide as the record and reads
+                     from the sofa. Both meta lines stay on one line each:
+                     the cover is measured against this block's height, so a
+                     caption that wrapped would resize the square that
+                     decides its width. -->
+                <div class="fp-caption" bind:clientHeight={capH}>
+                    <div class="fp-meta">
+                        <h2 class="fp-title">
+                            {featured.trackTitle ?? (featured.playing ? "Playing" : "Not playing")}
+                        </h2>
+                        <p class="fp-sub">{featured.trackSub || featured.title}</p>
+                    </div>
+                    {#if !featured.standby}
+                        <TrackRail
+                            position={music.posSec}
+                            duration={music.durSec}
+                            seekable={music.seekable}
+                            idle={railIdle}
+                            liveLabel={railLabel}
+                            onSeek={(sec) => music.seek(sec)}
+                        />
+                    {/if}
                 </div>
             </section>
 
@@ -203,15 +222,6 @@
                     </div>
                 {:else}
                     <div class="fp-controls">
-                        <TrackRail
-                            position={music.posSec}
-                            duration={music.durSec}
-                            seekable={music.seekable}
-                            idle={railIdle}
-                            liveLabel={railLabel}
-                            onSeek={(sec) => music.seek(sec)}
-                        />
-
                         <div class="fp-transport">
                             {#if featured.canSkip}
                                 <button
@@ -473,8 +483,20 @@
         display: inline-flex;
     }
 
+    /* Name and position, under the record they belong to. */
+    .fp-caption {
+        flex: none;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-4);
+    }
+    /* Distance-scaled like the rest of the panel (§16): the shared rail's
+       times are sized for a phone in the hand. */
+    .fp-caption :global(.rail-times) {
+        font-size: 12.5px;
+    }
     .fp-meta {
-        flex-shrink: 0;
         min-width: 0;
         text-align: center;
     }

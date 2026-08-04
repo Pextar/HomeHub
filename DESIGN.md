@@ -1244,11 +1244,20 @@ about the room it is showing:
   comes back from the *caption*, and a 700px-tall cover gets clamped to
   the length of an artist's name: on a wide wall every record rendered as
   a vertical strip of its own middle. So the screen measures the body's
-  stretched height and width and the two lines of meta, then writes both
+  stretched height and width and the caption under it, then writes both
   axes onto the square. **The column is the cover's width**, so the
   caption truncates against the record and never the record against the
   caption. Both meta lines stay on one line each for that reason: a
   caption that wrapped would resize the square that decides its width.
+- **The scrubber is part of the record, not of the controls.** How far
+  through the song we are is a fact about the song, and it is the one
+  control on this screen whose subject is in the other column: at the top
+  of the control card it was a hairline across a corner, describing
+  something you weren't looking at. Under the cover it is exactly the
+  record's width and reads from the sofa, and the card left behind is what
+  its name says — transport, volume, preferences, queue. It costs the
+  cover the caption's extra height, which is the cheapest thing on the
+  screen.
 - **Neither column grows past what it can use.** Past its cap the cover
   stops and the controls stop, and the slack goes to the margins — a
   fader stretched across a desk monitor is a worse aim than one at arm's
