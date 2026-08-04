@@ -50,6 +50,16 @@
                             },
                             60 * 60 * 1000,
                         );
+                        // iOS suspends a backgrounded home-screen PWA's timers
+                        // entirely, so the hourly poll above never fires across
+                        // a close/reopen — the app can sit on a stale build for
+                        // days. Check the moment it's looked at again instead of
+                        // waiting on a timer that was never running.
+                        document.addEventListener("visibilitychange", () => {
+                            if (document.visibilityState === "visible") {
+                                r.update().catch(() => {});
+                            }
+                        });
                     }
                 },
                 onNeedRefresh() {
