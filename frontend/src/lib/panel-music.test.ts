@@ -39,6 +39,8 @@ vi.mock("./api", () => ({
       return zonesFixture;
     }),
     sonosQueue: vi.fn(async () => queueFixture),
+    sonosJoin: vi.fn(async () => {}),
+    sonosLeave: vi.fn(async () => {}),
     sonosSettings: vi.fn(async () => ({ sleep_minutes: 0 })),
     sonosFavorites: vi.fn(async () => []),
     sonosSetVolume: vi.fn(async () => {}),
@@ -396,6 +398,165 @@ describe("pause all", () => {
     expect(api.kefPause).toHaveBeenCalledWith("study");
     // The room that wasn't playing is left alone.
     expect(api.sonosPause).not.toHaveBeenCalledWith("bedroom");
+    h.stop();
+  });
+});
+
+// ── Grouping ─────────────────────────────────────────────────────────────
+// What the full player's grouping pane is allowed to offer. The rule under
+// all of it is §15.1's: only Sonos groups natively, so anything else is
+// absent from the pane rather than present and refused.
+
+describe("grouping", () => {
+  it("offers every other Sonos room to a featured Sonos room", async () => {
+    const h = await boot();
+    h.value.selected = "s:kitchen";
+    h.flush();
+
+    expect(h.value.joinable.map((s) => s.title)).toEqual(["bedroom"]);
+    expect(h.value.canGroup).toBe(true);
+    h.stop();
+  });
+
+  it("offers nothing to a KEF speaker or a HomeHub room, which don't group natively", async () => {
+    kefFixture = { speakers: [kefSpeaker("study")] };
+    zonesFixture = [
+      zone("Downstairs", [
+        { id: "bedroom", vendor: "sonos" },
+        { id: "study", vendor: "kef" },
+      ]),
+    ];
+    const h = await boot();
+
+    h.value.selected = "z:Downstairs";
+    h.flush();
+    expect(h.value.joinable).toEqual([]);
+    expect(h.value.canGroup).toBe(false);
+    h.stop();
+  });
+
+  it("says a lone Sonos room in a one-room house has nothing to group", async () => {
+    sonosFixture = {
+      speakers: [sonosSpeaker("kitchen")],
+      groups: [{ coordinator_id: "kitchen", member_ids: ["kitchen"] }],
+    } as SonosStatus;
+    const h = await boot();
+
+    expect(h.value.joinable).toEqual([]);
+    // Nothing to join, and nothing to split either.
+    expect(h.value.canGroup).toBe(false);
+    h.stop();
+  });
+
+  it("still offers the pane to a grouped room with nowhere left to join", async () => {
+    sonosFixture = {
+      speakers: [sonosSpeaker("kitchen"), sonosSpeaker("bedroom")],
+      groups: [{ coordinator_id: "kitchen", member_ids: ["kitchen", "bedroom"] }],
+    } as SonosStatus;
+    const h = await boot();
+
+    expect(h.value.joinable).toEqual([]);
+    // The group can still be split, and each speaker balanced — which is
+    // the other half of what the pane is for.
+    expect(h.value.canGroup).toBe(true);
+    h.stop();
+  });
+
+  it("joins the whole card, not the speaker that was aimed at", async () => {
+    // §15.4: what was dragged — or here, tapped — is a room, so every
+    // speaker in it goes.
+    sonosFixture = {
+      speakers: [sonosSpeaker("kitchen"), sonosSpeaker("bedroom"), sonosSpeaker("study")],
+      groups: [
+        { coordinator_id: "kitchen", member_ids: ["kitchen"] },
+        { coordinator_id: "bedroom", member_ids: ["bedroom", "study"] },
+      ],
+    } as SonosStatus;
+    const h = await boot();
+    h.value.selected = "s:kitchen";
+    h.flush();
+
+    h.value.joinSource(h.value.joinable[0]);
+    h.flush();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(api.sonosJoin).toHaveBeenCalledWith("bedroom", "kitchen");
+    expect(api.sonosJoin).toHaveBeenCalledWith("study", "kitchen");
+    h.stop();
+  });
+
+  it("gathers every room into the featured one, and leaves it featured", async () => {
+    sonosFixture = {
+      speakers: [sonosSpeaker("kitchen"), sonosSpeaker("bedroom"), sonosSpeaker("study")],
+      groups: [
+        { coordinator_id: "kitchen", member_ids: ["kitchen"] },
+        { coordinator_id: "bedroom", member_ids: ["bedroom"] },
+        { coordinator_id: "study", member_ids: ["study"] },
+      ],
+    } as SonosStatus;
+    const h = await boot();
+    h.value.selected = "s:kitchen";
+    h.flush();
+
+    h.value.joinAll();
+    h.flush();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(api.sonosJoin).toHaveBeenCalledWith("bedroom", "kitchen");
+    expect(api.sonosJoin).toHaveBeenCalledWith("study", "kitchen");
+    // The room the wall was driving is still the room the wall is driving.
+    expect(h.value.selected).toBe("s:kitchen");
+    h.stop();
+  });
+
+  it("refuses a join a non-Sonos room could never take", async () => {
+    kefFixture = { speakers: [kefSpeaker("study")] };
+    const h = await boot();
+    h.value.selected = "k:study";
+    h.flush();
+
+    h.value.joinAll();
+    h.flush();
+    await Promise.resolve();
+
+    expect(api.sonosJoin).not.toHaveBeenCalled();
+    h.stop();
+  });
+
+  it("steps one speaker out without disturbing the rest", async () => {
+    sonosFixture = {
+      speakers: [sonosSpeaker("kitchen"), sonosSpeaker("bedroom"), sonosSpeaker("study")],
+      groups: [{ coordinator_id: "kitchen", member_ids: ["kitchen", "bedroom", "study"] }],
+    } as SonosStatus;
+    const h = await boot();
+
+    h.value.leaveMember("bedroom");
+    h.flush();
+    await Promise.resolve();
+
+    expect(api.sonosLeave).toHaveBeenCalledWith("bedroom");
+    expect(api.sonosLeave).toHaveBeenCalledTimes(1);
+    h.stop();
+  });
+
+  it("splits by sending every follower out, and never the lead", async () => {
+    sonosFixture = {
+      speakers: [sonosSpeaker("kitchen"), sonosSpeaker("bedroom"), sonosSpeaker("study")],
+      groups: [{ coordinator_id: "kitchen", member_ids: ["kitchen", "bedroom", "study"] }],
+    } as SonosStatus;
+    const h = await boot();
+
+    h.value.ungroupFeatured();
+    h.flush();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(api.sonosLeave).toHaveBeenCalledWith("bedroom");
+    expect(api.sonosLeave).toHaveBeenCalledWith("study");
+    expect(api.sonosLeave).not.toHaveBeenCalledWith("kitchen");
     h.stop();
   });
 });

@@ -1235,7 +1235,7 @@ three: the band answers *what's on* while you walk past, the depth answers
 started a record and there is nothing left to browse for, so the cover
 goes to the size a record deserves and the room the search results were
 using goes to the queue, which is finally visible in full. Its back chip
-and Escape climb one rung to the depth. Five rules keep the screen honest
+and Escape climb one rung to the depth. These rules keep the screen honest
 about the room it is showing:
 
 - **The record is measured in pixels, exactly like the card's cover** —
@@ -1274,6 +1274,52 @@ about the room it is showing:
   into a playlist opened at track one with the mark below the fold. The
   nudge happens only when that row is actually out of view — this runs
   beside a five-second poll on an A8X.
+- **The control card leads with the destination, and the destination is
+  the door to grouping.** "Put this in the kitchen as well" is a listening
+  thought, not a browsing one, and until this line existed the wall made
+  you leave the record, walk back to the depth's Rooms list and aim at a
+  chip naming a group you could no longer see. So the card's first row
+  names the room the transport is driving — the one fact this screen never
+  stated, since the chips that carry it sit three feet up on the header —
+  with its speaker count in mono, and tapping it swaps the queue for the
+  grouping pane (`PanelGroupPane`). A swap, not a sheet and not a second
+  screen: the transport and the room fader stay exactly where they are, so
+  pausing mid-thought costs nothing, and the queue is back when the pane
+  closes. Escape closes the pane before it leaves the screen — the pane is
+  a rung of the same ladder. The line appears only where it can do
+  something: a Sonos room with somewhere to join from or more than one
+  speaker to split. A lone KEF gets no control that would be refused
+  (§15.1).
+- **The grouping pane is one list, and membership is a tap.** Every Sonos
+  room in the house is a row: the ones above the rule are in the group,
+  the ones below are not, and a tap moves a room across — the row moving
+  *is* the confirmation, so there is no Done to forget and no mode to be
+  stuck in. Three things it must keep saying:
+  - **It states what a tap costs before the tap.** A room that is playing
+    something else says so on its own row; joining stops that and follows
+    this record. Sonos will do it either way, and the wall is the part
+    that has to be honest about it.
+  - **Grouping and balance are the same surface.** The second a room
+    joins, the next thing anyone wants is the kitchen quieter than the
+    living room, so a member row carries its own fader and mute — beside
+    the way out, in a membership column of one fixed width, because a
+    mixer whose faders don't line up can't be read as one. A room of one
+    speaker shows neither: its fader is the player's own three rows up,
+    and a second copy of a control is worse than none. The room-wide
+    fader never moves.
+  - **The lead can't step out, and splitting arms.** The coordinator
+    carries the queue and the stream, so its row has no ✕ — `Split` at the
+    head of the pane is what ends a group, and like every destructive tap
+    on a kiosk it arms for a second tap rather than raising a dialog
+    (§16). `Everywhere` is the opposite tap and worth its own button: a
+    house has exactly one "play it everywhere", and four rooms joined one
+    at a time is four aims at a wall.
+  Only Sonos rooms appear, because only they group natively. A KEF and a
+  HomeHub zone are absent rather than dead — a zone is arranged in the
+  Music view and never assembled from a kiosk. And the gesture is a tap,
+  not the app's drag (§15.4): a hold-then-drag at arm's length, over a
+  five-second poll, on an A8X, is the least reliable gesture the panel
+  could have picked.
 - **This card is flat even while the room plays.** §15.2's fill is what a
   hero, a room card or a mini-player wears to say _this one_ is making
   noise among others that aren't. Here there is one room and nothing to
