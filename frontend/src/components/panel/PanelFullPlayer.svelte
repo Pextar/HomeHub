@@ -23,6 +23,7 @@
     import TrackRail from "../music/TrackRail.svelte";
     import QueuePane from "../music/QueuePane.svelte";
     import PanelRoomChips from "./PanelRoomChips.svelte";
+    import PanelGroupPane from "./PanelGroupPane.svelte";
     import { kefSourceLabel } from "../../lib/kef";
     import { repeatLabel } from "../../lib/music/sonos.svelte";
     import { dur } from "../../lib/motion";
@@ -104,6 +105,38 @@
     const coverStyle = $derived(coverPx ? `width:${coverPx}px` : "");
     const artStyle = $derived(coverPx ? `width:${coverPx}px;height:${coverPx}px` : "");
 
+    // ── Where the sound goes, and changing it here ──────────────────────
+    // This screen never used to name the room it was driving — the chips in
+    // the header did, three feet above the transport, and nothing on the
+    // card said "and the kitchen too". So the card leads with the
+    // destination line, and the line is the door: tapping it swaps the
+    // lower half for the grouping pane, which is the one place on the wall
+    // where "put this in the kitchen as well" is one tap from the record
+    // you are listening to.
+    //
+    // A swap, not a second screen and certainly not a sheet (§16 has none):
+    // the transport and the room fader stay exactly where they were, so
+    // pausing mid-thought costs nothing, and the queue comes back when the
+    // pane closes. The play modes go with it — grouping is a two-second
+    // job and the preferences underneath it are not what anyone is reading
+    // while they do it.
+    let grouping = $state(false);
+    const memberCount = $derived(featured?.members?.length ?? 0);
+    // Held against the store rather than the flag alone: splitting the last
+    // pair in a one-room house leaves nothing to group, and a pane whose
+    // own opener has just vanished is a pane with no way out.
+    const groupOpen = $derived(grouping && music.canGroup);
+
+    // A different room featured is a different question; the pane closes
+    // rather than re-pointing itself at a group nobody was looking at.
+    let groupingFor = "";
+    $effect(() => {
+        const key = featured?.key ?? "";
+        if (key === groupingFor) return;
+        groupingFor = key;
+        grouping = false;
+    });
+
     // ── The queue arrives already scrolled to what is playing ───────────
     // "The queue, in full, with the row playing marked" is what this screen
     // is for beyond size — and a room forty tracks into a playlist opened
@@ -127,10 +160,18 @@
         });
     });
 
-    // Escape climbs one level, the same ladder the back chip walks (§15.6).
+    // Escape climbs one level, the same ladder the back chip walks (§15.6)
+    // — and the grouping pane is a rung of it, so the first Escape puts the
+    // queue back rather than leaving the screen out from under someone who
+    // only meant to close the pane.
     onMount(() => {
         const onKey = (e: KeyboardEvent) => {
-            if (e.key === "Escape") onBack();
+            if (e.key !== "Escape") return;
+            if (groupOpen) {
+                grouping = false;
+                return;
+            }
+            onBack();
         };
         window.addEventListener("keydown", onKey);
         return () => window.removeEventListener("keydown", onKey);
@@ -206,9 +247,30 @@
                  in whatever is left. -->
             <section
                 class="fp-side"
-                class:hollow={!hasQueue || featured.standby}
+                class:hollow={(!hasQueue && !groupOpen) || featured.standby}
                 aria-label="Player controls"
             >
+                <!-- The destination, and the way to change it. It shows up
+                     only where it can do something: a Sonos room with
+                     somewhere to join from or more than one speaker to
+                     split. A lone KEF has nothing to group with and gets no
+                     control that would be refused (§15.1). -->
+                {#if music.canGroup}
+                    <button
+                        class="fp-where"
+                        class:open={groupOpen}
+                        aria-expanded={groupOpen}
+                        onclick={() => (grouping = !grouping)}
+                    >
+                        <span class="w-ico"><Icon name="speaker" size={16} /></span>
+                        <span class="w-title">{featured.title}</span>
+                        {#if memberCount > 1}
+                            <span class="w-count mono">{memberCount} speakers</span>
+                        {/if}
+                        <span class="w-act">{groupOpen ? "Done" : "Group"}</span>
+                    </button>
+                {/if}
+
                 {#if featured.standby}
                     <div class="fp-standby">
                         <p>In standby</p>
@@ -289,7 +351,7 @@
                             <span class="v-val mono">{music.vol}</span>
                         </div>
 
-                        {#if gs}
+                        {#if gs && !groupOpen}
                             <div class="fp-modes">
                                 <button
                                     class="p-mode"
@@ -350,7 +412,9 @@
                          line and gives the height back to the transport
                          rather than holding open a scroll region with a
                          sentence at the top of it. -->
-                    {#if hasQueue}
+                    {#if groupOpen}
+                        <PanelGroupPane {music} />
+                    {:else if hasQueue}
                         <div class="fp-queue" bind:this={queueEl}>
                             <QueuePane
                                 items={music.queue}
@@ -552,6 +616,74 @@
         align-self: center;
     }
 
+    /* The destination line: a full-width target because it is the one
+       control on this card whose job is to be found from across the room,
+       and quiet because it is a statement first and a button second. */
+    .fp-where {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        width: 100%;
+        min-height: 48px;
+        flex: none;
+        padding: 0 var(--space-3);
+        border-radius: var(--r-md);
+        border: 1px solid var(--hairline);
+        background: var(--card-2);
+        color: var(--text);
+        font-family: inherit;
+        text-align: left;
+        cursor: pointer;
+        transition:
+            background var(--t-fast),
+            border-color var(--t-fast),
+            transform var(--t-fast);
+    }
+    .fp-where:active {
+        transform: scale(0.99);
+        transition-duration: 80ms;
+    }
+    /* Open, it reads as the head of the pane below it rather than as one
+       more control floating over the queue. */
+    .fp-where.open {
+        border-color: var(--border-strong);
+        background: var(--surface);
+    }
+    .w-ico {
+        display: inline-flex;
+        color: var(--text-dim);
+        flex-shrink: 0;
+    }
+    .w-title {
+        flex: 1;
+        min-width: 0;
+        font-size: 14px;
+        font-weight: 500;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .w-count {
+        font-size: 11.5px;
+        color: var(--text-dim);
+        flex-shrink: 0;
+    }
+    .w-act {
+        flex-shrink: 0;
+        padding: 6px 12px;
+        border-radius: var(--r-pill);
+        border: 1px solid var(--hairline);
+        background: var(--card);
+        color: var(--text-mute);
+        font-size: 12.5px;
+        font-weight: 500;
+    }
+    .fp-where.open .w-act {
+        border-color: var(--tile-on-border);
+        background: var(--on-soft);
+        color: var(--on);
+    }
+
     .fp-controls {
         flex: none;
         display: flex;
@@ -700,6 +832,7 @@
        for, and a focus ring is the only thing that says where a tap would
        land there. */
     .back:focus-visible,
+    .fp-where:focus-visible,
     .t-btn:focus-visible,
     .v-ico:focus-visible,
     .v-step:focus-visible,
@@ -718,6 +851,16 @@
         flex-direction: column;
         gap: var(--space-3);
         overflow-y: auto;
+        /* One axis, stated. `overflow-y: auto` alone computes the *other*
+           axis to `auto` as well, so a row whose content lands on a
+           fractional pixel — a queue row is a flex line of text, and text
+           measures at 25.97px as readily as at 26 — makes the pane
+           scrollable sideways by the 1px that rounding adds. Nothing is
+           actually too wide: every row's box ends exactly where the pane's
+           does. But the wall doesn't know that, and it wobbles under a
+           finger. `.s-results` in the depth's search column has said this
+           for the same reason. */
+        overflow-x: hidden;
         border-top: 1px solid var(--hairline);
     }
     /* How long the queue is, and Clear, stay put while it scrolls: the pane
@@ -810,6 +953,11 @@
         }
         .fp-transport {
             gap: var(--space-4);
+        }
+        /* The destination line gives back the four pixels it can; it stays
+           a 44px target, which is the floor and not a preference. */
+        .fp-where {
+            min-height: 44px;
         }
     }
 

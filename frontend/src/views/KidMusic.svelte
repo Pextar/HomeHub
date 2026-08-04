@@ -478,6 +478,12 @@
         inset: 0;
         z-index: var(--z-modal);
         overflow-y: auto;
+        /* One axis (§12). The two bands that bleed back out to the edges do
+           it by exactly this scroller's gutter — out to the padding box,
+           which is where a hidden x axis clips — so they are untouched,
+           and a row of song text can no longer pan the screen sideways by
+           the pixel its rounding invents. */
+        overflow-x: hidden;
         /* Its own scroll world: a flick that runs off the end of the queue
            must not drag the lamps page underneath it. */
         overscroll-behavior: contain;

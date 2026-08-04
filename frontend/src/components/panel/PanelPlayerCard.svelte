@@ -474,6 +474,11 @@
         flex: 1 1 auto;
         min-height: 0;
         overflow-y: auto;
+        /* Down the card, and only down it (§12): nothing in here is wider
+           than the column, but a fader row lands on a fractional pixel as
+           readily as a queue row does, and the card would pan by the one
+           the rounding adds. */
+        overflow-x: hidden;
         display: flex;
         flex-direction: column;
         gap: var(--space-4);

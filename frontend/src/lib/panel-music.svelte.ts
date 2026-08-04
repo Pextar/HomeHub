@@ -193,8 +193,18 @@ export interface PanelMusicStore {
     playItem(item: SpotifyItem): Promise<void>;
 
     // ── Grouping (Sonos-native only) ──
+    /** The Sonos rooms that could join the featured one — every other
+     *  reachable Sonos source. Empty unless a Sonos room is featured:
+     *  nothing else groups natively, and a control that would be refused
+     *  is worse than one that isn't there (§15.1). */
+    readonly joinable: PanelSource[];
+    /** There is something to say about grouping at all: a Sonos room with
+     *  either somewhere to join from or more than one speaker to split. */
+    readonly canGroup: boolean;
     /** Every speaker in src's group joins the featured group. */
     joinSource(src: PanelSource): void;
+    /** Every joinable room at once — the wall's "play everywhere" tap. */
+    joinAll(): void;
     /** Every non-coordinator member leaves the featured group. */
     ungroupFeatured(): void;
     /** One member steps out of the featured group. */
@@ -1044,6 +1054,21 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
     // card, not one speaker — a room that moves takes its partners with
     // it. Cross-vendor zones are played from the wall but never built
     // there; making a persistent routed room is configuration.
+    /** What a Sonos room could group with right now. A KEF speaker and a
+     *  HomeHub zone are absent rather than refused: neither joins a Sonos
+     *  household, and a zone is arranged in the Music view, never here. */
+    const joinable = $derived.by(() => {
+        const f = featured;
+        if (!f || f.kind !== "sonos") return [];
+        return sources.filter((s) => s.kind === "sonos" && s.key !== f.key);
+    });
+
+    const canGroup = $derived(
+        !!featured &&
+            featured.kind === "sonos" &&
+            (joinable.length > 0 || (featured.members?.length ?? 0) > 1),
+    );
+
     function joinSource(src: PanelSource) {
         const f = featured;
         if (!f || f.kind !== "sonos" || src.kind !== "sonos") return;
@@ -1057,6 +1082,26 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
             "Grouping failed",
             () => {
                 selected = f.key; // the group stays featured through the reshuffle
+            },
+        );
+    }
+
+    /** Everything at once. Sequential, like a single join: a household that
+     *  is handed four `SetAVTransportURI`s in the same instant re-elects its
+     *  coordinators mid-flight and lands with a speaker or two left out. */
+    function joinAll() {
+        const f = featured;
+        if (!f || f.kind !== "sonos") return;
+        const ids = joinable.flatMap((s) => (s.members ?? []).map((m) => m.id));
+        if (!ids.length) return;
+        void run(
+            "joinall",
+            async () => {
+                for (const id of ids) await api.sonosJoin(id, f.id);
+            },
+            "Grouping failed",
+            () => {
+                selected = f.key;
             },
         );
     }
@@ -1172,7 +1217,14 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
         },
         playFavorite,
         playItem,
+        get joinable() {
+            return joinable;
+        },
+        get canGroup() {
+            return canGroup;
+        },
         joinSource,
+        joinAll,
         ungroupFeatured,
         leaveMember,
         refresh,

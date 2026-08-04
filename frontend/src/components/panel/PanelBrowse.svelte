@@ -1155,13 +1155,22 @@
         flex: 1;
         min-height: 0;
         overflow-y: auto;
+        /* The same queue list lives here, and rounds the same way: without
+           this, `overflow-y: auto` computes the x axis to `auto` too and a
+           row that measures 432.03px in a 432px pane pans sideways by the
+           pixel the rounding invents (see `.fp-queue`). */
+        overflow-x: hidden;
         padding-bottom: var(--space-2);
     }
-    /* The catalog stack owns the column's scroll the same way. */
+    /* The catalog stack owns the column's scroll the same way — including
+       the one-axis rule: an artist's page is rows of text too, and the
+       pixel rounding invents pans it sideways exactly like the queue
+       (§12). */
     .b-stack {
         flex: 1;
         min-height: 0;
         overflow-y: auto;
+        overflow-x: hidden;
         padding-bottom: var(--space-2);
     }
     .play-on {
