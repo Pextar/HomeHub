@@ -1235,7 +1235,44 @@ three: the band answers *what's on* while you walk past, the depth answers
 started a record and there is nothing left to browse for, so the cover
 goes to the size a record deserves and the room the search results were
 using goes to the queue, which is finally visible in full. Its back chip
-and Escape climb one rung to the depth.
+and Escape climb one rung to the depth. Five rules keep the screen honest
+about the room it is showing:
+
+- **The record is measured in pixels, exactly like the card's cover** —
+  same reason, and it was the same bug. Stating a square as an
+  `aspect-ratio` inside a shrink-to-fit column means the column's width
+  comes back from the *caption*, and a 700px-tall cover gets clamped to
+  the length of an artist's name: on a wide wall every record rendered as
+  a vertical strip of its own middle. So the screen measures the body's
+  stretched height and width and the two lines of meta, then writes both
+  axes onto the square. **The column is the cover's width**, so the
+  caption truncates against the record and never the record against the
+  caption. Both meta lines stay on one line each for that reason: a
+  caption that wrapped would resize the square that decides its width.
+- **Neither column grows past what it can use.** Past its cap the cover
+  stops and the controls stop, and the slack goes to the margins — a
+  fader stretched across a desk monitor is a worse aim than one at arm's
+  length on the iPad this is drawn for, and a queue row that wide parts
+  its title from its duration by half a screen.
+- **A room with nothing under the transport gets a card the height of its
+  controls**, beside the record rather than stretched to the panel. A KEF
+  has no queue and says so in one line; held open to a full-height
+  rectangle those four rows read as something that failed to load rather
+  than as a speaker with nothing more to show.
+- **The queue opens at the track playing**, and its count and Clear stay
+  pinned while it scrolls. "The queue, in full, with the row playing
+  marked" is what this screen is for beyond size, and a room forty tracks
+  into a playlist opened at track one with the mark below the fold. The
+  nudge happens only when that row is actually out of view — this runs
+  beside a five-second poll on an A8X.
+- **This card is flat even while the room plays.** §15.2's fill is what a
+  hero, a room card or a mini-player wears to say _this one_ is making
+  noise among others that aren't. Here there is one room and nothing to
+  distinguish it from, the record beside it already carries the waveform,
+  and the one thing on screen that still needs the ON gradient is the
+  queue row that is playing — which it cannot have against a card wearing
+  the same gradient. The app's own full player is flat for the same
+  reason; the band's card, which sits among room tiles, is not.
 
 Idling anywhere on the ladder sleeps home to the ambient face like any
 other panel idle. All three depths read one shared speaker store
