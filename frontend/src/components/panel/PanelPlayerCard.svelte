@@ -18,7 +18,11 @@
     //
     // Two shapes, and the zone picks (`wide`): the dashboard's wide band
     // puts the cover beside the controls, the depth's tall column above
-    // them.
+    // them. In the wide shape the scrubber rides under the cover, with the
+    // record it describes rather than in the control strip — the full
+    // player's rule (§16), applied where the same two columns exist. What
+    // it gives back is height in the controls column, which is where the
+    // play modes live on this shape.
     //
     // Every capability renders only where the room says it has one (§15):
     // the rail seeks on a Sonos track and is a read-only rail elsewhere,
@@ -65,7 +69,8 @@
     // outright: definite on both axes, nothing to resolve.
     const ART_FLOOR = 96;
     const ART_CAP = 420;
-    /** The gap between the cover and the meta under it, stacked. */
+    /** The gap between the cover and what rides under it — the meta when
+     *  the card is stacked, the scrubber when it is wide. */
     const HEAD_GAP = 16;
 
     // Landscape is the designed-for shape and the one that measures; the
@@ -90,10 +95,17 @@
     let scrollH = $state(0);
     let scrollW = $state(0);
     let metaH = $state(0);
+    let railH = $state(0);
+
+    /** What the scrubber takes off the cover in the wide shape. Held against
+     *  `standby` as well as the measurement: the rail is unmounted while a
+     *  speaker sleeps, and a binding on an unmounted box keeps its last
+     *  reading rather than falling back to zero. */
+    const railBlock = $derived(wide && !featured?.standby && railH > 0 ? railH + HEAD_GAP : 0);
 
     const coverPx = $derived.by(() => {
         if (!landscape) return 0; // portrait: CSS sizes it from the width
-        const height = wide ? bodyH : scrollH - metaH - HEAD_GAP;
+        const height = wide ? bodyH - railBlock : scrollH - metaH - HEAD_GAP;
         // Beside the controls the cover may take about half the band; above
         // them it may take the column.
         const width = wide ? cardW * 0.45 : scrollW;
@@ -101,6 +113,9 @@
         return Math.max(ART_FLOOR, Math.min(height, width, ART_CAP));
     });
     const coverStyle = $derived(coverPx ? `width:${coverPx}px;height:${coverPx}px` : "");
+    /** The record column is exactly the square's width, so the rail under it
+     *  measures the cover and not the column it happens to sit in. */
+    const recordStyle = $derived(coverPx ? `width:${coverPx}px` : "");
 
     // Art that 404s (the proxy can't reach the speaker, the service expired
     // the URL) left an empty box behind — indistinguishable from a cover
@@ -194,14 +209,38 @@
                  button around the meta would only say the same thing
                  twice. The band's header carries the way in as well, but
                  that is section navigation and it is there whether or not
-                 there is a card under it (§16). -->
-            {#if onOpen}
-                <button class="p-cover p-open" onclick={onOpen} aria-label={openLabel}>
-                    {@render art()}
-                </button>
-            {:else}
-                <div class="p-cover">{@render art()}</div>
-            {/if}
+                 there is a card under it (§16).
+
+                 Under it rides the scrubber, because how far through the
+                 song we are is a fact about the song and not about the
+                 transport (§16, the full player's own rule). In the strip
+                 it was a hairline across the top of the other column,
+                 describing something you weren't looking at; here it is
+                 exactly the record's width. The height it hands back is
+                 what the play modes beside it are drawn in. It stays out
+                 of the tap-through button — a scrubber inside a link is
+                 not a scrubber. -->
+            <div class="p-record" style={recordStyle}>
+                {#if onOpen}
+                    <button class="p-cover p-open" onclick={onOpen} aria-label={openLabel}>
+                        {@render art()}
+                    </button>
+                {:else}
+                    <div class="p-cover">{@render art()}</div>
+                {/if}
+                {#if !featured.standby}
+                    <div class="p-rail" bind:clientHeight={railH}>
+                        <TrackRail
+                            position={music.posSec}
+                            duration={music.durSec}
+                            seekable={music.seekable}
+                            idle={railIdle}
+                            liveLabel={railLabel}
+                            onSeek={(sec) => music.seek(sec)}
+                        />
+                    </div>
+                {/if}
+            </div>
         {/if}
 
         <div class="p-body" bind:clientHeight={bodyH}>
@@ -314,14 +353,20 @@
                         </p>
                     {/if}
 
-                    <TrackRail
-                        position={music.posSec}
-                        duration={music.durSec}
-                        seekable={music.seekable}
-                        idle={railIdle}
-                        liveLabel={railLabel}
-                        onSeek={(sec) => music.seek(sec)}
-                    />
+                    {#if !wide}
+                        <!-- Stacked, the scrubber stays in the strip: there
+                             is one column, so "under the cover" and "above
+                             the transport" are the same place, and the
+                             strip is the half that never moves. -->
+                        <TrackRail
+                            position={music.posSec}
+                            duration={music.durSec}
+                            seekable={music.seekable}
+                            idle={railIdle}
+                            liveLabel={railLabel}
+                            onSeek={(sec) => music.seek(sec)}
+                        />
+                    {/if}
 
                     <div class="p-transport">
                         {#if featured.canSkip}
@@ -430,6 +475,18 @@
         align-items: stretch;
         gap: var(--space-5);
     }
+    /* The record: the cover and the scrubber that belongs to what is on it,
+       as one column beside the controls. Its width is the square's own (see
+       `recordStyle`), so the rail is as wide as the cover and never as wide
+       as whatever slack the row has left. */
+    .p-record {
+        flex: none;
+        align-self: center;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-4); /* HEAD_GAP */
+    }
     /* The cover slot. It has no size of its own any more: the square inside
        it is stated in pixels (see `coverPx`), so this is just the frame that
        centres it against the band and carries the focus ring. */
@@ -447,6 +504,24 @@
     }
     .p-cover:focus-visible {
         box-shadow: var(--focus-ring);
+    }
+
+    /* The scrubber under the record. Distance-scaled like the rest of the
+       panel (§16): the shared rail's times are sized for a phone in the
+       hand. The live line is held to one line because the cover is measured
+       against this block — a label that wrapped would shrink the square that
+       decides how wide the label is. */
+    .p-rail {
+        flex: none;
+        min-width: 0;
+    }
+    .p-rail :global(.rail-times) {
+        font-size: 12.5px;
+    }
+    .p-rail :global(.rail-live) {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
     }
     .p-body {
         flex: 1 1 auto;
@@ -856,6 +931,14 @@
            a phone's whole screen. */
         .p-card.wide {
             flex-direction: column;
+        }
+        /* The record keeps its shape stacked — cover with the scrubber under
+           it — at the width the portrait cover is capped to, so the rail
+           still measures the square rather than the page. */
+        .p-record {
+            align-self: center;
+            width: 100%;
+            max-width: 280px;
         }
         .p-cover {
             align-self: auto;
