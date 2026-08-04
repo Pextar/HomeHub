@@ -1213,19 +1213,32 @@ sidebar, no tab dock, no assistant FAB, no pull-to-refresh. It is reached
 from the sidebar's last entry and the PWA's "Panel" shortcut, and left
 through one quiet Exit chip, top-right.
 
-**Home and music are one surface with two depths.** The panel is the fused
-Home+Music screen — home control on the left and centre, the player on the
-right, both always visible. The second depth is the panel's **own music
-screen** (`#/panel?music=1`, one tap in through the player's art and
+**Home and music are one surface with three depths.** The panel is the fused
+Home+Music screen — the status strip and room tiles above and below, the
+player band between them, all always visible. The second depth is the
+panel's **own music screen** (`#/panel?music=1`, one tap in through the player's art and
 meta): the featured room's player riding on the right, and a work area on
 the left switched by chip between three panes — **Search** (the catalog,
 with the room's recent searches, the household's favorites and the
 account's playlists while the box is empty), **Queue** (the featured
-Sonos group's, with jump / remove / two-tap clear), **Rooms** (every
-room, with Sonos-native grouping: join the featured room, split one, or
-step a single speaker out). Its back chip returns to the dashboard depth,
-and idling there sleeps home to the ambient face like any other panel
-idle. Both depths read one shared speaker store
+Sonos group's, with jump / remove / two-tap clear), **Rooms** (the
+featured room's own settings at the head of it — play modes, per-speaker
+faders, sleep, the KEF input — then every room, with Sonos-native
+grouping: join the featured room, split one, or step a single speaker
+out). Its back chip returns to the dashboard depth.
+
+The third is the **full-screen player** (`#/panel?music=1&player=1`,
+`PanelFullPlayer`), reached from the expand control on the depth's cover.
+The three answer three different questions and that is why there are
+three: the band answers *what's on* while you walk past, the depth answers
+*put something on*, and this one answers **I am listening** — you have
+started a record and there is nothing left to browse for, so the cover
+goes to the size a record deserves and the room the search results were
+using goes to the queue, which is finally visible in full. Its back chip
+and Escape climb one rung to the depth.
+
+Idling anywhere on the ladder sleeps home to the ambient face like any
+other panel idle. All three depths read one shared speaker store
 (`lib/panel-music.svelte.ts`) — one poll, one featured source, one
 now-playing line. The full Music view stays for the jobs a wall can't do
 (*arranging* cross-vendor HomeHub rooms, speaker settings, EQ, Spotify
@@ -1253,14 +1266,35 @@ The reference hardware is an iPad Air 2 — 1024×768, Safari 15, an A8X that
 drops frames on blur and stacked shadows. Every rule below is that
 constraint made visible.
 
-- **One screen per depth, no chrome.** Landscape grid, three zones:
-  clock/status hero (left, 300px), room lights (centre, flexible), music
-  (right, 352px — present only when speakers exist; the grid is sized from
-  the `speakers-seen` memory so the column doesn't pop in after the first
-  poll). Nothing scrolls: each zone owns its overflow internally. Portrait
-  is a stacked, scrollable fallback — supported, not designed-for. The
-  music depth keeps the same shape: search and its results on the left
-  (the list owns its scroll), the featured player on the right.
+- **One screen per depth, no chrome — and the music band gets the slack.**
+  Three stacked bands, not three columns: a **status strip** across the top
+  (clock, date, the two stats, the master button), the **music band**
+  taking every row the other two don't claim, and a **row of room tiles**
+  along the foot, at the height one tile needs. Present only when speakers
+  exist; the grid is sized from the `speakers-seen` memory so the band
+  doesn't pop in after the first poll, and a home with none gets the room
+  grid back over the whole surface.
+
+  This is the panel's central allocation and it is deliberate. It used to
+  be three columns — clock 300, rooms flexible, music 352 — which gave two
+  thirds of a landscape screen to the two surfaces you only *read* and a
+  phone-shaped slot to the one you actually drive. **The status and the
+  tiles are glance surfaces: they are sized by what they have to say. The
+  music band is a control surface: it is sized by what is left.** A wall
+  panel is walked up to to change the music far more often than to read the
+  time.
+
+  Nothing scrolls: each band owns its overflow internally. Portrait is a
+  stacked, scrollable fallback — supported, not designed-for; every
+  landscape rule here is off below 900px, including the player's own
+  (§16's landscape card falls back to the stacked one). The music depth
+  keeps a two-column shape, because there its left half is a catalog to
+  read: search and its results on the left (the list owns its scroll), the
+  featured player on the right at 420px.
+- **The destination chips ride on the surface's header, not in the card.**
+  Both depths. In a 336px column three rooms wrapped to two rows and six to
+  three — 150px of a 720px panel spent on the control touched least, taken
+  from the cover looked at most. On a full-width header they are one line.
 - **The job is glance + tap.** Room tiles toggle the room; the music card
   transports and sets volume; the master button does all-on/all-off. The
   music depth adds the player's daily jobs — search, the queue, Sonos
@@ -1316,31 +1350,67 @@ constraint made visible.
   in `components/panel/`). Both depths get the scrubber — seek on a
   Sonos track, a read-only rail elsewhere, an honest no-position line
   where there is no duration — and a Sonos coordinator's play-mode
-  chips (shuffle, repeat, crossfade). Cover art is square, because
-  records are — it is the frame that gives when a tall card runs out of
-  room, never the controls. The volume row carries a **−/+ step** either
+  chips (shuffle, repeat, crossfade).
+  **The card has two shapes, and the zone picks.** Beside a cover, or above
+  it. Which one fits more cover is pure arithmetic on the zone's aspect: a
+  stacked card caps the cover at what the controls leave of the *height*, a
+  landscape card caps it at the zone's whole height and spends *width* on
+  the controls instead. So the dashboard's wide, short band lays the cover
+  to the left of everything (`wide`), and the depth's tall, narrow column
+  stacks. On a 1024×768 wall that is the difference between a 160px cover
+  and a 360px one, and it is the thing four rounds of fixing the card
+  itself could never have found: the card was a portrait player in a
+  portrait slot on a landscape screen.
+  In the landscape shape the **cover carries the tap-through on its own** —
+  it is the biggest and most obviously tappable thing on the card (§15.8),
+  and a second button around the meta would only say the same thing twice.
+  **The card is two regions, and which one a control is in is the layout
+  decision.** Below a hairline sits the strip that never moves — the
+  scrubber, prev/play/next, and the room's fader — because a wall is
+  tapped in passing and the tapping half has to be where it was last
+  time. Above it, everything else scrolls: the cover, what is playing,
+  and the room's preferences. There is no room on a 768px panel for both
+  a cover worth looking at and every preference at once, and the cover is
+  the half that is read from across the room, so it takes the scrolling
+  region's height and the preferences take the scroll. When something
+  does ride below it, the cover holds back a sliver of that first row: a
+  kiosk has no scrollbar, and a region whose content stops exactly at its
+  own edge gives no sign that it moves.
+  Cover art is square, because records are — and it gives way as a
+  square, on both axes together. Sizing it from the *column* (a width
+  plus a ratio) is not the same thing and was a bug for four rounds: the
+  height came from the wrong axis, flexbox shrank the box while the image
+  kept its size, and every record rendered as a letterbox strip of its
+  top third. Height is the scarce axis on a wall, so height leads.
+  The volume row carries a **−/+ step** either
   side of the fader: a rail is an imprecise aim at arm's length, and a
   range input's hit area is its box rather than its knob (which is why
   the shared slider grows to a 44px box on a coarse pointer while the
-  rail keeps its drawn weight). The depth's card adds what the
-  dashboard's glance surface hasn't room for: one fader per speaker
-  under the room-wide one when a group or zone has more than one, the KEF
-  input selector, the **sleep timer** — group-scoped like the play modes,
-  and the one setting the wall has more claim to than the phone, since
-  "stop in half an hour" is asked at the light switch on the way to bed —
-  and the Up-next row that names the actual next track and opens the
-  queue pane (§15.8's door, same sentence). **Up next only claims what it
-  knows**: under shuffle the speaker picks its own next track and under
-  repeat-one it plays this one again, so the row keeps the door and drops
-  the claim, naming the queue's length and why instead. The mode row
-  carries §15.5's **Play similar** with the rest, since "what happens
-  when this song is the last one" is exactly the question a wall gets
-  asked; the depth's card adds one line naming which way it will go,
-  because that choice shows itself only once the queue has run out.
+  rail keeps its drawn weight). **The player is a player, and the room's settings are not on it.**
+  Cover, what is playing, scrubber, transport, volume — that is the whole
+  card. Play modes, the sleep timer, one fader per speaker and the KEF
+  input selector live on the **music depth's Rooms pane**
+  (`PanelRoomSettings`), at the head of it, for the featured room. They
+  were stacked under the cover and they were the reason nothing in that
+  column fitted: they came to more height than the column had, so the
+  cover was squeezed to a third of its size and the rest went behind a
+  scroll with half a chip peeking out of it. Rooms is already the depth's
+  "which device" surface (§16.3) — a room's preferences belong with the
+  room. Only the wide band, which has the width to spare, keeps the play
+  modes on the player itself.
+  The mode row carries §15.5's **Play similar** with the rest, since "what
+  happens when this song is the last one" is exactly the question a wall
+  gets asked, plus one line naming which way it will go, because that
+  choice shows itself only once the queue has run out.
+  **No Up-next row on the panel's player.** On the phone that row is the
+  queue's door (§15.8); here the depth's own pane switcher already names
+  Queue, and a second door beside it is a door twice.
   A queued track is the one action here that changes nothing visible, so
   the card confirms it in place for a few seconds — not a toast (§10's
   quiet answer stands, and a kiosk has nobody to dismiss cards), just the
-  one line saying what went in and whether it plays next.
+  one line saying what went in and whether it plays next. That line rides
+  in the pinned strip, since a confirmation at the far end of a scroll
+  nobody took is not a confirmation.
 - **On the music depth, a song plays; an artist opens.** The wall keeps
   the flat gesture where it's about starting sound: a song found by
   search plays, an album or playlist plays whole — the player names what
@@ -1354,11 +1424,14 @@ constraint made visible.
   like" — fetched once per URI and kept for the session. From there a
   record or a related artist goes one level deeper still, the back chip
   climbs one level rather than leaving the depth, and Escape walks the
-  same ladder. **The results name their own destination**: the room chips
-  ride on the player column, so the search says "Plays on {room}" above
-  its list — the wall is the surface most likely to be used by whoever
-  walked past it last, and it must never be a guess which room a tap
-  reaches. Arriving in the depth also *pins* that room: the featured
+  same ladder. **The results name their own destination**: the search
+  says "Plays on {room}" above its list — the wall is the surface most
+  likely to be used by whoever walked past it last, and it must never be a
+  guess which room a tap reaches. It rides on the pane switcher's own row
+  rather than on a band of its own, because **on a 656px column every band
+  above the results is a result you can't see**: panes, box, destination,
+  kind filter and the top result's label came to five of them, and left
+  room for three songs. Arriving in the depth also *pins* that room: the featured
   source is otherwise a fallback ("whatever is playing"), and a speaker
   starting up elsewhere between typing and tapping would move the
   destination under the finger. Queueing without interrupting is two

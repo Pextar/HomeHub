@@ -37,6 +37,8 @@
     import ArtistScreen from "../music/ArtistScreen.svelte";
     import ContextScreen from "../music/ContextScreen.svelte";
     import PanelPlayerCard from "./PanelPlayerCard.svelte";
+    import PanelRoomChips from "./PanelRoomChips.svelte";
+    import PanelRoomSettings from "./PanelRoomSettings.svelte";
     import { api } from "../../lib/api";
     import { route, toasts } from "../../lib/stores.svelte";
     import type { SpotifyStore } from "../../lib/music/spotify.svelte";
@@ -429,34 +431,62 @@
             <Icon name="chevronLeft" size={16} /><span>Panel</span>
         </button>
         <h2>Music</h2>
+        <!-- Where a tap plays. Full-width here rather than stacked in the
+             player column, where six rooms cost three rows of the cover's
+             height (§16); the search below still names the same room in
+             its "Plays on {…}" line. -->
+        <PanelRoomChips {music} />
     </header>
 
     <div class="b-body">
         <section class="b-left">
             {#if !topLevel}
-                <div class="p-panes" role="group" aria-label="Music panes">
-                    <button
-                        class="k-chip"
-                        class:active={pane === "search"}
-                        onclick={() => (pane = "search")}
-                    >
-                        Search
-                    </button>
-                    <button
-                        class="k-chip"
-                        class:active={pane === "queue"}
-                        onclick={() => (pane = "queue")}
-                    >
-                        Queue{#if featured?.kind === "sonos" && queueCount > 0}
-                            <span class="mono">{queueCount}</span>{/if}
-                    </button>
-                    <button
-                        class="k-chip"
-                        class:active={pane === "rooms"}
-                        onclick={() => (pane = "rooms")}
-                    >
-                        Rooms <span class="mono">{music.sources.length}</span>
-                    </button>
+                <!-- The pane switcher and the destination share one band.
+                     They were two stacked rows, and on a 656px column every
+                     band above the results is a result you can't see: five
+                     of them (panes, box, destination, kind filter, the top
+                     result's own label) left room for three songs. -->
+                <div class="p-panerow">
+                    <div class="p-panes" role="group" aria-label="Music panes">
+                        <button
+                            class="k-chip"
+                            class:active={pane === "search"}
+                            onclick={() => (pane = "search")}
+                        >
+                            Search
+                        </button>
+                        <button
+                            class="k-chip"
+                            class:active={pane === "queue"}
+                            onclick={() => (pane = "queue")}
+                        >
+                            Queue{#if featured?.kind === "sonos" && queueCount > 0}
+                                <span class="mono">{queueCount}</span>{/if}
+                        </button>
+                        <button
+                            class="k-chip"
+                            class:active={pane === "rooms"}
+                            onclick={() => (pane = "rooms")}
+                        >
+                            Rooms <span class="mono">{music.sources.length}</span>
+                        </button>
+                    </div>
+                    {#if pane === "search"}
+                        <!-- Where a tap lands, said where the tapping
+                             happens: the results are otherwise the one place
+                             on the wall that never names its own
+                             destination, and a wall is the surface most
+                             likely to be used by whoever walked past it
+                             last. -->
+                        <p class="s-dest">
+                            <Icon name="speaker" size={14} />
+                            <span
+                                >{featured
+                                    ? `Plays on ${featured.title}`
+                                    : "No speaker is answering"}</span
+                            >
+                        </p>
+                    {/if}
                 </div>
             {/if}
 
@@ -520,21 +550,6 @@
                             </button>
                         {/if}
                     </div>
-
-                    <!-- Where a tap lands, said where the tapping happens.
-                         The room chips ride on the player column, so without
-                         this the results are the one place on the wall that
-                         never names its own destination — and the wall is
-                         the surface most likely to be used by whoever walked
-                         past it last. -->
-                    <p class="s-dest">
-                        <Icon name="speaker" size={14} />
-                        <span
-                            >{featured
-                                ? `Plays on ${featured.title}`
-                                : "No speaker is answering"}</span
-                        >
-                    </p>
 
                     {#if spotify.results}
                         {@const r = spotify.results}
@@ -790,6 +805,11 @@
                 </div>
             {:else}
                 <div class="b-pane">
+                    <!-- The featured room's own preferences lead the pane:
+                         this is the "which device" surface, and they used to
+                         be stacked under the cover in the player column
+                         where they cost it two thirds of its height. -->
+                    <PanelRoomSettings {music} />
                     <h3 class="s-label">Rooms</h3>
                     <div class="rm-list">
                         {#each music.sources as s (s.key)}
@@ -867,11 +887,7 @@
             {#if featured}
                 <PanelPlayerCard
                     {music}
-                    full
-                    onShowQueue={() => {
-                        stack = [];
-                        pane = "queue";
-                    }}
+                    onExpand={() => route.go("panel", { music: "1", player: "1" })}
                 />
             {:else}
                 <div class="p-nosrc">
@@ -937,7 +953,10 @@
             disabled={item.kind !== "artist" && music.busy["item:" + item.uri]}
             onclick={() =>
                 item.kind === "artist"
-                    ? void openArtist(item.uri, item.art_url ? { art_url: item.art_url, round: true } : undefined)
+                    ? void openArtist(
+                          item.uri,
+                          item.art_url ? { art_url: item.art_url, round: true } : undefined,
+                      )
                     : pick(item)}
         >
             {#if item.art_url}
@@ -1024,6 +1043,9 @@
         gap: var(--space-4);
         flex-shrink: 0;
     }
+    .b-head :global(.p-sources) {
+        flex: 1 1 auto;
+    }
     /* The way back to the dashboard depth — same quiet pill as the
        panel's Exit chip, mirrored to the leading edge like a detail
        screen's back chevron. */
@@ -1061,7 +1083,7 @@
         flex: 1;
         min-height: 0;
         display: grid;
-        grid-template-columns: minmax(0, 1fr) 380px;
+        grid-template-columns: minmax(0, 1fr) 360px;
         gap: var(--space-5);
     }
 
@@ -1071,6 +1093,13 @@
         gap: var(--space-3);
         min-height: 0;
         min-width: 0;
+    }
+    .p-panerow {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-3);
+        flex-shrink: 0;
     }
     .p-panes {
         display: flex;
