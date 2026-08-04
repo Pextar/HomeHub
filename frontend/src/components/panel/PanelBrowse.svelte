@@ -1162,11 +1162,15 @@
         overflow-x: hidden;
         padding-bottom: var(--space-2);
     }
-    /* The catalog stack owns the column's scroll the same way. */
+    /* The catalog stack owns the column's scroll the same way — including
+       the one-axis rule: an artist's page is rows of text too, and the
+       pixel rounding invents pans it sideways exactly like the queue
+       (§12). */
     .b-stack {
         flex: 1;
         min-height: 0;
         overflow-y: auto;
+        overflow-x: hidden;
         padding-bottom: var(--space-2);
     }
     .play-on {
