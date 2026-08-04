@@ -29,6 +29,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	mathrand "math/rand/v2"
 	"net/http"
 	"net/url"
 	"os"
@@ -1086,23 +1087,38 @@ func (a *Account) relatedArtists(ctx context.Context, id string) ([]Item, error)
 	return out, nil
 }
 
+// similarTracksPoolPages is how many 10-track search pages SimilarTracks
+// draws its candidates from. A single page (Spotify's old top-tracks-sized
+// list) runs out after ten songs and forces "Play similar" to fall silent
+// mid-session; a wider pool keeps a long-lived autoplay session going and
+// gives the shuffle below something to vary.
+const similarTracksPoolPages = 5
+
 // SimilarTracks finds tracks to continue with once a group's queue runs out
-// — the artist's most-played tracks, seeded from whatever is currently
-// playing. Spotify retired the recommendations and related-artists endpoints
-// for apps created after November 2024, and removed top tracks in February
-// 2026, so "more like this" is answered through search — the one ranked
-// catalog read left. exclude drops URIs queued recently, so a short
-// discography doesn't loop the same handful of songs every time the queue
-// runs out.
+// — the artist's tracks, seeded from whatever is currently playing. Spotify
+// retired the recommendations and related-artists endpoints for apps created
+// after November 2024, and removed top tracks in February 2026, so "more
+// like this" is answered through search — the one ranked catalog read left.
+// The pool is shuffled so repeated calls (each toggle-on, each top-up) don't
+// hand back the same ten songs in the same order. exclude drops URIs queued
+// recently so a top-up doesn't immediately repeat a track — but once the
+// whole pool has been excluded, exclusion is dropped rather than starving
+// the queue, so autoplay keeps the room going for as long as it's on instead
+// of quietly running dry once an artist's pool is exhausted.
 func (a *Account) SimilarTracks(ctx context.Context, artistName string, exclude map[string]bool, limit int) ([]Item, error) {
 	artistName = strings.TrimSpace(artistName)
 	if artistName == "" {
 		return nil, errors.New("spotify: no artist to seed similar tracks from")
 	}
-	tracks, err := a.artistPopularTracks(ctx, artistName)
+	tracks, err := a.artistTrackPool(ctx, artistName, similarTracksPoolPages)
 	if err != nil {
 		return nil, err
 	}
+	if len(tracks) == 0 {
+		return nil, nil
+	}
+	mathrand.Shuffle(len(tracks), func(i, j int) { tracks[i], tracks[j] = tracks[j], tracks[i] })
+
 	out := make([]Item, 0, limit)
 	for _, t := range tracks {
 		if exclude[t.URI] {
@@ -1111,6 +1127,46 @@ func (a *Account) SimilarTracks(ctx context.Context, artistName string, exclude 
 		out = append(out, t)
 		if len(out) >= limit {
 			break
+		}
+	}
+	if len(out) == 0 {
+		// Every candidate has been queued recently and the pool has nothing
+		// left unseen — allow repeats rather than stalling autoplay.
+		for _, t := range tracks {
+			out = append(out, t)
+			if len(out) >= limit {
+				break
+			}
+		}
+	}
+	return out, nil
+}
+
+// artistTrackPool gathers up to pages*10 of an artist's tracks for
+// SimilarTracks to draw from, paging past search's 10-per-page cap (see
+// SearchPage) so a long autoplay session has more than ten songs to rotate
+// through. Duplicate URIs across pages are dropped.
+func (a *Account) artistTrackPool(ctx context.Context, name string, pages int) ([]Item, error) {
+	query := `artist:"` + strings.ReplaceAll(name, `"`, "") + `"`
+	out := make([]Item, 0, pages*10)
+	seen := make(map[string]bool, pages*10)
+	for p := 0; p < pages; p++ {
+		res, err := a.SearchPage(ctx, query, "tracks", 10, p*10)
+		if err != nil {
+			if p == 0 {
+				return nil, err
+			}
+			break
+		}
+		if len(res.Tracks) == 0 {
+			break
+		}
+		for _, t := range res.Tracks {
+			if seen[t.URI] {
+				continue
+			}
+			seen[t.URI] = true
+			out = append(out, t)
 		}
 	}
 	return out, nil
