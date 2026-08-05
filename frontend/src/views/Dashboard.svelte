@@ -289,29 +289,6 @@
     </section>
 {/if}
 
-<!-- ── Rooms ──────────────────────────────────────────────────────── -->
-{#if v.loaded}
-<section class="home-section mobile-rooms">
-    <div class="section-head">
-        <h2><span class="section-ico"><Icon name="home" size={15} /></span>Rooms</h2>
-        {#if liveRooms.length > 0}<span class="header-meta mono">{liveRooms.length}</span>{/if}
-    </div>
-    {#if liveRooms.length === 0}
-        <p class="field-help">No rooms yet. Create devices and assign rooms to them.</p>
-    {:else}
-        <div class="rooms">
-            {#each liveRooms as room, i (room.name)}
-                <div class="room-item"
-                    animate:flip={{ duration: dur(280), easing: cubicOut }}
-                    in:scale={{ start: 0.95, opacity: 0, duration: dur(220), delay: stagger(i), easing: cubicOut }}>
-                    <RoomCard {room} />
-                </div>
-            {/each}
-        </div>
-    {/if}
-</section>
-{/if}
-
 <!-- ── Groups ─────────────────────────────────────────────────────── -->
 {#if groupsWithState.length > 0}
     <section class="home-section">
@@ -340,6 +317,29 @@
             {/each}
         </div>
     </section>
+{/if}
+
+<!-- ── Rooms ──────────────────────────────────────────────────────── -->
+{#if v.loaded}
+<section class="home-section mobile-rooms">
+    <div class="section-head">
+        <h2><span class="section-ico"><Icon name="home" size={15} /></span>Rooms</h2>
+        {#if liveRooms.length > 0}<span class="header-meta mono">{liveRooms.length}</span>{/if}
+    </div>
+    {#if liveRooms.length === 0}
+        <p class="field-help">No rooms yet. Create devices and assign rooms to them.</p>
+    {:else}
+        <div class="rooms">
+            {#each liveRooms as room, i (room.name)}
+                <div class="room-item"
+                    animate:flip={{ duration: dur(280), easing: cubicOut }}
+                    in:scale={{ start: 0.95, opacity: 0, duration: dur(220), delay: stagger(i), easing: cubicOut }}>
+                    <RoomCard {room} />
+                </div>
+            {/each}
+        </div>
+    {/if}
+</section>
 {/if}
 
 <!-- ── Sensors ────────────────────────────────────────────────────── -->
