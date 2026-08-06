@@ -1273,14 +1273,23 @@ These rules keep the screen honest about the room it is showing:
   thing it measures, and reads from the sofa — with the title and the
   artist under it, where a caption goes. The column left behind is what its
   name says: transport, volume, queue.
-- **Neither column grows past what it can use.** The controls hold a
-  stated **380px** and the record stops at **340**, and the slack goes to
-  the margins — the record centres in whatever the controls leave. A fader
-  stretched across a desk monitor is a worse aim than one at arm's length
-  on the iPad this is drawn for, and a queue row that wide parts its title
-  from its duration by half a screen. The transport is **64px with an 80px
-  centre**, one size up from the band's and the depth's: this is the one
-  screen a transport is the subject of, and the one you are furthest from.
+- **The controls don't grow; the record does.** The column holds a stated
+  **380px** whatever the screen, because a fader stretched across a desk
+  monitor is a worse aim than one at arm's length on the iPad this is drawn
+  for, and a queue row that wide parts its title from its duration by half
+  a screen. Those controls have a size they are best at. A record doesn't —
+  so its cap is stated **as a proportion, not a number**: **340 on the
+  reference wall**, which is what the handoff draws, and the same share of
+  a taller screen elsewhere, to a 720 ceiling. A flat 340 read as the whole
+  rule drew a small record in a large margin on every screen bigger than
+  the iPad, and this panel is opened from a desk browser as readily as from
+  the wall. The record centres in whatever the controls leave.
+  The cap is measured against the **stage** — the body inside its own
+  padding, which is why there is an element for it: `clientHeight` on a
+  padded box counts the padding as room the cover could have, and it isn't.
+  The transport is **64px with an 80px centre**, one size up from the
+  band's and the depth's: this is the one screen a transport is the subject
+  of, and the one you are furthest from.
 - **A room with nothing under the transport gets a column the height of
   its controls**, beside the record rather than stretched to the panel. A
   KEF has no queue and says so in one line; held open to a full-height
@@ -1466,9 +1475,25 @@ constraint made visible.
   reference's own composition, and the one state where the wall genuinely
   has nothing to offer.
 - **The destination chips ride on the surface's header, not in the card.**
-  Both depths. In a 336px column three rooms wrapped to two rows and six to
-  three — 150px of a 720px panel spent on the control touched least, taken
-  from the cover looked at most. On a full-width header they are one line.
+  Both depths, and they behave the same way on both. In a 336px column
+  three rooms wrapped to two rows and six to three — 150px of a 720px panel
+  spent on the control touched least, taken from the cover looked at most.
+  On a full-width header they are **one line that scrolls sideways past
+  what fits, and the chips do not shrink to make it fit**. A room grid's
+  tiles share the width down to a floor because they are equal cells; a
+  chip is its own name, and seven of them shrunk into a header read "Kit…",
+  "O…", "P…" — a row of rooms nobody can tell apart is worse than a row you
+  have to push. Every chip on screen is legible, the rest are one swipe
+  away, and the part-chip at the edge is what says so.
+  **Chosen is a ring and a brighter ink**, which is how the panel says
+  *chosen* everywhere else (the Rooms pane's chosen room gets a ring, and
+  playing gets the gradient). They used to invert to solid `--text` — the
+  register the pane switcher beside them uses for its own active segment,
+  so two different pickers on one header shouted the same way. Playing is
+  still the waveform, and the two states stay independent. The chosen chip
+  is also the one that names **how far it reaches** (`2 spkrs`, mono): it
+  is the room every other control on the surface is pointed at, and a count
+  on every chip is a column of numbers nobody is comparing.
 - **The job is glance + tap.** Room tiles toggle the room; the music band
   transports and sets volume; the master pill does all-on/all-off. **A band
   tile says what the room is doing in words, not in a fraction**: a 30px
@@ -1687,8 +1712,18 @@ constraint made visible.
   Enter) _and_ when a result is acted on, because the wall's flow is
   type → tap with no Enter in between. While the box is empty the pane
   idles on those recents and the account's playlists — the playlists as
-  an art grid (§15.9's rule: everything but songs is a grid), a tap
-  still playing one whole. **The box knows when the software keyboard
+  an art grid (§15.9's rule: everything but songs is a grid), and the grid
+  **fits as many as the column has room for rather than stating a count** —
+  four on the depth, which draws a ~130px tile, near enough the band
+  shelf's 132 that a cover is the same size wherever the wall offers one,
+  and three in the portrait fallback's narrower column. A tap still plays
+  one whole. It used to state three outright, which on the depth made them
+  posters in a column that has more to show than four playlists.
+  The **search box is 48px**, not the 56 it was when it shared the column
+  with the pane switcher and had to be the thing you found: the switcher is
+  on the header now and the results are what the column is for. Its text
+  stays at 17px — that floor is iOS's, not a preference.
+  **The box knows when the software keyboard
   is up** (measured off `visualViewport`, so a docked, floating or split
   keyboard all read true, and no keyboard reads as none): the depth
   re-floors to just above it and the results go dense — single-line

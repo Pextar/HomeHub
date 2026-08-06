@@ -1068,14 +1068,11 @@
         padding: 0 var(--space-8);
         border-bottom: 1px solid var(--hairline);
     }
+    /* The chip row keeps its own one-line, shrink-then-scroll behaviour
+       (PanelRoomChips) on every surface that carries it; here it just takes
+       the space between the back chip and the pane switcher. */
     .b-head :global(.p-sources) {
         flex: 1 1 auto;
-        /* One line, whatever the household owns: a header that wrapped would
-           take the height off the body under it. Past what fits, the chips
-           scroll sideways — one axis, like every other scroller here. */
-        flex-wrap: nowrap;
-        overflow-x: auto;
-        overflow-y: hidden;
     }
     /* The way back to the dashboard depth: a round chevron chip on the
        leading edge, the same shape the full player's header wears. */
@@ -1231,11 +1228,16 @@
         font-size: 12.5px;
         color: var(--text-mute);
     }
+    /* The box was 56px when it shared the column with the pane switcher and
+       was the thing that had to be found. The switcher is on the header now
+       and the results below are what this column is for, so the box gives
+       back the height it was only using to be large. Its text stays at 17px
+       — that floor is iOS's, not a preference (§16). */
     .s-box {
         display: flex;
         align-items: center;
         gap: var(--space-3);
-        height: 56px;
+        height: 48px;
         padding: 0 var(--space-2) 0 var(--space-4);
         border-radius: var(--r-md);
         border: 1px solid var(--hairline);
@@ -1501,9 +1503,17 @@
 
     /* The account's playlists, idle: covers on a grid (§15.9 — everything
        but songs is a grid), three across the work column. */
+    /* The column count follows the width rather than being stated: four on
+       the depth's 556px column, which draws a 130px tile — near enough the
+       dashboard band shelf's 132 that a cover is the same size wherever the
+       wall offers one — and three in the portrait fallback's narrower one.
+       The 110px floor is the breakpoint knob, not the tile size: the tiles
+       are `1fr` and land well above it at both widths. It used to state
+       three outright, which on the depth made them posters in a column that
+       has more to show than four playlists. */
     .s-pl-grid {
         display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
+        grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
         gap: var(--space-4) var(--space-3);
     }
 

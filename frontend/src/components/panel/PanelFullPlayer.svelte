@@ -75,17 +75,20 @@
     // a vertical strip of its own middle. The screen whose entire point is
     // the cover is not the layout to be clever in front of.
     //
-    // So: measure the boxes the cover cannot itself size — the body's
-    // stretched height and width, and the caption riding under it (the two
-    // lines of meta and the scrubber) — then write both axes onto the
-    // square outright.
+    // So: measure the boxes the cover cannot itself size — the *stage*
+    // (the body inside its own padding, which is why there is an element for
+    // it: `clientHeight` on the padded body counts the padding as room the
+    // cover could have, and it isn't) and the caption riding under the
+    // square — then write both axes onto it outright.
     const ART_FLOOR = 160;
-    /** Where the record stops growing. Past this the cover is bigger than
-     *  the screen it is on has any use for: at 340 the record is more than
-     *  half the height of the reference wall, twice what it gets one depth
-     *  back, and the slack beyond it belongs to the margins rather than to a
-     *  poster nobody is close enough to read (§16). */
-    const ART_CAP = 340;
+    /** The reference wall's stage, and the record the handoff draws in it:
+     *  1024×768 less the header and the body's padding is 656 tall, and the
+     *  record on it is 340. */
+    const REF_STAGE_H = 656;
+    const REF_ART = 340;
+    /** Where the record stops growing whatever the screen. Past this it is a
+     *  poster, not a record. */
+    const ART_CEIL = 720;
     /** The gap between the cover and its caption, and between the columns. */
     const HEAD_GAP = 16;
     const COL_GAP = 32;
@@ -94,6 +97,17 @@
      *  arm's length on the iPad this is drawn for, and a queue row that wide
      *  parts its title from its duration by half a screen. */
     const SIDE_W = 380;
+
+    /** The record's cap, in proportion to the screen rather than stated flat.
+     *  340 is the handoff's number *for a 768px wall*, and a flat 340 read as
+     *  the whole rule made every bigger screen — the desk browser this panel
+     *  is opened from as readily as the iPad — draw a small record in a large
+     *  margin. So the ratio is what carries: on the reference wall this
+     *  computes to exactly 340, and a taller screen gets a record in the same
+     *  proportion to it. The controls column doesn't grow, because a fader
+     *  and a queue row have a size they are best at; a record doesn't. */
+    const artCap = (stageH: number) =>
+        Math.min(ART_CEIL, Math.max(REF_ART, Math.round(stageH * (REF_ART / REF_STAGE_H))));
 
     // Landscape is the designed-for shape and the one that measures; the
     // portrait fallback lets CSS size the cover from its width, the one
@@ -107,16 +121,16 @@
         return () => mq.removeEventListener("change", apply);
     });
 
-    let bodyW = $state(0);
-    let bodyH = $state(0);
+    let stageW = $state(0);
+    let stageH = $state(0);
     let capH = $state(0);
 
     const coverPx = $derived.by(() => {
         if (!landscape) return 0; // portrait: CSS sizes it from the width
-        const height = bodyH - capH - HEAD_GAP;
-        const width = bodyW - SIDE_W - COL_GAP;
+        const height = stageH - capH - HEAD_GAP;
+        const width = stageW - SIDE_W - COL_GAP;
         if (height <= 0 || width <= 0) return 0; // pre-measure, one frame
-        return Math.max(ART_FLOOR, Math.min(height, width, ART_CAP));
+        return Math.max(ART_FLOOR, Math.min(height, width, artCap(stageH)));
     });
     const coverStyle = $derived(coverPx ? `width:${coverPx}px` : "");
     const artStyle = $derived(coverPx ? `width:${coverPx}px;height:${coverPx}px` : "");
@@ -211,223 +225,233 @@
     </header>
 
     {#if featured}
-        <div class="fp-body" bind:clientWidth={bodyW} bind:clientHeight={bodyH}>
-            <!-- The record: the cover at the size a wall can read from the
-                 sofa, with the name of what is on it directly underneath —
-                 the two together are one object, and putting the name in the
-                 controls column left this side of the screen half empty.
-                 The column is exactly as wide as the square, so the caption
-                 truncates against the cover rather than the cover against
-                 the caption. -->
-            <section class="fp-record" style={coverStyle} aria-label="Now playing">
-                <span class="fp-art" style={artStyle}>
-                    {#if artSrc}
-                        <img
-                            class="fp-cover"
-                            src={artSrc}
-                            alt=""
-                            onerror={() => (artFailed = artSrc)}
-                        />
-                    {:else}
-                        <span class="fp-cover placeholder">[ art ]</span>
-                    {/if}
-                    {#if featured.playing}
-                        <span class="fp-wave"><Waveform /></span>
-                    {/if}
-                </span>
-                <!-- The caption: how far through the record we are, and what
-                     it is. The scrubber belongs to the song and not to the
-                     controls — at the top of the card it was a hairline in
-                     a corner, describing something in the other column;
-                     under the cover it is exactly as wide as the record and
-                     reads from the sofa. It rides directly under the square
-                     and the name under it, so the rail touches the thing it
-                     measures. Both meta lines stay on one line each: the
-                     cover is measured against this block's height, so a
-                     caption that wrapped would resize the square that
-                     decides its width. -->
-                <div class="fp-caption" bind:clientHeight={capH}>
-                    {#if !featured.standby}
-                        <TrackRail
-                            position={music.posSec}
-                            duration={music.durSec}
-                            seekable={music.seekable}
-                            idle={railIdle}
-                            liveLabel={railLabel}
-                            onSeek={(sec) => music.seek(sec)}
-                        />
-                    {/if}
-                    <div class="fp-meta">
-                        <h3 class="fp-title">
-                            {featured.trackTitle ?? (featured.playing ? "Playing" : "Not playing")}
-                        </h3>
-                        <p class="fp-sub">{featured.trackSub || featured.title}</p>
+        <!-- The body pads; the stage inside it is what the two columns
+             actually have, and what the record is measured against. Two
+             elements because one can't be both: `clientHeight` on a padded
+             box counts the padding as room. -->
+        <div class="fp-body">
+            <div class="fp-stage" bind:clientWidth={stageW} bind:clientHeight={stageH}>
+                <!-- The record: the cover at the size a wall can read from the
+                     sofa, with the name of what is on it directly underneath —
+                     the two together are one object, and putting the name in the
+                     controls column left this side of the screen half empty.
+                     The column is exactly as wide as the square, so the caption
+                     truncates against the cover rather than the cover against
+                     the caption. -->
+                <section class="fp-record" style={coverStyle} aria-label="Now playing">
+                    <span class="fp-art" style={artStyle}>
+                        {#if artSrc}
+                            <img
+                                class="fp-cover"
+                                src={artSrc}
+                                alt=""
+                                onerror={() => (artFailed = artSrc)}
+                            />
+                        {:else}
+                            <span class="fp-cover placeholder">[ art ]</span>
+                        {/if}
+                        {#if featured.playing}
+                            <span class="fp-wave"><Waveform /></span>
+                        {/if}
+                    </span>
+                    <!-- The caption: how far through the record we are, and what
+                         it is. The scrubber belongs to the song and not to the
+                         controls — at the top of the card it was a hairline in
+                         a corner, describing something in the other column;
+                         under the cover it is exactly as wide as the record and
+                         reads from the sofa. It rides directly under the square
+                         and the name under it, so the rail touches the thing it
+                         measures. Both meta lines stay on one line each: the
+                         cover is measured against this block's height, so a
+                         caption that wrapped would resize the square that
+                         decides its width. -->
+                    <div class="fp-caption" bind:clientHeight={capH}>
+                        {#if !featured.standby}
+                            <TrackRail
+                                position={music.posSec}
+                                duration={music.durSec}
+                                seekable={music.seekable}
+                                idle={railIdle}
+                                liveLabel={railLabel}
+                                onSeek={(sec) => music.seek(sec)}
+                            />
+                        {/if}
+                        <div class="fp-meta">
+                            <h3 class="fp-title">
+                                {featured.trackTitle ??
+                                    (featured.playing ? "Playing" : "Not playing")}
+                            </h3>
+                            <p class="fp-sub">{featured.trackSub || featured.title}</p>
+                        </div>
                     </div>
-                </div>
-            </section>
+                </section>
 
-            <!-- The controls, capped: a fader stretched across a 1500px
-                 desk monitor is a worse aim than one at arm's length on the
-                 iPad this is drawn for, and a queue row that wide parts its
-                 title from its duration by half a screen. The pair centres
-                 in whatever is left. -->
-            <section
-                class="fp-side"
-                class:hollow={(!hasQueue && !groupOpen) || featured.standby}
-                aria-label="Player controls"
-            >
-                <!-- The destination, and the way to change it. It shows up
-                     only where it can do something: a Sonos room with
-                     somewhere to join from or more than one speaker to
-                     split. A lone KEF has nothing to group with and gets no
-                     control that would be refused (§15.1). -->
-                {#if music.canGroup}
-                    <button
-                        class="fp-where"
-                        class:open={groupOpen}
-                        aria-expanded={groupOpen}
-                        onclick={() => (grouping = !grouping)}
-                    >
-                        <span class="w-title">{featured.title}</span>
-                        <span class="w-tail">
-                            {#if memberCount > 1}
-                                <span class="w-count mono">{memberCount} spkrs</span>
-                            {/if}
-                            <span class="w-go" aria-hidden="true"
-                                ><Icon name="chevronRight" size={16} /></span
-                            >
-                        </span>
-                    </button>
-                {:else}
-                    <!-- Nothing to group with — a lone KEF, a zone — so the
-                         row is a statement rather than a control, and the
-                         screen still names the room it is driving. -->
-                    <p class="fp-where flat">
-                        <span class="w-title">{featured.title}</span>
-                    </p>
-                {/if}
-
-                {#if featured.standby}
-                    <div class="fp-standby">
-                        <p>In standby</p>
+                <!-- The controls, capped: a fader stretched across a 1500px
+                     desk monitor is a worse aim than one at arm's length on the
+                     iPad this is drawn for, and a queue row that wide parts its
+                     title from its duration by half a screen. The pair centres
+                     in whatever is left. -->
+                <section
+                    class="fp-side"
+                    class:hollow={(!hasQueue && !groupOpen) || featured.standby}
+                    aria-label="Player controls"
+                >
+                    <!-- The destination, and the way to change it. It shows up
+                         only where it can do something: a Sonos room with
+                         somewhere to join from or more than one speaker to
+                         split. A lone KEF has nothing to group with and gets no
+                         control that would be refused (§15.1). -->
+                    {#if music.canGroup}
                         <button
-                            class="fp-wake"
-                            disabled={music.busy["power:" + featured.id]}
-                            onclick={() => music.wake(featured)}
+                            class="fp-where"
+                            class:open={groupOpen}
+                            aria-expanded={groupOpen}
+                            onclick={() => (grouping = !grouping)}
                         >
-                            <Icon name="power" size={18} /><span>Wake {featured.title}</span>
+                            <span class="w-title">{featured.title}</span>
+                            <span class="w-tail">
+                                {#if memberCount > 1}
+                                    <span class="w-count mono">{memberCount} spkrs</span>
+                                {/if}
+                                <span class="w-go" aria-hidden="true"
+                                    ><Icon name="chevronRight" size={16} /></span
+                                >
+                            </span>
                         </button>
-                    </div>
-                {:else}
-                    <div class="fp-controls">
-                        <div class="fp-transport">
-                            {#if featured.canSkip}
-                                <button
-                                    class="t-btn"
-                                    aria-label="Previous track"
-                                    disabled={music.busy["previous:" + featured.id]}
-                                    onclick={() => music.skip(featured, "previous")}
-                                >
-                                    <Icon name="skipPrev" size={22} />
-                                </button>
-                            {/if}
-                            <button
-                                class="t-btn primary"
-                                aria-label={featured.playing ? "Pause" : "Play"}
-                                disabled={music.busy["play:" + featured.id]}
-                                onclick={() => music.togglePlay(featured)}
-                            >
-                                <Icon name={featured.playing ? "pause" : "play"} size={28} />
-                            </button>
-                            {#if featured.canSkip}
-                                <button
-                                    class="t-btn"
-                                    aria-label="Next track"
-                                    disabled={music.busy["next:" + featured.id]}
-                                    onclick={() => music.skip(featured, "next")}
-                                >
-                                    <Icon name="skipNext" size={22} />
-                                </button>
-                            {/if}
-                        </div>
-
-                        <div class="fp-volume">
-                            <button
-                                class="v-ico"
-                                class:mute={featured.muted}
-                                aria-label={featured.muted ? "Unmute" : "Mute"}
-                                disabled={music.busy["mute:" + featured.id]}
-                                onclick={() => music.toggleMute(featured)}
-                            >
-                                <Icon name={featured.muted ? "volumeOff" : "volume"} size={18} />
-                            </button>
-                            <button
-                                class="v-step"
-                                aria-label="Volume down"
-                                disabled={music.busy["vol:" + featured.id]}
-                                onclick={() => music.nudgeVolume(featured, -5)}
-                            >
-                                <Icon name="minus" size={18} />
-                            </button>
-                            <Slider
-                                value={music.vol}
-                                label="Volume"
-                                valueText="{music.vol}%"
-                                onInput={(v) => music.dragVolume(featured, v)}
-                                onChange={(v) => music.setVolume(featured, v)}
-                            />
-                            <button
-                                class="v-step"
-                                aria-label="Volume up"
-                                disabled={music.busy["vol:" + featured.id]}
-                                onclick={() => music.nudgeVolume(featured, 5)}
-                            >
-                                <Icon name="plus" size={18} />
-                            </button>
-                            <span class="v-val mono">{music.vol}</span>
-                        </div>
-                    </div>
-
-                    <!-- The rule that says the transport is one thing and the
-                         queue under it is another. It is the only edge drawn
-                         in this column: the column itself is flat (§16). -->
-                    <div class="fp-rule"></div>
-
-                    <!-- What this screen is for beyond size: the queue, in
-                         full, with the row playing marked — the one thing
-                         the depth's column never had the height to show. A
-                         room with no queue behind it says so in one quiet
-                         line and gives the height back to the transport
-                         rather than holding open a scroll region with a
-                         sentence at the top of it. -->
-                    {#if groupOpen}
-                        <PanelGroupPane {music} />
-                    {:else if hasQueue}
-                        <div class="fp-queue" bind:this={queueEl}>
-                            <QueuePane
-                                art
-                                items={music.queue}
-                                loading={music.queueLoading}
-                                total={queueCount || music.queue.length}
-                                currentTrack={featured.queueTrack}
-                                playing={featured.playing}
-                                confirmClear
-                                clearBusy={!!music.busy["qclear:" + featured.id]}
-                                isBusy={(k) => !!music.busy[k]}
-                                onJump={(t) => music.jumpTo(t)}
-                                onRemove={(t) => music.removeQueued(t)}
-                                onClear={() => music.clearQueue()}
-                            />
-                        </div>
                     {:else}
-                        <p class="fp-noqueue">
-                            {featured.kind === "kef"
-                                ? "A KEF speaker plays its input — there is no queue to show."
-                                : "This room is played together — its queue lives with whatever is streaming to it."}
+                        <!-- Nothing to group with — a lone KEF, a zone — so the
+                             row is a statement rather than a control, and the
+                             screen still names the room it is driving. -->
+                        <p class="fp-where flat">
+                            <span class="w-title">{featured.title}</span>
                         </p>
                     {/if}
-                {/if}
-            </section>
+
+                    {#if featured.standby}
+                        <div class="fp-standby">
+                            <p>In standby</p>
+                            <button
+                                class="fp-wake"
+                                disabled={music.busy["power:" + featured.id]}
+                                onclick={() => music.wake(featured)}
+                            >
+                                <Icon name="power" size={18} /><span>Wake {featured.title}</span>
+                            </button>
+                        </div>
+                    {:else}
+                        <div class="fp-controls">
+                            <div class="fp-transport">
+                                {#if featured.canSkip}
+                                    <button
+                                        class="t-btn"
+                                        aria-label="Previous track"
+                                        disabled={music.busy["previous:" + featured.id]}
+                                        onclick={() => music.skip(featured, "previous")}
+                                    >
+                                        <Icon name="skipPrev" size={22} />
+                                    </button>
+                                {/if}
+                                <button
+                                    class="t-btn primary"
+                                    aria-label={featured.playing ? "Pause" : "Play"}
+                                    disabled={music.busy["play:" + featured.id]}
+                                    onclick={() => music.togglePlay(featured)}
+                                >
+                                    <Icon name={featured.playing ? "pause" : "play"} size={28} />
+                                </button>
+                                {#if featured.canSkip}
+                                    <button
+                                        class="t-btn"
+                                        aria-label="Next track"
+                                        disabled={music.busy["next:" + featured.id]}
+                                        onclick={() => music.skip(featured, "next")}
+                                    >
+                                        <Icon name="skipNext" size={22} />
+                                    </button>
+                                {/if}
+                            </div>
+
+                            <div class="fp-volume">
+                                <button
+                                    class="v-ico"
+                                    class:mute={featured.muted}
+                                    aria-label={featured.muted ? "Unmute" : "Mute"}
+                                    disabled={music.busy["mute:" + featured.id]}
+                                    onclick={() => music.toggleMute(featured)}
+                                >
+                                    <Icon
+                                        name={featured.muted ? "volumeOff" : "volume"}
+                                        size={18}
+                                    />
+                                </button>
+                                <button
+                                    class="v-step"
+                                    aria-label="Volume down"
+                                    disabled={music.busy["vol:" + featured.id]}
+                                    onclick={() => music.nudgeVolume(featured, -5)}
+                                >
+                                    <Icon name="minus" size={18} />
+                                </button>
+                                <Slider
+                                    value={music.vol}
+                                    label="Volume"
+                                    valueText="{music.vol}%"
+                                    onInput={(v) => music.dragVolume(featured, v)}
+                                    onChange={(v) => music.setVolume(featured, v)}
+                                />
+                                <button
+                                    class="v-step"
+                                    aria-label="Volume up"
+                                    disabled={music.busy["vol:" + featured.id]}
+                                    onclick={() => music.nudgeVolume(featured, 5)}
+                                >
+                                    <Icon name="plus" size={18} />
+                                </button>
+                                <span class="v-val mono">{music.vol}</span>
+                            </div>
+                        </div>
+
+                        <!-- The rule that says the transport is one thing and the
+                             queue under it is another. It is the only edge drawn
+                             in this column: the column itself is flat (§16). -->
+                        <div class="fp-rule"></div>
+
+                        <!-- What this screen is for beyond size: the queue, in
+                             full, with the row playing marked — the one thing
+                             the depth's column never had the height to show. A
+                             room with no queue behind it says so in one quiet
+                             line and gives the height back to the transport
+                             rather than holding open a scroll region with a
+                             sentence at the top of it. -->
+                        {#if groupOpen}
+                            <PanelGroupPane {music} />
+                        {:else if hasQueue}
+                            <div class="fp-queue" bind:this={queueEl}>
+                                <QueuePane
+                                    art
+                                    items={music.queue}
+                                    loading={music.queueLoading}
+                                    total={queueCount || music.queue.length}
+                                    currentTrack={featured.queueTrack}
+                                    playing={featured.playing}
+                                    confirmClear
+                                    clearBusy={!!music.busy["qclear:" + featured.id]}
+                                    isBusy={(k) => !!music.busy[k]}
+                                    onJump={(t) => music.jumpTo(t)}
+                                    onRemove={(t) => music.removeQueued(t)}
+                                    onClear={() => music.clearQueue()}
+                                />
+                            </div>
+                        {:else}
+                            <p class="fp-noqueue">
+                                {featured.kind === "kef"
+                                    ? "A KEF speaker plays its input — there is no queue to show."
+                                    : "This room is played together — its queue lives with whatever is streaming to it."}
+                            </p>
+                        {/if}
+                    {/if}
+                </section>
+            </div>
         </div>
     {:else}
         <div class="fp-nosrc">
@@ -500,8 +524,14 @@
         flex: 1;
         min-height: 0;
         display: flex;
-        gap: var(--space-8); /* COL_GAP */
         padding: var(--space-7) var(--space-8);
+    }
+    .fp-stage {
+        flex: 1;
+        min-width: 0;
+        min-height: 0;
+        display: flex;
+        gap: var(--space-8); /* COL_GAP */
     }
 
     /* ── The record ──────────────────────────────────────────────────── */
@@ -921,9 +951,11 @@
     /* Portrait: the record over the controls, and the page scrolls. */
     @media (orientation: portrait), (max-width: 900px) {
         .fp-body {
+            padding: var(--space-5);
+        }
+        .fp-stage {
             flex-direction: column;
             align-items: center;
-            padding: var(--space-5);
         }
         .fp-record {
             width: min(100%, 340px);
