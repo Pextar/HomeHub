@@ -32,6 +32,7 @@
         onOpen = undefined,
         onExpand = undefined,
         wide = false,
+        artMax = 0,
     }: {
         music: PanelMusicStore;
         /** Given, the cover is a button into the music depth. */
@@ -48,6 +49,11 @@
          *  way round is bigger is purely the zone's aspect, so the zone
          *  says. */
         wide?: boolean;
+        /** Band only: the measured height of the stage the row sits in. The
+         *  cover grows into it between BAND_ART_MIN and BAND_ART_CAP. The
+         *  band measures rather than the card, because a box the cover can
+         *  size is a reading that chases its own tail. */
+        artMax?: number;
     } = $props();
 
     const featured = $derived(music.featured);
@@ -68,13 +74,16 @@
     /** The gap between the cover and what rides under it — the meta when
      *  the card is stacked. */
     const HEAD_GAP = 16;
-    /** The dashboard band's cover, stated outright. The band is the tallest
-     *  zone on the panel and the cover used to take all of it, which made
-     *  the surface a poster with a control strip beside it. In the stacked
-     *  bands the band is a *strip*: cover, what's playing, transport,
-     *  destination, on one line with air above and below it, and the record
-     *  gets its full size one depth in where listening is the job (§16). */
-    const BAND_ART = 128;
+    /** The dashboard band's cover. It grows into whatever height the band's
+     *  stage has, between these two, and the cap is a *width* decision as
+     *  much as a height one: the band's row is 960px on the reference wall
+     *  and four columns share it, so every pixel the square takes comes off
+     *  the title beside it. Past ~200 the title column is too narrow to
+     *  name a song, which is the one thing this band exists to say. The
+     *  height the cap leaves is not spent on air — it goes to the shelf at
+     *  the foot of the band (PanelBandShelf, §16). */
+    const BAND_ART_MIN = 128;
+    const BAND_ART_CAP = 200;
 
     // Landscape is the designed-for shape and the one that measures; the
     // portrait fallback lets CSS size the cover from its width, which is the
@@ -97,10 +106,14 @@
 
     const coverPx = $derived.by(() => {
         if (!landscape) return 0; // portrait: CSS sizes it from the width
-        // The band states its cover; only the depth's column has to measure
-        // one, because there the cover is what the column is *for* and what
-        // it may have is whatever the controls under it leave.
-        if (wide) return BAND_ART;
+        // The band's stage is measured by the band (see `artMax`); the
+        // depth's column measures its own, because there the cover is what
+        // the column is *for* and what it may have is whatever the controls
+        // under it leave.
+        if (wide) {
+            if (artMax <= 0) return BAND_ART_MIN; // pre-measure, one frame
+            return Math.max(BAND_ART_MIN, Math.min(artMax, BAND_ART_CAP));
+        }
         const height = scrollH - metaH - HEAD_GAP;
         if (height <= 0 || scrollW <= 0) return 0; // pre-measure, one frame
         return Math.max(ART_FLOOR, Math.min(height, scrollW, ART_CAP));
@@ -439,7 +452,7 @@
         flex: none;
         flex-direction: row;
         align-items: center;
-        gap: var(--space-6);
+        gap: var(--space-5);
         padding: 0;
         border: 0;
         border-radius: 0;
@@ -464,7 +477,7 @@
        enough that the middle keeps the row. */
     .p-dest {
         flex: none;
-        width: 280px;
+        width: 268px;
         display: flex;
         flex-direction: column;
         gap: var(--space-3);

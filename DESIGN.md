@@ -1403,6 +1403,30 @@ constraint made visible.
   keeps a two-column shape, because there its left half is a catalog to
   read: search and its results on the left (the list owns its scroll), the
   featured player on the right at 420px.
+- **The music band spends its height on a shelf, not on a bigger cover.**
+  The band's player is a *strip* — cover, meta and scrubber, transport,
+  destination and fader, on one line — and the strip's height is capped by
+  a **width** problem, not a height one: the row is 960px on the reference
+  wall and four columns share it, so every pixel the square takes comes off
+  the title beside it. Past about 200px the title column is too narrow to
+  name a song, which is the one thing this band exists to say. So the cover
+  grows into the band's stage and stops at 200, and what would otherwise be
+  340px of air becomes a **shelf across the foot of the band**
+  (`PanelBandShelf`): one row of 132px art tiles, scrolling sideways past
+  what fits, each one a tap.
+
+  Air was the wrong answer there. The wall's most-wanted gesture after
+  play/pause is *put something on*, and until the shelf existed that cost a
+  trip one depth in — on the surface with a third of its screen unused. One
+  slot, and the room's state picks what fills it: **Up next**, the queue
+  past the track playing, where a tap jumps to it — only where the order is
+  known, since shuffle and repeat-one make "next" a guess and the wall
+  doesn't guess; else **Favorites**, the household's Sonos list, where a tap
+  plays it here. Both are Sonos-only because both lists are, and both ride
+  the poll the panel already runs, so the shelf costs no extra read. A room
+  with neither gets no shelf and the player centres in the band — the
+  reference's own composition, and the one state where the wall genuinely
+  has nothing to offer.
 - **The destination chips ride on the surface's header, not in the card.**
   Both depths. In a 336px column three rooms wrapped to two rows and six to
   three — 150px of a 720px panel spent on the control touched least, taken
@@ -1438,7 +1462,8 @@ constraint made visible.
   the clock is the *subject*, at `clamp(104px, 20vw, 168px)`. Stat figures
   19px over an 11px label; band tile names 14px over an 11.5px status line
   (19px in the room grid, where there is height to spend); track title 19px
-  on the band and 21px in the depth's column; transport 48px with a 60px
+  on the band and 21px in the depth's column; the band's cover grows into
+  its stage and stops at 200px, the shelf's tiles are 132px; transport 48px with a 60px
   centre on the band and in the depth, 64/80 on the full player, which is
   the one screen a transport is the subject of. Room tiles in the grid
   share the zone's height down to a 120px floor, then scroll internally;
