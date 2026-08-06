@@ -68,17 +68,25 @@
 {/if}
 
 <style>
+    /* The middle band. It takes every row the strip above and the room row
+       below don't claim (§16) and spends most of it on air: the head row
+       states the section and where the sound goes, and the player is one
+       line centred in what's left. A wall panel is read from across a room,
+       and a strip with room to breathe reads from further away than a
+       rectangle packed to its edges. */
     .music {
         display: flex;
         flex-direction: column;
+        justify-content: center;
+        gap: var(--space-7);
         min-height: 0;
         min-width: 0;
+        padding: var(--space-5) var(--space-8);
     }
     .m-head {
         display: flex;
         align-items: center;
         gap: var(--space-3);
-        margin-bottom: var(--space-3);
         flex-shrink: 0;
     }
     /* The chips take the middle; Pause all keeps the trailing edge. */
