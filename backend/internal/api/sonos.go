@@ -35,8 +35,10 @@ type sonosSpeakerView struct {
 	// Autoplay is HomeHub's own "continue with similar music once the queue
 	// runs out" setting — see sonos_autoplay.go. It lives beside GroupState
 	// rather than inside it: GroupState is only ever what the speaker itself
-	// reports, and this is a HomeHub preference layered on top.
-	Autoplay bool `json:"autoplay,omitempty"`
+	// reports, and this is a HomeHub preference layered on top. Always sent:
+	// it is on by default, so false is the interesting value and an absent
+	// field would be indistinguishable from a room that opted out.
+	Autoplay bool `json:"autoplay"`
 }
 
 // sonosGroupView is one live zone group mapped onto registered speaker IDs.

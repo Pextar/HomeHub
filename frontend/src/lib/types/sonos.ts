@@ -61,8 +61,9 @@ export interface SonosSpeakerView extends SonosSpeaker {
   group_state?: SonosGroupState;
   /** HomeHub's own "continue with similar music once the queue runs out"
    *  setting for this coordinator — a preference layered on top of what the
-   *  speaker reports, the same shape as crossfade. Only meaningful when
-   *  group_state is present. */
+   *  speaker reports, the same shape as crossfade. On unless the room opted
+   *  out (§15.5), and always sent, so `false` really means "let it end".
+   *  Only meaningful when group_state is present. */
   autoplay?: boolean;
 }
 

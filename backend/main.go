@@ -296,8 +296,9 @@ func main() {
 	go server.RunKEFEvents(schedCtx)
 
 	// "Continue play similar": tops up a group's queue with similar tracks
-	// once autoplay is on for it and it reaches the last queued track. Same
-	// reasoning as the KEF poller — nothing here needs a clean release.
+	// as it reaches the last queued one, and picks a room back up if it
+	// managed to fall silent anyway. On for every group that hasn't opted
+	// out. Same reasoning as the KEF poller — nothing needs a clean release.
 	go server.RunAutoplay(schedCtx)
 
 	go func() {
