@@ -1242,9 +1242,17 @@ three: the band answers *what's on* while you walk past, the depth answers
 started a record and there is nothing left to browse for, so the cover
 goes to the size a record deserves and the room the search results were
 using goes to the queue, which is finally visible in full. Its back chip
-and Escape climb one rung to the depth. These rules keep the screen honest
-about the room it is showing:
+and Escape climb one rung to the depth; a **close chip on the header's
+trailing edge drops the whole ladder home**, because "back to what I was
+browsing" and "I'm done listening" are two different answers and on a wall
+the second is worth its own target rather than two aims at the first.
+These rules keep the screen honest about the room it is showing:
 
+- **The screen is a 72px header and a body, both edge to edge** — the same
+  band the music depth wears, so the chrome lands in the same place as you
+  climb. Back chip, the screen's name, close chip; nothing else. The room
+  chips are *not* here: this screen is one room, and the control column
+  below names it and is the door to changing it.
 - **The record is measured in pixels, exactly like the card's cover** —
   same reason, and it was the same bug. Stating a square as an
   `aspect-ratio` inside a shrink-to-fit column means the column's width
@@ -1256,23 +1264,26 @@ about the room it is showing:
   caption truncates against the record and never the record against the
   caption. Both meta lines stay on one line each for that reason: a
   caption that wrapped would resize the square that decides its width.
-- **The scrubber is part of the record, not of the controls.** How far
-  through the song we are is a fact about the song, and it is the one
-  control on this screen whose subject is in the other column: at the top
-  of the control card it was a hairline across a corner, describing
-  something you weren't looking at. Under the cover it is exactly the
-  record's width and reads from the sofa, and the card left behind is what
-  its name says — transport, volume, preferences, queue. It costs the
-  cover the caption's extra height, which is the cheapest thing on the
-  screen.
-- **Neither column grows past what it can use.** Past its cap the cover
-  stops and the controls stop, and the slack goes to the margins — a
-  fader stretched across a desk monitor is a worse aim than one at arm's
-  length on the iPad this is drawn for, and a queue row that wide parts
-  its title from its duration by half a screen.
-- **A room with nothing under the transport gets a card the height of its
-  controls**, beside the record rather than stretched to the panel. A KEF
-  has no queue and says so in one line; held open to a full-height
+- **The scrubber is part of the record, not of the controls, and it sits
+  between the record and its name.** How far through the song we are is a
+  fact about the song, and it is the one control on this screen whose
+  subject is in the other column: at the top of the control card it was a
+  hairline across a corner, describing something you weren't looking at.
+  Directly under the cover it is exactly the record's width, touches the
+  thing it measures, and reads from the sofa — with the title and the
+  artist under it, where a caption goes. The column left behind is what its
+  name says: transport, volume, queue.
+- **Neither column grows past what it can use.** The controls hold a
+  stated **380px** and the record stops at **340**, and the slack goes to
+  the margins — the record centres in whatever the controls leave. A fader
+  stretched across a desk monitor is a worse aim than one at arm's length
+  on the iPad this is drawn for, and a queue row that wide parts its title
+  from its duration by half a screen. The transport is **64px with an 80px
+  centre**, one size up from the band's and the depth's: this is the one
+  screen a transport is the subject of, and the one you are furthest from.
+- **A room with nothing under the transport gets a column the height of
+  its controls**, beside the record rather than stretched to the panel. A
+  KEF has no queue and says so in one line; held open to a full-height
   rectangle those four rows read as something that failed to load rather
   than as a speaker with nothing more to show.
 - **The queue opens at the track playing**, and its count and Clear stay
@@ -1280,15 +1291,19 @@ about the room it is showing:
   marked" is what this screen is for beyond size, and a room forty tracks
   into a playlist opened at track one with the mark below the fold. The
   nudge happens only when that row is actually out of view — this runs
-  beside a five-second poll on an A8X.
-- **The control card leads with the destination, and the destination is
+  beside a five-second poll on an A8X. **The rows carry cover art here and
+  nowhere else**: the queue is what this screen is for and has the width
+  for a 36px thumbnail, where in a phone-width sheet the same thumbnail is
+  bought from the title.
+- **The controls lead with the destination, and the destination is
   the door to grouping.** "Put this in the kitchen as well" is a listening
   thought, not a browsing one, and until this line existed the wall made
   you leave the record, walk back to the depth's Rooms list and aim at a
-  chip naming a group you could no longer see. So the card's first row
-  names the room the transport is driving — the one fact this screen never
-  stated, since the chips that carry it sit three feet up on the header —
-  with its speaker count in mono, and tapping it swaps the queue for the
+  chip naming a group you could no longer see. So the column's first row
+  names the room the transport is driving — the only thing on this screen
+  that says which room it is, the header carrying no chips — with its
+  speaker count in mono and a chevron that turns a quarter when the pane is
+  open. Tapping it swaps the queue for the
   grouping pane (`PanelGroupPane`). A swap, not a sheet and not a second
   screen: the transport and the room fader stay exactly where they are, so
   pausing mid-thought costs nothing, and the queue is back when the pane
@@ -1313,7 +1328,10 @@ about the room it is showing:
     mixer whose faders don't line up can't be read as one. A room of one
     speaker shows neither: its fader is the player's own three rows up,
     and a second copy of a control is worse than none. The room-wide
-    fader never moves.
+    fader never moves. **No number beside a member's fader**: this list is
+    read for the *balance* between rooms, which is what the faders lining
+    up already say, and in a 380px column three digits a row are bought
+    from the one control that has to be aimed at.
   - **The lead can't step out, and splitting arms.** The coordinator
     carries the queue and the stream, so its row has no ✕ — `Split` at the
     head of the pane is what ends a group, and like every destructive tap
@@ -1327,14 +1345,18 @@ about the room it is showing:
   not the app's drag (§15.4): a hold-then-drag at arm's length, over a
   five-second poll, on an A8X, is the least reliable gesture the panel
   could have picked.
-- **This card is flat even while the room plays.** §15.2's fill is what a
-  hero, a room card or a mini-player wears to say _this one_ is making
-  noise among others that aren't. Here there is one room and nothing to
-  distinguish it from, the record beside it already carries the waveform,
-  and the one thing on screen that still needs the ON gradient is the
-  queue row that is playing — which it cannot have against a card wearing
-  the same gradient. The app's own full player is flat for the same
-  reason; the band's card, which sits among room tiles, is not.
+- **The controls have no card, and are flat even while the room plays.**
+  This screen draws its own edges — a header rule, and one hairline between
+  the transport and the queue — and a bordered rectangle inside a bordered
+  surface draws the same edge twice. Nor does it take §15.2's fill: that is
+  what a hero, a room card or a mini-player wears to say _this one_ is
+  making noise among others that aren't. Here there is one room and nothing
+  to distinguish it from, the record beside it already carries the
+  waveform, and the one thing on screen that still needs the ON gradient is
+  the queue row that is playing — which it cannot have against a card
+  wearing the same gradient. The app's own full player is flat for the same
+  reason, and so are the band's player and the depth's column, each for the
+  region it sits in.
 
 Idling anywhere on the ladder sleeps home to the ambient face like any
 other panel idle. All three depths read one shared speaker store
@@ -1399,10 +1421,26 @@ constraint made visible.
   Nothing scrolls: each band owns its overflow internally. Portrait is a
   stacked, scrollable fallback — supported, not designed-for; every
   landscape rule here is off below 900px, including the player's own
-  (§16's landscape card falls back to the stacked one). The music depth
-  keeps a two-column shape, because there its left half is a catalog to
-  read: search and its results on the left (the list owns its scroll), the
-  featured player on the right at 420px.
+  (§16's landscape card falls back to the stacked one).
+
+  **Both depths repeat the dashboard's chrome one level in.** A **72px
+  header band** across the top with a hairline under it, then the body,
+  everything edge to edge and each region padding itself. On the music
+  depth that header carries the back chip, the destination chips and the
+  **pane switcher as one segmented control on the trailing edge**; on the
+  full player, the back chip, the screen's name and the close chip. The
+  switcher used to sit in the work area, and on a 656px column every band
+  above the results is a result you can't see — on the header it costs the
+  column nothing and holds the same place whichever pane is up. It also
+  stays reachable while a catalog page is open, and the page is the Search
+  pane's: stepping over to Queue and back finds the artist where it was
+  left. What the switcher gave back, the results keep; the one line the
+  column takes for itself is "Plays on {room}" under the search box.
+
+  The music depth keeps a two-column body, because there its left half is
+  a catalog to read: search and its results on the left (the list owns its
+  scroll), the featured player on the right at **420px**, divided by a
+  hairline rather than a gap.
 - **The music band spends its height on a shelf, not on a bigger cover.**
   The band's player is a *strip* — cover, meta and scrubber, transport,
   destination and fader, on one line — and the strip's height is capped by
@@ -1462,10 +1500,12 @@ constraint made visible.
   the clock is the *subject*, at `clamp(104px, 20vw, 168px)`. Stat figures
   19px over an 11px label; band tile names 14px over an 11.5px status line
   (19px in the room grid, where there is height to spend); track title 19px
-  on the band and 21px in the depth's column; the band's cover grows into
-  its stage and stops at 200px, the shelf's tiles are 132px; transport 48px with a 60px
-  centre on the band and in the depth, 64/80 on the full player, which is
-  the one screen a transport is the subject of. Room tiles in the grid
+  on the band *and* in the depth's column, 22px on the full player, which
+  is the one screen a title is the subject of; the band's cover grows into
+  its stage and stops at 200px, the shelf's tiles are 132px, the depth's
+  record is stated at 230 and the full player's at 340; transport 48px with
+  a 60px centre on the band and in the depth, 64/80 on the full player,
+  which is the one screen a transport is the subject of. Room tiles in the grid
   share the zone's height down to a 120px floor, then scroll internally;
   in the band they share the width down to 132px, then scroll sideways.
 - **Old-GPU motion budget.** No backdrop-filter anywhere. The §6.1 glow
@@ -1529,21 +1569,27 @@ constraint made visible.
   wants its size one depth in, where listening is the whole job. The band
   is what you read walking past and poke in passing, so what it spends its
   height on is *space*, not artwork.
-  In the band the **cover carries the tap-through on its own** — it is the
-  biggest and most obviously tappable thing there (§15.8), and a second
-  button around the meta would only say the same thing twice.
-  **The stacked card is two regions, and which one a control is in is the
-  layout decision.** Below a hairline sits the strip that never moves —
-  prev/play/next and the room's fader — because a wall is tapped in
-  passing and the tapping half has to be where it was last time. Above it,
-  the cover and what is playing scroll.
+  **On both shapes the cover carries the tap** — it is the biggest and most
+  obviously tappable thing there (§15.8), and a second button around the
+  meta would only say the same thing twice. In the band it goes one depth
+  in, to the music screen; in the depth's column it goes one further, to
+  the full player, with a small mark in the corner opposite the waveform
+  saying so. The mark is not a second target: the cover around it is the
+  control, because at arm's length a 230px square beats a 44px chip on it.
+  **The depth's column is one centred stack, with nothing pinned and
+  nothing behind a scroll.** It used to be two regions — a pinned transport
+  strip under a hairline, the cover scrolling above it — because the room's
+  preferences were stacked under the cover and would not fit. They left for
+  the Rooms pane, and a hairline that divides a card which no longer
+  scrolls divides nothing. What is left is a player, and a player fits: the
+  column keeps a scroll only as a safety valve for screens shorter than the
+  wall this is drawn for.
   **The scrubber never sits in the transport strip.** How far through the
   song we are is a fact about the song, so it rides with the record: under
-  the cover on the full player, beside it in the band's meta column, and
-  in the stacked card's strip only because there one column makes "under
-  the cover" and "above the transport" the same place. It stays out of the
-  tap-through button either way — a scrubber inside a link is not a
-  scrubber.
+  the cover on the full player, beside it in the band's meta column, and in
+  the depth's column between the record and the transport, which one column
+  makes the same place. It stays out of the tap-through button either way —
+  a scrubber inside a link is not a scrubber.
   **The play modes are not on either shape.** Shuffle, repeat, crossfade
   and "play similar" live on the depth's Rooms pane with the rest of the
   room's settings (`PanelRoomSettings`): the band has one line and the
@@ -1564,13 +1610,15 @@ constraint made visible.
   engine can answer `auto`, and one that does collapses the cover to
   nothing on a screen where the rest of the card looks fine. The reference
   hardware is a Safari 15 iPad and this is not the layout to be clever in
-  front of it. So the stacked card measures the room the cover may have —
+  front of it. So the full player measures the room the cover may have —
   boxes the cover cannot itself size, or the reading chases its own tail —
   and writes the square onto it in pixels, definite on both axes with
-  nothing left to resolve. The band skips even the measurement: it states
-  its 128px outright, which is the same rule taken one step further. Only
-  the portrait fallback keeps a ratio, and only in the width-led direction
-  every engine agrees on.
+  nothing left to resolve. The two card shapes skip even the measurement.
+  The band grows its cover into the stage the band measures for it and
+  stops at 200; the depth's column, being a stated 420px with everything in
+  it centred under the record, states **230** outright and has nothing left
+  for a measurement to discover. Only the portrait fallback keeps a ratio,
+  and only in the width-led direction every engine agrees on.
   **Art that fails to load falls back to the placeholder** (§6.7), keyed
   to the URL so the next track gets its own try. A broken proxy read used
   to leave an empty box, which looks exactly like a cover still loading
@@ -1589,8 +1637,9 @@ constraint made visible.
   cover was squeezed to a third of its size and the rest went behind a
   scroll with half a chip peeking out of it. Rooms is already the depth's
   "which device" surface (§16.3) — a room's preferences belong with the
-  room. Only the wide band, which has the width to spare, keeps the play
-  modes on the player itself.
+  room. **Not on any of the three**, the full player included: it had them
+  for as long as it was the only screen with height to spare, and a second
+  copy of a preference is a second place to look for it.
   The mode row carries §15.5's **Play similar** with the rest, since "what
   happens when this song is the last one" is exactly the question a wall
   gets asked, plus one line naming which way it will go, because that
@@ -1601,9 +1650,7 @@ constraint made visible.
   A queued track is the one action here that changes nothing visible, so
   the card confirms it in place for a few seconds — not a toast (§10's
   quiet answer stands, and a kiosk has nobody to dismiss cards), just the
-  one line saying what went in and whether it plays next. That line rides
-  in the pinned strip, since a confirmation at the far end of a scroll
-  nobody took is not a confirmation.
+  one line saying what went in and whether it plays next.
 - **On the music depth, a song plays; an artist opens.** The wall keeps
   the flat gesture where it's about starting sound: a song found by
   search plays, an album or playlist plays whole — the player names what

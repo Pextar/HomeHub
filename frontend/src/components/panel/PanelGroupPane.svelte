@@ -165,7 +165,13 @@
                         onInput={(v) => music.dragMemberVolume(m.id, v)}
                         onChange={(v) => music.setMemberVolume(m.id, v)}
                     />
-                    <span class="g-val mono">{music.memVol[m.id] ?? m.volume}</span>
+                    <!-- No number beside a member's fader. The room-wide one
+                         three rows up carries the reading; what this list is
+                         for is the *balance* between rooms — the kitchen
+                         quieter than the living room — which is what the
+                         faders lining up already say, and three digits per
+                         row buy that at the fader's expense in a 380px
+                         column (§16). -->
                     <!-- The membership column, one width for every row: a
                          badge that said "lead" mid-row and an ✕ that didn't
                          shunted every fader in the list to a different x,
@@ -354,9 +360,11 @@
         text-overflow: ellipsis;
     }
     /* A member row's name shares the row with a fader, so it takes a fixed
-       slice rather than pushing the control it labels off the end. */
+       slice rather than pushing the control it labels off the end — and the
+       slice is cut to what the 380px controls column can spare, since every
+       pixel it takes comes off the fader beside it (§16). */
     .g-row.in .g-name {
-        width: 118px;
+        width: 92px;
         flex-shrink: 0;
     }
     /* Alone in its group there is no fader beside it to line up with, so
@@ -403,13 +411,6 @@
     }
     .g-ico:disabled {
         opacity: 0.5;
-    }
-    .g-val {
-        font-size: 13px;
-        color: var(--text-mute);
-        width: 3ch;
-        text-align: right;
-        flex-shrink: 0;
     }
 
     .g-join {

@@ -175,7 +175,14 @@
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="panel" class:has-music={music.hasSpeakers} onpointerdown={poke}>
     {#if playerOpen}
-        <PanelFullPlayer {music} onBack={() => route.go("panel", { music: "1" })} />
+        <!-- Back climbs one rung to the depth; the close chip drops the whole
+             ladder home, which is the other thing a wall gets asked for when
+             the record is on and nobody is browsing (§16). -->
+        <PanelFullPlayer
+            {music}
+            onBack={() => route.go("panel", { music: "1" })}
+            onClose={() => route.go("panel")}
+        />
     {:else if musicOpen}
         <PanelBrowse {music} {spotify} {recents} {booted} />
     {:else}

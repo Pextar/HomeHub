@@ -12,14 +12,22 @@
     // playing, scrubber, transport, volume. The room's own settings — the
     // play modes, the sleep timer, per-speaker faders, the KEF input — live
     // on the depth's Rooms pane (PanelRoomSettings) on both shapes: neither
-    // the dashboard's one-line band nor a 360px column has the height for
+    // the dashboard's one-line band nor a 420px column has the height for
     // them, and the cover pays for all of it either way.
     //
     // Two shapes, and the zone picks (`wide`): the dashboard's band lays
     // everything out on one line — cover, meta and scrubber, transport,
-    // destination and fader — and the depth's tall column stacks the same
-    // parts. The band is a strip you read in passing and poke at; the
-    // column is where the cover gets to be a record (§16).
+    // destination and fader — and the depth's column centres the same parts
+    // one under the other. The band is a strip you read in passing and poke
+    // at; the column is where the cover gets to be a record, and where it
+    // carries the way one depth further in (§16).
+    //
+    // Neither shape wears a card. Both sit inside a region this surface has
+    // already drawn an edge around — the band between two hairlines, the
+    // column behind one — and a bordered rectangle inside a bordered region
+    // draws the same edge twice. Flat while the room plays, too: §15.2's
+    // fill says *this one* is making noise among others that aren't, and
+    // there is one player on each of these surfaces.
     //
     // Every capability renders only where the room says it has one (§15):
     // the rail seeks on a Sonos track and is a read-only rail elsewhere,
@@ -35,19 +43,16 @@
         artMax = 0,
     }: {
         music: PanelMusicStore;
-        /** Given, the cover is a button into the music depth. */
+        /** Band only: the cover is a button into the music depth. */
         onOpen?: () => void;
-        /** Given, the cover carries a control that takes the player full
-         *  screen. Only the depth's column offers it: the dashboard band is
-         *  already the biggest thing on its surface, and its cover is the
-         *  way *into* the depth. */
+        /** Column only: the cover is a button that takes the player full
+         *  screen. The band's cover is the way *into* the depth and can't
+         *  also be the way past it. */
         onExpand?: () => void;
         /** Landscape: the cover beside the controls rather than above them.
-         *  The dashboard's music zone is a wide, short band, where a stacked
-         *  cover is capped by what the controls leave of the height and a
-         *  beside-cover is capped by the band's full height instead. Which
-         *  way round is bigger is purely the zone's aspect, so the zone
-         *  says. */
+         *  The dashboard's music zone is a wide, short band; the depth's is a
+         *  tall, narrow column. Which way round the parts go is purely the
+         *  zone's aspect, so the zone says. */
         wide?: boolean;
         /** Band only: the measured height of the stage the row sits in. The
          *  cover grows into it between BAND_ART_MIN and BAND_ART_CAP. The
@@ -60,20 +65,14 @@
 
     // ── The cover's size, stated in pixels ──────────────────────────────
     // The cover is a square and height is the scarce axis on a wall, so the
-    // square has to be sized from the height it is allowed. It used to say
-    // that as a chain — an `aspect-ratio` hanging off a flex item stretched
-    // by its row, a `height: 100%` resolved against that, a ratio again on
-    // the box inside — and a chain is only as good as its weakest link: an
-    // engine that resolves any one of those to `auto` collapses the cover to
+    // square is sized from the height it is allowed — and written onto the
+    // box outright, definite on both axes. It used to be said as a chain of
+    // ratios — an `aspect-ratio` hanging off a flex item stretched by its
+    // row, a `height: 100%` resolved against that, a ratio again on the box
+    // inside — and a chain is only as good as its weakest link: an engine
+    // that resolves any one of those to `auto` collapses the cover to
     // nothing. On the dashboard that took the artwork *and* the band's only
     // way into the music depth with it, since the cover is the tap-through.
-    // So the card measures the room the cover may have and states the square
-    // outright: definite on both axes, nothing to resolve.
-    const ART_FLOOR = 96;
-    const ART_CAP = 420;
-    /** The gap between the cover and what rides under it — the meta when
-     *  the card is stacked. */
-    const HEAD_GAP = 16;
     /** The dashboard band's cover. It grows into whatever height the band's
      *  stage has, between these two, and the cap is a *width* decision as
      *  much as a height one: the band's row is 960px on the reference wall
@@ -84,6 +83,15 @@
      *  the foot of the band (PanelBandShelf, §16). */
     const BAND_ART_MIN = 128;
     const BAND_ART_CAP = 200;
+    /** The depth's column, stated outright the way the band states its own.
+     *  The column is a fixed 420px and everything in it is centred under the
+     *  record, so there is nothing left for a measurement to discover: 230
+     *  is what a 420px column has room for once the caption, the scrubber,
+     *  the transport and the fader have theirs. The card used to measure a
+     *  scroll region here because the room's preferences were stacked under
+     *  the cover; they moved to the Rooms pane, and the measurement was the
+     *  last thing left of that layout (§16). */
+    const COL_ART = 230;
 
     // Landscape is the designed-for shape and the one that measures; the
     // portrait fallback lets CSS size the cover from its width, which is the
@@ -97,26 +105,15 @@
         return () => mq.removeEventListener("change", apply);
     });
 
-    // Every measurement below is of a box the cover cannot itself size, or
-    // the reading would chase its own tail: the scroll region's leftover
-    // after the pinned strip, and the meta, whose two lines never wrap.
-    let scrollH = $state(0);
-    let scrollW = $state(0);
-    let metaH = $state(0);
-
     const coverPx = $derived.by(() => {
         if (!landscape) return 0; // portrait: CSS sizes it from the width
-        // The band's stage is measured by the band (see `artMax`); the
-        // depth's column measures its own, because there the cover is what
-        // the column is *for* and what it may have is whatever the controls
-        // under it leave.
-        if (wide) {
-            if (artMax <= 0) return BAND_ART_MIN; // pre-measure, one frame
-            return Math.max(BAND_ART_MIN, Math.min(artMax, BAND_ART_CAP));
-        }
-        const height = scrollH - metaH - HEAD_GAP;
-        if (height <= 0 || scrollW <= 0) return 0; // pre-measure, one frame
-        return Math.max(ART_FLOOR, Math.min(height, scrollW, ART_CAP));
+        // The band's stage is measured by the band (see `artMax`) because
+        // the band's height is whatever the strip above and the room row
+        // below leave; the depth's column is a stated width with a stated
+        // square in it.
+        if (!wide) return COL_ART;
+        if (artMax <= 0) return BAND_ART_MIN; // pre-measure, one frame
+        return Math.max(BAND_ART_MIN, Math.min(artMax, BAND_ART_CAP));
     });
     const coverStyle = $derived(coverPx ? `width:${coverPx}px;height:${coverPx}px` : "");
 
@@ -172,31 +169,24 @@
                 <span class="p-wave"><Waveform /></span>
             {/if}
             {#if onExpand}
-                <!-- Opposite the waveform, on the biggest thing on the
-                     card. Listening is a different job from browsing,
-                     and it wants the whole screen (§16). -->
-                <button class="p-expand" aria-label="Full screen player" onclick={onExpand}>
-                    <Icon name="expand" size={20} />
-                </button>
+                <!-- Opposite the waveform, on the biggest thing in the
+                     column. The whole cover is the tap (see below) —
+                     listening is a different job from browsing and it wants
+                     the whole screen (§16) — so this is the mark that says
+                     so, not a second target beside it. -->
+                <span class="p-expand" aria-hidden="true"><Icon name="expand" size={18} /></span>
             {/if}
         </span>
     {/if}
 {/snippet}
 
-{#snippet meta(chevron: boolean)}
+{#snippet meta()}
     {#if featured}
-        <span class="p-track" bind:clientHeight={metaH}>
+        <span class="p-track">
             <span class="p-title">
                 {featured.trackTitle ?? (featured.playing ? "Playing" : "Not playing")}
             </span>
-            <span class="p-subrow">
-                <span class="p-sub">{featured.trackSub || featured.title}</span>
-                {#if chevron}
-                    <span class="p-go" aria-hidden="true"
-                        ><Icon name="chevronRight" size={16} /></span
-                    >
-                {/if}
-            </span>
+            <span class="p-sub">{featured.trackSub || featured.title}</span>
         </span>
     {/if}
 {/snippet}
@@ -251,7 +241,7 @@
                     disabled={music.busy["previous:" + featured.id]}
                     onclick={() => music.skip(featured, "previous")}
                 >
-                    <Icon name="skipPrev" size={wide ? 20 : 24} />
+                    <Icon name="skipPrev" size={20} />
                 </button>
             {/if}
             <button
@@ -261,7 +251,7 @@
                 disabled={music.busy["play:" + featured.id]}
                 onclick={() => music.togglePlay(featured)}
             >
-                <Icon name={featured.playing ? "pause" : "play"} size={wide ? 24 : 30} />
+                <Icon name={featured.playing ? "pause" : "play"} size={24} />
             </button>
             {#if featured.canSkip}
                 <button
@@ -270,7 +260,7 @@
                     disabled={music.busy["next:" + featured.id]}
                     onclick={() => music.skip(featured, "next")}
                 >
-                    <Icon name="skipNext" size={wide ? 20 : 24} />
+                    <Icon name="skipNext" size={20} />
                 </button>
             {/if}
         </div>
@@ -320,7 +310,9 @@
 {/snippet}
 
 {#if featured}
-    {@const openLabel = `Open music — ${featured.trackTitle ?? (featured.playing ? "playing" : "nothing playing")} on ${featured.title}`}
+    {@const what = featured.trackTitle ?? (featured.playing ? "playing" : "nothing playing")}
+    {@const openLabel = `Open music — ${what} on ${featured.title}`}
+    {@const expandLabel = `Full screen player — ${what} on ${featured.title}`}
     <article class="p-card" class:playing={featured.playing} class:wide>
         {#if wide}
             <!-- The dashboard band, as one line across the panel: the cover,
@@ -347,7 +339,7 @@
             {/if}
 
             <div class="p-mid">
-                {@render meta(false)}
+                {@render meta()}
                 {@render queuedLine()}
                 {#if !featured.standby}
                     <div class="p-rail">{@render rail()}</div>
@@ -372,73 +364,84 @@
                 </div>
             {/if}
         {:else}
-            <div class="p-body">
-                <!-- The card is two regions, and which one a control is in
-                     is the layout decision (§16). This one scrolls: the
-                     cover and what is playing. The strip below never does.
-                     A wall is read from across the room and tapped in
-                     passing, so the tapping half has to be where it was
-                     last time. -->
-                <div class="p-scroll" bind:clientHeight={scrollH} bind:clientWidth={scrollW}>
-                    {#if onOpen}
-                        <!-- Transport and volume stay out of the button so
-                             the player still answers on the panel itself. -->
-                        <button class="p-head p-open" onclick={onOpen} aria-label={openLabel}>
-                            {@render art()}
-                            {@render meta(true)}
-                        </button>
-                    {:else}
-                        <div class="p-head">
-                            {@render art()}
-                            {@render meta(false)}
-                        </div>
-                    {/if}
-                </div>
+            <!-- The depth's column: the record at the top and everything
+                 that answers for it under, centred, all of it visible at
+                 once. There is no pinned strip here any more and nothing
+                 behind a scroll — the two regions existed to hold the
+                 transport still while the room's preferences scrolled above
+                 it, and the preferences left for the Rooms pane (§16). What
+                 is left is a player, and a player fits.
+                 The cover is the way one depth further in: it is the biggest
+                 and most obviously tappable thing in the column (§15.8), so
+                 it carries the tap whole rather than lending a corner of
+                 itself to a 44px chip. Transport and volume stay outside the
+                 button, so the player still answers here. -->
+            {#if onExpand}
+                <button class="p-cover p-open" onclick={onExpand} aria-label={expandLabel}>
+                    {@render art()}
+                </button>
+            {:else}
+                <div class="p-cover">{@render art()}</div>
+            {/if}
 
-                <!-- The pinned strip: where the track is, play/pause and
-                     skip, and how loud. These are what a wall gets walked up
-                     to for, so they hold the same place whatever else the
-                     room has to show. -->
-                <div class="p-controls">
-                    {#if featured.standby}
-                        {@render standby()}
-                    {:else}
-                        {@render queuedLine()}
-                        <!-- Stacked, the scrubber stays in the strip: there
-                             is one column, so "under the cover" and "above
-                             the transport" are the same place, and the strip
-                             is the half that never moves. -->
-                        {@render rail()}
-                        {@render transport()}
-                        {@render volume()}
-                    {/if}
-                </div>
-            </div>
+            {@render meta()}
+
+            {#if featured.standby}
+                {@render standby()}
+            {:else}
+                {@render queuedLine()}
+                <!-- The scrubber belongs to the record, and in one column
+                     "under the cover" and "above the transport" are the same
+                     place (§16). -->
+                <div class="p-rail">{@render rail()}</div>
+                {@render transport()}
+                {@render volume()}
+            {/if}
         {/if}
     </article>
 {/if}
 
 <style>
+    /* The depth's column. Flat, and centred in the column it was given: no
+       border, no fill, and none while the room plays either. §15.2's fill is
+       what a hero or a room card wears to say *this one* is making noise
+       among others that aren't; there is one player here, its column is
+       already divided from the work area by a hairline, and the cover
+       carries the waveform. A card inside that column would draw the same
+       edge twice — the same rule the band's player and the full player's
+       controls follow (§16).
+       It owns a scroll as a safety valve, not as a layout: everything in it
+       fits the reference wall, and a shorter screen scrolls rather than
+       squeezing the record. */
     .p-card {
         flex: 1;
         min-height: 0;
         display: flex;
         flex-direction: column;
-        gap: var(--space-4);
-        padding: var(--space-5);
-        border-radius: var(--r-lg);
-        border: 1px solid var(--hairline);
-        background: var(--card);
-        /* The card itself never scrolls now — .p-scroll inside it does, so
-           the strip under it can't be pushed off the panel. */
-        overflow: hidden;
-        transition:
-            background var(--t-med),
-            border-color var(--t-med);
+        align-items: center;
+        justify-content: center;
+        gap: var(--space-5);
+        overflow-y: auto;
+        /* One axis, stated (§12): a fader row lands on a fractional pixel as
+           readily as a queue row does, and `overflow-y: auto` alone computes
+           the other axis to `auto` too — so the column would pan sideways by
+           the pixel the rounding invents. */
+        overflow-x: hidden;
     }
-    .p-card.playing {
-        background: var(--tile-on-gradient);
-        border-color: var(--tile-on-border);
+    /* The column centres its rows on the record; the ones that are rails
+       rather than blocks of text take the column's whole width, because a
+       fader you have to aim at from across a room wants every pixel of it.
+       The meta stretches for the opposite reason: a title truncates against
+       the column that way instead of setting its own width. */
+    .p-card:not(.wide) .p-track,
+    .p-card:not(.wide) .p-rail,
+    .p-card:not(.wide) .p-volume,
+    .p-card:not(.wide) .p-queued {
+        align-self: stretch;
+        min-width: 0;
+    }
+    .p-card:not(.wide) .p-track {
+        text-align: center;
     }
 
     /* The dashboard band: one line, centred in the band's height, with no
@@ -451,16 +454,9 @@
     .p-card.wide {
         flex: none;
         flex-direction: row;
-        align-items: center;
+        justify-content: flex-start;
         gap: var(--space-5);
-        padding: 0;
-        border: 0;
-        border-radius: 0;
-        background: none;
         overflow: visible;
-    }
-    .p-card.wide.playing {
-        background: none;
     }
     /* What's playing, and how far through it is — the flexible middle, so
        the title truncates against the row rather than pushing the transport
@@ -529,10 +525,10 @@
         box-shadow: var(--focus-ring);
     }
 
-    /* The scrubber beside the record. Distance-scaled like the rest of the
-       panel (§16): the shared rail's times are sized for a phone in the
-       hand. The live line is held to one line so a KEF's "no track
-       position" can't wrap the row into two. */
+    /* The scrubber: beside the record in the band, under it in the column.
+       Distance-scaled like the rest of the panel (§16) — the shared rail's
+       times are sized for a phone in the hand. The live line is held to one
+       line so a KEF's "no track position" can't wrap the row into two. */
     .p-rail {
         flex: none;
         min-width: 0;
@@ -545,56 +541,9 @@
         overflow: hidden;
         text-overflow: ellipsis;
     }
-    .p-body {
-        flex: 1 1 auto;
-        min-width: 0;
-        min-height: 0;
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-4);
-    }
-    /* Everything but the transport strip. It takes the card's leftover
-       height and scrolls what doesn't fit — which, past the cover and the
-       track, is only ever preferences. */
-    .p-scroll {
-        flex: 1 1 auto;
-        min-height: 0;
-        overflow-y: auto;
-        /* Down the card, and only down it (§12): nothing in here is wider
-           than the column, but a fader row lands on a fractional pixel as
-           readily as a queue row does, and the card would pan by the one
-           the rounding adds. */
-        overflow-x: hidden;
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-4);
-    }
-    /* The transport strip, pinned. The hairline is the only thing that says
-       the card is in two halves — without it the strip reads as the bottom
-       of a list that happens to stop there, and there is nothing else on a
-       kiosk (no scrollbar, no chrome) to say the half above it moves. */
-    .p-controls {
-        flex: none;
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-4);
-        padding-top: var(--space-3);
-        border-top: 1px solid var(--hairline);
-    }
 
-    /* Cover + track title, stacked. The pair is sized by the cover, which
-       was measured to leave the two lines of meta their room (HEAD_GAP +
-       metaH), so nothing here has to be capped or squeezed. */
-    .p-head {
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-4);
-        flex: 0 0 auto;
-        min-width: 0;
-    }
-
-    /* The tap-through button: reset to a plain flex column so it reads as
-       the art + meta it contains, not as a button. */
+    /* The tap-through button: reset to a plain flex box so it reads as the
+       art it contains, not as a button. */
     .p-open {
         padding: 0;
         border: 0;
@@ -637,27 +586,20 @@
     span.p-art {
         font-size: 11px;
     }
+    /* The mark that says the cover leads somewhere. Not a control — the
+       cover around it is the control — so it is drawn small and quiet,
+       opposite the waveform. */
     .p-expand {
         position: absolute;
         top: var(--space-3);
         right: var(--space-3);
-        width: 44px;
-        height: 44px;
+        width: 32px;
+        height: 32px;
         display: grid;
         place-items: center;
-        border: 0;
         border-radius: var(--r-sm);
         background: var(--bg-bar);
         color: var(--text);
-        cursor: pointer;
-        transition: transform var(--t-fast);
-    }
-    .p-expand:active {
-        transform: scale(0.92);
-        transition-duration: 80ms;
-    }
-    .p-expand:focus-visible {
-        box-shadow: var(--focus-ring);
     }
 
     .p-wave {
@@ -677,41 +619,23 @@
         min-width: 0;
         flex-shrink: 0;
     }
+    /* One size on both shapes. The band and the depth's column say the same
+       thing at the same scale — a title is stated large on the full player,
+       which is the screen it is the subject of (§16). */
     .p-title {
-        font-size: 21px;
+        font-size: 19px;
         font-weight: 600;
         letter-spacing: -0.02em;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
     }
-    /* On the band the title shares a line with everything else the strip
-       has to say, so it is stated at the band's scale rather than the
-       column's — the record is where a title gets to be large (§16). */
-    .p-card.wide .p-title {
-        font-size: 19px;
-    }
-    .p-card.wide .p-sub {
-        font-size: 13.5px;
-    }
-    .p-subrow {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: var(--space-2);
-        min-width: 0;
-    }
     .p-sub {
-        font-size: 14px;
+        font-size: 13.5px;
         color: var(--text-mute);
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
-    }
-    .p-go {
-        color: var(--text-dim);
-        flex-shrink: 0;
-        display: inline-flex;
     }
 
     .p-standby {
@@ -753,21 +677,22 @@
         opacity: 0.55;
     }
 
-    /* Transport sized for a wall poke: 64px sides, 80px centre on the
-       depth's column, one size down on the dashboard band — the band is a
-       strip shared with the meta and the fader, and the full player is the
-       screen a transport gets to be the subject of (§16). 48px still clears
-       the §2 floor by a comfortable margin. */
+    /* Transport sized for a wall poke: 48px sides with a 60px centre on both
+       of this card's shapes. The band is a strip shared with the meta and the
+       fader, and the depth's column is shared with the record — the full
+       player is the one screen a transport gets to be the subject of, and it
+       is the only one at 64/80 (§16). 48px clears the §2 floor by a
+       comfortable margin either way. */
     .p-transport {
         display: flex;
         align-items: center;
         justify-content: center;
-        gap: var(--space-5);
+        gap: var(--space-4);
         flex-shrink: 0;
     }
     .t-btn {
-        width: 64px;
-        height: 64px;
+        width: 48px;
+        height: 48px;
         border-radius: 50%;
         border: 1px solid var(--hairline);
         background: var(--card-2);
@@ -789,23 +714,17 @@
         opacity: 0.5;
     }
     .t-btn.primary {
-        width: 80px;
-        height: 80px;
+        width: 60px;
+        height: 60px;
         background: var(--on);
         border-color: var(--on);
         color: var(--primary-fg);
     }
+    /* On the band the transport is one of four things sharing a 960px row,
+       so it holds only the width it needs. */
     .p-card.wide .p-transport {
         flex: none;
         gap: var(--space-3);
-    }
-    .p-card.wide .t-btn {
-        width: 48px;
-        height: 48px;
-    }
-    .p-card.wide .t-btn.primary {
-        width: 60px;
-        height: 60px;
     }
 
     /* Queued: the only visible trace an untouched player leaves. */
@@ -890,30 +809,22 @@
         flex-shrink: 0;
     }
 
-    /* The reference wall panel is a 1024×768 iPad Air 2 (§16), where the
-       card's whole stack — cover, meta, scrubber, transport, play modes,
-       volume — lands within a dozen pixels of the column it has to fit.
-       Tightening the card's own spacing there is what keeps the cover off
-       its floor, and keeps the depth's extra rows from sitting as far
-       under the fold. Nothing that is a touch target shrinks. */
+    /* The reference wall panel is a 1024×768 iPad Air 2 (§16). The column's
+       stack — record, meta, scrubber, transport, fader — has room to spare
+       there, but a shorter landscape screen doesn't, and the first thing to
+       give is the air between the rows rather than the record. Nothing that
+       is a touch target shrinks. */
     @media (max-height: 820px) and (orientation: landscape) {
-        .p-card,
-        .p-body,
-        .p-scroll,
-        .p-controls {
-            gap: var(--space-3);
-        }
         .p-card {
-            padding: var(--space-4);
-        }
-        .p-transport {
             gap: var(--space-4);
+        }
+        .p-card.wide {
+            gap: var(--space-5);
         }
     }
 
     /* Portrait stack: the whole page scrolls, so the card sizes to its
-       content and neither region owns a scroll of its own — a pinned strip
-       inside a page that already scrolls is just a shorter card. */
+       content and owns no scroll of its own. */
     @media (orientation: portrait), (max-width: 900px) {
         /* Landscape needs landscape. Stacked again, the band's markup falls
            out as cover-over-controls on its own — .p-cover is simply the
@@ -950,11 +861,17 @@
         }
         .p-card {
             flex: none;
+            justify-content: flex-start;
             overflow: visible;
         }
-        .p-scroll {
-            flex: none;
-            overflow: visible;
+        /* Stacked in a page that scrolls, the column is a card again: there
+           are no bands here to be its edges, so it has to be its own. */
+        .p-card:not(.wide) {
+            align-items: stretch;
+            padding: var(--space-5);
+            border: 1px solid var(--hairline);
+            border-radius: var(--r-lg);
+            background: var(--card);
         }
     }
 </style>
