@@ -27,6 +27,11 @@
         /** True where no confirm dialog exists (the kiosk panel): the first
          *  tap arms the button for a few seconds, the second clears. */
         confirmClear = false,
+        /** Cover art on every row. Off by default — in a phone-width sheet
+         *  a thumbnail is bought from the title — and on where the queue is
+         *  the point of the screen and has the width for it (the panel's
+         *  full player, §16). */
+        art = false,
         isBusy,
         onJump,
         onRemove,
@@ -39,6 +44,7 @@
         playing?: boolean;
         clearBusy?: boolean;
         confirmClear?: boolean;
+        art?: boolean;
         isBusy: (key: string) => boolean;
         onJump: (track: number) => void;
         onRemove: (track: number) => void;
@@ -93,6 +99,13 @@
                             {item.track}
                         {/if}
                     </span>
+                    {#if art}
+                        {#if item.art_uri}
+                            <img class="q-art" src={item.art_uri} alt="" loading="lazy" />
+                        {:else}
+                            <span class="q-art placeholder"></span>
+                        {/if}
+                    {/if}
                     <span class="q-meta">
                         <span class="q-title">{item.title || "Unknown track"}</span>
                         {#if item.artist}<span class="q-sub">{item.artist}</span>{/if}
@@ -147,6 +160,10 @@
         font-size: 11.5px; color: var(--text-dim);
     }
     .q-row.current .q-num { color: var(--on); }
+    .q-art {
+        width: 36px; height: 36px; flex-shrink: 0;
+        object-fit: cover; border-radius: var(--r-sm); background: var(--card-2);
+    }
     .q-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
     .q-title {
         font-size: 13.5px; font-weight: 500;

@@ -105,6 +105,11 @@
     type Level = { kind: "artist" | "context"; uri: string; scroll: number };
     let stack = $state<Level[]>([]);
     const topLevel = $derived(stack.length ? stack[stack.length - 1] : null);
+    /** The stack is the Search pane's — it was opened from a search row and
+     *  it is where the back chip climbs to. With the switcher on the header
+     *  it is reachable while a page is open, so Queue and Rooms answer over
+     *  the top of it and Search comes back to where it was. */
+    const catalogOpen = $derived(pane === "search" ? topLevel : null);
 
     let artistCache = $state<Record<string, SpotifyArtistDetail>>({});
     let artistLoadingUri = $state<string | null>(null);
@@ -225,7 +230,10 @@
         const onKey = (e: KeyboardEvent) => {
             if (e.key !== "Escape") return;
             if (artistScr?.closeMenu() || contextScr?.closeMenu()) return;
-            if (stack.length) {
+            // Only while the stack is the thing on screen: a page left open
+            // behind the Queue pane is not what an Escape over the queue is
+            // aimed at.
+            if (catalogOpen) {
                 void popLevel();
                 return;
             }
@@ -426,74 +434,64 @@
 </script>
 
 <div class="browse" class:kb-open={kbOpen} style:--kb="{kb}px" in:fade={{ duration: dur(160) }}>
+    <!-- The depth's own band, drawn the way the dashboard's status strip is:
+         a fixed 72px row, edge to edge, divided from the body by a hairline
+         rather than floated over it. It carries everything about the surface
+         that isn't the work itself — the way back, where a tap plays, and
+         which pane the work area is showing. -->
     <header class="b-head">
         <button class="back" onclick={back} aria-label="Back to the panel">
-            <Icon name="chevronLeft" size={16} /><span>Panel</span>
+            <Icon name="chevronLeft" size={18} />
         </button>
-        <h2>Music</h2>
+        <h2 class="sr-only">Music</h2>
         <!-- Where a tap plays. Full-width here rather than stacked in the
              player column, where six rooms cost three rows of the cover's
              height (§16); the search below still names the same room in
              its "Plays on {…}" line. -->
         <PanelRoomChips {music} />
+        <!-- The pane switcher rides the header's trailing edge as one
+             segmented control. In the work area it was a band above the
+             results, and on a 656px column every band above the results is a
+             result you can't see; on the header it costs the column nothing
+             and holds the same place whichever pane is up. -->
+        <div class="p-panes" role="group" aria-label="Music panes">
+            <button
+                class="p-pane"
+                class:active={pane === "search"}
+                aria-pressed={pane === "search"}
+                onclick={() => (pane = "search")}
+            >
+                Search
+            </button>
+            <button
+                class="p-pane"
+                class:active={pane === "queue"}
+                aria-pressed={pane === "queue"}
+                onclick={() => (pane = "queue")}
+            >
+                Queue{#if featured?.kind === "sonos" && queueCount > 0}
+                    <span class="mono">{queueCount}</span>{/if}
+            </button>
+            <button
+                class="p-pane"
+                class:active={pane === "rooms"}
+                aria-pressed={pane === "rooms"}
+                onclick={() => (pane = "rooms")}
+            >
+                Rooms <span class="mono">{music.sources.length}</span>
+            </button>
+        </div>
     </header>
 
     <div class="b-body">
         <section class="b-left">
-            {#if !topLevel}
-                <!-- The pane switcher and the destination share one band.
-                     They were two stacked rows, and on a 656px column every
-                     band above the results is a result you can't see: five
-                     of them (panes, box, destination, kind filter, the top
-                     result's own label) left room for three songs. -->
-                <div class="p-panerow">
-                    <div class="p-panes" role="group" aria-label="Music panes">
-                        <button
-                            class="k-chip"
-                            class:active={pane === "search"}
-                            onclick={() => (pane = "search")}
-                        >
-                            Search
-                        </button>
-                        <button
-                            class="k-chip"
-                            class:active={pane === "queue"}
-                            onclick={() => (pane = "queue")}
-                        >
-                            Queue{#if featured?.kind === "sonos" && queueCount > 0}
-                                <span class="mono">{queueCount}</span>{/if}
-                        </button>
-                        <button
-                            class="k-chip"
-                            class:active={pane === "rooms"}
-                            onclick={() => (pane = "rooms")}
-                        >
-                            Rooms <span class="mono">{music.sources.length}</span>
-                        </button>
-                    </div>
-                    {#if pane === "search"}
-                        <!-- Where a tap lands, said where the tapping
-                             happens: the results are otherwise the one place
-                             on the wall that never names its own
-                             destination, and a wall is the surface most
-                             likely to be used by whoever walked past it
-                             last. -->
-                        <p class="s-dest">
-                            <Icon name="speaker" size={14} />
-                            <span
-                                >{featured
-                                    ? `Plays on ${featured.title}`
-                                    : "No speaker is answering"}</span
-                            >
-                        </p>
-                    {/if}
-                </div>
-            {/if}
-
-            {#if topLevel}
+            {#if catalogOpen}
                 <!-- One level deeper: the app's own artist/record pages ride
-                     in this column; their back chip climbs the stack. -->
-                {@const level = topLevel}
+                     in this column; their back chip climbs the stack. The
+                     stack belongs to the Search pane, so stepping over to
+                     Queue and back finds the artist's page where it was
+                     left rather than at the search results. -->
+                {@const level = catalogOpen}
                 <div class="b-stack" bind:this={stackEl}>
                     {#if level.kind === "artist"}
                         <ArtistScreen
@@ -550,6 +548,23 @@
                             </button>
                         {/if}
                     </div>
+
+                    <!-- Where a tap lands, said under the box the tapping
+                         starts in: the results are otherwise the one place on
+                         the wall that never names their own destination, and
+                         a wall is the surface most likely to be used by
+                         whoever walked past it last. It rides on a line of
+                         its own now that the pane switcher has left the
+                         column for the header — one thin band replacing a
+                         whole row, which the results keep. -->
+                    <p class="s-dest">
+                        <Icon name="speaker" size={14} />
+                        <span
+                            >{featured
+                                ? `Plays on ${featured.title}`
+                                : "No speaker is answering"}</span
+                        >
+                    </p>
 
                     {#if spotify.results}
                         {@const r = spotify.results}
@@ -1019,52 +1034,58 @@
 
 <style>
     .browse {
-        /* The depth takes the whole panel grid, whatever columns the
-           dashboard depth is sized for. The dashboard's bands run edge to
-           edge and pad themselves; a depth is one surface rather than three
-           bands, so it pads itself here. */
+        /* The depth takes the whole panel grid — every row of it, so the
+           surface is the screen and each region owns its own overflow. Like
+           the dashboard's bands it runs edge to edge and lets each region pad
+           itself: a wall panel has no page around it to show, and a margin
+           there is only screen the depth isn't using (§16). */
         grid-column: 1 / -1;
+        grid-row: 1 / -1;
         display: flex;
         flex-direction: column;
-        gap: var(--space-5);
         min-height: 0;
         min-width: 0;
-        padding: var(--space-6);
     }
     /* Type mode: while the iPad's keyboard is up, the depth re-floors to
        just above it instead of running underneath. --kb is the measured
-       keyboard height; + one panel padding lands the depth's new bottom
-       edge on the keyboard's top edge exactly. */
+       keyboard height, and the depth's new bottom edge lands on the
+       keyboard's top edge exactly. */
     .browse.kb-open {
         align-self: start;
-        max-height: calc(100% - var(--kb) + var(--space-6));
+        max-height: calc(100% - var(--kb));
     }
 
+    /* The depth's header band: the same 72px row on both depths, drawn like
+       the dashboard's status strip — a hairline under it rather than a gap,
+       and its own inline padding. */
     .b-head {
+        height: 72px;
+        flex-shrink: 0;
         display: flex;
         align-items: center;
         gap: var(--space-4);
-        flex-shrink: 0;
+        min-width: 0;
+        padding: 0 var(--space-8);
+        border-bottom: 1px solid var(--hairline);
     }
+    /* The chip row keeps its own one-line, shrink-then-scroll behaviour
+       (PanelRoomChips) on every surface that carries it; here it just takes
+       the space between the back chip and the pane switcher. */
     .b-head :global(.p-sources) {
         flex: 1 1 auto;
     }
-    /* The way back to the dashboard depth — same quiet pill as the
-       panel's Exit chip, mirrored to the leading edge like a detail
-       screen's back chevron. */
+    /* The way back to the dashboard depth: a round chevron chip on the
+       leading edge, the same shape the full player's header wears. */
     .back {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        height: 44px;
-        padding: 0 var(--space-4);
-        border-radius: var(--r-pill);
+        width: 40px;
+        height: 40px;
+        flex-shrink: 0;
+        display: grid;
+        place-items: center;
+        border-radius: 50%;
         border: 1px solid var(--hairline);
-        background: var(--card);
-        color: var(--text-mute);
-        font-size: 13px;
-        font-weight: 500;
-        font-family: inherit;
+        background: var(--card-2);
+        color: var(--text);
         cursor: pointer;
         transition:
             background var(--t-fast),
@@ -1072,42 +1093,66 @@
             transform var(--t-fast);
     }
     .back:active {
-        transform: scale(0.95);
+        transform: scale(0.94);
         transition-duration: 80ms;
     }
-    h2 {
-        margin: 0;
-        font-size: 20px;
+
+    /* The pane switcher as one segmented control: a track around the three,
+       so they read as one choice rather than as three chips that happen to
+       sit together. */
+    .p-panes {
+        display: flex;
+        gap: 6px;
+        flex-shrink: 0;
+        padding: 4px;
+        border-radius: var(--r-pill);
+        border: 1px solid var(--hairline);
+        background: var(--card-2);
+    }
+    .p-pane {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        min-height: 36px;
+        padding: 0 16px;
+        border: 0;
+        border-radius: var(--r-pill);
+        background: none;
+        color: var(--text-mute);
+        font-family: inherit;
+        font-size: 13px;
         font-weight: 600;
-        letter-spacing: -0.02em;
+        cursor: pointer;
+        transition:
+            background var(--t-fast),
+            color var(--t-fast);
+    }
+    .p-pane.active {
+        background: var(--text);
+        color: var(--bg);
+    }
+    .p-pane:focus-visible {
+        outline: none;
+        box-shadow: var(--focus-ring);
     }
 
     .b-body {
         flex: 1;
         min-height: 0;
         display: grid;
-        grid-template-columns: minmax(0, 1fr) 360px;
-        gap: var(--space-5);
+        /* The catalog on the left takes what is left; the player holds a
+           fixed 420px on the right, divided by a hairline rather than a gap
+           — the two are regions of one surface, not two cards on a page. */
+        grid-template-columns: minmax(0, 1fr) 420px;
     }
 
     .b-left {
         display: flex;
         flex-direction: column;
-        gap: var(--space-3);
+        gap: var(--space-4);
         min-height: 0;
         min-width: 0;
-    }
-    .p-panerow {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: var(--space-3);
-        flex-shrink: 0;
-    }
-    .p-panes {
-        display: flex;
-        gap: var(--space-2);
-        flex-shrink: 0;
+        padding: var(--space-5) var(--space-6);
     }
     .k-chip {
         display: inline-flex;
@@ -1183,11 +1228,16 @@
         font-size: 12.5px;
         color: var(--text-mute);
     }
+    /* The box was 56px when it shared the column with the pane switcher and
+       was the thing that had to be found. The switcher is on the header now
+       and the results below are what this column is for, so the box gives
+       back the height it was only using to be large. Its text stays at 17px
+       — that floor is iOS's, not a preference (§16). */
     .s-box {
         display: flex;
         align-items: center;
         gap: var(--space-3);
-        height: 56px;
+        height: 48px;
         padding: 0 var(--space-2) 0 var(--space-4);
         border-radius: var(--r-md);
         border: 1px solid var(--hairline);
@@ -1453,9 +1503,17 @@
 
     /* The account's playlists, idle: covers on a grid (§15.9 — everything
        but songs is a grid), three across the work column. */
+    /* The column count follows the width rather than being stated: four on
+       the depth's 556px column, which draws a 130px tile — near enough the
+       dashboard band shelf's 132 that a cover is the same size wherever the
+       wall offers one — and three in the portrait fallback's narrower one.
+       The 110px floor is the breakpoint knob, not the tile size: the tiles
+       are `1fr` and land well above it at both widths. It used to state
+       three outright, which on the depth made them posters in a column that
+       has more to show than four playlists. */
     .s-pl-grid {
         display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
+        grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
         gap: var(--space-4) var(--space-3);
     }
 
@@ -1876,11 +1934,17 @@
         color: var(--text-dim);
     }
 
+    /* The player's column: a hairline off the work area, and its own
+       padding. The player inside it is flat — the column is already a region
+       of this surface, and a bordered card inside a hairline-divided column
+       draws the same edge twice (§16). */
     .b-player {
         display: flex;
         flex-direction: column;
         min-height: 0;
         min-width: 0;
+        padding: var(--space-7);
+        border-left: 1px solid var(--hairline);
     }
     .p-nosrc {
         flex: 1;
@@ -1908,6 +1972,13 @@
             min-height: 44px;
             padding-inline: 16px;
         }
+        .back {
+            width: 44px;
+            height: 44px;
+        }
+        .p-pane {
+            min-height: 44px;
+        }
         .rm-x::after {
             content: "";
             position: absolute;
@@ -1927,8 +1998,19 @@
         .browse {
             min-height: 100%;
         }
+        .b-head {
+            height: auto;
+            flex-wrap: wrap;
+            padding: var(--space-4) var(--space-5);
+        }
         .b-body {
             grid-template-columns: minmax(0, 1fr);
+        }
+        /* Stacked, the divider is above the player rather than beside it. */
+        .b-player {
+            border-left: 0;
+            border-top: 1px solid var(--hairline);
+            padding: var(--space-5);
         }
         .s-results,
         .b-pane,
