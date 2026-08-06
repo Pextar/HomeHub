@@ -5,7 +5,6 @@
     import PanelMusic from "../components/panel/PanelMusic.svelte";
     import PanelBrowse from "../components/panel/PanelBrowse.svelte";
     import PanelFullPlayer from "../components/panel/PanelFullPlayer.svelte";
-    import Icon from "../components/Icon.svelte";
     import { route, data, uiPrefs } from "../lib/stores.svelte";
     import { isPanelNight, panelIdleMs } from "../lib/panel";
     import { createPanelMusic } from "../lib/panel-music.svelte";
@@ -118,6 +117,14 @@
     // And what's playing — the ambient face carries it.
     const playing = $derived(music.nowPlaying);
 
+    // Which rooms are making noise, by name. The room band marks the
+    // playing room with the waveform instead of a switch (§16), and a
+    // source's title is the room it names — a Sonos group, a KEF speaker
+    // or a zone all carry the room's own name.
+    const playingRooms = $derived(
+        music.sources.filter((s) => s.playing).map((s) => s.title.toLowerCase()),
+    );
+
     // The catalog lives up here for the same reason the speakers do: the
     // music depth is a route away, and a route away and back used to throw
     // the search out with the component. Typing on a wall is the most
@@ -172,13 +179,9 @@
     {:else if musicOpen}
         <PanelBrowse {music} {spotify} {recents} {booted} />
     {:else}
-        <PanelClock {timeLabel} {dateLabel} {lightsOn} {lightsTotal} {insideTemp} />
+        <PanelClock {timeLabel} {dateLabel} {lightsOn} {lightsTotal} {insideTemp} onExit={exit} />
         <PanelMusic {music} />
-        <PanelRooms band={music.hasSpeakers} />
-
-        <button class="exit" onclick={exit}>
-            <Icon name="close" size={14} /><span>Exit</span>
-        </button>
+        <PanelRooms band={music.hasSpeakers} {playingRooms} />
     {/if}
 
     {#if idle}
@@ -232,11 +235,17 @@
            panel is actually used to drive (DESIGN.md §16).
            The rows are capped at the panel's fixed height so each zone owns
            its overflow — without it an `auto` row sizes to content and the
-           page itself spills past the viewport. */
+           page itself spills past the viewport.
+
+           The bands run edge to edge and are divided by hairlines rather
+           than floated apart as cards on a padded page: a wall panel has no
+           page around it to show, so a margin is just screen the bands
+           aren't using. Each band pads itself and draws its own rule — the
+           strip a border-bottom, the room row a border-top. */
         grid-template-columns: minmax(0, 1fr);
         grid-template-rows: auto minmax(0, 1fr);
-        gap: var(--space-5);
-        padding: var(--space-6);
+        gap: 0;
+        padding: 0;
         background: var(--bg);
         color: var(--text);
         overflow: hidden;
@@ -266,35 +275,6 @@
             min-height: 100dvh;
             overflow-y: auto;
         }
-    }
-
-    /* The one way out — quiet, top-right, big enough for a wall poke. */
-    .exit {
-        position: absolute;
-        top: var(--space-4);
-        right: var(--space-4);
-        z-index: var(--z-raised);
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        height: 44px;
-        padding: 0 var(--space-4);
-        border-radius: var(--r-pill);
-        border: 1px solid var(--hairline);
-        background: var(--card);
-        color: var(--text-mute);
-        font-size: 13px;
-        font-weight: 500;
-        font-family: inherit;
-        cursor: pointer;
-        transition:
-            color var(--t-fast),
-            border-color var(--t-fast),
-            transform var(--t-fast);
-    }
-    .exit:active {
-        transform: scale(0.95);
-        transition-duration: 80ms;
     }
 
     /* ── Ambient face ────────────────────────────────────────────────── */

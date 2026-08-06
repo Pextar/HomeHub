@@ -1217,7 +1217,8 @@ always-on display: an old iPad on a wall or shelf, logged in once, living at
 `App.svelte` renders it chromeless the same way it renders `KidHome`: no
 sidebar, no tab dock, no assistant FAB, no pull-to-refresh. It is reached
 from the sidebar's last entry and the PWA's "Panel" shortcut, and left
-through one quiet Exit chip, top-right.
+through one quiet Exit chip, riding the trailing edge of the status strip
+— the only chrome the surface has.
 
 **Home and music are one surface with three depths.** The panel is the fused
 Home+Music screen — the status strip and room tiles above and below, the
@@ -1365,13 +1366,26 @@ drops frames on blur and stacked shadows. Every rule below is that
 constraint made visible.
 
 - **One screen per depth, no chrome — and the music band gets the slack.**
-  Three stacked bands, not three columns: a **status strip** across the top
-  (clock, date, the two stats, the master button), the **music band**
-  taking every row the other two don't claim, and a **row of room tiles**
-  along the foot, at the height one tile needs. Present only when speakers
-  exist; the grid is sized from the `speakers-seen` memory so the band
-  doesn't pop in after the first poll, and a home with none gets the room
-  grid back over the whole surface.
+  Three stacked bands, not three columns: an **80px status strip** across
+  the top (clock, date, the two stats, the master pill, the Exit chip), the
+  **music band** taking every row the other two don't claim, and a **156px
+  row of room tiles** along the foot. Present only when speakers exist; the
+  grid is sized from the `speakers-seen` memory so the band doesn't pop in
+  after the first poll, and a home with none gets the room grid back over
+  the whole surface.
+
+  **The bands run edge to edge and are divided by hairlines, not gaps.**
+  The strip carries a `border-bottom`, the room row a `border-top`, and
+  each band pads itself (`--space-8` inline). There is no page around a
+  wall panel to show, so a margin is only screen the bands aren't using —
+  and floating each band as a bordered card inside a bordered surface
+  draws the same edge twice. For the same reason the player on the band
+  has **no card of its own**: no border, no fill, flat even while the room
+  plays. §15.2's fill is what a hero or a room card wears to say *this
+  one* is making noise among others that aren't; there is one player on
+  this band, and the cover already carries the waveform. The room tiles
+  below it are the surface's cards, and they keep the ON gradient because
+  they are the things being compared.
 
   This is the panel's central allocation and it is deliberate. It used to
   be three columns — clock 300, rooms flexible, music 352 — which gave two
@@ -1389,12 +1403,47 @@ constraint made visible.
   keeps a two-column shape, because there its left half is a catalog to
   read: search and its results on the left (the list owns its scroll), the
   featured player on the right at 420px.
+- **The music band spends its height on a shelf, not on a bigger cover.**
+  The band's player is a *strip* — cover, meta and scrubber, transport,
+  destination and fader, on one line — and the strip's height is capped by
+  a **width** problem, not a height one: the row is 960px on the reference
+  wall and four columns share it, so every pixel the square takes comes off
+  the title beside it. Past about 200px the title column is too narrow to
+  name a song, which is the one thing this band exists to say. So the cover
+  grows into the band's stage and stops at 200, and what would otherwise be
+  340px of air becomes a **shelf across the foot of the band**
+  (`PanelBandShelf`): one row of 132px art tiles, scrolling sideways past
+  what fits, each one a tap.
+
+  Air was the wrong answer there. The wall's most-wanted gesture after
+  play/pause is *put something on*, and until the shelf existed that cost a
+  trip one depth in — on the surface with a third of its screen unused. One
+  slot, and the room's state picks what fills it: **Up next**, the queue
+  past the track playing, where a tap jumps to it — only where the order is
+  known, since shuffle and repeat-one make "next" a guess and the wall
+  doesn't guess; else **Favorites**, the household's Sonos list, where a tap
+  plays it here. Both are Sonos-only because both lists are, and both ride
+  the poll the panel already runs, so the shelf costs no extra read. A room
+  with neither gets no shelf and the player centres in the band — the
+  reference's own composition, and the one state where the wall genuinely
+  has nothing to offer.
 - **The destination chips ride on the surface's header, not in the card.**
   Both depths. In a 336px column three rooms wrapped to two rows and six to
   three — 150px of a 720px panel spent on the control touched least, taken
   from the cover looked at most. On a full-width header they are one line.
-- **The job is glance + tap.** Room tiles toggle the room; the music card
-  transports and sets volume; the master button does all-on/all-off. The
+- **The job is glance + tap.** Room tiles toggle the room; the music band
+  transports and sets volume; the master pill does all-on/all-off. **A band
+  tile says what the room is doing in words, not in a fraction**: a 30px
+  icon chip and a drawn switch on top, the room's name and one status line
+  under it — "Playing", "3 lights on", "Off". The tile is the button, so
+  the switch is an indicator rather than a control inside a control, and
+  the room that is playing shows §6.8's waveform in the switch's place —
+  on a wall the one thing you want to find without reading is where the
+  sound is coming from. The ON gradient stays tied to the lights, which is
+  what the tap changes; music is marked by the waveform alone, so the tile
+  never looks lit for a room whose lamps are off. The room *grid* — the
+  shape a home without speakers gets — keeps the on/total count instead,
+  because there the tile has the height for a badge. The
   music depth adds the player's daily jobs — search, the queue, Sonos
   grouping — as panes on the one kiosk surface, still with no sheets, no
   modals, no forms: destructive taps arm for a second tap instead of a
@@ -1407,12 +1456,21 @@ constraint made visible.
   wakes it. The face drifts a few pixels per minute (transform-only) so no
   pixel holds one value for hours. This is the nightstand face, the
   burn-in guard and the backlight saver in one.
-- **Type and targets are distance-scaled, not phone-scaled.** Hero clock
-  76px; ambient clock `clamp(104px, 20vw, 168px)`; tile names 19px; track
-  title 21px; transport buttons 64px with an 80px centre; room tiles share
-  the zone's height down to a 120px floor, then scroll internally.
+- **Type and targets are distance-scaled, not phone-scaled — and each band
+  is scaled to its own job.** The strip's clock is 32px, because on the
+  dashboard the clock is a fact you glance at; the ambient face is where
+  the clock is the *subject*, at `clamp(104px, 20vw, 168px)`. Stat figures
+  19px over an 11px label; band tile names 14px over an 11.5px status line
+  (19px in the room grid, where there is height to spend); track title 19px
+  on the band and 21px in the depth's column; the band's cover grows into
+  its stage and stops at 200px, the shelf's tiles are 132px; transport 48px with a 60px
+  centre on the band and in the depth, 64/80 on the full player, which is
+  the one screen a transport is the subject of. Room tiles in the grid
+  share the zone's height down to a 120px floor, then scroll internally;
+  in the band they share the width down to 132px, then scroll sideways.
 - **Old-GPU motion budget.** No backdrop-filter anywhere. The §6.1 glow
-  lives only on small badges (56px icon chips), never on whole tiles.
+  lives only on small badges (30px icon chips in the band, 56px in the
+  grid), never on whole tiles.
   Animations are opacity/transform only, ≤200ms, and the ambient fade is
   the one 600ms exception. The app-shell view transition does not run
   here.
@@ -1456,43 +1514,43 @@ constraint made visible.
   column. The same reasoning runs the poll: while the ambient face is up
   the panel is a clock, so the backstop drops to two minutes and a pushed
   change still lands at once.
-- **The player card is one component with two widths** (§16 keeps them
+- **The player card is one component with two shapes** (§16 keeps them
   in `components/panel/`). Both depths get the scrubber — seek on a
   Sonos track, a read-only rail elsewhere, an honest no-position line
-  where there is no duration — and a Sonos coordinator's play-mode
-  chips (shuffle, repeat, crossfade).
-  **The card has two shapes, and the zone picks.** Beside a cover, or above
-  it. Which one fits more cover is pure arithmetic on the zone's aspect: a
-  stacked card caps the cover at what the controls leave of the *height*, a
-  landscape card caps it at the zone's whole height and spends *width* on
-  the controls instead. So the dashboard's wide, short band lays the cover
-  to the left of everything (`wide`), and the depth's tall, narrow column
-  stacks. On a 1024×768 wall that is the difference between a 160px cover
-  and a 360px one, and it is the thing four rounds of fixing the card
-  itself could never have found: the card was a portrait player in a
-  portrait slot on a landscape screen.
-  In the landscape shape the **cover carries the tap-through on its own** —
-  it is the biggest and most obviously tappable thing on the card (§15.8),
-  and a second button around the meta would only say the same thing twice.
-  **The card is two regions, and which one a control is in is the layout
-  decision.** Below a hairline sits the strip that never moves —
-  prev/play/next and the room's fader — because a wall is
-  tapped in passing and the tapping half has to be where it was last
-  time. Above it, everything else scrolls: the cover, what is playing,
-  and the room's preferences.
-  **The scrubber goes with the record wherever there is a record column to
-  put it in** — the full-screen player's rule, and the wide band has the
-  same two columns, so it follows it: cover, then the rail at exactly the
-  cover's width, then the controls beside the pair. How far through the
-  song we are is a fact about the song, and above the transport it was a
-  hairline across the top of the *other* column. The height it hands back
-  is what the play modes are drawn in, which is the only shape that keeps
-  them on the card at all (below). Stacked, the two placements are the same
-  place — one column, and the strip is the half that never moves — so the
-  depth's card keeps it there. There is no room on a 768px panel for both
-  a cover worth looking at and every preference at once, and the cover is
-  the half that is read from across the room, so it takes the scrolling
-  region's height and the preferences take the scroll.
+  where there is no duration.
+  **The zone picks the shape, and it is picking between two different
+  jobs.** The dashboard's band is a **strip**: cover, what is playing with
+  its scrubber, the transport, and the destination with its fader, all on
+  one line, centred in the band with air above and below it. The depth's
+  column **stacks** the same parts, and there the cover gets to be a
+  record. The band's cover is stated outright at **128px** rather than
+  grown to the band's height: a cover stretched to 380px turns the wall's
+  home screen into a poster with a control strip beside it, and the record
+  wants its size one depth in, where listening is the whole job. The band
+  is what you read walking past and poke in passing, so what it spends its
+  height on is *space*, not artwork.
+  In the band the **cover carries the tap-through on its own** — it is the
+  biggest and most obviously tappable thing there (§15.8), and a second
+  button around the meta would only say the same thing twice.
+  **The stacked card is two regions, and which one a control is in is the
+  layout decision.** Below a hairline sits the strip that never moves —
+  prev/play/next and the room's fader — because a wall is tapped in
+  passing and the tapping half has to be where it was last time. Above it,
+  the cover and what is playing scroll.
+  **The scrubber never sits in the transport strip.** How far through the
+  song we are is a fact about the song, so it rides with the record: under
+  the cover on the full player, beside it in the band's meta column, and
+  in the stacked card's strip only because there one column makes "under
+  the cover" and "above the transport" the same place. It stays out of the
+  tap-through button either way — a scrubber inside a link is not a
+  scrubber.
+  **The play modes are not on either shape.** Shuffle, repeat, crossfade
+  and "play similar" live on the depth's Rooms pane with the rest of the
+  room's settings (`PanelRoomSettings`): the band has one line and the
+  column has a cover, and preferences are the thing a wall is walked up to
+  for least. There is no room on a 768px panel for both a cover worth
+  looking at and every preference at once, and the cover is the half that
+  is read from across the room.
   Cover art is square, because records are — and it gives way as a
   square, on both axes together. Sizing it from the *column* (a width
   plus a ratio) is not the same thing and was a bug for four rounds: the
@@ -1506,11 +1564,13 @@ constraint made visible.
   engine can answer `auto`, and one that does collapses the cover to
   nothing on a screen where the rest of the card looks fine. The reference
   hardware is a Safari 15 iPad and this is not the layout to be clever in
-  front of it. So the card measures the room the cover may have — boxes
-  the cover cannot itself size, or the reading chases its own tail — and
-  writes the square onto it in pixels, definite on both axes with nothing
-  left to resolve. Only the portrait fallback keeps a ratio, and only in
-  the width-led direction every engine agrees on.
+  front of it. So the stacked card measures the room the cover may have —
+  boxes the cover cannot itself size, or the reading chases its own tail —
+  and writes the square onto it in pixels, definite on both axes with
+  nothing left to resolve. The band skips even the measurement: it states
+  its 128px outright, which is the same rule taken one step further. Only
+  the portrait fallback keeps a ratio, and only in the width-led direction
+  every engine agrees on.
   **Art that fails to load falls back to the placeholder** (§6.7), keyed
   to the URL so the next track gets its own try. A broken proxy read used
   to leave an empty box, which looks exactly like a cover still loading

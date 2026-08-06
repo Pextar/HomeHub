@@ -1020,13 +1020,16 @@
 <style>
     .browse {
         /* The depth takes the whole panel grid, whatever columns the
-           dashboard depth is sized for. */
+           dashboard depth is sized for. The dashboard's bands run edge to
+           edge and pad themselves; a depth is one surface rather than three
+           bands, so it pads itself here. */
         grid-column: 1 / -1;
         display: flex;
         flex-direction: column;
         gap: var(--space-5);
         min-height: 0;
         min-width: 0;
+        padding: var(--space-6);
     }
     /* Type mode: while the iPad's keyboard is up, the depth re-floors to
        just above it instead of running underneath. --kb is the measured

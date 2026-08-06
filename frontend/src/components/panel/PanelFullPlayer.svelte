@@ -456,6 +456,9 @@
         gap: var(--space-5);
         min-height: 0;
         min-width: 0;
+        /* The dashboard's bands pad themselves and run edge to edge; a depth
+           is one surface, so it carries the page padding itself. */
+        padding: var(--space-6);
     }
 
     .fp-head {

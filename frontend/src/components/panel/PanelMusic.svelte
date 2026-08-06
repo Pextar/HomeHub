@@ -1,6 +1,7 @@
 <script lang="ts">
     import PanelPlayerCard from "./PanelPlayerCard.svelte";
     import PanelRoomChips from "./PanelRoomChips.svelte";
+    import PanelBandShelf from "./PanelBandShelf.svelte";
     import Icon from "../Icon.svelte";
     import { route } from "../../lib/stores.svelte";
     import type { PanelMusicStore } from "../../lib/panel-music.svelte";
@@ -28,6 +29,11 @@
     // where the depth's door belongs. It is section navigation, not a
     // second copy of the cover's job.
     const open = () => route.go("panel", { music: "1" });
+
+    /** The stage's measured height — what the player row may have once the
+     *  head row and the shelf have taken theirs. The cover is sized from it
+     *  (see PanelPlayerCard's `artMax`). */
+    let stageH = $state(0);
 </script>
 
 {#if music.hasSpeakers}
@@ -55,30 +61,63 @@
                 </button>
             {/if}
         </header>
-        {#if music.unreachable}
-            <div class="m-out">
-                <Icon name="speaker" size={26} />
-                <p class="m-outline">No speaker is answering</p>
-                <p class="m-outsub">The panel keeps trying — nothing here has been lost.</p>
-            </div>
-        {:else}
-            <PanelPlayerCard {music} wide onOpen={open} />
+        <!-- The stage: the height the band has left once the head row and
+             the shelf have taken theirs. It is measured here rather than
+             inside the card because the cover is sized from it, and a box
+             the cover can size is a reading that chases its own tail (§16).
+             A flex item with `min-height: 0` takes its height from the band
+             and never from what is in it, so the loop can't close. -->
+        <div class="m-stage" bind:clientHeight={stageH}>
+            {#if music.unreachable}
+                <div class="m-out">
+                    <Icon name="speaker" size={26} />
+                    <p class="m-outline">No speaker is answering</p>
+                    <p class="m-outsub">The panel keeps trying — nothing here has been lost.</p>
+                </div>
+            {:else}
+                <PanelPlayerCard {music} wide artMax={stageH} onOpen={open} />
+            {/if}
+        </div>
+        <!-- What to put on next, at the foot of the band. The player is a
+             strip and cannot use the band's height on its own; this is what
+             that height is for (§16). -->
+        {#if !music.unreachable}
+            <PanelBandShelf {music} />
         {/if}
     </section>
 {/if}
 
 <style>
+    /* The middle band. It takes every row the strip above and the room row
+       below don't claim (§16) and spends them in this order: the head row
+       states the section and where the sound goes, the shelf at the foot
+       says what could go on next, and the player row in between takes what
+       is left — which is what sizes the cover. */
     .music {
         display: flex;
         flex-direction: column;
+        gap: var(--space-5);
         min-height: 0;
+        min-width: 0;
+        padding: var(--space-5) var(--space-8);
+    }
+    /* The player's room. `min-height: 0` is what makes the measurement safe:
+       the stage is sized by the band, never by the cover inside it. */
+    .m-stage {
+        flex: 1 1 auto;
+        min-height: 0;
+        min-width: 0;
+        display: flex;
+        align-items: center;
+    }
+    .m-stage :global(.p-card.wide) {
+        flex: 1 1 auto;
         min-width: 0;
     }
     .m-head {
         display: flex;
         align-items: center;
         gap: var(--space-3);
-        margin-bottom: var(--space-3);
         flex-shrink: 0;
     }
     /* The chips take the middle; Pause all keeps the trailing edge. */

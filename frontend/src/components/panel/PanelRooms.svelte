@@ -1,5 +1,6 @@
 <script lang="ts">
     import Icon from "../Icon.svelte";
+    import Waveform from "../music/Waveform.svelte";
     import { api } from "../../lib/api";
     import { data } from "../../lib/stores.svelte";
     import { runAction, roomIcon, haptic } from "../../lib/utils";
@@ -13,9 +14,16 @@
     // are read far more often than they are pressed — the status of the
     // house at a glance — so on a surface that also carries a player they
     // give it the height and keep the width (DESIGN.md §16).
-    let { band = false }: { band?: boolean } = $props();
+    //
+    // `playingRooms` is the rooms making noise, lowercased. A room that is
+    // playing shows the waveform where its switch would be: on a wall the
+    // one thing you want to find without reading is which room the sound
+    // is coming from, and §6.8's motif says it without a word.
+    let { band = false, playingRooms = [] }: { band?: boolean; playingRooms?: string[] } = $props();
 
     const v = $derived(data.value);
+
+    const isPlaying = (name: string) => playingRooms.includes(name.toLowerCase());
 
     // Live on-counts derived from socket state (same derivation as the
     // dashboard) so tiles answer the tap immediately instead of waiting
@@ -58,14 +66,17 @@
 </script>
 
 <section class="rooms" class:band aria-label="Room lights">
-    <header class="rooms-head">
-        <h2>Rooms</h2>
-    </header>
+    {#if !band}
+        <header class="rooms-head">
+            <h2>Rooms</h2>
+        </header>
+    {/if}
 
     {#if rooms.length > 0}
         <div class="rooms-grid" class:band>
             {#each rooms as r (r.id)}
                 {@const anyOn = r.on > 0}
+                {@const playing = isPlaying(r.name)}
                 <button
                     class="rtile"
                     class:on={anyOn}
@@ -75,13 +86,46 @@
                 >
                     <span class="r-top">
                         <span class="r-ico" class:on={anyOn}>
-                            <Icon name={roomIcon(r.name)} size={28} />
+                            <Icon name={roomIcon(r.name)} size={band ? 16 : 28} />
                         </span>
-                        <span class="r-count mono" class:lit={anyOn}
-                            >{r.on}<span class="dim"> / {r.sockets}</span></span
-                        >
+                        {#if band}
+                            <!-- The waveform takes the switch's place for the
+                                 room that is playing: the tile still toggles
+                                 the lights, but what it *says* is that the
+                                 sound is here (§6.8). -->
+                            {#if playing}
+                                <Waveform />
+                            {:else}
+                                <span class="sw" class:on={anyOn} aria-hidden="true"></span>
+                            {/if}
+                        {:else}
+                            <span class="r-count mono" class:lit={anyOn}
+                                >{r.on}<span class="dim"> / {r.sockets}</span></span
+                            >
+                        {/if}
                     </span>
-                    <span class="r-name" title={r.name}>{r.name}</span>
+                    <span class="r-foot">
+                        <span class="r-name" title={r.name}>{r.name}</span>
+                        {#if band}
+                            <!-- What the room is doing, in words. The lights
+                                 are what the tile toggles, so they are what
+                                 it reports; playing leads when both are
+                                 true, because the waveform above has just
+                                 said so. -->
+                            <span class="r-sub">
+                                {#if playing && anyOn}
+                                    Playing · <span class="mono">{r.on}</span> on
+                                {:else if playing}
+                                    Playing
+                                {:else if anyOn}
+                                    <span class="mono">{r.on}</span>
+                                    light{r.on === 1 ? "" : "s"} on
+                                {:else}
+                                    Off
+                                {/if}
+                            </span>
+                        {/if}
+                    </span>
                 </button>
             {/each}
         </div>
@@ -97,11 +141,20 @@
                 >
                     <span class="r-top">
                         <span class="r-ico" class:on={s.state}>
-                            <Icon name="socket" size={28} />
+                            <Icon name="socket" size={band ? 16 : 28} />
                         </span>
-                        <span class="r-count">{s.room || "Unassigned"}</span>
+                        {#if band}
+                            <span class="sw" class:on={s.state} aria-hidden="true"></span>
+                        {:else}
+                            <span class="r-count">{s.room || "Unassigned"}</span>
+                        {/if}
                     </span>
-                    <span class="r-name" title={s.name}>{s.name}</span>
+                    <span class="r-foot">
+                        <span class="r-name" title={s.name}>{s.name}</span>
+                        {#if band}
+                            <span class="r-sub">{s.room || "Unassigned"}</span>
+                        {/if}
+                    </span>
                 </button>
             {/each}
         </div>
@@ -119,6 +172,17 @@
         flex-direction: column;
         min-height: 0;
         min-width: 0;
+        padding: var(--space-5) var(--space-8);
+    }
+    /* The foot band: a fixed height, and a hairline that separates it from
+       the music band rather than a gap. 156px is what one tile needs to
+       state an icon, a switch, a name and a line about what the room is
+       doing — every row above it is the music band's (§16). */
+    .rooms.band {
+        height: 156px;
+        flex-shrink: 0;
+        padding: 18px var(--space-8);
+        border-top: 1px solid var(--hairline);
     }
     .rooms-head {
         display: flex;
@@ -149,22 +213,24 @@
         overflow-y: auto;
         scrollbar-width: none;
     }
-    /* Band: one row across the foot of the panel. Tiles share the width
-       down to a legible floor and the row scrolls sideways past that —
-       the same bargain the grid makes vertically. */
-    /* One row across the foot of the panel, at the height a tile needs and
-       not a pixel more — the band is `auto` in the panel grid, so every row
-       this doesn't claim goes to the music band above it. Tiles share the
-       width down to a legible floor and the row scrolls sideways past
-       that — the same bargain the grid makes vertically. */
+    /* One row across the foot of the panel, filling the band's height.
+       Tiles share the width equally down to a legible floor and the row
+       scrolls sideways past that — the same bargain the grid makes
+       vertically. A flex row rather than a grid because equal *shares* of
+       whatever width is left is the whole rule here, and six rooms or four
+       should each read the same. */
     .rooms-grid.band {
-        flex: none;
+        flex: 1;
+        display: flex;
+        gap: 14px;
         grid-template-columns: none;
-        grid-auto-flow: column;
-        grid-auto-columns: minmax(150px, 1fr);
-        grid-auto-rows: 96px;
+        grid-auto-rows: auto;
         overflow-x: auto;
         overflow-y: hidden;
+    }
+    .rooms-grid.band .rtile {
+        flex: 1 1 0;
+        min-width: 132px;
     }
     .rooms-grid::-webkit-scrollbar {
         display: none;
@@ -275,29 +341,109 @@
     }
 
     /* The band is short and its tiles are narrow, so they trade the grid's
-       generous badge and name for ones that fit. Laying them out as a row
-       instead was tried and was worse: the icon and the count took the
-       width from the middle and every room read as "Li…". The name is what
-       the tile is for. */
+       generous badge and count for a small icon chip, a switch and two
+       lines of words. Laying them out as a row instead was tried and was
+       worse: the icon and the count took the width from the middle and
+       every room read as "Li…". The name is what the tile is for. */
     .rooms.band .rtile {
-        padding: var(--space-3);
+        padding: 14px;
         gap: var(--space-2);
+        border-radius: var(--r-lg);
     }
     .rooms.band .r-ico {
-        width: 40px;
-        height: 40px;
+        width: 30px;
+        height: 30px;
+        border-radius: var(--r-sm);
+        background: var(--card-3);
+    }
+    /* Filled rather than tinted at this size: 30px of amber-soft behind a
+       16px glyph reads as nothing from across a room. The glow stays on
+       the badge and nowhere else (§16). */
+    .rooms.band .r-ico.on {
+        background: var(--on);
+        color: var(--primary-fg);
+        box-shadow: 0 0 16px 2px var(--on-glow);
     }
     .rooms.band .r-name {
-        font-size: 17px;
+        font-size: 14px;
+    }
+    .r-foot {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        min-width: 0;
+    }
+    .r-sub {
+        font-size: 11.5px;
+        color: var(--text-mute);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    /* The switch, drawn and not built: the tile is the button, so a real
+       Switch inside it would be a control inside a control. This is the
+       §6.2 shape as a read-only indicator. */
+    .sw {
+        width: 38px;
+        height: 22px;
+        border-radius: var(--r-pill);
+        background: var(--card-3);
+        position: relative;
+        flex-shrink: 0;
+        transition: background var(--t-med);
+    }
+    .sw::after {
+        content: "";
+        position: absolute;
+        top: 2px;
+        left: 2px;
+        width: 18px;
+        height: 18px;
+        border-radius: 50%;
+        background: var(--knob-off);
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+        transition:
+            transform var(--t-med),
+            background var(--t-med);
+    }
+    .sw.on {
+        background: var(--on);
+    }
+    .sw.on::after {
+        transform: translateX(16px);
+        background: var(--knob);
+    }
+    @media (prefers-reduced-motion: reduce) {
+        .sw,
+        .sw::after {
+            transition-duration: 0.001ms;
+        }
     }
 
     /* Portrait / narrow: the band idea does not survive one column. */
     @media (orientation: portrait), (max-width: 900px) {
+        .rooms.band {
+            height: auto;
+            padding: var(--space-5);
+        }
+        .rooms {
+            padding: var(--space-5);
+        }
+        /* Stacked, the row is a grid again and the page owns the scroll, so
+           the band's fixed height and internal overflow both stand down —
+           a row that keeps them here just clips its own tiles. */
         .rooms-grid.band {
+            display: grid;
+            flex: none;
             grid-template-columns: repeat(2, minmax(0, 1fr));
             grid-auto-flow: row;
-            grid-auto-rows: minmax(120px, 1fr);
-            overflow-x: hidden;
+            grid-auto-rows: minmax(120px, auto);
+            gap: var(--space-3);
+            overflow: visible;
+        }
+        .rooms-grid.band .rtile {
+            min-width: 0;
         }
     }
 </style>
