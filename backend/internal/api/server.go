@@ -87,14 +87,20 @@ type Server struct {
 	// top of what the speakers themselves report (DESIGN.md's "Continue play
 	// similar" note) — Sonos has no such concept, so the household doesn't
 	// either; it's ours to keep, keyed by the coordinator's registered
-	// speaker id, and only for as long as this process runs. autoplayAttempt
-	// throttles retries when finding similar tracks keeps failing, and
-	// autoplayRecent remembers what a coordinator was just topped up with so
-	// a short discography doesn't loop the same handful of songs.
+	// speaker id, and only for as long as this process runs. It is on for
+	// every coordinator, so what autoplayOff holds is the opt-*out*: the
+	// rooms that were told to fall silent when their queue ends.
+	// autoplayAttempt throttles retries when finding similar tracks keeps
+	// failing, autoplayRecent remembers what a coordinator was just topped
+	// up with so a short discography doesn't loop the same handful of songs,
+	// and autoplayHeard is when each coordinator was last seen actually
+	// playing its queue — what separates "the queue just ran dry" from "this
+	// room has been quiet all evening".
 	autoplayMu      sync.Mutex
-	autoplay        map[string]bool
+	autoplayOff     map[string]bool
 	autoplayAttempt map[string]time.Time
 	autoplayRecent  map[string][]string
+	autoplayHeard   map[string]time.Time
 
 	// kefMon polls the KEF speakers once for the whole process and caches
 	// what they report (see internal/kef/monitor.go). KEF's local API has no

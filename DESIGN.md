@@ -759,12 +759,22 @@ _which device_. Nothing appears on two of them.
   (`api/sonos_autoplay.go`), held per coordinator in memory. It renders as one
   more play-mode chip beside Crossfade because that is what it reads as, and
   three things follow from it being ours rather than the speaker's: it is
-  **off again after a restart**, it needs a Spotify account to find anything
+  **on again after a restart**, it needs a Spotify account to find anything
   to add, and it exists only for a Sonos coordinator — there is no queue to
   top up anywhere else. Name it for the choice it settles: the room either
   continues with its queue or continues with something like it. **One word
   across surfaces** — the chip is `Play similar` in the player and on the
   panel, never `Autoplay` in one place and something else in the other.
+- **The default is "keep playing."** Starting a song asks for music, not for
+  that one song and then silence, so every group has this on and what the hub
+  remembers is the **opt-out** — the rooms told to fall quiet when their queue
+  ends. Which is why the restart lands on _on_ above, and why the chip is lit
+  the first time anyone looks at it. The queue tops up on the last track, and
+  a room that fell silent anyway — a top-up that failed, a hub restarted
+  mid-song — gets picked back up, but only from `STOPPED` at the end of its
+  queue and only if it was heard playing within the last quarter hour. **A
+  pause is a decision.** Nothing autoplay does may restart a room somebody
+  paused, or wake one that has been quiet all evening.
 - **Progress rides on the playing surface.** A 2px hairline along a card's
   bottom edge (`ProgressLine`), extrapolated between polls by `clock.beat`
   so it creeps rather than stepping. Zero duration renders nothing at all
