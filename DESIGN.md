@@ -1878,8 +1878,8 @@ constraint made visible.
   is up** (measured off `visualViewport`, so a docked, floating or split
   keyboard all read true, and no keyboard reads as none): the depth
   re-floors to just above it and the results go dense — single-line
-  rows, no shelf labels, no kind chips, the top-result card folded back
-  into the shelves — because typing should show a handful of matches
+  rows, no kind chips, no destination line, the top-result card folded
+  back into the shelves — because typing should show a handful of matches
   where one card used to fit. The keyboard is part of the flow: Enter
   dismisses it, and so does a tap on any result, so the rich layout
   returns for the choosing. **The household's favorites idle here too**,
@@ -1936,6 +1936,29 @@ constraint made visible.
     shelf of truncated names is worse than a shorter list — so the columns
     fit to that rather than to a stated count, and the ordinary single
     column is what a narrower body gets.
+  - **The keyboard is the case this was built for, and the two modes
+    compose.** The reference wall is 768px tall and its docked landscape
+    keyboard takes about 350 of them: the depth re-floors above it (type
+    mode, below) and what is left has to hold the header, the box, the
+    dock and the list. Full-bleed is what makes that survivable — the same
+    dense rows, dealt into two columns, are twice the matches in the same
+    strip. Where the two modes meet, the width buys back two things the
+    narrow column had to drop:
+    - **the artist returns**, on the title's own line. A dense row drops
+      it in a 556px column because there is nowhere to put it; at ~500px
+      a column there is, and ten songs with no artists on them is a list
+      nobody can choose from — worse than one row fewer.
+    - **the shelf labels return**, tight. In one column the sections
+      arrive in a known order and a row's shape says what it is; dealt
+      into two columns an album and a song look alike, and the label is
+      the only thing separating them. 24px for that is a fair trade where
+      a whole row is not.
+    **The dock goes to one line while the keyboard is up** — a 36px cover,
+    what is playing, play/pause; the skips go, because you are typing and
+    not conducting. It may not go away altogether: the queue buttons on
+    the rows are tappable while typing, and the dock is where that answer
+    lives, so removing it would make a tap answer with nothing. It keeps
+    the answer and gives up everything else.
 - **The depth idles on shelves, and the room in front of you leads them.**
   With an empty box the pane is a browse screen, in the order that answers
   *put something on* without typing: **what this room plays** (HomeHub's

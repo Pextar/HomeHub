@@ -669,6 +669,7 @@
                                 aria-label="Search music"
                                 autocapitalize="off"
                                 autocomplete="off"
+                                autocorrect="off"
                                 spellcheck="false"
                                 enterkeyhint="search"
                                 oninput={(e) => {
@@ -1697,10 +1698,18 @@
     }
 
     /* Type mode's dense results: single-line rows and nothing that isn't
-       a match — the shelf labels and kind chips return with the keyboard,
-       because filtering and browsing are what the choosing phase is for. */
+       a match — the kind chips and the destination line return with the
+       keyboard, because filtering is what the choosing phase is for.
+
+       The arithmetic this is answering: the reference wall is 768px tall
+       and its docked landscape keyboard takes ~350 of them. What is left
+       has to hold the header (72), the box (48) and the dock, and
+       everything else is the list. Every rule below is a row bought back
+       out of that. */
     .kb-open .s-kinds,
-    .kb-open .s-dest,
+    .kb-open .s-dest {
+        display: none;
+    }
     .kb-open .s-label {
         display: none;
     }
@@ -1721,6 +1730,38 @@
     .kb-open .sk-art {
         width: 36px;
         height: 36px;
+    }
+
+    /* Typing on the wall, with the results across the whole of it: the two
+       modes compose, and where they meet the width buys back what the
+       keyboard took.
+
+       The artist comes back, on the title's own line. Dense rows drop it
+       in a 556px column because there is nowhere to put it; at ~500px a
+       column there is, and a list of ten songs with no artists on it is a
+       list you cannot choose from — which is worse than one row fewer. */
+    .browse.full.kb-open .r-meta {
+        flex-direction: row;
+        align-items: baseline;
+        gap: var(--space-2);
+        overflow: hidden;
+    }
+    .browse.full.kb-open .r-sub {
+        display: block;
+        flex: 0 1 auto;
+        min-width: 0;
+    }
+    .browse.full.kb-open .r-name {
+        flex: 0 1 auto;
+    }
+    /* And the shelf labels come back, tight. In one column the sections
+       arrive in a known order and a row's own shape says what it is; dealt
+       into two columns, an album and a song look alike and the label is
+       the only thing that separates them. 24px for that is a fair trade
+       where a whole row is not. */
+    .browse.full.kb-open .s-label {
+        display: block;
+        margin: var(--space-2) 0 4px;
     }
 
     .s-results {
@@ -2456,6 +2497,40 @@
         margin: 0;
         font-size: 13px;
         color: var(--text-dim);
+    }
+
+    /* With the keyboard up the dock is one line. It cannot simply go: the
+       queue buttons on the rows are tappable while typing, and queueing is
+       the one action here that changes nothing on screen — the dock is
+       where that answer lives, so removing it would make a tap answer with
+       nothing. So it keeps the answer and gives up everything else: a
+       36px cover, one line, and play/pause. The skips go too — you are
+       typing, not conducting — and the second line only appears when it
+       has something to confirm. */
+    .kb-open .b-dock {
+        min-height: 52px;
+        gap: var(--space-3);
+        padding: 4px var(--space-6);
+    }
+    .kb-open .d-art {
+        width: 36px;
+        height: 36px;
+    }
+    .kb-open .d-title {
+        font-size: 14px;
+    }
+    .kb-open .d-sub:not(.said) {
+        display: none;
+    }
+    .kb-open .d-sub.said {
+        font-size: 12px;
+    }
+    .kb-open .d-btn:not(.d-play) {
+        display: none;
+    }
+    .kb-open .d-play {
+        width: 44px;
+        height: 44px;
     }
     @media (hover: hover) {
         .d-open:hover {
