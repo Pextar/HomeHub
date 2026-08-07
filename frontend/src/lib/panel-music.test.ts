@@ -779,14 +779,14 @@ describe("more like this", () => {
     for (let i = 0; i < 6; i++) await Promise.resolve();
 
     expect(api.spotifySimilar).toHaveBeenCalledWith("Bo Kaspers", 8);
-    // The first goes next so the run starts after this song rather than at
-    // the end of whatever was already queued.
-    expect(api.sonosQueueAdd).toHaveBeenCalledWith("kitchen", {
-      service: "Spotify",
-      uri: "spotify:track:1",
-      title: "One",
-      next: true,
-    });
+    // Backwards, every one "next": Sonos resolves "play next" against the
+    // queue as it is at that moment, so inserting in reverse is what lands
+    // the run in order and contiguous behind the current track.
+    expect(vi.mocked(api.sonosQueueAdd).mock.calls.map((c) => c[1].uri)).toEqual([
+      "spotify:track:2",
+      "spotify:track:1",
+    ]);
+    expect(vi.mocked(api.sonosQueueAdd).mock.calls.every((c) => c[1].next)).toBe(true);
     h.stop();
   });
 

@@ -592,6 +592,14 @@ Two rules keep that from becoming a dumping ground:
   view and strands whatever it was holding; every store in `lib/music/` is a
   `create*()` the view instantiates, and none of them own an `$effect` —
   effects belong to the component whose lifetime they should share.
+- **The panel's pieces live in `components/panel/` and read one store**
+  (`lib/panel-music.svelte.ts`). Both depths and the full player share that
+  instance, so a room picked on one is featured on the others (§16). Two
+  things it owns are HomeHub's own rather than a bridge's: the per-room
+  **play history** the shelves fall back to, and the **announcement** the
+  wall sends — both live in the backend beside the speakers (`internal/
+  store/history.go`, `internal/announce/`) because neither Sonos nor
+  Spotify has a concept that fits.
 
 ---
 
@@ -617,9 +625,14 @@ way in and its own transport. That was the module's central fault, and
   household's own grouping, which beats a speaker standing alone. One sound
   is listed once, under one name, in one place. If a speaker ever shows up on
   two cards, that is a bug in the room model, not a labelling choice.
-- **Capabilities are carried, never inferred from the make.** A room says
-  whether it can seek, skip, queue, take play modes or pick an input, and
-  surfaces render only what it says yes to. A Sonos room playing radio can't
+- **Capabilities are carried, never inferred from the make — and the same
+  holds for a *track*.** A room says whether it can seek, skip, queue, take
+  play modes or pick an input, and surfaces render only what it says yes
+  to. What is playing carries the same kind of fact: a Spotify source
+  names the track's canonical id and radio, line-in and a local library
+  item carry none, so the controls that need one (saving it, opening its
+  artist) are present on the first and absent on the rest rather than
+  offered everywhere and refused on tap. A Sonos room playing radio can't
   seek; a KEF has no queue; a room HomeHub is streaming to has no skip. **A
   control that would be refused is worse than a control that isn't there** —
   the oldest rule in this section and the one everything else here follows
@@ -948,7 +961,10 @@ _up one_.
   offer to reconnect is made once, quietly, where they would have been. It
   is not a fault: everything else about that connection works, and the
   copy says so. The same shape as `status.playback` (§15.5), for the same
-  reason.
+  reason — and `status.library` is a third of the same kind, gating the
+  panel's heart (§16): reading whether a track is saved has always been in
+  the grant, so an old login shows the truth and only the *write* is
+  withheld.
 - **What the page has already said, the rows don't repeat.** An album's own
   tracks carry neither its cover nor its artist (a featured artist still
   differs, so that survives), and below 560px the trailing play mark goes —
@@ -1686,6 +1702,120 @@ constraint made visible.
   the card confirms it in place for a few seconds — not a toast (§10's
   quiet answer stands, and a kiosk has nobody to dismiss cards), just the
   one line saying what went in and whether it plays next.
+- **The song's own controls live on the full player, and only there.**
+  A heart, **More like this**, and the artist's name as a door. They ride
+  under the record's caption rather than in the control column because
+  their subject is the record and not the room — the same argument that
+  put the scrubber there — and the full player is the one screen a title
+  is the subject of. Each appears only where it can act (§15.1 applied to
+  a *track* rather than to a room):
+  - **Saving needs a catalog id**, which only a Spotify source carries.
+    Radio and line-in have an artist line and nothing to save, so no
+    heart. The id is recovered from the speaker's own resource string —
+    a Sonos playing Spotify names the track inside it — and is absent
+    everywhere else rather than guessed at from a title.
+  - **Saving is split across two grants.** Reading whether a track is in
+    the library has always been in the login's scope set; writing was
+    added later. So an older login shows an honest filled or empty heart
+    and simply does not offer the tap, rather than offering one that
+    fails. That is the "render only what it answered for" discipline the
+    Sonos settings pane already follows.
+  - **More like this seeds from the artist's name**, because that is what
+    a speaker reports. On a Sonos room it fills the queue behind what is
+    playing — asking for more of a record must not interrupt it — and
+    anywhere else, having no queue to fill, it plays the first result. It
+    is the same engine as §15.5's "play similar", asked for on purpose
+    instead of when a queue runs dry. Queuing a run changes nothing on
+    screen, so the record says what went in for a few seconds, in place,
+    like the queued-track line.
+  - **The artist climbs a rung rather than stacking a screen.** Tapping
+    the name leaves the full player for the depth and opens the catalog's
+    artist page there, which is where the catalog lives. The name is
+    resolved to a page on arrival; a name nothing matches lands on the
+    search results for it, which is an answer rather than a dead end.
+- **The scrubber has a 15-second step either side, where stepping is
+  possible.** Same argument as the volume row's −/+: a rail is an
+  imprecise aim at arm's length, and "back a bit, I missed that" is the
+  one seek anybody makes from a sofa. Absent on a source with no position
+  to step within.
+- **The full player's queue reorders by tap, one place at a time.**
+  Up and down on every row, disabled at the ends rather than hidden — a
+  control that appears and disappears as rows move is a moving target.
+  Not the app's drag, for the reason grouping isn't either: a
+  hold-then-drag at arm's length, over a five-second poll, on an A8X is
+  the least reliable gesture this surface could pick. The move renumbers
+  the rest of the queue, so the pane re-reads rather than splicing
+  locally.
+- **Join plays it there as well; Move takes it there and leaves.** "Take
+  the music with me" is the other half of the sentence the grouping pane
+  answers, and until it existed it cost two aims at a wall: join, then
+  walk back and split the room you left. It is a second, quieter target
+  on the same row — quieter because it is the rarer ask and because it
+  stops the sound in the room you are standing in — and it appears on
+  both places the wall offers grouping, the full player's pane and the
+  depth's Rooms list. Underneath it is two calls in a fixed order: the
+  destination joins *first*, so the queue and the stream are handed over
+  while the old room is still coordinating, and only then does the old
+  room step out. The other order stops the music between the two calls.
+  The panel then follows the sound: the destination becomes the featured
+  room, because that is where the music now is.
+- **The band's shelf has a third mode: what this room played before.**
+  Up next and Favorites are both Sonos' own lists, so a KEF speaker or a
+  HomeHub zone got no shelf at all and spent the band's height on air —
+  on the one surface a house walks up to, with a third of its screen
+  unused. HomeHub keeps its own per-room play history for this (it
+  records what was started, in which room, at what time) because
+  Spotify's history is one list for the whole household and cannot say
+  that the kitchen gets radio at breakfast. A room with no history of its
+  own falls back to the household's, and **the label says which**:
+  "Played here" against "Played recently". A wall must never imply a room
+  played something it didn't. On the household's list the second line is
+  the room rather than the artist, since that is the part which says this
+  shelf is not about the room you are looking at. A favorite in the
+  history replays through the favorites path it came from, matched by URI
+  against the household's current list — one that has since been deleted
+  stops being offered rather than becoming a tile that fails.
+- **Announce is the panel's own feature, and it takes the shelf's
+  place.** Calling the house is the one thing a hallway panel can do that
+  a phone in a pocket cannot: make a sound in a room you are not standing
+  in. "Dinner's ready" is shouted up a staircase, and the panel is
+  already on the wall at the bottom of it. The control rides in the music
+  band's head row beside Pause all — both are whole-house taps aimed at
+  from a step away, and neither is about the room the chips name — and
+  opening it **swaps the shelf for an announce strip**, the way the full
+  player's grouping pane swaps the queue. Not a sheet and not a screen:
+  the kiosk has neither, the player above keeps playing and stays
+  touchable, and one tap puts the shelf back. The strip:
+  - **leads with presets**, because typing is the worst thing a wall asks
+    anyone to do, and because a house shouts the same four sentences. A
+    box follows them for anything else, at the search box's 17px floor.
+  - **names the rooms before the tap.** A wall must never be vague about
+    which rooms are about to be interrupted.
+  - **says when there will be no words.** Speech needs a text-to-speech
+    endpoint the household points HomeHub at; without one every room
+    hears a chime and nothing else, and the strip offers exactly that
+    instead of taking a sentence nobody will hear. The chime is
+    synthesised rather than shipped as an asset, so it always works.
+  - **is Sonos-only, and says so by absence.** A KEF cannot report what
+    it was playing, so there would be nothing to put back afterwards, and
+    interrupting a room that cannot be restored is the one thing this
+    must never do (§15.1).
+  - **confirms in place and closes itself.** A kiosk has nobody to
+    dismiss a card, so the confirmation names the rooms that heard it,
+    and the strip goes away a few seconds later.
+- **The ambient face has two subjects: the clock, and the record.** While
+  something is playing, the panel rests on the **listening face** — the
+  cover at the size a record deserves, with the clock demoted beside it
+  and the status line under the track. It replaced a 40px thumbnail under
+  a full-size clock, which spent the most-looked-at surface the panel has
+  on the least interesting thing in the room. It is one face with two
+  subjects and not a second screen: the same fade, the same
+  minute-by-minute drift, the same tap to wake, and the same night
+  dimming. The cover is sized in viewport units and capped rather than
+  measured — nothing else on this face competes for the space, so there
+  is no reading that could chase its own tail (contrast the band and the
+  full player, which both measure). Nothing playing, and the clock is the
+  subject again.
 - **On the music depth, a song plays; an artist opens.** The wall keeps
   the flat gesture where it's about starting sound: a song found by
   search plays, an album or playlist plays whole — the player names what

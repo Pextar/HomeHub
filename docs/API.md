@@ -278,6 +278,7 @@ zones — sets of speakers that play together regardless of make. See
 | POST | `/api/media/zones/{id}/stop` | Stop, and release a stream session |
 | PUT | `/api/media/zones/{id}/volume` | `{"level": 0-100}` across the zone |
 | PUT | `/api/media/zones/{id}/mute` | `{"muted": bool}` across the zone |
+| GET | `/api/media/history?room=&limit=` | What a room has been asked to play, newest first |
 
 Zone members are bridge-qualified speaker ids: `sonos:abc`, `kef:def`.
 
@@ -313,6 +314,85 @@ Environment: `HOMEHUB_STREAM_URL` overrides the address speakers fetch from,
 `HOMEHUB_LIBRESPOT_BIN` / `HOMEHUB_LIBRESPOT_NAME` configure the decoder, and
 `HOMEHUB_STREAM_DELAY_SONOS` / `HOMEHUB_STREAM_DELAY_KEF` (Go durations) space
 out the start commands to line up buffers. All optional.
+
+#### Play history
+
+`GET /api/media/history?room=sonos:abc&limit=8` answers with what that room has
+been asked to play, newest first and de-duplicated by URI. `room` is the
+bridge-qualified destination — `sonos:<id>`, `kef:<id>`, `zone:<id>`.
+
+```json
+{
+  "plays": [
+    {
+      "provider": "spotify",
+      "kind": "album",
+      "uri": "spotify:album:…",
+      "title": "Kaos",
+      "sub": "Bo Kaspers Orkester",
+      "art_uri": "https://…",
+      "room_name": "Kitchen",
+      "at": "2026-08-07T18:12:04Z"
+    }
+  ],
+  "household": false
+}
+```
+
+`household` is true when the room has no history of its own and the answer is
+every room's merged — surfaces must label the two differently rather than
+implying a room played something it didn't. A `provider` of `sonos` is a
+household favorite and is replayed through `/api/sonos/{id}/favorites/play`;
+anything else goes back through the play endpoint it came from.
+
+This is HomeHub's own memory, not Spotify's: the account's history is one list
+for the whole household and cannot say what a given room plays. It is recorded
+when a play succeeds, kept per room, and dropped when the speaker or zone is
+deleted.
+
+### Announcements
+
+Calling the house: a chime, and — when a voice service is configured — the
+words after it. Sent to every reachable Sonos coordinator at once, each room's
+transport snapshotted before and restored after.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/announce` | Where an announcement would land, and whether it would be spoken |
+| POST | `/api/announce` | `{"text": "Dinner's ready"}` — announce it |
+
+`GET` answers `{"available": bool, "rooms": [...], "voice": bool, "max_text": 200}`.
+`voice` is false when no text-to-speech endpoint is configured, in which case
+every announcement is the chime alone — clients should say so rather than
+taking a sentence nobody will hear.
+
+`POST` answers **202** once every room has accepted the clip:
+
+```json
+{
+  "rooms": ["Kitchen", "Living Room"],
+  "unreachable": ["Bedroom"],
+  "spoken": true,
+  "duration_ms": 4400
+}
+```
+
+The rooms are put back — transport URI, metadata, queue position, elapsed time
+and group volume — `duration_ms` after the response, in the background, because
+a wall panel that blocks for six seconds on a tap reads as broken. A room whose
+snapshot could not be read is never interrupted at all: interrupting a room
+that cannot be restored is the one thing this must not do. KEF speakers are
+excluded for the same reason — their API cannot report what they were playing.
+
+`GET /announce/{id}.wav` serves the clip to the speakers. Outside `/api` and
+unauthenticated, exactly like the audio stream and for the same reason, guarded
+by an unguessable id that expires a couple of minutes after it is minted.
+
+Environment (all optional): `HOMEHUB_TTS_URL` points at an OpenAI-shaped
+`/audio/speech` endpoint — several local servers implement it — with
+`HOMEHUB_TTS_MODEL`, `HOMEHUB_TTS_VOICE` and `HOMEHUB_TTS_KEY` alongside it.
+HomeHub asks for `wav`, since that is the one format it can join to the chime
+without a decoder. With none of this set, announcements are the chime.
 
 ## Error Format
 

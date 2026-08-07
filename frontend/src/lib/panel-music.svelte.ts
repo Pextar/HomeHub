@@ -1274,16 +1274,17 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
             () => api.spotifySetSaved(uri, next),
             next ? "Couldn't save that song" : "Couldn't remove that song",
         ).then(() => {
-            if (busy["save:" + uri] === false && featured?.trackURI === uri) {
-                // run() has already toasted a failure; re-read so the heart
-                // tells the truth rather than what was hoped for.
-                void api
-                    .spotifySaved(uri)
-                    .then((r) => {
-                        if (featured?.trackURI === uri) saved = r.saved;
-                    })
-                    .catch(() => {});
-            }
+            // Then re-read, because the optimistic flip above is a guess
+            // until Spotify agrees — and a refused write (an older grant,
+            // a dropped connection) has already been toasted by run(),
+            // which must not leave a heart claiming otherwise.
+            if (featured?.trackURI !== uri) return;
+            void api
+                .spotifySaved(uri)
+                .then((r) => {
+                    if (featured?.trackURI === uri) saved = r.saved;
+                })
+                .catch(() => {});
         });
     }
 
@@ -1310,14 +1311,19 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
                 const items = await api.spotifySimilar(artist, 8);
                 if (!items.length) throw new Error(`Nothing else by ${artist} came back`);
                 if (s.kind === "sonos") {
-                    // In order, each after the last, so the run plays as a
-                    // set rather than in reverse.
-                    for (const [i, item] of items.entries()) {
+                    // Backwards, every one of them "next". Sonos resolves
+                    // "play next" against wherever the queue is *now*, so
+                    // each insert lands directly after the current track and
+                    // pushes the previous one down: adding them in reverse
+                    // is what makes the run come out in order, contiguous,
+                    // and immediately after what is playing rather than
+                    // scattered behind whatever was already queued.
+                    for (const item of [...items].reverse()) {
                         await api.sonosQueueAdd(s.id, {
                             service: "Spotify",
                             uri: item.uri,
                             title: item.name,
-                            next: i === 0,
+                            next: true,
                         });
                     }
                     await loadQueue(s.id);
@@ -1349,14 +1355,19 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
         null,
     );
 
-    void api
-        .announceStatus()
-        .then((st) => {
-            announce = st;
-        })
-        .catch(() => {
-            announce = null;
-        });
+    // Not on the kid surface: announcing is a household action and the
+    // endpoint is admin-only, so asking would be one guaranteed 403 on
+    // every load of a screen that has no control to draw with the answer.
+    if (!opts.sonosOnly) {
+        void api
+            .announceStatus()
+            .then((st) => {
+                announce = st;
+            })
+            .catch(() => {
+                announce = null;
+            });
+    }
 
     function sendAnnouncement(text: string) {
         void run(
