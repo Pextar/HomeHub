@@ -185,7 +185,8 @@ publishes `ON` to confirm the device reacts.
 The panel can call the house — a chime in every Sonos room, and, if you give
 it a voice, the words after it. **The chime needs no setup at all**: it is
 synthesised by the controller, so "Announce" works the moment you have
-speakers. Everything below is about the words.
+speakers, and a household that is happy with a doorbell for dinner can stop
+reading here. Everything below is about the words.
 
 HomeHub asks a text-to-speech service over HTTP and expects a **16-bit PCM
 WAV** back — the one format that needs no decoder and can be joined to the
@@ -205,6 +206,12 @@ OpenAI-compatible servers mostly don't. Piper's repository was archived in
 October 2025, but the package is still published and is still the best
 offline option for these languages.
 
+The package is the engine only — it ships the phoneme data but no voice — so
+there is **one model to fetch, once**: about 60 MB per medium-quality voice,
+pulled from the `rhasspy/piper-voices` repository on Hugging Face by the
+command below. Nothing to hunt for by hand, and nothing further after that:
+the voice lives on the Pi and synthesis is offline from then on.
+
 ```bash
 sudo apt install -y python3-venv
 python3 -m venv ~/piper && ~/piper/bin/pip install piper-tts
@@ -216,6 +223,10 @@ cd ~/piper && ~/piper/bin/python -m piper.download_voices sv_SE-alma-medium
 # Serve it. Piper's own HTTP server answers with WAV, which is what we want.
 ~/piper/bin/python -m piper.http_server -m sv_SE-alma-medium --port 5000
 ```
+
+> Already running Home Assistant's Piper add-on? The voices it downloaded are
+> `.onnx` files on disk, and this server will use them: point it at that
+> directory with `--data-dir` instead of downloading a second copy.
 
 Then add to the controller's `.env` and restart it:
 
@@ -249,8 +260,9 @@ sudo systemctl daemon-reload && sudo systemctl enable --now piper
 
 #### Alternative: an OpenAI-shaped server
 
-Better-sounding English, at the cost of a container and more CPU. All of
-these serve `/v1/audio/speech` and support `response_format: wav`:
+Better-sounding English, at the cost of a container and more CPU — and no
+model to fetch, since the image carries one (which is why it is ~5 GB). All
+of these serve `/v1/audio/speech` and support `response_format: wav`:
 
 ```bash
 # Kokoro-FastAPI — 82M-parameter model, CPU-only image, ~50 voices.
