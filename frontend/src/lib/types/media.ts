@@ -186,12 +186,18 @@ export interface MediaHistory {
   household: boolean;
 }
 
+/** One room an announcement could be sent to. */
+export interface AnnounceRoom {
+  id: string;
+  name: string;
+}
+
 /** What the announcement control needs before anyone taps it. */
 export interface AnnounceStatus {
   /** False when no speaker is answering — there is nowhere to announce to. */
   available: boolean;
   /** The rooms that would hear it, in the order they will be addressed. */
-  rooms: string[];
+  rooms: AnnounceRoom[];
   /** False when no voice service is configured: a chime, and no words. */
   voice: boolean;
   max_text: number;

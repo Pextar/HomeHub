@@ -44,6 +44,24 @@
     let text = $state("");
     let box = $state<HTMLInputElement | null>(null);
 
+    /** Which rooms to call. Empty means every reachable room — the default,
+     *  and the common case: most calls are meant for the whole house, so
+     *  picking a subset is an opt-in narrowing, not a required step. */
+    let picked = $state<Set<string>>(new Set());
+
+    function toggleRoom(id: string) {
+        if (busy) return;
+        const next = new Set(picked);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        picked = next;
+    }
+
+    const allRoomNames = $derived(status?.rooms.map((r) => r.name).join(" · ") ?? "");
+    const pickedNames = $derived(
+        status?.rooms.filter((r) => picked.has(r.id)).map((r) => r.name),
+    );
+
     /** The confirmation, for as long as it is worth showing. A wall has
      *  nobody to dismiss a card, so this expires on its own — and the strip
      *  closes with it, because the job is done. */
@@ -65,7 +83,7 @@
 
     function say(what: string) {
         if (busy) return;
-        music.sendAnnouncement(what);
+        music.sendAnnouncement(what, picked.size ? [...picked] : undefined);
         text = "";
     }
 
@@ -92,21 +110,45 @@
                     >{/if}
             </p>
         {:else if status?.rooms.length}
-            <p class="a-where">Heard in {status.rooms.join(" · ")}</p>
+            <p class="a-where">
+                Heard in {pickedNames?.length ? pickedNames.join(" · ") : allRoomNames}
+            </p>
         {/if}
         <button class="a-x" onclick={onClose} aria-label="Close announce">
             <Icon name="close" size={16} />
         </button>
     </header>
 
+    {#snippet roomPicker()}
+        {#if status && status.rooms.length > 1}
+            <div class="a-row a-rooms" role="group" aria-label="Rooms to announce to">
+                {#each status.rooms as r (r.id)}
+                    <button
+                        type="button"
+                        class="a-room"
+                        class:picked={picked.has(r.id)}
+                        disabled={busy}
+                        aria-pressed={picked.has(r.id)}
+                        onclick={() => toggleRoom(r.id)}
+                    >
+                        {r.name}
+                    </button>
+                {/each}
+            </div>
+        {/if}
+    {/snippet}
+
     {#if sent}
         <p class="a-said">“{sent.text || "Chime"}”</p>
     {:else if !status?.available}
         <p class="a-note">No speaker is answering, so there is nowhere to announce.</p>
     {:else if !voice}
+        {@render roomPicker()}
         <div class="a-row">
             <button class="a-preset wide" disabled={busy} onclick={() => say("")}>
-                <Icon name="megaphone" size={18} /><span>Chime every room</span>
+                <Icon name="megaphone" size={18} /><span
+                    >{picked.size ? "Chime selected" : "Chime every room"}</span
+                >
             </button>
         </div>
         <p class="a-note">
@@ -114,6 +156,7 @@
             full app.
         </p>
     {:else}
+        {@render roomPicker()}
         <div class="a-row">
             {#each PRESETS as p (p)}
                 <button class="a-preset" disabled={busy} onclick={() => say(p)}>{p}</button>
@@ -221,6 +264,44 @@
         font-weight: 500;
         cursor: pointer;
         transition: transform var(--t-fast);
+    }
+
+    /* Room filters, one step smaller than the preset row below them — a
+       narrowing before the sentence, not the action itself. Unpicked means
+       "every room" (the default), so nothing here starts selected. */
+    .a-rooms {
+        padding-bottom: 0;
+    }
+    .a-room {
+        flex: none;
+        min-height: 44px;
+        padding: 0 var(--space-4);
+        border: 1px solid var(--border);
+        border-radius: var(--r-pill);
+        background: var(--card-2);
+        color: var(--text-mute);
+        font-family: inherit;
+        font-size: 13.5px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: transform var(--t-fast), background var(--t-fast), color var(--t-fast),
+            border-color var(--t-fast);
+    }
+    .a-room.picked {
+        background: var(--on-soft);
+        color: var(--on);
+        border-color: transparent;
+    }
+    .a-room:active {
+        transform: scale(0.96);
+        transition-duration: 80ms;
+    }
+    .a-room:disabled {
+        opacity: 0.55;
+    }
+    .a-room:focus-visible {
+        box-shadow: var(--focus-ring);
+        outline: none;
     }
     .a-preset.wide {
         display: inline-flex;

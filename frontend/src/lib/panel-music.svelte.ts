@@ -237,7 +237,7 @@ export interface PanelMusicStore {
     /** Where an announcement would go and whether it would be spoken.
      *  Null while the read is out or when the server has no answer. */
     readonly announce: AnnounceStatus | null;
-    sendAnnouncement(text: string): void;
+    sendAnnouncement(text: string, rooms?: string[]): void;
     readonly lastAnnounce: { text: string; rooms: string[]; spoken: boolean; at: number } | null;
 
     // ── Grouping (Sonos-native only) ──
@@ -1369,11 +1369,11 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
             });
     }
 
-    function sendAnnouncement(text: string) {
+    function sendAnnouncement(text: string, rooms?: string[]) {
         void run(
             "announce",
             async () => {
-                const res = await api.announce(text);
+                const res = await api.announce(text, rooms);
                 lastAnnounce = {
                     text,
                     rooms: res.rooms,
