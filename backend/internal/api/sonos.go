@@ -256,6 +256,7 @@ func (s *Server) sonosDeleteSpeaker(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.sonosEvents().Nudge() // release its subscriptions
+	s.pruneHistory()        // and its shelf, which now plays to nothing
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -517,6 +518,38 @@ func (s *Server) sonosQueueAdd(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, added)
 }
 
+// sonosQueueMove handles PUT /api/sonos/{id}/queue/{track} with {"to": 4} —
+// the track moves to that 1-based position, both numbers read off the queue
+// as the caller currently sees it.
+func (s *Server) sonosQueueMove(w http.ResponseWriter, r *http.Request) {
+	sp, ok := s.sonosSpeaker(w, r)
+	if !ok {
+		return
+	}
+	track, err := strconv.Atoi(mux.Vars(r)["track"])
+	if err != nil || track < 1 {
+		writeError(w, http.StatusBadRequest, "track must be a positive number")
+		return
+	}
+	var body struct {
+		To int `json:"to"`
+	}
+	if !decodeBody(w, r, &body) {
+		return
+	}
+	if body.To < 1 {
+		writeError(w, http.StatusBadRequest, "to must be a positive number")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), sonos.DefaultTimeout)
+	defer cancel()
+	if err := sonos.MoveInQueue(ctx, sp.IP, track, body.To); err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // sonosQueueRemove handles DELETE /api/sonos/{id}/queue/{track}.
 func (s *Server) sonosQueueRemove(w http.ResponseWriter, r *http.Request) {
 	sp, ok := s.sonosSpeaker(w, r)
@@ -634,6 +667,17 @@ func (s *Server) sonosPlayFavorite(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
+	// A favorite is filed under its own URI, not the Spotify one it may
+	// wrap: it is played back through PlayFavorite, so that is the handle
+	// a shelf tile has to carry to be able to start it again.
+	s.recordPlay("sonos:"+sp.ID, sp.Name, store.MediaPlay{
+		Provider: "sonos",
+		Kind:     "station",
+		URI:      fav.URI,
+		Title:    fav.Title,
+		Sub:      fav.Service,
+		ArtURI:   fav.ArtURI,
+	})
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -652,6 +696,7 @@ func (s *Server) sonosPlayItem(w http.ResponseWriter, r *http.Request) {
 		Service string `json:"service"`
 		URI     string `json:"uri"`
 		Title   string `json:"title"`
+		playSuffix
 	}
 	if !decodeBody(w, r, &body) {
 		return
@@ -683,6 +728,14 @@ func (s *Server) sonosPlayItem(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
+	s.recordPlay("sonos:"+sp.ID, sp.Name, store.MediaPlay{
+		Provider: "spotify",
+		Kind:     body.Kind,
+		URI:      body.URI,
+		Title:    body.Title,
+		Sub:      body.Sub,
+		ArtURI:   body.ArtURI,
+	})
 	w.WriteHeader(http.StatusNoContent)
 }
 

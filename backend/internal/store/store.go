@@ -63,14 +63,17 @@ type Store struct {
 	Zones map[string]*Zone
 	// Readings is a rolling window of recent values per sensor id.
 	// Trimmed to ReadingsHistorySize on each append.
-	Readings  map[string][]SensorReading
-	Users     map[string]*User
-	Settings  *Settings
-	Activity  *ActivityLog
-	Discovery *Discovery
-	DataDir   string
-	RF        RFSender
-	Light     LightController
+	Readings map[string][]SensorReading
+	// MediaHistory is what each room has been asked to play, newest first,
+	// keyed by the media layer's destination key. See history.go.
+	MediaHistory map[string][]MediaPlay
+	Users        map[string]*User
+	Settings     *Settings
+	Activity     *ActivityLog
+	Discovery    *Discovery
+	DataDir      string
+	RF           RFSender
+	Light        LightController
 
 	// OnChange, if set, is invoked whenever a socket's state changes via
 	// ApplyState (manual control, scheduler, or timer). It must be cheap and
@@ -134,6 +137,7 @@ const (
 	sonosFile       = "sonos.json"
 	kefFile         = "kef.json"
 	zonesFile       = "zones.json"
+	historyFile     = "media_history.json"
 
 	// ReadingsHistorySize caps how many readings are kept per sensor.
 	// At one sample per minute that's ~16 hours; at one per five minutes
@@ -145,24 +149,25 @@ const (
 // previously persisted data into it.
 func New(dataDir string, rf RFSender) *Store {
 	return &Store{
-		Sockets:     make(map[string]*Socket),
-		Schedules:   make(map[string]*Schedule),
-		Groups:      make(map[string]*Group),
-		Scenes:      make(map[string]*Scene),
-		Timers:      make(map[string]*Timer),
-		Automations: make(map[string]*Automation),
-		Sensors:     make(map[string]*Sensor),
-		Rooms:       make(map[string]*Room),
-		Sonos:       make(map[string]*SonosSpeaker),
-		KEF:         make(map[string]*KEFSpeaker),
-		Zones:       make(map[string]*Zone),
-		Readings:    make(map[string][]SensorReading),
-		Users:       make(map[string]*User),
-		Settings:    &Settings{},
-		Activity:    NewActivityLog(200),
-		Discovery:   &Discovery{Candidates: make(map[string]*DiscoveryCandidate)},
-		DataDir:     dataDir,
-		RF:          rf,
+		Sockets:      make(map[string]*Socket),
+		Schedules:    make(map[string]*Schedule),
+		Groups:       make(map[string]*Group),
+		Scenes:       make(map[string]*Scene),
+		Timers:       make(map[string]*Timer),
+		Automations:  make(map[string]*Automation),
+		Sensors:      make(map[string]*Sensor),
+		Rooms:        make(map[string]*Room),
+		Sonos:        make(map[string]*SonosSpeaker),
+		KEF:          make(map[string]*KEFSpeaker),
+		Zones:        make(map[string]*Zone),
+		Readings:     make(map[string][]SensorReading),
+		MediaHistory: make(map[string][]MediaPlay),
+		Users:        make(map[string]*User),
+		Settings:     &Settings{},
+		Activity:     NewActivityLog(200),
+		Discovery:    &Discovery{Candidates: make(map[string]*DiscoveryCandidate)},
+		DataDir:      dataDir,
+		RF:           rf,
 	}
 }
 

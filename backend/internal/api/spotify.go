@@ -331,12 +331,62 @@ func (s *Server) spotifyContext(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, det)
 }
 
+// spotifySaved handles GET /api/spotify/saved?uri=spotify:track:… — whether
+// the track is in the account's library. Answered even on a login too old to
+// save with; the write below is the half that refuses.
+func (s *Server) spotifySaved(w http.ResponseWriter, r *http.Request) {
+	if !s.requireSpotify(w) {
+		return
+	}
+	uri := strings.TrimSpace(r.URL.Query().Get("uri"))
+	if uri == "" {
+		writeError(w, http.StatusBadRequest, "uri is required")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), spotifyTimeout)
+	defer cancel()
+	saved, err := s.spotifyAccount(r).IsSaved(ctx, uri)
+	if err != nil {
+		writeError(w, spotifyErrStatus(err), err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"saved": saved})
+}
+
+// spotifySetSaved handles PUT /api/spotify/saved with
+// {"uri": "spotify:track:…", "saved": true} — adds or removes one track from
+// the account's own library.
+func (s *Server) spotifySetSaved(w http.ResponseWriter, r *http.Request) {
+	if !s.requireSpotify(w) {
+		return
+	}
+	var body struct {
+		URI   string `json:"uri"`
+		Saved bool   `json:"saved"`
+	}
+	if !decodeBody(w, r, &body) {
+		return
+	}
+	if strings.TrimSpace(body.URI) == "" {
+		writeError(w, http.StatusBadRequest, "uri is required")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), spotifyTimeout)
+	defer cancel()
+	if err := s.spotifyAccount(r).SetSaved(ctx, strings.TrimSpace(body.URI), body.Saved); err != nil {
+		writeError(w, spotifyErrStatus(err), err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // spotifyErrStatus maps the two things the user can act on — no account
 // linked, and an account linked before HomeHub asked for the scope this
 // call needs — to 409 so the frontend can prompt for a (re)connect.
 // Everything else is the service's problem, not theirs: bad gateway.
 func spotifyErrStatus(err error) int {
-	if errors.Is(err, spotify.ErrPlaybackScope) || errors.Is(err, spotify.ErrListeningScope) {
+	if errors.Is(err, spotify.ErrPlaybackScope) || errors.Is(err, spotify.ErrListeningScope) ||
+		errors.Is(err, spotify.ErrLibraryScope) {
 		return http.StatusConflict
 	}
 	if strings.Contains(err.Error(), "not connected") {

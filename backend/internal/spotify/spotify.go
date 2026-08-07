@@ -54,12 +54,19 @@ const (
 	// typing. Search itself needs no scope.
 	scopes = "user-read-private playlist-read-private user-library-read " +
 		scopeReadPlayback + " " + scopeModifyPlayback + " " +
-		scopeTop + " " + scopeRecent
+		scopeTop + " " + scopeRecent + " " + scopeLibraryWrite
 
 	scopeReadPlayback   = "user-read-playback-state"
 	scopeModifyPlayback = "user-modify-playback-state"
 	scopeTop            = "user-top-read"
 	scopeRecent         = "user-read-recently-played"
+	// scopeLibraryWrite is what saving a track to the account's own library
+	// needs. Reading the library has never needed asking for separately —
+	// user-library-read has been in the grant from the start — so a login
+	// made before this scope existed can still say whether a track is
+	// saved, and only the saving itself is refused. That asymmetry is why
+	// Status reports the write half on its own.
+	scopeLibraryWrite = "user-library-modify"
 )
 
 // ErrNotConnected is returned by every call that needs an account when none
@@ -79,6 +86,12 @@ var ErrPlaybackScope = errors.New("spotify: reconnect Spotify to let HomeHub sta
 // shelves it feeds are a convenience rather than a capability, every caller
 // treats this as "no shelf", never as a failure.
 var ErrListeningScope = errors.New("spotify: reconnect Spotify to see what you've been playing — this login was granted before that permission existed")
+
+// ErrLibraryScope is the same story again for saving: an older login can
+// read the library and so can still answer "is this one saved", and only
+// the write is refused. Surfaces that offer saving hide the control when
+// Status says the login can't do it, rather than offering a tap that fails.
+var ErrLibraryScope = errors.New("spotify: reconnect Spotify to save tracks to your library — this login was granted before that permission existed")
 
 // accountState is one connected Spotify account: its tokens, the "connected
 // as" label, and the two facts about the grant worth remembering.
@@ -219,6 +232,12 @@ func (c *Client) Context(ctx context.Context, uri string) (*ContextDetail, error
 func (c *Client) MyPlaylists(ctx context.Context, limit int) ([]Item, error) {
 	return c.For("").MyPlaylists(ctx, limit)
 }
+func (c *Client) IsSaved(ctx context.Context, uri string) (bool, error) {
+	return c.For("").IsSaved(ctx, uri)
+}
+func (c *Client) SetSaved(ctx context.Context, uri string, saved bool) error {
+	return c.For("").SetSaved(ctx, uri, saved)
+}
 func (c *Client) Devices(ctx context.Context) ([]Device, error) {
 	return c.For("").Devices(ctx)
 }
@@ -297,6 +316,10 @@ type Status struct {
 	// has been playing — the idle shelves. False on a login that predates
 	// those scopes, in which case the shelves are absent rather than empty.
 	Listening bool `json:"listening"`
+	// Library reports whether this login may *write* to the account's saved
+	// tracks. Reading them needs no separate grant, so a false here means
+	// the heart is hidden while "is this saved" still answers.
+	Library bool `json:"library"`
 }
 
 // Status returns the account's connection state. Configured describes the
@@ -311,6 +334,7 @@ func (a *Account) Status() Status {
 		s.DisplayName = st.DisplayName
 		s.Playback = st.RefreshToken != "" && grantsPlayback(st.Scope)
 		s.Listening = st.RefreshToken != "" && grantsListening(st.Scope)
+		s.Library = st.RefreshToken != "" && grants(st.Scope, scopeLibraryWrite)
 	}
 	return s
 }
@@ -1402,6 +1426,94 @@ func (a *Account) TopTracks(ctx context.Context, limit int) ([]Item, error) {
 		out = append(out, trackItem(t))
 	}
 	return out, nil
+}
+
+// trackIDFromURI pulls the bare id out of a canonical track URI. Saving is
+// the one place a caller hands us a URI and Spotify wants an id.
+func trackIDFromURI(uri string) (string, error) {
+	const prefix = "spotify:track:"
+	id := strings.TrimPrefix(uri, prefix)
+	if id == uri || id == "" {
+		return "", fmt.Errorf("spotify: %q is not a track URI", uri)
+	}
+	return id, nil
+}
+
+// IsSaved reports whether the track is in the account's own library. Needs
+// no scope beyond the one every login has had, so it answers even for a
+// grant too old to save with — which is the whole reason the heart can be
+// drawn as filled on such an account and simply refuse to change.
+func (a *Account) IsSaved(ctx context.Context, uri string) (bool, error) {
+	id, err := trackIDFromURI(uri)
+	if err != nil {
+		return false, err
+	}
+	var out []bool
+	if err := a.apiGet(ctx, "/me/tracks/contains", url.Values{"ids": {id}}, &out); err != nil {
+		return false, err
+	}
+	return len(out) > 0 && out[0], nil
+}
+
+// SetSaved adds or removes one track from the account's library.
+func (a *Account) SetSaved(ctx context.Context, uri string, saved bool) error {
+	id, err := trackIDFromURI(uri)
+	if err != nil {
+		return err
+	}
+	if err := a.requireLibrary(); err != nil {
+		return err
+	}
+	method := http.MethodDelete
+	if saved {
+		method = http.MethodPut
+	}
+	return a.libraryWrite(ctx, method, url.Values{"ids": {id}})
+}
+
+// libraryWrite sends one /me/tracks mutation. It stays out of apiPut because
+// that method's error mapping is the player's — "wake the speaker", "needs
+// Premium" — and none of those sentences is true of a library write.
+func (a *Account) libraryWrite(ctx context.Context, method string, q url.Values) error {
+	tok, err := a.accessToken(ctx)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, method, apiBase+"/me/tracks?"+q.Encode(), nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+tok)
+	resp, err := a.c.httpClient().Do(req)
+	if err != nil {
+		return fmt.Errorf("spotify: %w", err)
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode == http.StatusForbidden {
+		// A grant that was widened after this build cached its scope
+		// string still lands here; say the one thing that fixes it.
+		return ErrLibraryScope
+	}
+	if resp.StatusCode >= 400 {
+		return apiError(resp.StatusCode, raw)
+	}
+	return nil
+}
+
+// requireLibrary fails early when the stored grant predates the library
+// write scope, so the caller gets "reconnect" rather than Spotify's 403.
+func (a *Account) requireLibrary() error {
+	a.c.mu.Lock()
+	defer a.c.mu.Unlock()
+	st := a.peek()
+	if st == nil || st.RefreshToken == "" {
+		return ErrNotConnected
+	}
+	if !grants(st.Scope, scopeLibraryWrite) {
+		return ErrLibraryScope
+	}
+	return nil
 }
 
 // requireListening fails early when the stored grant predates the listening

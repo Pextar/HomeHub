@@ -192,6 +192,7 @@ func (s *Server) registerSonosRoutes(api *mux.Router) {
 	api.HandleFunc("/sonos/{id}/queue", s.requireAdminOrKid(s.sonosQueueAdd)).Methods("POST")
 	api.HandleFunc("/sonos/{id}/queue", s.requireAdminOrKid(s.sonosQueueClear)).Methods("DELETE")
 	api.HandleFunc("/sonos/{id}/queue/{track}", s.requireAdminOrKid(s.sonosQueueRemove)).Methods("DELETE")
+	api.HandleFunc("/sonos/{id}/queue/{track}", s.requireAdminOrKid(s.sonosQueueMove)).Methods("PUT")
 }
 
 // registerKEFRoutes mounts local HTTP control (transport, volume, source, DSP
@@ -236,6 +237,9 @@ func (s *Server) registerMediaRoutes(api *mux.Router) {
 	api.HandleFunc("/media/zones/{id}", s.requireAdmin(s.mediaDeleteZone)).Methods("DELETE")
 	api.HandleFunc("/media/zones/{id}/routes", s.requireAdmin(s.mediaZoneRoutes)).Methods("GET")
 	api.HandleFunc("/media/zones/{id}/play", s.requireAdmin(s.mediaZonePlay)).Methods("POST")
+	api.HandleFunc("/media/history", s.requireAdminOrKid(s.mediaHistory)).Methods("GET")
+	api.HandleFunc("/announce", s.requireAdmin(s.announceStatus)).Methods("GET")
+	api.HandleFunc("/announce", s.requireAdmin(s.announceSend)).Methods("POST")
 	api.HandleFunc("/media/zones/{id}/stop", s.requireAdmin(s.mediaZoneStop)).Methods("POST")
 	api.HandleFunc("/media/zones/{id}/resume",
 		s.requireAdmin(s.mediaZoneTransport(media.TransportPlay))).Methods("POST")
@@ -266,6 +270,8 @@ func (s *Server) registerSpotifyRoutes(api *mux.Router) {
 	api.HandleFunc("/spotify/listening", s.requireAdminOrKid(s.spotifyListening)).Methods("GET")
 	api.HandleFunc("/spotify/artist", s.requireAdminOrKid(s.spotifyArtist)).Methods("GET")
 	api.HandleFunc("/spotify/context", s.requireAdminOrKid(s.spotifyContext)).Methods("GET")
+	api.HandleFunc("/spotify/saved", s.requireAdminOrKid(s.spotifySaved)).Methods("GET")
+	api.HandleFunc("/spotify/saved", s.requireAdminOrKid(s.spotifySetSaved)).Methods("PUT")
 }
 
 func (s *Server) registerMatterRoutes(api *mux.Router) {
@@ -332,4 +338,10 @@ func (s *Server) registerDeviceCallbackRoutes(r *mux.Router) {
 	// invalid the moment it ends. GET and HEAD only, since speakers probe with
 	// HEAD before committing to play.
 	r.PathPrefix(streamPath+"/").Handler(s.streamHandler()).Methods("GET", "HEAD")
+
+	// The announcement clip a speaker fetches when the house is being
+	// called. Same posture as the stream: unguarded by the session because
+	// the client is a speaker, guarded instead by an unguessable id that
+	// stops mattering a couple of minutes after it is minted.
+	r.PathPrefix(announcePath+"/").Handler(s.announceHandler()).Methods("GET", "HEAD")
 }

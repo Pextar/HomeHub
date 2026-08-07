@@ -303,6 +303,44 @@ func RemoveFromQueue(ctx context.Context, ip string, track int) error {
 	return err
 }
 
+// MoveInQueue moves the 1-based track `from` to the 1-based position `to`,
+// both stated in the queue as it looks *now* — which is how a list reads to
+// the person moving a row down it, and not how Sonos takes the instruction.
+//
+// ReorderTracksInQueue takes an insertion point measured against the queue
+// with the moved block still in place, so moving track 5 to position 7 means
+// "insert before 8": the two tracks it passes have not shifted up yet at the
+// moment the insertion point is read. Moving up needs no such adjustment,
+// since nothing below the destination has moved. Getting this wrong is
+// off-by-one in one direction only, which is exactly the bug that survives a
+// quick try in the living room.
+func MoveInQueue(ctx context.Context, ip string, from, to int) error {
+	if from < 1 || to < 1 {
+		return fmt.Errorf("sonos: track numbers must be 1 or greater, got %d and %d", from, to)
+	}
+	if from == to {
+		return nil
+	}
+	_, err := soapCall(ctx, ip, avTransport, "ReorderTracksInQueue", []arg{
+		{"InstanceID", instance0},
+		{"StartingIndex", strconv.Itoa(from)},
+		{"NumberOfTracks", "1"},
+		{"InsertBefore", strconv.Itoa(queueInsertBefore(from, to))},
+		{"UpdateID", "0"},
+	})
+	return err
+}
+
+// queueInsertBefore converts "put track `from` at position `to`" into the
+// insertion point ReorderTracksInQueue wants. See MoveInQueue for why the
+// two differ in one direction only.
+func queueInsertBefore(from, to int) int {
+	if to > from {
+		return to + 1
+	}
+	return to
+}
+
 // ClearQueue empties the group queue. Playback stops with it.
 func ClearQueue(ctx context.Context, ip string) error {
 	_, err := soapCall(ctx, ip, avTransport, "RemoveAllTracksFromQueue",

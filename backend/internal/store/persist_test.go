@@ -80,12 +80,15 @@ func TestCollectionTableIsWellFormed(t *testing.T) {
 	}
 }
 
-// Readings are the one collection Save skips; everything else is written.
-// Stated as a test so flipping the flag by accident is caught.
-func TestOnlyReadingsAreExcludedFromFullSave(t *testing.T) {
+// Save skips exactly the collections that have a saver of their own, because
+// each is written on a path where rewriting the whole store would be absurd:
+// readings arrive several times a second from a chatty sensor, and a play is
+// recorded on every tap of a shelf. Stated as a test so flipping the flag by
+// accident is caught, and so adding a third exception is a deliberate edit.
+func TestOnlyOwnSaverCollectionsAreExcludedFromFullSave(t *testing.T) {
+	ownSaver := map[string]bool{"readings": true, "media history": true}
 	for _, c := range collections {
-		want := c.label != "readings"
-		if c.inFullSave != want {
+		if want := !ownSaver[c.label]; c.inFullSave != want {
 			t.Errorf("collection %q inFullSave = %v, want %v", c.label, c.inFullSave, want)
 		}
 	}
