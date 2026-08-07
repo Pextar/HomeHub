@@ -379,7 +379,10 @@ taking a sentence nobody will hear.
 
 The rooms are put back — transport URI, metadata, queue position, elapsed time
 and group volume — `duration_ms` after the response, in the background, because
-a wall panel that blocks for six seconds on a tap reads as broken. A room whose
+a wall panel that blocks for six seconds on a tap reads as broken. Only one
+announcement runs at a time, household-wide: a second one starting mid-clip
+would snapshot the clip itself as what the rooms were playing. While one is
+audible, `POST` answers **409**. A room whose
 snapshot could not be read is never interrupted at all: interrupting a room
 that cannot be restored is the one thing this must not do. KEF speakers are
 excluded for the same reason — their API cannot report what they were playing.

@@ -129,6 +129,10 @@ type Server struct {
 	// seconds of audio someone asked the house to hear.
 	announceMu sync.Mutex
 	announcer  *announce.Host
+	// announcing is held for as long as an announcement is audible, not
+	// just for as long as its request is: a second one starting mid-clip
+	// would snapshot the clip as what the rooms were playing.
+	announcing bool
 }
 
 // sonosAcctEntry is one cached service-account resolution.

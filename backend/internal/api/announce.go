@@ -82,6 +82,24 @@ func (s *Server) announceHandler() http.Handler {
 	})
 }
 
+// announceBegin claims the household for one announcement, reporting false
+// when another is still playing. announceEnd releases it.
+func (s *Server) announceBegin() bool {
+	s.announceMu.Lock()
+	defer s.announceMu.Unlock()
+	if s.announcing {
+		return false
+	}
+	s.announcing = true
+	return true
+}
+
+func (s *Server) announceEnd() {
+	s.announceMu.Lock()
+	s.announcing = false
+	s.announceMu.Unlock()
+}
+
 // announceStatus handles GET /api/announce — what the surface needs to draw
 // the control before anyone taps it: whether there is anywhere to announce
 // to, and whether it will be spoken or only chimed.
@@ -177,6 +195,25 @@ func (s *Server) announceSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// One at a time, household-wide. A second announcement that starts
+	// while the first is still playing would snapshot the *clip* as what
+	// the room was doing — and then "restore" every room to a dead clip
+	// URL at announcement volume, with the music gone for good. The busy
+	// state on the panel's button covers the request, which is over in a
+	// second; this covers the several seconds of audio after it.
+	if !s.announceBegin() {
+		writeError(w, http.StatusConflict, "the house is already being announced to — give it a moment")
+		return
+	}
+	// Released here only on the paths that never reached a speaker; once
+	// rooms are playing it belongs to the restore goroutine.
+	release := s.announceEnd
+	defer func() {
+		if release != nil {
+			release()
+		}
+	}()
+
 	targets := s.announceTargets()
 	if len(targets) == 0 {
 		writeError(w, http.StatusConflict, "no speaker is answering, so there is nowhere to announce")
@@ -258,7 +295,9 @@ func (s *Server) announceSend(w http.ResponseWriter, r *http.Request) {
 	// request: the caller has its answer, and this must finish even if they
 	// walk away from the panel.
 	wait := clip.Duration() + announceTail
+	release = nil // the restore below owns it now
 	go func() {
+		defer s.announceEnd()
 		time.Sleep(wait)
 		ctx, cancel := context.WithTimeout(context.Background(), announceRestoreBudget)
 		defer cancel()
