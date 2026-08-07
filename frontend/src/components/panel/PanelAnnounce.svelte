@@ -35,8 +35,11 @@
 
     /** The four things a house shouts. Kept here rather than made editable:
      *  a preset list that can be configured from the wall is a settings
-     *  screen on a kiosk, and configuration lives in the full app (§16). */
-    const PRESETS = ["Dinner's ready", "Time to come home", "Bedtime", "Come downstairs"];
+     *  screen on a kiosk, and configuration lives in the full app (§16).
+     *  In Swedish because that's this household's voice (sv_SE-alma-medium,
+     *  see docs/INSTALL.md) — Piper reads whatever text it's given in the
+     *  phonetics of the voice it was started with, it doesn't translate. */
+    const PRESETS = ["Middagen är klar", "Dags att komma hem", "Läggdags", "Kom ner"];
 
     let text = $state("");
     let box = $state<HTMLInputElement | null>(null);
