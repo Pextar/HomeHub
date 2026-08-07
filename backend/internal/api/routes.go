@@ -270,6 +270,8 @@ func (s *Server) registerSpotifyRoutes(api *mux.Router) {
 	api.HandleFunc("/spotify/search", s.requireAdminOrKid(s.spotifySearch)).Methods("GET")
 	api.HandleFunc("/spotify/playlists", s.requireAdminOrKid(s.spotifyPlaylists)).Methods("GET")
 	api.HandleFunc("/spotify/listening", s.requireAdminOrKid(s.spotifyListening)).Methods("GET")
+	api.HandleFunc("/spotify/library", s.requireAdminOrKid(s.spotifyLibrary)).Methods("GET")
+	api.HandleFunc("/spotify/new-releases", s.requireAdminOrKid(s.spotifyNewReleases)).Methods("GET")
 	api.HandleFunc("/spotify/artist", s.requireAdminOrKid(s.spotifyArtist)).Methods("GET")
 	api.HandleFunc("/spotify/context", s.requireAdminOrKid(s.spotifyContext)).Methods("GET")
 	api.HandleFunc("/spotify/similar", s.requireAdminOrKid(s.spotifySimilar)).Methods("GET")

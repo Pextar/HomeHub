@@ -461,15 +461,16 @@ func TestSetSavedSendsTheRightVerb(t *testing.T) {
 	}
 }
 
-// A URI that isn't a track never reaches Spotify: albums and playlists have
-// their own library endpoints, and sending one here would save nothing and
-// report success.
-func TestSavedRejectsNonTrackURIs(t *testing.T) {
+// A URI the library cannot hold never reaches Spotify. Tracks and albums are
+// the two collections it has (see savedPath); following a playlist or an
+// artist is a different API with a different scope, and sending one here
+// would save nothing and report success.
+func TestSavedRejectsURIsTheLibraryCannotHold(t *testing.T) {
 	c := connected(t, scopeLibraryWrite, roundTripFunc(func(*http.Request) *http.Response {
-		t.Error("a non-track URI reached the service")
+		t.Error("an unsavable URI reached the service")
 		return jsonResponse(http.StatusOK, `[]`)
 	}))
-	for _, uri := range []string{"spotify:album:x", "spotify:track:", "", "nonsense"} {
+	for _, uri := range []string{"spotify:playlist:x", "spotify:artist:x", "spotify:track:", "", "nonsense"} {
 		if _, err := c.For("").IsSaved(context.Background(), uri); err == nil {
 			t.Errorf("IsSaved(%q) = nil, want error", uri)
 		}
