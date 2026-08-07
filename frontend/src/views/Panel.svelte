@@ -351,14 +351,14 @@
     .face.listening {
         flex-direction: row;
         align-items: center;
-        gap: clamp(var(--space-6), 5vw, var(--space-9));
+        gap: clamp(var(--space-7), 7vw, 88px);
         text-align: left;
-        max-width: 92vw;
+        max-width: 96vw;
     }
     .l-art {
         flex: none;
-        width: clamp(180px, 42vh, 420px);
-        height: clamp(180px, 42vh, 420px);
+        width: clamp(220px, 58vh, 620px);
+        height: clamp(220px, 58vh, 620px);
         border-radius: var(--r-lg);
         overflow: hidden;
         background: var(--card-2);
@@ -384,37 +384,37 @@
         min-width: 0;
         display: flex;
         flex-direction: column;
-        gap: var(--space-2);
+        gap: var(--space-3);
     }
     /* Still a wall panel: the time is what you glance up for, so it keeps
        its place at the top of the column — one size down from the clock
        face, where it is no longer the subject. */
     .l-clock {
-        font-size: clamp(56px, 9vw, 96px);
+        font-size: clamp(56px, 12vw, 140px);
         font-weight: 500;
         letter-spacing: -0.03em;
         line-height: 1;
     }
     .l-track {
-        font-size: clamp(22px, 2.6vw, 32px);
+        font-size: clamp(24px, 3.6vw, 48px);
         font-weight: 600;
         letter-spacing: -0.02em;
-        max-width: 40vw;
+        max-width: 46vw;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
     }
     .l-sub {
-        font-size: clamp(14px, 1.5vw, 18px);
+        font-size: clamp(15px, 2vw, 24px);
         color: var(--text-mute);
-        max-width: 40vw;
+        max-width: 46vw;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
     }
     .l-status {
-        margin-top: var(--space-2);
-        font-size: 13px;
+        margin-top: var(--space-3);
+        font-size: 15px;
         color: var(--text-dim);
     }
 
@@ -427,15 +427,15 @@
             gap: var(--space-5);
         }
         .l-art {
-            width: min(62vw, 320px);
-            height: min(62vw, 320px);
+            width: min(68vw, 440px);
+            height: min(68vw, 440px);
         }
         .l-meta {
             align-items: center;
         }
         .l-track,
         .l-sub {
-            max-width: 80vw;
+            max-width: 84vw;
         }
     }
     /* Night: the face drops to a murmur — readable across a dark room,
