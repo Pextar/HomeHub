@@ -48,6 +48,23 @@ export interface SpotifyStore {
   /** Connected, but on a grant that can't be asked what it plays — the one
    *  case worth offering a reconnect for, since everything else works. */
   readonly needsListeningScope: boolean;
+
+  // ── The browse shelves (loadBrowse) ──
+  // The rest of the collection, and the one shelf that isn't about this
+  // household at all. Not part of `load()`: the app's Music view has a
+  // search box and a dock and never idles on shelves, so these two reads
+  // belong to the surface that browses — the panel — and are asked for
+  // once, by it.
+  /** Albums the account saved. */
+  readonly savedAlbums: SpotifyItem[];
+  /** The artists it actually listens to. */
+  readonly topArtists: SpotifyItem[];
+  /** What came out lately — the only answer on an evening when nobody
+   *  wants to hear anything they already know. */
+  readonly newReleases: SpotifyItem[];
+  /** Fetch the three above, once per connected session. Each shelf is
+   *  independent: one refused read costs its own shelf and nothing else. */
+  loadBrowse(): Promise<void>;
   query: string;
   kindFilter: SpotifyKind;
 
@@ -140,6 +157,9 @@ export function createSpotify(
     myPlaylists: [] as SpotifyItem[],
     recentTracks: [] as SpotifyItem[],
     topTracks: [] as SpotifyItem[],
+    savedAlbums: [] as SpotifyItem[],
+    topArtists: [] as SpotifyItem[],
+    newReleases: [] as SpotifyItem[],
     setupOpen: false,
     clientId: "",
     saving: false,
@@ -149,6 +169,7 @@ export function createSpotify(
   });
 
   let playlistsLoaded = false;
+  let browseLoaded = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let seq = 0;
   /** The request the current search owns, so a superseded one is called off
@@ -178,6 +199,35 @@ export function createSpotify(
     } catch {
       s.status = null; // integration unavailable — hide the card
     }
+  }
+
+  /**
+   * The shelves a browse screen opens on, beyond what this account has been
+   * playing. Asked for once, and only by a surface that idles on shelves —
+   * `load()` deliberately does not, since the app's Music view never shows
+   * them and would be paying two round trips for a screen with a dock on it.
+   *
+   * Both reads are independent and both are allowed to come back with
+   * nothing: an account with no saved albums and a login whose grant
+   * predates a scope look the same from here, and in both cases the honest
+   * answer is a shelf that isn't drawn (§15.9).
+   */
+  async function loadBrowse() {
+    if (browseLoaded || !s.status?.connected) return;
+    browseLoaded = true;
+    const [lib, fresh] = await Promise.allSettled([
+      api.spotifyLibrary(20),
+      api.spotifyNewReleases(20),
+    ]);
+    if (lib.status === "fulfilled") {
+      s.savedAlbums = lib.value.albums;
+      s.topArtists = lib.value.artists;
+      // The library read answers for playlists too. Kept only when the
+      // dedicated read hasn't already: one list from two sources is one
+      // list too many, and `load()`'s is the one every other surface uses.
+      if (!s.myPlaylists.length) s.myPlaylists = lib.value.playlists;
+    }
+    if (fresh.status === "fulfilled") s.newReleases = fresh.value;
   }
 
   /**
@@ -273,6 +323,16 @@ export function createSpotify(
     get needsListeningScope() {
       return !!s.status?.connected && !s.status.listening;
     },
+    get savedAlbums() {
+      return s.savedAlbums;
+    },
+    get topArtists() {
+      return s.topArtists;
+    },
+    get newReleases() {
+      return s.newReleases;
+    },
+    loadBrowse,
     // With no query the list browses the account's playlists instead of
     // sitting empty. "all" has no array of its own — it's every kind at
     // once, which is also what an empty-results check needs to see.
@@ -396,7 +456,11 @@ export function createSpotify(
         s.myPlaylists = [];
         s.recentTracks = [];
         s.topTracks = [];
+        s.savedAlbums = [];
+        s.topArtists = [];
+        s.newReleases = [];
         playlistsLoaded = false;
+        browseLoaded = false;
         await load();
       } catch (e) {
         toasts.error("Disconnect failed", (e as Error).message);

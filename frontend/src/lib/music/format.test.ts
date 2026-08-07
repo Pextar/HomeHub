@@ -1,5 +1,15 @@
 import { describe, it, expect } from "vitest";
-import { fmtCount, fmtFollowers, fmtMs, fmtTotalMs, capFirst } from "./format";
+import {
+  fmtCount,
+  fmtFollowers,
+  fmtMs,
+  fmtTotalMs,
+  capFirst,
+  playCount,
+  fmtHour,
+  fmtUntil,
+  fmtDays,
+} from "./format";
 
 describe("fmtCount", () => {
   it("compacts the way Spotify writes counts", () => {
@@ -39,5 +49,66 @@ describe("capFirst", () => {
   it("capitalises genre labels", () => {
     expect(capFirst("art rock")).toBe("Art rock");
     expect(capFirst("")).toBe("");
+  });
+});
+
+describe("playCount", () => {
+  // The store writes no tally on the entry that created a row, and the one
+  // play that made it is what a missing count means. Every surface reads it
+  // through here so none of them invents a second rule.
+  it("reads a missing tally as the one play behind the entry", () => {
+    expect(playCount({})).toBe(1);
+    expect(playCount({ count: 0 })).toBe(1);
+    expect(playCount({ count: 7 })).toBe(7);
+  });
+});
+
+describe("fmtHour", () => {
+  it("says a local hour the way a wall clock does", () => {
+    expect(fmtHour(0)).toBe("00:00");
+    expect(fmtHour(8)).toBe("08:00");
+    expect(fmtHour(23)).toBe("23:00");
+    // Junk clamps rather than printing NaN into a shelf label.
+    expect(fmtHour(99)).toBe("23:00");
+    expect(fmtHour(NaN)).toBe("00:00");
+  });
+});
+
+describe("fmtUntil", () => {
+  const from = new Date("2026-08-07T20:00:00");
+  const at = (mins: number) => new Date(from.getTime() + mins * 60_000).toISOString();
+
+  it("counts the wait rather than repeating the clock", () => {
+    expect(fmtUntil(at(6), from)).toBe("in 6 min");
+    expect(fmtUntil(at(180), from)).toBe("in 3 h");
+    expect(fmtUntil(at(200), from)).toBe("in 3 h 20");
+    expect(fmtUntil(at(11 * 60), from)).toBe("in 11 h");
+  });
+
+  // Something on its way is never behind us: a fire time a tick or two in
+  // the past is the poll not having landed, not an event that was missed.
+  it("never counts backwards", () => {
+    expect(fmtUntil(at(-5), from)).toBe("now");
+    expect(fmtUntil(at(0), from)).toBe("now");
+  });
+
+  it("names the day once the wait is longer than one", () => {
+    expect(fmtUntil(at(36 * 60), from)).toMatch(/^Sun /);
+  });
+
+  it("says nothing about a timer that has no next time", () => {
+    expect(fmtUntil(undefined, from)).toBe("");
+    expect(fmtUntil("not a date", from)).toBe("");
+  });
+});
+
+describe("fmtDays", () => {
+  it("names the shapes a week actually comes in", () => {
+    expect(fmtDays([])).toBe("Every day");
+    expect(fmtDays(undefined)).toBe("Every day");
+    expect(fmtDays([0, 1, 2, 3, 4, 5, 6])).toBe("Every day");
+    expect(fmtDays([1, 2, 3, 4, 5])).toBe("Weekdays");
+    expect(fmtDays([0, 6])).toBe("Weekends");
+    expect(fmtDays([3, 1])).toBe("Mon Wed");
   });
 });

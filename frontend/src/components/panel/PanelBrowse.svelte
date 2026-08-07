@@ -39,17 +39,25 @@
     import PanelPlayerCard from "./PanelPlayerCard.svelte";
     import PanelRoomChips from "./PanelRoomChips.svelte";
     import PanelRoomSettings from "./PanelRoomSettings.svelte";
+    import PanelTimers from "./PanelTimers.svelte";
+    import PanelInsights from "./PanelInsights.svelte";
     import { api } from "../../lib/api";
     import { route, toasts } from "../../lib/stores.svelte";
+    import { clock } from "../../lib/music/clock.svelte";
     import type { SpotifyStore } from "../../lib/music/spotify.svelte";
     import type { SearchHistory } from "../../lib/music/history.svelte";
-    import { fmtCount, fmtMs, capFirst } from "../../lib/music/format";
+    import { fmtCount, fmtMs, capFirst, fmtHour, playCount } from "../../lib/music/format";
     import { SEARCH_KINDS as KINDS, topLine } from "../../lib/music/catalog";
     import { dur } from "../../lib/motion";
     import { kefSourceLabel } from "../../lib/kef";
     import type { PanelMusicStore, PanelSource } from "../../lib/panel-music.svelte";
     import type { Busy } from "../../lib/music/busy.svelte";
-    import type { SpotifyArtistDetail, SpotifyContextDetail, SpotifyItem } from "../../lib/types";
+    import type {
+        MediaPlay,
+        SpotifyArtistDetail,
+        SpotifyContextDetail,
+        SpotifyItem,
+    } from "../../lib/types";
 
     // The catalog and the room's history are the panel's, not this
     // component's: the depth is a route away, and a route away and back
@@ -102,6 +110,53 @@
         route.go("panel");
     }
 
+    // ── Searching takes the screen ───────────────────────────────────────
+    // The results lived in the left half of a two-column body: a 556px
+    // column on the reference wall, which is eight rows of a list that is
+    // read from across a room — while a 420px player sat beside it showing
+    // a record nobody is looking at, because looking at a record is not
+    // what someone typing is doing.
+    //
+    // Searching is a different job from listening, so the surface changes
+    // job with it. The moment the box has the caret the player column folds
+    // down into a dock along the foot and the results take the whole width
+    // of the wall, in two columns — twice the answers, at the same size,
+    // for the gesture this depth exists for. Nothing is lost: the dock
+    // keeps the transport and what is playing, the room chips never move
+    // (they are on the header, and where a tap plays must not change
+    // because a search started), and the dock itself is the way back.
+    //
+    // It ends where the *searching* ends — Done, Escape, or opening an
+    // artist's page — and never on a play. Choosing three songs in a row is
+    // one search, and a wall that reflowed after each one would move the
+    // next target out from under the finger.
+    let searching = $state(false);
+
+    function endSearch() {
+        searching = false;
+        searchEl?.blur();
+    }
+
+    function showPane(p: Pane) {
+        pane = p;
+        // Stepping over to the queue is not searching any more. Coming back
+        // finds the box exactly as it was left — the query survives, only
+        // the layout gives way.
+        if (p !== "search") endSearch();
+    }
+
+    /** The one thing queueing changes that can be seen. It normally rides
+     *  on the player card, which is exactly what the dock replaced — and
+     *  queueing from a search row is the likeliest thing to happen in this
+     *  mode, so the dock has to carry it or the tap answers with nothing. */
+    const QUEUED_MS = 5000;
+    const queuedLine = $derived.by(() => {
+        void clock.beat;
+        const q = music.lastQueued;
+        if (!q || Date.now() - q.at > QUEUED_MS) return null;
+        return `${q.next ? "Playing next" : "Added to the queue"} — ${q.title}`;
+    });
+
     // ── The catalog stack: artist and record pages, one level deeper ────
     // The app's own catalog screens ride in this column (§15.9's stack on
     // §16's wall): an artist opens from a search row, their records and
@@ -117,6 +172,12 @@
      *  it is reachable while a page is open, so Queue and Rooms answer over
      *  the top of it and Search comes back to where it was. */
     const catalogOpen = $derived(pane === "search" ? topLevel : null);
+
+    /** The catalog's own pages are column-shaped and belong beside the
+     *  player, and the other two panes were never the reason the results
+     *  column was short. So the full-bleed layout is the Search pane's
+     *  alone, and only while it is showing results rather than a page. */
+    const fullBleed = $derived(searching && pane === "search" && !catalogOpen);
 
     let artistCache = $state<Record<string, SpotifyArtistDetail>>({});
     let artistLoadingUri = $state<string | null>(null);
@@ -140,6 +201,9 @@
         if (stack.length === 0) searchScroll = resultsEl?.scrollTop ?? 0;
         else stack[stack.length - 1].scroll = stackEl?.scrollTop ?? 0;
         stack = [...stack, { kind, uri, scroll: 0 }];
+        // A page opened is a question answered: the typing is over, and the
+        // player comes back beside the discography being read.
+        searching = false;
     }
 
     async function popLevel() {
@@ -269,6 +333,12 @@
             // aimed at.
             if (catalogOpen) {
                 void popLevel();
+                return;
+            }
+            // The full-bleed search is a rung of the same ladder: Escape
+            // gives the player its column back before it leaves the depth.
+            if (searching) {
+                endSearch();
                 return;
             }
             back();
@@ -457,17 +527,47 @@
     const favTarget = $derived(featured?.kind === "sonos");
     const favorites = $derived(favTarget ? music.favorites : []);
 
+    // ── This room's own memory ───────────────────────────────────────────
+    // The shelf the band has had since it grew one, now on the depth too —
+    // and ranked rather than listed, because "what does this room keep
+    // coming back to" is a better answer to *put something on* than "what
+    // was on last". The label never claims more than the answer carries:
+    // a habit at this hour says the hour, a ranking without one says
+    // "most", and the household's fallback says it is the household's.
+    const roomPlays = $derived(music.topPlays.length > 0 ? music.topPlays : music.history);
+    const roomPlaysLabel = $derived(
+        music.topPlays.length > 0
+            ? music.topPlaysByHour
+                ? `Played here around ${fmtHour(music.topPlaysHour)}`
+                : "Played here most"
+            : music.historyHousehold
+              ? "Played recently in this house"
+              : "Played here",
+    );
+    /** The plain list is the only one that can be somebody else's room. */
+    const roomPlaysHousehold = $derived(music.topPlays.length === 0 && music.historyHousehold);
+
     /** Nothing at all to idle on — a different panel from a thin one. */
     const idleEmpty = $derived(
         recents.list.length === 0 &&
             favorites.length === 0 &&
+            roomPlays.length === 0 &&
             spotify.myPlaylists.length === 0 &&
             spotify.recentTracks.length === 0 &&
-            spotify.topTracks.length === 0,
+            spotify.topTracks.length === 0 &&
+            spotify.savedAlbums.length === 0 &&
+            spotify.topArtists.length === 0 &&
+            spotify.newReleases.length === 0,
     );
 </script>
 
-<div class="browse" class:kb-open={kbOpen} style:--kb="{kb}px" in:fade={{ duration: dur(160) }}>
+<div
+    class="browse"
+    class:kb-open={kbOpen}
+    class:full={fullBleed}
+    style:--kb="{kb}px"
+    in:fade={{ duration: dur(160) }}
+>
     <!-- The depth's own band, drawn the way the dashboard's status strip is:
          a fixed 72px row, edge to edge, divided from the body by a hairline
          rather than floated over it. It carries everything about the surface
@@ -493,7 +593,7 @@
                 class="p-pane"
                 class:active={pane === "search"}
                 aria-pressed={pane === "search"}
-                onclick={() => (pane = "search")}
+                onclick={() => showPane("search")}
             >
                 Search
             </button>
@@ -501,7 +601,7 @@
                 class="p-pane"
                 class:active={pane === "queue"}
                 aria-pressed={pane === "queue"}
-                onclick={() => (pane = "queue")}
+                onclick={() => showPane("queue")}
             >
                 Queue{#if featured?.kind === "sonos" && queueCount > 0}
                     <span class="mono">{queueCount}</span>{/if}
@@ -510,7 +610,7 @@
                 class="p-pane"
                 class:active={pane === "rooms"}
                 aria-pressed={pane === "rooms"}
-                onclick={() => (pane = "rooms")}
+                onclick={() => showPane("rooms")}
             >
                 Rooms <span class="mono">{music.sources.length}</span>
             </button>
@@ -559,27 +659,41 @@
                 </div>
             {:else if pane === "search"}
                 <div class="b-search">
-                    <div class="s-box">
-                        <Icon name="search" size={20} />
-                        <input
-                            bind:this={searchEl}
-                            value={spotify.query}
-                            placeholder="Search songs, artists, albums"
-                            aria-label="Search music"
-                            autocapitalize="off"
-                            autocomplete="off"
-                            spellcheck="false"
-                            enterkeyhint="search"
-                            oninput={(e) => {
-                                spotify.query = e.currentTarget.value;
-                                spotify.onQueryInput();
-                            }}
-                            onkeydown={onQueryKey}
-                        />
-                        {#if spotify.query}
-                            <button class="s-clear" onclick={clearQuery} aria-label="Clear search">
-                                <Icon name="close" size={16} />
-                            </button>
+                    <div class="s-boxrow">
+                        <div class="s-box">
+                            <Icon name="search" size={20} />
+                            <input
+                                bind:this={searchEl}
+                                value={spotify.query}
+                                placeholder="Search songs, artists, albums"
+                                aria-label="Search music"
+                                autocapitalize="off"
+                                autocomplete="off"
+                                spellcheck="false"
+                                enterkeyhint="search"
+                                oninput={(e) => {
+                                    // Typing is the surest signal there is that
+                                    // this is a search and not a glance at the
+                                    // player, so it is what claims the screen.
+                                    searching = true;
+                                    spotify.query = e.currentTarget.value;
+                                    spotify.onQueryInput();
+                                }}
+                                onpointerdown={() => (searching = true)}
+                                onkeydown={onQueryKey}
+                            />
+                            {#if spotify.query}
+                                <button class="s-clear" onclick={clearQuery} aria-label="Clear search">
+                                    <Icon name="close" size={16} />
+                                </button>
+                            {/if}
+                        </div>
+                        <!-- The named way out of the full-bleed search, so
+                             giving the player its column back is a target and
+                             not a keystroke nobody standing at a wall has.
+                             The dock's own cover does the same thing. -->
+                        {#if fullBleed}
+                            <button class="k-chip s-done" onclick={endSearch}>Done</button>
                         {/if}
                     </div>
 
@@ -706,9 +820,16 @@
                                 {/if}
                                 {#each sections as sec (sec.id)}
                                     <h3 class="s-label">{sec.label}</h3>
-                                    {#each sec.items as item (item.uri)}
-                                        {@render resultRow(item, false)}
-                                    {/each}
+                                    <!-- One shelf's rows, in a box of their
+                                         own so the full-bleed layout can put
+                                         them in two columns without the
+                                         labels between them being dealt into
+                                         the same grid. -->
+                                    <div class="s-rows">
+                                        {#each sec.items as item (item.uri)}
+                                            {@render resultRow(item, false)}
+                                        {/each}
+                                    </div>
                                     <!-- Spotify answers ten per kind and no
                                          more, so a shelf pages for the rest
                                          rather than making its own count a
@@ -738,11 +859,34 @@
                                  (§15.9: everything but songs is a grid). A
                                  tap plays it on the featured room, like
                                  every container on the wall. -->
+                            <!-- The room in front of you leads: HomeHub's own
+                                 per-room memory, ranked by what this room
+                                 keeps coming back to and — where it has a
+                                 habit at this hour — by what it plays at
+                                 this hour. Spotify's history is one list for
+                                 the whole household and cannot say that the
+                                 kitchen gets radio at breakfast, which is
+                                 exactly the question a wall is asked. -->
+                            {#if roomPlays.length > 0}
+                                <h3 class="s-label">{roomPlaysLabel}</h3>
+                                <!-- One row of it in the two-column body,
+                                     where a second row of covers would be
+                                     the whole column and everything under it
+                                     a scroll away; the full-bleed layout has
+                                     the width for the rest. -->
+                                <div class="s-grid">
+                                    {#each roomPlays.slice(0, fullBleed ? 8 : 4) as p (p.uri)}
+                                        {@render playTile(p)}
+                                    {/each}
+                                </div>
+                            {/if}
                             {#if spotify.recentTracks.length > 0}
                                 <h3 class="s-label">Played recently</h3>
-                                {#each spotify.recentTracks.slice(0, 6) as item (item.uri)}
-                                    {@render resultRow(item, false)}
-                                {/each}
+                                <div class="s-rows">
+                                    {#each spotify.recentTracks.slice(0, 6) as item (item.uri)}
+                                        {@render resultRow(item, false)}
+                                    {/each}
+                                </div>
                             {/if}
                             {#if recents.list.length > 0}
                                 <div class="s-shelf-head">
@@ -784,14 +928,73 @@
                             {@render favoriteShelf()}
                             {#if spotify.topTracks.length > 0}
                                 <h3 class="s-label">You play these most</h3>
-                                {#each spotify.topTracks.slice(0, 6) as item (item.uri)}
-                                    {@render resultRow(item, false)}
-                                {/each}
+                                <div class="s-rows">
+                                    {#each spotify.topTracks.slice(0, 6) as item (item.uri)}
+                                        {@render resultRow(item, false)}
+                                    {/each}
+                                </div>
                             {/if}
                             {#if spotify.myPlaylists.length > 0}
                                 <h3 class="s-label">Your playlists</h3>
-                                <div class="s-pl-grid">
+                                <div class="s-grid">
                                     {#each spotify.myPlaylists as item (item.uri)}
+                                        <MediaCard
+                                            {item}
+                                            sub={sub(item)}
+                                            onOpen={() => pick(item)}
+                                        />
+                                    {/each}
+                                </div>
+                            {/if}
+                            <!-- The rest of the collection. Each shelf is its
+                                 own read on the backend and its own absence
+                                 here: an account with no saved albums and a
+                                 login whose grant predates a scope both draw
+                                 nothing, which is the honest answer to
+                                 both (§15.9). -->
+                            {#if spotify.savedAlbums.length > 0}
+                                <h3 class="s-label">Your albums</h3>
+                                <div class="s-grid">
+                                    {#each spotify.savedAlbums as item (item.uri)}
+                                        <MediaCard
+                                            {item}
+                                            sub={sub(item)}
+                                            onOpen={() => pick(item)}
+                                        />
+                                    {/each}
+                                </div>
+                            {/if}
+                            {#if spotify.topArtists.length > 0}
+                                <!-- Artists open their page rather than
+                                     playing, here as everywhere else on this
+                                     depth: no speaker takes an artist URI,
+                                     and the page is where the records are. -->
+                                <h3 class="s-label">Artists you play</h3>
+                                <div class="s-grid">
+                                    {#each spotify.topArtists as item (item.uri)}
+                                        <MediaCard
+                                            {item}
+                                            round
+                                            sub={sub(item)}
+                                            onOpen={() =>
+                                                void openArtist(
+                                                    item.uri,
+                                                    item.art_url
+                                                        ? { art_url: item.art_url, round: true }
+                                                        : undefined,
+                                                )}
+                                        />
+                                    {/each}
+                                </div>
+                            {/if}
+                            {#if spotify.newReleases.length > 0}
+                                <!-- The one shelf here that is not about this
+                                     household at all — and so the only
+                                     answer on an evening when nobody wants
+                                     to hear anything they already know. -->
+                                <h3 class="s-label">Out this week</h3>
+                                <div class="s-grid">
+                                    {#each spotify.newReleases as item (item.uri)}
                                         <MediaCard
                                             {item}
                                             sub={sub(item)}
@@ -859,6 +1062,13 @@
                          be stacked under the cover in the player column
                          where they cost it two thirds of its height. -->
                     <PanelRoomSettings {music} />
+                    <!-- And what the room is going to do on its own: the
+                         sleep timer someone sets on the way to bed, and the
+                         wake-up that is the same mechanism run the other
+                         way. Both are the room's, like the settings above
+                         them, and both reach every kind of room the panel
+                         can feature (§16). -->
+                    <PanelTimers {music} />
                     <h3 class="s-label">Rooms</h3>
                     <div class="rm-list">
                         {#each music.sources as s (s.key)}
@@ -945,23 +1155,95 @@
                         plays any mix of speakers together and can be started from this panel, but
                         arranging one is done in the Music view.
                     </p>
+                    <!-- The one picture no single room can give: which rooms
+                         do the listening, what the house keeps coming back
+                         to, and when in the day it is loud. It sits at the
+                         foot of the pane that is about rooms, because that
+                         is what it is about — a kiosk gets no screen for
+                         something nobody taps. -->
+                    <PanelInsights {music} onArtist={(name) => void openArtistByName(name)} />
                 </div>
             {/if}
         </section>
 
-        <section class="b-player" aria-label="Now playing">
-            {#if featured}
-                <PanelPlayerCard
-                    {music}
-                    onExpand={() => route.go("panel", { music: "1", player: "1" })}
-                />
-            {:else}
-                <div class="p-nosrc">
-                    <Icon name="speaker" size={28} />
-                    <p>No speakers reachable</p>
-                </div>
-            {/if}
-        </section>
+        {#if fullBleed}
+            <!-- The player, folded to a strip along the foot while the
+                 results have the wall. Everything the column was carrying
+                 that a search needs is still here — what is on, whether it
+                 is playing, what just went into the queue — and the cover is
+                 the way back to the column, the same bargain the band's
+                 cover makes one depth out. -->
+            <div class="b-dock">
+                {#if featured}
+                    <button class="d-open" onclick={endSearch} aria-label="Back to the player">
+                        {#if featured.art}
+                            <img class="d-art" src={featured.art} alt="" />
+                        {:else}
+                            <span class="d-art placeholder">[ art ]</span>
+                        {/if}
+                        <span class="d-meta">
+                            <span class="d-title">
+                                {featured.trackTitle ??
+                                    (featured.playing ? "Playing" : "Nothing playing")}
+                            </span>
+                            <!-- One line, and the freshest true thing goes on
+                                 it: a queued track changes nothing else on
+                                 this screen, and the card that used to say so
+                                 is the thing this strip replaced. -->
+                            <span class="d-sub" class:said={!!queuedLine}>
+                                {queuedLine ?? `${featured.trackSub || "—"} · ${featured.title}`}
+                            </span>
+                        </span>
+                    </button>
+                    <div class="d-transport">
+                        {#if featured.canSkip}
+                            <button
+                                class="d-btn"
+                                aria-label="Previous"
+                                disabled={!!music.busy["previous:" + featured.id]}
+                                onclick={() => music.skip(featured, "previous")}
+                            >
+                                <Icon name="skipPrev" size={18} />
+                            </button>
+                        {/if}
+                        <button
+                            class="d-btn d-play"
+                            aria-label={featured.playing ? "Pause" : "Play"}
+                            disabled={!!music.busy["play:" + featured.id]}
+                            onclick={() => music.togglePlay(featured)}
+                        >
+                            <Icon name={featured.playing ? "pause" : "play"} size={20} />
+                        </button>
+                        {#if featured.canSkip}
+                            <button
+                                class="d-btn"
+                                aria-label="Next"
+                                disabled={!!music.busy["next:" + featured.id]}
+                                onclick={() => music.skip(featured, "next")}
+                            >
+                                <Icon name="skipNext" size={18} />
+                            </button>
+                        {/if}
+                    </div>
+                {:else}
+                    <p class="d-nosrc">No speaker is answering</p>
+                {/if}
+            </div>
+        {:else}
+            <section class="b-player" aria-label="Now playing">
+                {#if featured}
+                    <PanelPlayerCard
+                        {music}
+                        onExpand={() => route.go("panel", { music: "1", player: "1" })}
+                    />
+                {:else}
+                    <div class="p-nosrc">
+                        <Icon name="speaker" size={28} />
+                        <p>No speakers reachable</p>
+                    </div>
+                {/if}
+            </section>
+        {/if}
     </div>
 </div>
 
@@ -974,7 +1256,7 @@
 {#snippet favoriteShelf()}
     {#if favorites.length > 0}
         <h3 class="s-label">Favorites</h3>
-        <div class="s-fav-grid">
+        <div class="s-grid">
             {#each favorites as f (f.id)}
                 <button
                     class="s-fav-play"
@@ -993,6 +1275,33 @@
             {/each}
         </div>
     {/if}
+{/snippet}
+
+<!-- One thing this room has played, as a tile. The same square the
+     household's favorites wear, because on a wall a cover is a far better
+     target than a title — with the tally under it where there is one, since
+     that is what separates the record a room lives on from the one somebody
+     tried once. A favorite replays through the favorites path it came from,
+     which the store handles; a favorite since deleted stops being offered
+     rather than becoming a tile that fails. -->
+{#snippet playTile(p: MediaPlay)}
+    <button
+        class="s-fav-play"
+        aria-label="Play {p.title} again on {featured?.title ?? 'this room'}"
+        disabled={!!music.busy["hist:" + p.uri]}
+        onclick={() => music.playFromHistory(p)}
+    >
+        {#if p.art_uri}
+            <img class="s-fav-art" src={p.art_uri} alt="" loading="lazy" />
+        {:else}
+            <span class="s-fav-art placeholder">[ art ]</span>
+        {/if}
+        <span class="s-fav-title">{p.title}</span>
+        <span class="s-fav-sub">
+            {roomPlaysHousehold && p.room_name ? p.room_name : (p.sub ?? "")}
+            {#if playCount(p) > 1}<span class="mono"> ×{playCount(p)}</span>{/if}
+        </span>
+    </button>
 {/snippet}
 
 <!-- The catalog screens name where they'll sound; on the wall that's
@@ -1196,6 +1505,13 @@
            — the two are regions of one surface, not two cards on a page. */
         grid-template-columns: minmax(0, 1fr) 420px;
     }
+    /* Searching: one column, and a dock along the foot. The results get the
+       whole width of the wall for as long as the box has the caret, and the
+       player becomes the strip it can be while nobody is looking at it. */
+    .browse.full .b-body {
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-rows: minmax(0, 1fr) auto;
+    }
 
     .b-left {
         display: flex;
@@ -1284,6 +1600,23 @@
        and the results below are what this column is for, so the box gives
        back the height it was only using to be large. Its text stays at 17px
        — that floor is iOS's, not a preference (§16). */
+    /* The box and its way out, on one line. The chip only exists while the
+       search has the screen, so the row is the box alone the rest of the
+       time and nothing moves when it appears. */
+    .s-boxrow {
+        display: flex;
+        align-items: center;
+        gap: var(--space-3);
+        flex-shrink: 0;
+    }
+    .s-boxrow .s-box {
+        flex: 1;
+        min-width: 0;
+    }
+    .s-done {
+        flex-shrink: 0;
+        min-height: 48px;
+    }
     .s-box {
         display: flex;
         align-items: center;
@@ -1411,6 +1744,23 @@
         display: flex;
         justify-content: center;
         margin-top: var(--space-3);
+    }
+
+    /* One shelf's rows. Stacked in the two-column body, where the results
+       column is 556px and a row is a row; dealt into columns once the
+       search has the whole wall, because at 1024px a single column of
+       64px rows spends half the screen on margin and still shows eight
+       answers. The floor is stated in the row's own terms: below ~360px a
+       title and its artist stop fitting on one line, and a shelf of
+       truncated names is worse than a shorter list. */
+    .s-rows {
+        display: flex;
+        flex-direction: column;
+    }
+    .browse.full .s-rows {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+        column-gap: var(--space-5);
     }
 
     /* The search didn't get through. On a wall the retry has to be a target
@@ -1562,17 +1912,15 @@
        are `1fr` and land well above it at both widths. It used to state
        three outright, which on the depth made them posters in a column that
        has more to show than four playlists. */
-    .s-pl-grid {
+    /* Every shelf of covers on this pane uses it — the room's own plays,
+       the household's favorites, the playlists, the albums, the artists,
+       what came out this week. One grid rather than one per shelf, so a
+       cover is the same size wherever the wall offers one, and the column
+       count follows the width instead of being stated: four on the depth's
+       556px column, eight once the search takes the wall. */
+    .s-grid {
         display: grid;
         grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
-        gap: var(--space-4) var(--space-3);
-    }
-
-    /* The household's favorites: the same grid, four across — a station's
-       cover carries less to read than a playlist's, so they sit smaller. */
-    .s-fav-grid {
-        display: grid;
-        grid-template-columns: repeat(4, minmax(0, 1fr));
         gap: var(--space-4) var(--space-3);
     }
     .s-fav-play {
@@ -1994,6 +2342,128 @@
         font-size: 12.5px;
         line-height: 1.5;
         color: var(--text-dim);
+    }
+
+    /* ── The search dock ──────────────────────────────────────────────
+       The player while the results have the screen: cover, one line of
+       what is on, and the transport. Same rule as every other region on
+       this surface — a hairline above it rather than a gap, its own
+       padding, and no card of its own. It is 88px, which is what a 64px
+       cover and the §2 target floor come to, and it does not grow: the
+       whole point of the mode is that the height belongs to the list. */
+    .b-dock {
+        display: flex;
+        align-items: center;
+        gap: var(--space-4);
+        min-height: 88px;
+        padding: var(--space-3) var(--space-6);
+        border-top: 1px solid var(--hairline);
+    }
+    /* The cover is the way back to the column — the same bargain the band's
+       cover makes one depth out, so the biggest thing on the strip is the
+       control rather than a 44px chip beside it. */
+    .d-open {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        align-items: center;
+        gap: var(--space-4);
+        padding: var(--space-1);
+        border: 0;
+        border-radius: var(--r-md);
+        background: none;
+        color: inherit;
+        font: inherit;
+        text-align: left;
+        cursor: pointer;
+        transition: background var(--t-fast);
+    }
+    .d-art {
+        width: 64px;
+        height: 64px;
+        flex-shrink: 0;
+        display: block;
+        object-fit: cover;
+        border-radius: var(--r-sm);
+        border: 1px solid var(--hairline);
+        background: var(--card-2);
+    }
+    span.d-art {
+        display: grid;
+        place-items: center;
+        font-size: 10px;
+        color: var(--text-dim);
+    }
+    .d-meta {
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+    }
+    .d-title {
+        font-size: 16px;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .d-sub {
+        font-size: 12.5px;
+        color: var(--text-mute);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    /* The queued line takes the same slot in the ON ink for its few
+       seconds: it is the answer to the tap that was just made. */
+    .d-sub.said {
+        color: var(--on);
+    }
+    .d-transport {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        flex-shrink: 0;
+    }
+    .d-btn {
+        width: 48px;
+        height: 48px;
+        display: grid;
+        place-items: center;
+        border: 1px solid var(--hairline);
+        border-radius: 50%;
+        background: var(--card-2);
+        color: var(--text);
+        cursor: pointer;
+        transition:
+            background var(--t-fast),
+            transform var(--t-fast);
+    }
+    .d-btn:active {
+        transform: scale(0.94);
+        transition-duration: 80ms;
+    }
+    .d-btn:disabled {
+        opacity: 0.5;
+    }
+    .d-play {
+        width: 56px;
+        height: 56px;
+        background: var(--card-3);
+    }
+    .d-nosrc {
+        margin: 0;
+        font-size: 13px;
+        color: var(--text-dim);
+    }
+    @media (hover: hover) {
+        .d-open:hover {
+            background: var(--card-2);
+        }
+        .d-btn:hover {
+            background: var(--card-3);
+        }
     }
 
     /* The player's column: a hairline off the work area, and its own

@@ -28,11 +28,11 @@
         gs?.repeat === "all" ? "Repeat all" : gs?.repeat === "one" ? "Repeat one" : "Repeat",
     );
 
-    // The wall's own setting: "stop in half an hour" is asked at the light
-    // switch on the way to bed, not on a phone. Chips rather than a form —
-    // there are no forms on a kiosk.
-    const SLEEP_CHOICES = [15, 30, 60] as const;
-    const sleepOn = $derived(music.sleepMinutes > 0);
+    // The sleep timer used to be here, as a Sonos group's. It is a room's
+    // now — HomeHub keeps its own timers, which reach a KEF speaker and a
+    // zone too, and they fade rather than cutting — so it moved out with the
+    // wake-up it is one half of, into PanelTimers directly below this block.
+    // A preference and a standing instruction are different kinds of thing.
 
     /** A HomeHub zone of one speaker has no play modes, no balance and no
      *  input to pick — nothing to put here, so nothing goes here. A block
@@ -131,44 +131,6 @@
                         <span class="rs-val mono">{music.memVol[m.id] ?? m.volume}</span>
                     </div>
                 {/each}
-            </div>
-        {/if}
-
-        {#if featured.kind === "sonos"}
-            <!-- Sleep timer: group-scoped like the play modes, and the one
-                 setting the wall has more claim to than the phone. -->
-            <div class="rs-row">
-                <span class="rs-rowlabel">
-                    <Icon name="moon" size={15} />
-                    <span>Sleep</span>
-                    {#if sleepOn}
-                        <span class="rs-left mono">{music.sleepMinutes} min left</span>
-                    {/if}
-                </span>
-                <div class="rs-chips" role="group" aria-label="Sleep timer">
-                    <!-- No chip is marked "on": the speaker reports the
-                         minutes *left*, not the length that was set, so a
-                         highlighted chip would be a guess. The label carries
-                         the truth instead. -->
-                    {#each SLEEP_CHOICES as mins (mins)}
-                        <button
-                            class="p-chip"
-                            disabled={music.busy["sleep:" + featured.id]}
-                            onclick={() => music.setSleep(mins)}
-                        >
-                            {mins}m
-                        </button>
-                    {/each}
-                    {#if sleepOn}
-                        <button
-                            class="p-chip"
-                            disabled={music.busy["sleep:" + featured.id]}
-                            onclick={() => music.setSleep(0)}
-                        >
-                            Off
-                        </button>
-                    {/if}
-                </div>
             </div>
         {/if}
 
@@ -327,10 +289,6 @@
         gap: 6px;
         font-size: 12.5px;
         color: var(--text-mute);
-    }
-    .rs-left {
-        font-size: 11px;
-        color: var(--on);
     }
     .rs-chips {
         display: flex;

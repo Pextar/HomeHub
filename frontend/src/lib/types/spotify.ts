@@ -44,6 +44,18 @@ export interface SpotifyListening {
   top: SpotifyItem[];
 }
 
+/**
+ * The rest of the collection: what the account saved, kept and actually
+ * listens to. Any one shelf can be empty on its own — a refused read costs
+ * that shelf and nothing else (DESIGN.md §15.9), so a login whose grant
+ * predates one scope still fills the other two.
+ */
+export interface SpotifyLibrary {
+  albums: SpotifyItem[];
+  playlists: SpotifyItem[];
+  artists: SpotifyItem[];
+}
+
 /** One Spotify Connect endpoint the connected account can play to. */
 export interface SpotifyDevice {
   id: string;

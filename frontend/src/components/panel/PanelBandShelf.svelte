@@ -1,5 +1,6 @@
 <script lang="ts">
     import { trimClock } from "../../lib/music/time";
+    import { fmtHour, playCount } from "../../lib/music/format";
     import type { PanelMusicStore } from "../../lib/panel-music.svelte";
 
     /**
@@ -39,6 +40,19 @@
     const featured = $derived(music.featured);
     const sonos = $derived(featured?.kind === "sonos");
 
+    /** The played shelf, ranked rather than listed, when the room has enough
+     *  history to rank: what a room *keeps coming back to* is a better answer
+     *  to "put something on" than what happened to be last, and at an hour
+     *  this room has a habit at it is ranked by that hour instead. By eight
+     *  in the evening the kitchen's breakfast radio and its dinner records
+     *  are equally recent, and only one of them is right. */
+    const ranked = $derived(music.topPlays);
+    const played = $derived(ranked.length > 0 ? ranked : music.history);
+    /** Whether the tiles are somebody else's room. Only the plain shelf can
+     *  be: the ranked read answers with this room's own plays or with
+     *  nothing at all, and never softens into the household's. */
+    const household = $derived(ranked.length === 0 && music.historyHousehold);
+
     /** Everything after the track playing. The head of the queue is already
      *  on the cover three feet to the left. */
     const upNext = $derived.by(() => {
@@ -47,7 +61,6 @@
         return music.queue.filter((q) => q.track > at);
     });
     const favorites = $derived(sonos ? music.favorites : []);
-    const played = $derived(music.history);
     const mode = $derived(
         upNext.length > 0
             ? "next"
@@ -57,14 +70,23 @@
                 ? "played"
                 : "none",
     );
+    /** Four shelves, four different claims, and the label is the only thing
+     *  that separates them — so it says exactly which one this is. "You play
+     *  this now" about a record the room has never played in the morning is
+     *  the confident wrongness §15 rules out, so the ranked shelf names the
+     *  hour it was ranked for and the plain one never claims a habit. */
     const label = $derived(
         mode === "next"
             ? "Up next"
             : mode === "fav"
               ? "Favorites"
-              : music.historyHousehold
-                ? "Played recently"
-                : "Played here",
+              : ranked.length > 0
+                ? music.topPlaysByHour
+                    ? `Played here around ${fmtHour(music.topPlaysHour)}`
+                    : "Played here most"
+                : music.historyHousehold
+                  ? "Played recently"
+                  : "Played here",
     );
 </script>
 
@@ -129,15 +151,22 @@
                             <span class="s-art placeholder">[ art ]</span>
                         {/if}
                         <span class="s-title">{p.title}</span>
-                        {#if p.sub || (music.historyHousehold && p.room_name)}
+                        {#if p.sub || (household && p.room_name) || playCount(p) > 1}
                             <span class="s-sub">
                                 <!-- On the household's list the room is the
                                      more useful second line than the artist:
                                      it is the part that says this shelf is
                                      not about the room you are looking at. -->
                                 <span class="s-artist">
-                                    {music.historyHousehold && p.room_name ? p.room_name : p.sub}
+                                    {household && p.room_name ? p.room_name : p.sub}
                                 </span>
+                                <!-- What separates the record this room
+                                     lives on from the one somebody tried
+                                     once. Only past one play: "×1" is the
+                                     shelf saying nothing, in mono. -->
+                                {#if playCount(p) > 1}
+                                    <span class="s-dur mono">×{playCount(p)}</span>
+                                {/if}
                             </span>
                         {/if}
                     </button>

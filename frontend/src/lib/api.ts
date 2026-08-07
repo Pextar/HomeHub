@@ -58,6 +58,12 @@ import type {
   MediaZoneRoutes,
   MediaPlayResult,
   MediaHistory,
+  MediaTopPlays,
+  Listening,
+  MusicTimer,
+  MusicTimerView,
+  MusicSleepResult,
+  SpotifyLibrary,
   AnnounceStatus,
   AnnounceResult,
 } from "./types";
@@ -534,6 +540,20 @@ export const api = {
   spotifyContext(uri: string) {
     return req<SpotifyContextDetail>(`/spotify/context?uri=${encodeURIComponent(uri)}`);
   },
+  // The rest of the collection — saved albums, kept playlists, the artists
+  // this account actually plays — read as three shelves in one round trip.
+  // A shelf whose scope was refused comes back empty rather than failing the
+  // request; only all three failing is the account's problem rather than one
+  // permission's.
+  spotifyLibrary(limit = 20) {
+    return req<SpotifyLibrary>(`/spotify/library?limit=${limit}`);
+  },
+  // What came out lately. The one shelf that is about the catalog rather
+  // than about this household, and so the only answer available on an
+  // evening when nobody wants to hear anything they already know.
+  spotifyNewReleases(limit = 20) {
+    return req<SpotifyItem[]>(`/spotify/new-releases?limit=${limit}`);
+  },
 
   // Push notifications
   getPushVapidKey() {
@@ -623,6 +643,60 @@ export const api = {
     return req<MediaHistory>(
       `/media/history?room=${encodeURIComponent(room)}&limit=${limit}`,
     );
+  },
+  // What a room keeps coming back to, rather than what it happened to play
+  // last. `hour` takes a local hour or "now", and ranks by what this room
+  // plays at that hour — the difference between offering the kitchen its
+  // breakfast radio at eight and offering it last night's dinner record. The
+  // answer says which of the two it gave (`by_hour`).
+  mediaTopPlays(room: string, opts: { limit?: number; hour?: number | "now" } = {}) {
+    const p = new URLSearchParams({ room, limit: String(opts.limit ?? 8) });
+    if (opts.hour !== undefined) p.set("hour", String(opts.hour));
+    return req<MediaTopPlays>(`/media/history/top?${p}`);
+  },
+  // What the household listens to, summed over every room: who does the
+  // listening, which artists it keeps coming back to, and when in the day it
+  // is loud. Deliberately not per-room — the per-room questions are already
+  // answered above, and this is the one picture none of them can give.
+  mediaInsights(limit = 8) {
+    return req<Listening>(`/media/insights?limit=${limit}`);
+  },
+
+  // ── Music timers ───────────────────────────────────────────────────────
+  // Music that starts and stops on its own: the half the socket scheduler
+  // could never reach. A wake-up is arranged in advance and described in
+  // full, so it is ordinary CRUD; a sleep timer is set by someone already in
+  // bed and is "forty minutes, this room", so it has a call of its own that
+  // does the arithmetic.
+  musicTimers() { return req<MusicTimerView[]>("/media/timers"); },
+  musicCreateTimer(body: Omit<MusicTimer, "id">) {
+    return req<MusicTimer>("/media/timers", { method: "POST", body: json(body) });
+  },
+  // The body replaces the timer wholesale: the two schedules are mutually
+  // exclusive, so a partial update would have to define what clearing each
+  // of them looks like.
+  musicUpdateTimer(id: string, body: Omit<MusicTimer, "id">) {
+    return req<MusicTimer>(`/media/timers/${encodeURIComponent(id)}`, {
+      method: "PUT", body: json(body),
+    });
+  },
+  musicDeleteTimer(id: string) {
+    return req<void>(`/media/timers/${encodeURIComponent(id)}`, { method: "DELETE" });
+  },
+  // "Quiet in forty minutes." `minutes` is when the room goes silent and the
+  // fade is the tail of that wait rather than time added to it, so the room
+  // is quiet at forty and not at forty-eight. Setting one twice replaces it.
+  // The engine puts the volume back afterwards — a room faded to two and
+  // paused is inaudible the next morning.
+  musicSleep(body: { room: string; minutes: number; fade_minutes?: number; volume?: number }) {
+    return req<MusicSleepResult>("/media/timers/sleep", { method: "POST", body: json(body) });
+  },
+  // Stop a ramp in flight without deleting anything — "I'm still up". The
+  // room keeps whatever volume it started the fade at.
+  musicCancelFade(room: string) {
+    return req<{ cancelled: boolean }>("/media/timers/fade/cancel", {
+      method: "POST", body: json({ room }),
+    });
   },
 
   // Calling the house. The status read is what decides whether the control is

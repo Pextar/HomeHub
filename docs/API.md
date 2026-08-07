@@ -279,6 +279,14 @@ zones — sets of speakers that play together regardless of make. See
 | PUT | `/api/media/zones/{id}/volume` | `{"level": 0-100}` across the zone |
 | PUT | `/api/media/zones/{id}/mute` | `{"muted": bool}` across the zone |
 | GET | `/api/media/history?room=&limit=` | What a room has been asked to play, newest first |
+| GET | `/api/media/history/top?room=&limit=&hour=` | What a room keeps coming back to — at a given local hour with `hour=` (`0`–`23` or `now`) |
+| GET | `/api/media/insights?limit=` | The household's listening summed over every room |
+| GET | `/api/media/timers` | Every music timer, soonest first |
+| POST | `/api/media/timers` | Create one (a wake-up: a time of day, days, and something to play) |
+| PUT | `/api/media/timers/{id}` | Replace one wholesale |
+| DELETE | `/api/media/timers/{id}` | Remove one, cancelling a ramp already in flight |
+| POST | `/api/media/timers/sleep` | `{"room","minutes","fade_minutes","volume"}` — quiet this room in N minutes |
+| POST | `/api/media/timers/fade/cancel` | `{"room"}` — stop a ramp without deleting anything |
 
 Zone members are bridge-qualified speaker ids: `sonos:abc`, `kef:def`.
 
@@ -349,6 +357,61 @@ This is HomeHub's own memory, not Spotify's: the account's history is one list
 for the whole household and cannot say what a given room plays. It is recorded
 when a play succeeds, kept per room, and dropped when the speaker or zone is
 deleted.
+
+Each entry also carries `count`, `first_at` and a 24-slot `hours` histogram
+(absent on entries written before those fields existed, which read as one play
+and as no evidence about any hour).
+
+`GET /api/media/history/top?room=&hour=now` ranks the same entries by how often
+that room has started them, and with `hour` by how often it has started them at
+that local hour. `by_hour` in the answer says which of the two it gave — a room
+with no habit at that hour falls back to its favourites overall, and a surface
+that labelled the fallback as a habit would be claiming evidence it doesn't
+have. Unlike the plain history this never softens into the household's list.
+
+`GET /api/media/insights` sums every room: `plays`, `items`, per-room and
+per-artist tallies, the most-played items merged across rooms, a 24-slot
+histogram, and `since` — the oldest play still remembered, so a surface can say
+what window the numbers cover instead of implying they cover everything.
+
+#### Music timers
+
+Music that starts and stops without anyone tapping anything — the half the
+socket scheduler can't reach, since `ExecuteAction` stops at sockets, groups,
+rooms and scenes. One resource covers both uses, which differ only in which end
+of the fade they are on:
+
+```json
+{
+  "id": "mt_1786…",
+  "room": "sonos:abc",
+  "action": "start",
+  "enabled": true,
+  "time": "06:45",
+  "days": [1, 2, 3, 4, 5],
+  "item": { "provider": "spotify", "kind": "playlist", "uri": "spotify:playlist:…", "title": "Mornings" },
+  "volume": 20,
+  "fade_minutes": 10
+}
+```
+
+`room` is the same bridge-qualified destination the play history uses. Exactly
+one schedule applies: `time` + `days` repeats, `fires_at` runs once and is
+deleted. `volume` is where the room ends up — omit it to leave the volume alone,
+which also makes `fade_minutes` meaningless and clears it. A timer whose room is
+deleted is pruned with it, the way a shelf is.
+
+`GET /api/media/timers` adds what a surface would otherwise have to work out:
+`room_name` (what the house calls that room *now*), `next_at`, and `fading` —
+true while a ramp is walking that room's volume right now.
+
+`POST /api/media/timers/sleep` is the gesture the rest exists for: `{"room":
+"sonos:abc", "minutes": 40}`. The fade is the tail of the wait rather than time
+added to it, so the room is quiet at forty minutes and not at forty-eight, and
+the answer carries `quiet_at` — the moment worth reading back. Setting one twice
+on a room replaces it. The engine restores the volume it lowered, on the
+interrupted path too, and an interrupted sleep leaves the music playing:
+`POST /api/media/timers/fade/cancel` is "I'm still up".
 
 ### Announcements
 
