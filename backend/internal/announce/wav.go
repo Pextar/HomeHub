@@ -100,9 +100,17 @@ func parseWAV(b []byte) (Clip, error) {
 		id := string(b[pos : pos+4])
 		size := int(binary.LittleEndian.Uint32(b[pos+4 : pos+8]))
 		body := pos + 8
-		if size < 0 || body+size > len(b) {
-			// A truncated final chunk is common on streamed WAVs: take what
-			// is actually there rather than refusing the whole clip.
+		// A WAV written to a stream cannot know its own length, and the
+		// several conventions for saying so all have to be read as "the
+		// rest of what arrived": a zero, a placeholder maximum (which is
+		// also negative when int is 32 bits — a Pi), or simply more than
+		// turned up. This is not a corner case; it is what an HTTP TTS
+		// endpoint that streams its answer sends every time.
+		//
+		// The rule is only safe for the audio itself. An empty LIST or fact
+		// chunk is legitimately zero-length, and letting one of those
+		// swallow the remainder would eat the data chunk behind it.
+		if size < 0 || body+size > len(b) || (size == 0 && id == "data") {
 			size = len(b) - body
 		}
 		switch id {

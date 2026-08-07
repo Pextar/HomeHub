@@ -16,6 +16,7 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
+	"homehub/internal/announce"
 	"homehub/internal/api"
 	"homehub/internal/llm"
 	"homehub/internal/matter"
@@ -70,7 +71,21 @@ func nexaScriptPath() string {
 
 func main() {
 	resetAdmin := flag.Bool("reset-admin", false, "reset the first admin's password from AUTH_PASS and exit")
+	checkVoice := flag.String("check-voice", "",
+		"synthesise a phrase through the configured text-to-speech service, write it to announcement.wav, and exit")
 	flag.Parse()
+
+	// Checking the voice happens before anything is opened: it touches no
+	// state, and someone running it is setting the house up rather than
+	// running it. An announcement falls back to the chime whenever the
+	// words can't be made — right at dinner time, and the reason a
+	// misconfigured endpoint is otherwise indistinguishable from none.
+	if *checkVoice != "" {
+		if err := runVoiceCheck(*checkVoice); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
 
 	dataDir := "./data"
 	if err := os.MkdirAll(dataDir, 0755); err != nil {
@@ -348,4 +363,28 @@ func main() {
 	// Persist any readings still sitting in the debounce window.
 	st.FlushSensorSaves()
 	log.Println("bye")
+}
+
+// runVoiceCheck synthesises one phrase through the configured service and
+// writes the finished announcement — chime, pause, words — next to the
+// binary, so the household can listen to what the speakers would play
+// before trusting it to call anyone.
+func runVoiceCheck(phrase string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	res := announce.Check(ctx, announce.VoiceFromEnv(), phrase)
+	fmt.Print(res.Summary())
+
+	const out = "announcement.wav"
+	if err := os.WriteFile(out, res.Clip.WAV(), 0644); err != nil {
+		return fmt.Errorf("writing %s: %w", out, err)
+	}
+	fmt.Printf("  written to %s — play it to hear what the rooms would.\n", out)
+	if !res.Spoke {
+		// A chime-only house is a supported setup, not a failure, so this
+		// exits 0. The summary above has already said what is missing.
+		return nil
+	}
+	return nil
 }

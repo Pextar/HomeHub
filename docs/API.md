@@ -391,11 +391,17 @@ excluded for the same reason — their API cannot report what they were playing.
 unauthenticated, exactly like the audio stream and for the same reason, guarded
 by an unguessable id that expires a couple of minutes after it is minted.
 
-Environment (all optional): `HOMEHUB_TTS_URL` points at an OpenAI-shaped
-`/audio/speech` endpoint — several local servers implement it — with
-`HOMEHUB_TTS_MODEL`, `HOMEHUB_TTS_VOICE` and `HOMEHUB_TTS_KEY` alongside it.
-HomeHub asks for `wav`, since that is the one format it can join to the chime
-without a decoder. With none of this set, announcements are the chime.
+Environment (all optional): `HOMEHUB_TTS_URL` points at the text-to-speech
+service, with `HOMEHUB_TTS_MODEL`, `HOMEHUB_TTS_VOICE` and `HOMEHUB_TTS_KEY`
+alongside it. Two request shapes are spoken, chosen by `HOMEHUB_TTS_KIND`:
+`openai` (the default — `{model, voice, input, response_format: "wav"}`, which
+OpenAI and most self-hosted servers take) and `piper` (`{text, voice}`, Piper's
+own HTTP server, auto-detected from a URL ending in `/synthesize`). Either way
+the answer must be 16-bit PCM WAV, the one format that needs no decoder here
+and can be joined to the chime without resampling. With none of this set,
+announcements are the chime. `homehub --check-voice "…"` verifies a service
+through the same code path an announcement uses; see
+[INSTALL.md](INSTALL.md).
 
 ## Error Format
 

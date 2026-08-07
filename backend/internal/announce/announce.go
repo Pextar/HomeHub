@@ -44,14 +44,34 @@ const MaxTextLen = 200
 // leadIn is the pause between the chime and the first word.
 const leadIn = 250 * time.Millisecond
 
+// Dialect is the request shape a voice service speaks. Two, because the two
+// realistic ways to give a house a voice speak different ones and neither is
+// worth making the household run a translator for.
+type Dialect string
+
+const (
+	// DialectOpenAI is POST {model, voice, input, response_format} — what
+	// OpenAI's /v1/audio/speech takes and what most self-hosted servers
+	// copy (Kokoro-FastAPI, Speaches, openedai-speech, LocalAI).
+	DialectOpenAI Dialect = "openai"
+	// DialectPiper is POST {text, voice} — Piper's own HTTP server, which
+	// answers with a 16-bit PCM WAV directly. It is worth speaking natively
+	// because Piper is the offline engine that has the languages a European
+	// household actually needs, and because supporting it here saves that
+	// household from running a second container purely to reshape a JSON
+	// body.
+	DialectPiper Dialect = "piper"
+)
+
 // Voice is a text-to-speech endpoint. Nil when the household hasn't
 // configured one, which is a supported state and not an error.
 type Voice struct {
-	URL   string
-	Model string
-	Name  string // the endpoint's voice id
-	Key   string // optional bearer token
-	HTTP  *http.Client
+	URL     string
+	Dialect Dialect
+	Model   string
+	Name    string // the endpoint's voice id
+	Key     string // optional bearer token
+	HTTP    *http.Client
 }
 
 // VoiceFromEnv reads the optional TTS configuration.
@@ -66,18 +86,59 @@ func VoiceFromEnv() *Voice {
 		return nil
 	}
 	v := &Voice{
-		URL:   url,
-		Model: strings.TrimSpace(os.Getenv("HOMEHUB_TTS_MODEL")),
-		Name:  strings.TrimSpace(os.Getenv("HOMEHUB_TTS_VOICE")),
-		Key:   strings.TrimSpace(os.Getenv("HOMEHUB_TTS_KEY")),
+		URL:     url,
+		Dialect: DialectOpenAI,
+		Model:   strings.TrimSpace(os.Getenv("HOMEHUB_TTS_MODEL")),
+		Name:    strings.TrimSpace(os.Getenv("HOMEHUB_TTS_VOICE")),
+		Key:     strings.TrimSpace(os.Getenv("HOMEHUB_TTS_KEY")),
 	}
-	if v.Model == "" {
-		v.Model = "tts-1"
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("HOMEHUB_TTS_KIND"))) {
+	case string(DialectPiper):
+		v.Dialect = DialectPiper
+	case "", string(DialectOpenAI):
+		// Piper's endpoint names itself, so the common case needs no
+		// setting at all — a URL is enough to be pointed at either kind.
+		// An explicit HOMEHUB_TTS_KIND still wins, for a proxy that has
+		// moved the path.
+		if strings.HasSuffix(strings.TrimRight(url, "/"), "/synthesize") {
+			v.Dialect = DialectPiper
+		}
 	}
-	if v.Name == "" {
-		v.Name = "alloy"
+	if v.Dialect == DialectOpenAI {
+		// Defaults that only mean anything to an OpenAI-shaped service.
+		// Piper picks its voice from what the server was started with, and
+		// sending it "alloy" would name a voice it has never heard of.
+		if v.Model == "" {
+			v.Model = "tts-1"
+		}
+		if v.Name == "" {
+			v.Name = "alloy"
+		}
 	}
 	return v
+}
+
+// requestBody is the only thing the two dialects disagree about. Both
+// answer with a WAV, which is why everything after this point is shared.
+func (v *Voice) requestBody(text string) map[string]any {
+	if v.Dialect == DialectPiper {
+		body := map[string]any{"text": text}
+		// Optional: a Piper server started with one model needs no voice
+		// named, and naming one it doesn't have would make it fall back
+		// silently to its default.
+		if v.Name != "" {
+			body["voice"] = v.Name
+		}
+		return body
+	}
+	return map[string]any{
+		"model": v.Model,
+		"voice": v.Name,
+		"input": text,
+		// WAV explicitly: it is the one format that needs no decoder here,
+		// and the chime has to be generated at its rate to be joined to it.
+		"response_format": "wav",
+	}
 }
 
 func (v *Voice) client() *http.Client {
@@ -87,21 +148,14 @@ func (v *Voice) client() *http.Client {
 	return &http.Client{Timeout: 20 * time.Second}
 }
 
-// Speak renders text as 16-bit PCM WAV.
-//
-// WAV is requested explicitly because it is the one response format that
-// needs no decoder here, and because the chime has to be generated at the
-// same rate to be joined to it.
+// Speak renders text as 16-bit PCM WAV, in whichever dialect this endpoint
+// speaks. Both answer with a WAV — the OpenAI shape because it is asked to,
+// Piper because that is all it emits — so only the request differs.
 func (v *Voice) Speak(ctx context.Context, text string) (Clip, error) {
 	if v == nil || v.URL == "" {
 		return Clip{}, ErrNoVoice
 	}
-	body, err := json.Marshal(map[string]any{
-		"model":           v.Model,
-		"voice":           v.Name,
-		"input":           text,
-		"response_format": "wav",
-	})
+	body, err := json.Marshal(v.requestBody(text))
 	if err != nil {
 		return Clip{}, err
 	}

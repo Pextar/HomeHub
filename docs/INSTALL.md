@@ -180,6 +180,132 @@ publishes `ON` to confirm the device reacts.
 > publish to (and flip) your sockets. Prefer the `MQTT_USERNAME`/`MQTT_PASSWORD`
 > form unless your network is fully trusted.
 
+### Announcements (giving the house a voice)
+
+The panel can call the house — a chime in every Sonos room, and, if you give
+it a voice, the words after it. **The chime needs no setup at all**: it is
+synthesised by the controller, so "Announce" works the moment you have
+speakers. Everything below is about the words.
+
+HomeHub asks a text-to-speech service over HTTP and expects a **16-bit PCM
+WAV** back — the one format that needs no decoder and can be joined to the
+chime without resampling. It speaks two request shapes, and picks between
+them from the URL:
+
+| `HOMEHUB_TTS_KIND` | Request | Use with |
+|---|---|---|
+| `piper` (auto-detected from a `/synthesize` URL) | `{"text": …, "voice": …}` | Piper's own HTTP server |
+| `openai` (default) | `{"model", "voice", "input", "response_format": "wav"}` | OpenAI, Kokoro-FastAPI, Speaches, openedai-speech, LocalAI |
+
+#### Recommended: Piper on the Pi itself
+
+Free, offline, runs in real time on a Pi 4, and — the part that matters for a
+non-English house — it has **Swedish voices**, which the popular
+OpenAI-compatible servers mostly don't. Piper's repository was archived in
+October 2025, but the package is still published and is still the best
+offline option for these languages.
+
+```bash
+sudo apt install -y python3-venv
+python3 -m venv ~/piper && ~/piper/bin/pip install piper-tts
+
+# Pick a voice: sv_SE-alma-medium, sv_SE-nst-medium, sv_SE-lisa-medium,
+# en_GB-alba-medium, … (samples: https://rhasspy.github.io/piper-samples/)
+cd ~/piper && ~/piper/bin/python -m piper.download_voices sv_SE-alma-medium
+
+# Serve it. Piper's own HTTP server answers with WAV, which is what we want.
+~/piper/bin/python -m piper.http_server -m sv_SE-alma-medium --port 5000
+```
+
+Then add to the controller's `.env` and restart it:
+
+```bash
+HOMEHUB_TTS_URL=http://127.0.0.1:5000/synthesize
+# Optional — only needed if the server holds more than one voice:
+HOMEHUB_TTS_VOICE=sv_SE-alma-medium
+```
+
+To keep it running, install it as a service beside HomeHub's own:
+
+```ini
+# /etc/systemd/system/piper.service
+[Unit]
+Description=Piper text-to-speech
+After=network.target
+
+[Service]
+User=pi
+WorkingDirectory=/home/pi/piper
+ExecStart=/home/pi/piper/bin/python -m piper.http_server -m sv_SE-alma-medium --port 5000
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl daemon-reload && sudo systemctl enable --now piper
+```
+
+#### Alternative: an OpenAI-shaped server
+
+Better-sounding English, at the cost of a container and more CPU. All of
+these serve `/v1/audio/speech` and support `response_format: wav`:
+
+```bash
+# Kokoro-FastAPI — 82M-parameter model, CPU-only image, ~50 voices.
+# English, Spanish, French, Italian, Portuguese, Hindi, Japanese, Chinese.
+# No Swedish.
+docker run -p 8880:8880 ghcr.io/remsky/kokoro-fastapi-cpu:latest
+```
+
+```bash
+HOMEHUB_TTS_URL=http://127.0.0.1:8880/v1/audio/speech
+HOMEHUB_TTS_MODEL=kokoro
+HOMEHUB_TTS_VOICE=af_heart
+```
+
+[Speaches](https://speaches.ai) and
+[openedai-speech](https://github.com/matatonic/openedai-speech) are the same
+idea with different back ends — openedai-speech wraps Piper itself, so it is
+the way to get Piper's languages *and* the OpenAI shape if you already run
+other things that expect it.
+
+#### Or a hosted service
+
+Zero setup, but every announcement leaves the house and dinner depends on the
+internet. OpenAI's `gpt-4o-mini-tts` is around $0.015 a minute of audio,
+which for a household's announcements is cents a year:
+
+```bash
+HOMEHUB_TTS_URL=https://api.openai.com/v1/audio/speech
+HOMEHUB_TTS_MODEL=gpt-4o-mini-tts
+HOMEHUB_TTS_VOICE=alloy
+HOMEHUB_TTS_KEY=sk-…
+```
+
+#### Check it before you trust it
+
+An announcement falls back to the chime whenever the words can't be made —
+which is right at dinner time, and also means a misconfigured endpoint looks
+exactly like no endpoint at all. So check it once:
+
+```bash
+cd ~/homehub && set -a && . ./.env && set +a
+./homehub --check-voice "Maten är klar"
+```
+
+```
+Voice OK (piper dialect)
+  speech:       1.31s of 22050 Hz, 1 channel(s)
+  announcement: 2.28s (chime, pause, words)
+  written to announcement.wav — play it to hear what the rooms would.
+```
+
+It runs the same code path an announcement does and writes the finished clip
+— chime, pause, words — to `announcement.wav`, so you can hear what the
+speakers would play. If there are no words it names the reason and the fix.
+
 ## Software Installation
 
 ### Recommended: cross-compile from your laptop

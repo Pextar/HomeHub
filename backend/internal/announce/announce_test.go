@@ -223,3 +223,124 @@ func TestBuildCapsTheText(t *testing.T) {
 func decodeJSON(r *http.Request, out any) error {
 	return json.NewDecoder(r.Body).Decode(out)
 }
+
+// A WAV written to an HTTP response cannot know its own length, and every
+// convention for saying so has to read as "the rest of what arrived". This
+// is the normal case for a TTS endpoint that streams its answer, not a
+// corner case — and getting it wrong drops the voice and leaves the house
+// wondering why the panel only chimes.
+func TestParseWAVAcceptsStreamedLengths(t *testing.T) {
+	real := Clip{Format: Format{SampleRate: 24000, Channels: 1}, PCM: []byte{1, 0, 2, 0, 3, 0, 4, 0}}
+	for _, declared := range []uint32{0, 0xFFFFFFFF, 0xFFFFFF7F, 9999} {
+		wav := real.WAV()
+		binary.LittleEndian.PutUint32(wav[40:], declared) // the data chunk's size
+		got, err := parseWAV(wav)
+		if err != nil {
+			t.Errorf("data size %#x: %v", declared, err)
+			continue
+		}
+		if string(got.PCM) != string(real.PCM) || got.Format != real.Format {
+			t.Errorf("data size %#x gave %d bytes at %+v, want %d at %+v",
+				declared, len(got.PCM), got.Format, len(real.PCM), real.Format)
+		}
+	}
+}
+
+// ...but a zero-length chunk that isn't the audio is legitimate, and must
+// not swallow the data chunk sitting behind it.
+func TestParseWAVDoesNotLetAnEmptyChunkEatTheAudio(t *testing.T) {
+	real := Clip{Format: Format{SampleRate: 16000, Channels: 1}, PCM: []byte{5, 0, 6, 0}}
+	wav := real.WAV()
+	empty := []byte("LIST\x00\x00\x00\x00")
+	spliced := append([]byte{}, wav[:36]...)
+	spliced = append(spliced, empty...)
+	spliced = append(spliced, wav[36:]...)
+	binary.LittleEndian.PutUint32(spliced[4:], uint32(len(spliced)-8))
+
+	got, err := parseWAV(spliced)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got.PCM) != string(real.PCM) {
+		t.Errorf("PCM = %v, want %v — an empty LIST chunk ate the audio", got.PCM, real.PCM)
+	}
+}
+
+// The two dialects differ in exactly one place — the request body — and the
+// wrong one is a silent failure: Piper ignores fields it doesn't know and
+// synthesises an empty string, so the house gets a chime and no explanation.
+func TestPiperDialectSendsPipersOwnBody(t *testing.T) {
+	var got map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = decodeJSON(r, &got)
+		w.Header().Set("Content-Type", "audio/wav")
+		// Piper answers at its voice's own rate, mono — which is why the
+		// chime is regenerated to match rather than assumed.
+		_, _ = w.Write(Clip{Format: Format{SampleRate: 22050, Channels: 1}, PCM: make([]byte, 4410)}.WAV())
+	}))
+	defer srv.Close()
+
+	v := &Voice{URL: srv.URL + "/synthesize", Dialect: DialectPiper, Name: "sv_SE-alma-medium", HTTP: srv.Client()}
+	clip, err := Build(context.Background(), v, "Maten är klar")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["text"] != "Maten är klar" {
+		t.Errorf("body = %v, want Piper's own {text: …}", got)
+	}
+	if got["voice"] != "sv_SE-alma-medium" {
+		t.Errorf("voice = %v, want the configured one", got["voice"])
+	}
+	if _, ok := got["input"]; ok {
+		t.Error("the OpenAI field 'input' was sent to a Piper server")
+	}
+	if clip.Format.SampleRate != 22050 {
+		t.Errorf("clip rate = %d, want the voice's 22050", clip.Format.SampleRate)
+	}
+}
+
+// A Piper server names itself in its own URL, so pointing HomeHub at one is
+// a single setting. An explicit kind still wins, for a proxy that moved the
+// path.
+func TestVoiceFromEnvPicksTheDialect(t *testing.T) {
+	cases := []struct {
+		url, kind string
+		want      Dialect
+	}{
+		{"http://pi.local:5000/synthesize", "", DialectPiper},
+		{"http://pi.local:5000/synthesize/", "", DialectPiper},
+		{"http://pi.local:8880/v1/audio/speech", "", DialectOpenAI},
+		{"http://pi.local:8880/tts", "piper", DialectPiper},
+		{"http://pi.local:5000/synthesize", "openai", DialectPiper}, // suffix still wins
+	}
+	for _, c := range cases {
+		t.Setenv("HOMEHUB_TTS_URL", c.url)
+		t.Setenv("HOMEHUB_TTS_KIND", c.kind)
+		v := VoiceFromEnv()
+		if v == nil {
+			t.Fatalf("%s: no voice configured", c.url)
+		}
+		if v.Dialect != c.want {
+			t.Errorf("%s (kind %q) = %s, want %s", c.url, c.kind, v.Dialect, c.want)
+		}
+	}
+
+	// And an OpenAI-shaped service gets the defaults a Piper one must not:
+	// naming "alloy" at a Piper server picks a voice it has never heard of.
+	t.Setenv("HOMEHUB_TTS_URL", "http://pi.local:5000/synthesize")
+	t.Setenv("HOMEHUB_TTS_KIND", "")
+	if v := VoiceFromEnv(); v.Name != "" || v.Model != "" {
+		t.Errorf("piper voice defaulted to model=%q voice=%q, want neither", v.Model, v.Name)
+	}
+	t.Setenv("HOMEHUB_TTS_URL", "http://pi.local:8880/v1/audio/speech")
+	if v := VoiceFromEnv(); v.Name != "alloy" || v.Model != "tts-1" {
+		t.Errorf("openai voice = model=%q voice=%q, want the defaults", v.Model, v.Name)
+	}
+}
+
+func TestNoVoiceWithoutAURL(t *testing.T) {
+	t.Setenv("HOMEHUB_TTS_URL", "")
+	if VoiceFromEnv() != nil {
+		t.Error("a voice was configured out of nothing")
+	}
+}
