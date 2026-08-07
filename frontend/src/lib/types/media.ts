@@ -156,3 +156,53 @@ export interface MediaZoneRoutes {
   /** Every rejected route, in preference order. Present with `problem`. */
   blocked?: MediaRouteBlock[];
 }
+
+/**
+ * One thing a room was asked to play, as HomeHub remembers it.
+ *
+ * This is the app's own memory rather than Spotify's, because Spotify's is
+ * one list for the whole household and cannot say that the kitchen gets
+ * radio at breakfast. `provider` decides how a tile replays it: "spotify"
+ * goes back through the play path it came from, "sonos" is a household
+ * favorite and is matched against the current favorites list by URI (a
+ * favorite that has since been deleted simply stops appearing).
+ */
+export interface MediaPlay {
+  provider: string;
+  kind?: MediaItemKind;
+  uri: string;
+  title: string;
+  sub?: string;
+  art_uri?: string;
+  /** What the room was called when this played. */
+  room_name?: string;
+  at: string;
+}
+
+/** One room's play history, or the household's when it has none of its own. */
+export interface MediaHistory {
+  plays: MediaPlay[];
+  /** True when these are the household's plays rather than this room's. */
+  household: boolean;
+}
+
+/** What the announcement control needs before anyone taps it. */
+export interface AnnounceStatus {
+  /** False when no speaker is answering — there is nowhere to announce to. */
+  available: boolean;
+  /** The rooms that would hear it, in the order they will be addressed. */
+  rooms: string[];
+  /** False when no voice service is configured: a chime, and no words. */
+  voice: boolean;
+  max_text: number;
+}
+
+/** What an announcement did. */
+export interface AnnounceResult {
+  rooms: string[];
+  /** Rooms that didn't take it, so the surface can be honest about reach. */
+  unreachable: string[];
+  /** False when the words were dropped and only the chime played. */
+  spoken: boolean;
+  duration_ms: number;
+}

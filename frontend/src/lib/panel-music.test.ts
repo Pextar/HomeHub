@@ -6,6 +6,10 @@ import type {
   KEFStatus,
   KEFSpeakerView,
   MediaZone,
+  MediaHistory,
+  SonosFavorite,
+  AnnounceStatus,
+  SpotifyItem,
 } from "./types";
 
 /**
@@ -22,6 +26,11 @@ let sonosFixture: SonosStatus;
 let kefFixture: KEFStatus;
 let zonesFixture: MediaZone[];
 let queueFixture: SonosQueueItem[];
+let historyFixture: MediaHistory;
+let favoritesFixture: SonosFavorite[];
+let announceFixture: AnnounceStatus;
+let similarFixture: SpotifyItem[];
+let savedFixture = false;
 let sonosFails = false;
 
 vi.mock("./api", () => ({
@@ -42,12 +51,31 @@ vi.mock("./api", () => ({
     sonosJoin: vi.fn(async () => {}),
     sonosLeave: vi.fn(async () => {}),
     sonosSettings: vi.fn(async () => ({ sleep_minutes: 0 })),
-    sonosFavorites: vi.fn(async () => []),
+    sonosFavorites: vi.fn(async () => favoritesFixture),
+    sonosPlayFavorite: vi.fn(async () => {}),
     sonosSetVolume: vi.fn(async () => {}),
     sonosSetMute: vi.fn(async () => {}),
     sonosPause: vi.fn(async () => {}),
     kefPause: vi.fn(async () => {}),
     mediaZonePause: vi.fn(async () => {}),
+    sonosQueueMove: vi.fn(async () => {}),
+    // The reads the store makes on its own behalf as soon as it exists: what
+    // this login may do with the library, what the room played before, and
+    // whether there is anywhere to announce to. All three degrade to "no
+    // control" rather than failing, which is what the fixtures below say.
+    spotifyStatus: vi.fn(async () => ({ connected: true, library: true })),
+    spotifySaved: vi.fn(async () => ({ saved: savedFixture })),
+    spotifySetSaved: vi.fn(async () => {}),
+    spotifySimilar: vi.fn(async () => similarFixture),
+    sonosQueueAdd: vi.fn(async () => ({ track: 1, length: 1 })),
+    mediaHistory: vi.fn(async () => historyFixture),
+    announceStatus: vi.fn(async () => announceFixture),
+    announce: vi.fn(async () => ({
+      rooms: ["Kitchen"],
+      unreachable: [],
+      spoken: true,
+      duration_ms: 3000,
+    })),
   },
 }));
 
@@ -116,6 +144,11 @@ async function boot() {
 }
 
 beforeEach(() => {
+  historyFixture = { plays: [], household: false };
+  favoritesFixture = [];
+  announceFixture = { available: true, rooms: ["Kitchen"], voice: true, max_text: 200 };
+  similarFixture = [];
+  savedFixture = false;
   sonosFails = false;
   sonosFixture = {
     speakers: [sonosSpeaker("kitchen"), sonosSpeaker("bedroom")],
@@ -557,6 +590,287 @@ describe("grouping", () => {
     expect(api.sonosLeave).toHaveBeenCalledWith("bedroom");
     expect(api.sonosLeave).toHaveBeenCalledWith("study");
     expect(api.sonosLeave).not.toHaveBeenCalledWith("kitchen");
+    h.stop();
+  });
+});
+
+describe("moving the music", () => {
+  // "Put this in the kitchen as well" is grouping; "take it with me" is a
+  // move, and it used to cost two aims at a wall. The order is the whole
+  // rule: the destination joins while the old room is still coordinating,
+  // so the handover doesn't drop the music between two calls.
+  it("joins the destination before the old room leaves", async () => {
+    sonosFixture = {
+      speakers: [sonosSpeaker("kitchen"), sonosSpeaker("study")],
+      groups: [
+        { coordinator_id: "kitchen", member_ids: ["kitchen"] },
+        { coordinator_id: "study", member_ids: ["study"] },
+      ],
+    } as SonosStatus;
+    const h = await boot();
+    h.value.selected = "s:kitchen";
+    h.flush();
+
+    const order: string[] = [];
+    vi.mocked(api.sonosJoin).mockImplementation(async (id: string) => {
+      order.push("join:" + id);
+    });
+    vi.mocked(api.sonosLeave).mockImplementation(async (id: string) => {
+      order.push("leave:" + id);
+    });
+
+    h.value.moveTo(h.value.sources.find((s) => s.key === "s:study")!);
+    h.flush();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // The move is two calls and a re-read before the store follows the
+    // sound; a macrotask drains all of it.
+    await new Promise((r) => setTimeout(r, 0));
+    h.flush();
+
+    expect(order).toEqual(["join:study", "leave:kitchen"]);
+    // The wall follows the sound.
+    expect(h.value.selected).toBe("s:study");
+    h.stop();
+  });
+
+  it("has nothing to move to on a room that doesn't group", async () => {
+    kefFixture = { speakers: [kefSpeaker("study")] };
+    sonosFixture = {
+      speakers: [sonosSpeaker("kitchen")],
+      groups: [{ coordinator_id: "kitchen", member_ids: ["kitchen"] }],
+    } as SonosStatus;
+    const h = await boot();
+    h.value.selected = "k:study";
+    h.flush();
+
+    h.value.moveTo(h.value.sources.find((s) => s.key === "s:kitchen")!);
+    h.flush();
+    await Promise.resolve();
+
+    expect(api.sonosJoin).not.toHaveBeenCalled();
+    expect(api.sonosLeave).not.toHaveBeenCalled();
+    h.stop();
+  });
+});
+
+describe("the queue's order", () => {
+  it("moves a track one place and re-reads rather than guessing", async () => {
+    queueFixture = [
+      { track: 1, title: "One" },
+      { track: 2, title: "Two" },
+      { track: 3, title: "Three" },
+    ];
+    const h = await boot();
+
+    h.value.moveQueued(2, 1);
+    h.flush();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(api.sonosQueueMove).toHaveBeenCalledWith("kitchen", 2, 3);
+    expect(api.sonosQueue).toHaveBeenCalled();
+    h.stop();
+  });
+
+  // The ends of a list are where an off-by-one shows up as a speaker error.
+  it("refuses to move past either end", async () => {
+    queueFixture = [
+      { track: 1, title: "One" },
+      { track: 2, title: "Two" },
+    ];
+    const h = await boot();
+
+    h.value.moveQueued(1, -1);
+    h.value.moveQueued(2, 1);
+    h.flush();
+    await Promise.resolve();
+
+    expect(api.sonosQueueMove).not.toHaveBeenCalled();
+    h.stop();
+  });
+});
+
+describe("saving what's playing", () => {
+  it("only offers the heart where there is a track to save", async () => {
+    sonosFixture = {
+      speakers: [
+        sonosSpeaker("kitchen", {
+          state: {
+            volume: 30,
+            muted: false,
+            playing: true,
+            track: { title: "Radio 3", artist: "Live" },
+          },
+        } as Partial<SonosSpeakerView>),
+      ],
+      groups: [{ coordinator_id: "kitchen", member_ids: ["kitchen"] }],
+    } as SonosStatus;
+    const h = await boot();
+
+    // Radio carries an artist line and no catalog id, so there is nothing
+    // the library could be asked about.
+    expect(h.value.featured?.trackURI).toBeUndefined();
+    h.value.toggleSaved();
+    h.flush();
+    await Promise.resolve();
+    expect(api.spotifySetSaved).not.toHaveBeenCalled();
+    h.stop();
+  });
+
+  it("reads the saved state for a Spotify track and writes the flip", async () => {
+    savedFixture = false;
+    sonosFixture = {
+      speakers: [
+        sonosSpeaker("kitchen", {
+          state: {
+            volume: 30,
+            muted: false,
+            playing: true,
+            track: { title: "Kaos", artist: "Bo Kaspers", spotify_uri: "spotify:track:abc" },
+          },
+        } as Partial<SonosSpeakerView>),
+      ],
+      groups: [{ coordinator_id: "kitchen", member_ids: ["kitchen"] }],
+    } as SonosStatus;
+    const h = await boot();
+    await Promise.resolve();
+    h.flush();
+
+    expect(api.spotifySaved).toHaveBeenCalledWith("spotify:track:abc");
+
+    h.value.toggleSaved();
+    h.flush();
+    // Optimistic: the heart is the confirmation, since a wall has nothing
+    // else to show while the round trip completes.
+    expect(h.value.saved).toBe(true);
+    await Promise.resolve();
+    expect(api.spotifySetSaved).toHaveBeenCalledWith("spotify:track:abc", true);
+    h.stop();
+  });
+});
+
+describe("more like this", () => {
+  it("fills the queue behind what's playing on a Sonos room", async () => {
+    similarFixture = [
+      { kind: "track", uri: "spotify:track:1", name: "One" },
+      { kind: "track", uri: "spotify:track:2", name: "Two" },
+    ];
+    sonosFixture = {
+      speakers: [
+        sonosSpeaker("kitchen", {
+          state: {
+            volume: 30,
+            muted: false,
+            playing: true,
+            track: { title: "Kaos", artist: "Bo Kaspers" },
+          },
+        } as Partial<SonosSpeakerView>),
+      ],
+      groups: [{ coordinator_id: "kitchen", member_ids: ["kitchen"] }],
+    } as SonosStatus;
+    const h = await boot();
+
+    expect(h.value.canRadio).toBe(true);
+    h.value.startRadio();
+    h.flush();
+    for (let i = 0; i < 6; i++) await Promise.resolve();
+
+    expect(api.spotifySimilar).toHaveBeenCalledWith("Bo Kaspers", 8);
+    // The first goes next so the run starts after this song rather than at
+    // the end of whatever was already queued.
+    expect(api.sonosQueueAdd).toHaveBeenCalledWith("kitchen", {
+      service: "Spotify",
+      uri: "spotify:track:1",
+      title: "One",
+      next: true,
+    });
+    h.stop();
+  });
+
+  it("has nothing to seed from in a silent room", async () => {
+    const h = await boot();
+    expect(h.value.canRadio).toBe(false);
+    h.value.startRadio();
+    h.flush();
+    await Promise.resolve();
+    expect(api.spotifySimilar).not.toHaveBeenCalled();
+    h.stop();
+  });
+});
+
+describe("what the room played before", () => {
+  it("asks per room, under the key the media layer files plays under", async () => {
+    kefFixture = { speakers: [kefSpeaker("study")] };
+    const h = await boot();
+    h.value.selected = "k:study";
+    h.flush();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(api.mediaHistory).toHaveBeenCalledWith("kef:study", 12);
+    h.stop();
+  });
+
+  // A favorite is replayed the way it was started. One that has since been
+  // deleted from the household simply stops being offered — better than a
+  // tile that fails.
+  it("replays a Sonos favorite through the favorites path", async () => {
+    historyFixture = {
+      plays: [{ provider: "sonos", uri: "x-sonosapi-stream:p3", title: "P3", at: "" }],
+      household: false,
+    };
+    favoritesFixture = [
+      { id: "fv:1", title: "P3", uri: "x-sonosapi-stream:p3" } as SonosFavorite,
+    ];
+    const h = await boot();
+    for (let i = 0; i < 4; i++) await Promise.resolve();
+    h.flush();
+
+    h.value.playFromHistory(h.value.history[0]);
+    h.flush();
+    await Promise.resolve();
+
+    expect(api.sonosPlayFavorite).toHaveBeenCalledWith("kitchen", favoritesFixture[0]);
+    h.stop();
+  });
+
+  it("drops a favorite the household has since deleted", async () => {
+    historyFixture = {
+      plays: [{ provider: "sonos", uri: "x-sonosapi-stream:gone", title: "Gone", at: "" }],
+      household: false,
+    };
+    const h = await boot();
+    for (let i = 0; i < 4; i++) await Promise.resolve();
+    h.flush();
+
+    h.value.playFromHistory(h.value.history[0]);
+    h.flush();
+    await Promise.resolve();
+
+    expect(api.sonosPlayFavorite).not.toHaveBeenCalled();
+    h.stop();
+  });
+});
+
+describe("calling the house", () => {
+  it("reports where an announcement would land", async () => {
+    const h = await boot();
+    await Promise.resolve();
+    h.flush();
+
+    expect(h.value.announce?.available).toBe(true);
+    expect(h.value.announce?.voice).toBe(true);
+
+    h.value.sendAnnouncement("Dinner's ready");
+    h.flush();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(api.announce).toHaveBeenCalledWith("Dinner's ready");
+    expect(h.value.lastAnnounce?.rooms).toEqual(["Kitchen"]);
     h.stop();
   });
 });

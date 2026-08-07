@@ -38,6 +38,7 @@ import { NEXT_REPEAT } from "./music/sonos.svelte";
 import { clock } from "./music/clock.svelte";
 import { clampVol, createVolumeThrottle } from "./music/volume";
 import type { PanelNowPlaying } from "./panel";
+import type { PlayItemBody } from "./api";
 import type {
     SonosStatus,
     SonosGroupView,
@@ -51,6 +52,8 @@ import type {
     MediaZone,
     MediaZoneSpeaker,
     MediaRoute,
+    MediaPlay,
+    AnnounceStatus,
 } from "./types";
 
 /** Which bridge a member speaker's own volume/mute calls go to. */
@@ -81,6 +84,14 @@ export interface PanelSource {
     canSkip: boolean;
     trackTitle?: string;
     trackSub?: string;
+    /** The artist alone, where the sub line is "artist · album". What the
+     *  radio seeds from and what the artist page is opened by name with. */
+    trackArtist?: string;
+    /** The canonical Spotify URI of what is playing, when the source is
+     *  Spotify. Absent on radio, line-in and anything else — saving and
+     *  "open the artist" render only where it is present (§15.1 applied to
+     *  a track rather than to a room). */
+    trackURI?: string;
     art?: string;
     /** Every speaker inside it, when there is more than one to balance. */
     members?: PanelMember[];
@@ -178,6 +189,9 @@ export interface PanelMusicStore {
     readonly queueOrderKnown: boolean;
     jumpTo(track: number): void;
     removeQueued(track: number): void;
+    /** Move a queued track one place up (-1) or down (+1). One place at a
+     *  time, by tap: the app's drag is an imprecise aim at arm's length. */
+    moveQueued(track: number, dir: -1 | 1): void;
     clearQueue(): void;
     /** Add a search result without disturbing what's playing. */
     enqueue(item: SpotifyItem, next: boolean): void;
@@ -192,6 +206,40 @@ export interface PanelMusicStore {
     // ── Starting something ──
     playItem(item: SpotifyItem): Promise<void>;
 
+    // ── What this room played before (HomeHub's own memory, per room) ──
+    readonly history: MediaPlay[];
+    /** True when the list is the household's rather than this room's own —
+     *  the shelf says which, because a wall must never imply a room played
+     *  something it didn't. */
+    readonly historyHousehold: boolean;
+    playFromHistory(p: MediaPlay): void;
+
+    // ── Saving what's playing ──
+    /** The login may write to the library. False hides the heart rather
+     *  than offering a tap that will be refused. */
+    readonly canSave: boolean;
+    /** Whether what's playing is in the account's library. Meaningless
+     *  unless the featured source has a trackURI. */
+    readonly saved: boolean;
+    toggleSaved(): void;
+
+    // ── More like this ──
+    /** Something is playing with an artist to seed from. */
+    readonly canRadio: boolean;
+    /** Queue more of what's on (Sonos), or play the first of it (anywhere
+     *  else, which has no queue to fill). */
+    startRadio(): void;
+    /** What the last run added, for the in-place confirmation — queuing
+     *  changes nothing visible on its own. */
+    readonly lastRadio: { count: number; artist: string; at: number } | null;
+
+    // ── Announcements ──
+    /** Where an announcement would go and whether it would be spoken.
+     *  Null while the read is out or when the server has no answer. */
+    readonly announce: AnnounceStatus | null;
+    sendAnnouncement(text: string): void;
+    readonly lastAnnounce: { text: string; rooms: string[]; spoken: boolean; at: number } | null;
+
     // ── Grouping (Sonos-native only) ──
     /** The Sonos rooms that could join the featured one — every other
      *  reachable Sonos source. Empty unless a Sonos room is featured:
@@ -205,6 +253,9 @@ export interface PanelMusicStore {
     joinSource(src: PanelSource): void;
     /** Every joinable room at once — the wall's "play everywhere" tap. */
     joinAll(): void;
+    /** Take the music with you: the featured room's group moves to dest and
+     *  leaves where it was. Sonos-native, like every other grouping call. */
+    moveTo(dest: PanelSource): void;
     /** Every non-coordinator member leaves the featured group. */
     ungroupFeatured(): void;
     /** One member steps out of the featured group. */
@@ -396,6 +447,7 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
             trackSub: [lead?.state?.track?.artist, lead?.state?.track?.album]
                 .filter(Boolean)
                 .join(" · "),
+            trackArtist: lead?.state?.track?.artist,
             art: lead?.state?.track?.art_uri,
             members:
                 live.length > 1
@@ -456,6 +508,8 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
                 canSkip: true,
                 trackTitle: st?.track?.title,
                 trackSub: [st?.track?.artist, st?.track?.album].filter(Boolean).join(" · "),
+                trackArtist: st?.track?.artist,
+                trackURI: st?.track?.spotify_uri,
                 art: st?.track?.art_uri,
                 members: members.map((x) => ({
                     id: x.id,
@@ -491,6 +545,7 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
                     st?.track?.title ??
                     (st?.playing && st.source ? `${kefSourceLabel(st.source)} input` : undefined),
                 trackSub: [st?.track?.artist, st?.track?.album].filter(Boolean).join(" · "),
+                trackArtist: st?.track?.artist,
                 art: st?.track?.art_uri,
                 input: st?.source,
                 positionMs: st?.position_ms,
@@ -947,6 +1002,25 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
         void run("qclear:" + f.id, () => api.sonosQueueClear(f.id).then(() => loadQueue(f.id)), "Couldn't clear the queue");
     }
 
+    /** Move one queued track one place up or down.
+     *
+     *  One place at a time, by tap, because this is a wall: the app's drag
+     *  would be an imprecise aim at arm's length over a five-second poll
+     *  (§16's argument for tap-based grouping applies unchanged here). The
+     *  move renumbers the rest of the queue, so it re-reads rather than
+     *  splicing locally — the same reason removing does. */
+    function moveQueued(track: number, dir: -1 | 1) {
+        const f = featured;
+        if (!f || f.kind !== "sonos") return;
+        const to = track + dir;
+        if (to < 1 || to > queue.length) return;
+        void run(
+            "qmv:" + track,
+            () => api.sonosQueueMove(f.id, track, to).then(() => loadQueue(f.id)),
+            "Couldn't move that track",
+        );
+    }
+
     // Queueing never interrupts: `next` drops the item after the current
     // track instead of at the end. Nothing on screen moves when it lands —
     // adding to a group playing radio is legal but silent — so the store
@@ -1012,41 +1086,296 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
         busy[key] = true;
         haptic();
         try {
-            let body = { service: "Spotify", uri: item.uri, title: item.name };
-            let kind = item.kind;
+            let body: PlayItemBody = {
+                service: "Spotify",
+                uri: item.uri,
+                title: item.name,
+                kind: item.kind,
+                // Carried for the room's history rather than for the
+                // speaker: a shelf tile needs a picture and a second line,
+                // and asking the catalog for them again later would be a
+                // service round-trip to redraw a row we already have.
+                sub: item.sub,
+                art_uri: item.art_url,
+            };
             if (item.kind === "artist") {
                 // No speaker takes an artist URI (DESIGN.md §15), so an
                 // artist starts their top track — which the player then names.
                 const d = await api.spotifyArtist(item.uri);
                 const top = d.top_tracks[0];
                 if (!top) throw new Error(`No tracks found for ${item.name}`);
-                body = { service: "Spotify", uri: top.uri, title: top.name };
-                kind = "track";
+                body = {
+                    service: "Spotify",
+                    uri: top.uri,
+                    title: top.name,
+                    kind: "track",
+                    sub: top.sub ?? item.name,
+                    art_uri: top.art_url ?? item.art_url,
+                };
             }
-            if (s.kind === "zone") {
-                // The media layer resolves a route across whatever makes are
-                // in the zone and answers with the one it chose.
-                await api.mediaZonePlay(s.id, {
-                    provider: "spotify",
-                    uri: body.uri,
-                    title: body.title,
-                    kind,
-                });
-            } else if (s.kind === "sonos") {
-                await api.sonosPlayItem(s.id, body);
-            } else {
-                await api.kefPlayItem(s.id, body);
-            }
-            await refresh();
-            // A KEF or streamed play answers as soon as *Spotify* accepted it
-            // — the audio goes out to the cloud and comes back — so the read
-            // above can still say "stopped". Backstops for that gap.
-            if (s.kind !== "sonos") for (const ms of [1200, 4000]) setTimeout(() => void refresh(), ms);
+            await startOn(s, body);
         } catch (e) {
             toasts.error("Couldn't play", (e as Error).message);
         } finally {
             busy[key] = false;
         }
+    }
+
+    /** Hand one item to whichever bridge the destination belongs to. The
+     *  three roads differ (queue-based on Sonos, Connect on a KEF, a route
+     *  the media layer picks for a zone) and nothing above this line should
+     *  have to know which. */
+    async function startOn(s: PanelSource, body: PlayItemBody) {
+        if (s.kind === "zone") {
+            // The media layer resolves a route across whatever makes are
+            // in the zone and answers with the one it chose.
+            await api.mediaZonePlay(s.id, {
+                provider: "spotify",
+                uri: body.uri,
+                title: body.title,
+                kind: body.kind,
+                sub: body.sub,
+                art_uri: body.art_uri,
+            });
+        } else if (s.kind === "sonos") {
+            await api.sonosPlayItem(s.id, body);
+        } else {
+            await api.kefPlayItem(s.id, body);
+        }
+        await refresh();
+        // A KEF or streamed play answers as soon as *Spotify* accepted it
+        // — the audio goes out to the cloud and comes back — so the read
+        // above can still say "stopped". Backstops for that gap.
+        if (s.kind !== "sonos") for (const ms of [1200, 4000]) setTimeout(() => void refresh(), ms);
+    }
+
+    // ── What this room played before ─────────────────────────────────────
+    // HomeHub's own memory, per room, because Spotify's is one list for the
+    // whole household and cannot say that the kitchen gets radio at
+    // breakfast. It is what the band's shelf falls back to for a room that
+    // has no queue and no favorites — a KEF or a zone, which until now got
+    // a third of the wall's height as air (§16).
+    //
+    // A room with no history of its own answers with the household's, and
+    // says which it is: the wall must never imply a room played something
+    // it didn't.
+    let history = $state<MediaPlay[]>([]);
+    let historyHousehold = $state(false);
+    let historyFor = "";
+    let historySeq = 0;
+
+    /** The destination key the media layer files plays under. */
+    function roomKey(s: PanelSource | undefined): string {
+        if (!s) return "";
+        return (s.kind === "sonos" ? "sonos:" : s.kind === "kef" ? "kef:" : "zone:") + s.id;
+    }
+
+    async function loadHistory(key: string) {
+        const mine = ++historySeq;
+        try {
+            const h = await api.mediaHistory(key, 12);
+            if (mine !== historySeq) return;
+            history = h.plays;
+            historyHousehold = h.household;
+        } catch {
+            if (mine !== historySeq) return;
+            history = [];
+            historyHousehold = false;
+        }
+    }
+
+    $effect(() => {
+        const key = roomKey(featured);
+        if (key === historyFor) return;
+        historyFor = key;
+        historySeq++;
+        history = [];
+        historyHousehold = false;
+        if (key) void loadHistory(key);
+    });
+
+    /** Start something out of the history again.
+     *
+     *  A Sonos favorite is replayed through the favorites path it came from,
+     *  matched by URI against the household's current list — a favorite that
+     *  has since been deleted simply stops being offered, which is better
+     *  than a tile that fails. Everything else is a Spotify item and goes
+     *  back the way it was started. */
+    function playFromHistory(p: MediaPlay) {
+        const s = featured;
+        if (!s) return;
+        if (p.provider === "sonos") {
+            const fav = favorites.find((f) => f.uri === p.uri);
+            if (fav) playFavorite(fav);
+            return;
+        }
+        void run(
+            "hist:" + p.uri,
+            () =>
+                startOn(s, {
+                    service: "Spotify",
+                    uri: p.uri,
+                    title: p.title,
+                    kind: p.kind,
+                    sub: p.sub,
+                    art_uri: p.art_uri,
+                }).then(() => loadHistory(roomKey(s))),
+            "Couldn't play that again",
+        );
+    }
+
+    // ── Saving what's playing ────────────────────────────────────────────
+    // The heart. It needs a catalog id, which only a Spotify source has —
+    // radio and line-in carry an artist line and nothing to save — so the
+    // control renders only where `trackURI` does (§15.1 applied to a track).
+    //
+    // The saved *state* is read on whatever login the panel has, because
+    // reading has always been in the grant; only the write needs the newer
+    // scope, so an old login shows an honest heart and refuses the tap
+    // rather than being offered a control that will fail.
+    let savedURI = $state("");
+    let saved = $state(false);
+    let canSave = $state(false);
+    let savedSeq = 0;
+
+    void api
+        .spotifyStatus()
+        .then((st) => {
+            canSave = st.connected && !!st.library;
+        })
+        .catch(() => {
+            canSave = false;
+        });
+
+    $effect(() => {
+        const uri = featured?.trackURI ?? "";
+        if (uri === savedURI) return;
+        savedURI = uri;
+        saved = false;
+        const mine = ++savedSeq;
+        if (!uri) return;
+        void api
+            .spotifySaved(uri)
+            .then((r) => {
+                if (mine === savedSeq) saved = r.saved;
+            })
+            .catch(() => {});
+    });
+
+    function toggleSaved() {
+        const uri = featured?.trackURI;
+        if (!uri || !canSave) return;
+        const next = !saved;
+        // Optimistic: the heart is the confirmation, and a wall panel has
+        // nothing else to show while a round trip to Spotify completes.
+        saved = next;
+        void run(
+            "save:" + uri,
+            () => api.spotifySetSaved(uri, next),
+            next ? "Couldn't save that song" : "Couldn't remove that song",
+        ).then(() => {
+            if (busy["save:" + uri] === false && featured?.trackURI === uri) {
+                // run() has already toasted a failure; re-read so the heart
+                // tells the truth rather than what was hoped for.
+                void api
+                    .spotifySaved(uri)
+                    .then((r) => {
+                        if (featured?.trackURI === uri) saved = r.saved;
+                    })
+                    .catch(() => {});
+            }
+        });
+    }
+
+    // ── More like this ───────────────────────────────────────────────────
+    // The same engine "play similar" uses when a queue runs dry (§15.5),
+    // asked for on purpose instead of automatically. Seeded by artist name
+    // because that is what a speaker reports — a room on radio has an
+    // artist line and no catalog id at all.
+    //
+    // On Sonos it fills the queue behind what is playing, so the record you
+    // are listening to isn't interrupted by asking for more of it. Anywhere
+    // else there is no queue to fill, so the first result plays.
+    let lastRadio = $state<{ count: number; artist: string; at: number } | null>(null);
+
+    const canRadio = $derived(!!featured?.trackArtist);
+
+    function startRadio() {
+        const s = featured;
+        const artist = s?.trackArtist;
+        if (!s || !artist) return;
+        void run(
+            "radio",
+            async () => {
+                const items = await api.spotifySimilar(artist, 8);
+                if (!items.length) throw new Error(`Nothing else by ${artist} came back`);
+                if (s.kind === "sonos") {
+                    // In order, each after the last, so the run plays as a
+                    // set rather than in reverse.
+                    for (const [i, item] of items.entries()) {
+                        await api.sonosQueueAdd(s.id, {
+                            service: "Spotify",
+                            uri: item.uri,
+                            title: item.name,
+                            next: i === 0,
+                        });
+                    }
+                    await loadQueue(s.id);
+                    lastRadio = { count: items.length, artist, at: Date.now() };
+                } else {
+                    await startOn(s, {
+                        service: "Spotify",
+                        uri: items[0].uri,
+                        title: items[0].name,
+                        kind: "track",
+                        sub: items[0].sub,
+                        art_uri: items[0].art_url,
+                    });
+                    lastRadio = { count: 1, artist, at: Date.now() };
+                }
+            },
+            "Couldn't find more like this",
+        );
+    }
+
+    // ── Announcements ────────────────────────────────────────────────────
+    // Calling the house from the wall — the panel's own feature more than
+    // the app's, since "dinner's ready" is shouted from a hallway and not
+    // typed on a phone. It goes to every reachable Sonos room at once; the
+    // status read is what says whether there is anywhere to announce to and
+    // whether there will be words or only a chime.
+    let announce = $state<AnnounceStatus | null>(null);
+    let lastAnnounce = $state<{ text: string; rooms: string[]; spoken: boolean; at: number } | null>(
+        null,
+    );
+
+    void api
+        .announceStatus()
+        .then((st) => {
+            announce = st;
+        })
+        .catch(() => {
+            announce = null;
+        });
+
+    function sendAnnouncement(text: string) {
+        void run(
+            "announce",
+            async () => {
+                const res = await api.announce(text);
+                lastAnnounce = {
+                    text,
+                    rooms: res.rooms,
+                    spoken: res.spoken,
+                    at: Date.now(),
+                };
+                // Every room has been interrupted and will be put back a few
+                // seconds from now; re-read once that has happened so the
+                // panel doesn't show the announcement as what's playing.
+                setTimeout(() => void refresh(), res.duration_ms + 1500);
+            },
+            "Couldn't announce that",
+        );
     }
 
     // ── Grouping ─────────────────────────────────────────────────────────
@@ -1102,6 +1431,41 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
             "Grouping failed",
             () => {
                 selected = f.key;
+            },
+        );
+    }
+
+    /** Take the music with you: the featured room's group moves to `dest`
+     *  and leaves where it was.
+     *
+     *  This is the gesture a wall gets asked for on the way into the
+     *  kitchen, and until now it cost two: join, then split the room you
+     *  walked out of. Composed from the same two calls rather than given a
+     *  bridge of its own — Sonos has no "move", and what a move *is* on a
+     *  household is exactly this pair.
+     *
+     *  Order matters and is the whole reason this is a function: the
+     *  destination joins the group *first*, so the queue and the stream are
+     *  handed over while the old room is still coordinating, and only then
+     *  does the old room step out. Doing it the other way round stops the
+     *  music between the two calls. */
+    function moveTo(dest: PanelSource) {
+        const f = featured;
+        if (!f || f.kind !== "sonos" || dest.kind !== "sonos" || dest.key === f.key) return;
+        const leaving = (f.members ?? []).map((m) => m.id);
+        const arriving = (dest.members ?? []).map((m) => m.id);
+        if (!leaving.length || !arriving.length) return;
+        void run(
+            "move:" + dest.id,
+            async () => {
+                for (const id of arriving) await api.sonosJoin(id, f.id);
+                for (const id of leaving) await api.sonosLeave(id);
+            },
+            "Couldn't move the music",
+            () => {
+                // Follow the sound: the destination is what the panel should
+                // be pointed at once the music is there.
+                selected = dest.key;
             },
         );
     }
@@ -1207,6 +1571,7 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
         },
         jumpTo,
         removeQueued,
+        moveQueued,
         clearQueue,
         enqueue,
         get lastQueued() {
@@ -1217,6 +1582,34 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
         },
         playFavorite,
         playItem,
+        get history() {
+            return history;
+        },
+        get historyHousehold() {
+            return historyHousehold;
+        },
+        playFromHistory,
+        get canSave() {
+            return canSave;
+        },
+        get saved() {
+            return saved;
+        },
+        toggleSaved,
+        get canRadio() {
+            return canRadio;
+        },
+        startRadio,
+        get lastRadio() {
+            return lastRadio;
+        },
+        get announce() {
+            return announce;
+        },
+        sendAnnouncement,
+        get lastAnnounce() {
+            return lastAnnounce;
+        },
         get joinable() {
             return joinable;
         },
@@ -1225,6 +1618,7 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
         },
         joinSource,
         joinAll,
+        moveTo,
         ungroupFeatured,
         leaveMember,
         refresh,

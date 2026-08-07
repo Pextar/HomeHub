@@ -106,6 +106,22 @@
         info: "M12 2a10 10 0 100 20 10 10 0 000-20zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z",
         // Four corners opening outwards — take the panel's player full screen.
         expand: "M5 14H3v7h7v-2H5v-5zM3 10h2V5h5V3H3v7zm16 9h-5v2h7v-7h-2v5zM14 3v2h5v5h2V3h-7z",
+        // Megaphone, for calling the house from the panel. Functional, not
+        // decorative (§2): it is the one control on the wall that makes a
+        // sound in a room you are not standing in, and a speaker glyph would
+        // read as "a speaker" — which on this surface means something else.
+        // Cone, handle, and two arcs for the sound leaving it.
+        megaphone:
+            "M3 10v4a1 1 0 001 1h2l1 5a1 1 0 001 1h1a1 1 0 001-1l-1-5h1l7 4V5l-7 4H4a1 1 0 00-1 1zm16.5-1.2a5 5 0 010 6.4l1.5 1.2a7 7 0 000-8.8l-1.5 1.2z",
+        // Saved to the account's library, and not. Two paths rather than one
+        // stroked, because this set fills and never strokes (see the <svg>
+        // below); the outline is the same silhouette with an inner subpath
+        // wound the other way, which the nonzero rule renders as a hole —
+        // the trick starOutline already uses.
+        heart:
+            "M12 20.7l-1.4-1.3C5.4 14.7 2 11.6 2 7.8 2 4.9 4.2 2.8 7 2.8c1.6 0 3.1.7 4 1.9.9-1.2 2.4-1.9 4-1.9 2.8 0 5 2.1 5 5 0 3.8-3.4 6.9-8.6 11.6L12 20.7z",
+        heartOutline:
+            "M12 20.7l-1.4-1.3C5.4 14.7 2 11.6 2 7.8 2 4.9 4.2 2.8 7 2.8c1.6 0 3.1.7 4 1.9.9-1.2 2.4-1.9 4-1.9 2.8 0 5 2.1 5 5 0 3.8-3.4 6.9-8.6 11.6L12 20.7zm0-2.7c4.4-4 7-6.6 7-10.2 0-1.8-1.3-3-3-3-1.3 0-2.6.8-3.1 2h-1.8C10.6 5.6 9.3 4.8 8 4.8c-1.7 0-3 1.2-3 3 0 3.6 2.6 6.2 7 10.2z",
     } as const;
 </script>
 

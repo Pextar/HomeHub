@@ -21,6 +21,12 @@ export interface SpotifyStatus {
    */
   playback: boolean;
   /**
+   * Whether this login may save a track to the account's library. Reading
+   * whether one is saved has always been in the grant, so a heart can show
+   * the truth on an older login and simply not offer the tap.
+   */
+  library?: boolean;
+  /**
    * Whether this login may be asked what the account has been playing — the
    * shelves a search box idles on. Same story as `playback`: an older grant
    * searches perfectly well and simply has nothing to say here, so the

@@ -25,6 +25,7 @@
     import PanelGroupPane from "./PanelGroupPane.svelte";
     import { kefSourceLabel } from "../../lib/kef";
     import { dur } from "../../lib/motion";
+    import { route } from "../../lib/stores.svelte";
     import type { PanelMusicStore } from "../../lib/panel-music.svelte";
 
     let {
@@ -47,6 +48,46 @@
     const queueCount = $derived(gs?.queue_length ?? 0);
     /** Only a Sonos group has a queue to give the leftover height to. */
     const hasQueue = $derived(featured?.kind === "sonos");
+
+    /** How far a step moves. Fifteen seconds is the "I missed that" unit —
+     *  long enough to be worth a tap, short enough that two taps aren't a
+     *  different song. */
+    const SEEK_STEP = 15;
+
+    /** The heart renders only where there is something to save: a Spotify
+     *  track (radio and line-in carry no catalog id) on a login that may
+     *  write to the library. */
+    const canSave = $derived(!!featured?.trackURI && music.canSave);
+
+    /** Opening the artist is the depth's job, so it climbs one rung rather
+     *  than stacking a screen on a screen. The name is the handle — a
+     *  speaker reports what it is playing in words, not in catalog ids —
+     *  and the depth resolves it to a page. */
+    function openArtist() {
+        const name = featured?.trackArtist;
+        if (!name) return;
+        route.go("panel", { music: "1", artist: name });
+    }
+
+    /** The in-place confirmation for a radio run, for as long as it is worth
+     *  reading. Same instrument as the queued-track line the depth's column
+     *  uses, and for the same reason: nothing on screen moves when songs
+     *  land at the end of a queue. */
+    const NOTE_MS = 6000;
+    let noteBeat = $state(0);
+    $effect(() => {
+        if (!music.lastRadio) return;
+        const id = setInterval(() => (noteBeat = Date.now()), 1000);
+        return () => clearInterval(id);
+    });
+    const radioNote = $derived.by(() => {
+        void noteBeat;
+        const r = music.lastRadio;
+        if (!r || Date.now() - r.at > NOTE_MS) return "";
+        return r.count > 1
+            ? `Queued ${r.count} more like ${r.artist}`
+            : `Playing more like ${r.artist}`;
+    });
 
     const railIdle = $derived(!featured?.trackTitle && !featured?.playing);
     const railLabel = $derived(
@@ -267,14 +308,48 @@
                          decides its width. -->
                     <div class="fp-caption" bind:clientHeight={capH}>
                         {#if !featured.standby}
-                            <TrackRail
-                                position={music.posSec}
-                                duration={music.durSec}
-                                seekable={music.seekable}
-                                idle={railIdle}
-                                liveLabel={railLabel}
-                                onSeek={(sec) => music.seek(sec)}
-                            />
+                            <!-- The rail, with a step either side of it where
+                                 stepping is possible. Same argument as the
+                                 volume row's −/+: a rail is an imprecise aim
+                                 at arm's length, and "back a bit, I missed
+                                 that" is the one seek anybody makes from a
+                                 sofa. Absent where there is nothing to seek
+                                 through — radio has no position to step
+                                 within (§15.1). -->
+                            <div class="fp-scrub">
+                                {#if music.seekable}
+                                    <button
+                                        class="s-step"
+                                        aria-label="Back {SEEK_STEP} seconds"
+                                        onclick={() =>
+                                            music.seek(Math.max(0, music.posSec - SEEK_STEP))}
+                                    >
+                                        <Icon name="skipPrev" size={15} />
+                                        <span class="s-num mono">{SEEK_STEP}</span>
+                                    </button>
+                                {/if}
+                                <TrackRail
+                                    position={music.posSec}
+                                    duration={music.durSec}
+                                    seekable={music.seekable}
+                                    idle={railIdle}
+                                    liveLabel={railLabel}
+                                    onSeek={(sec) => music.seek(sec)}
+                                />
+                                {#if music.seekable}
+                                    <button
+                                        class="s-step"
+                                        aria-label="Forward {SEEK_STEP} seconds"
+                                        onclick={() =>
+                                            music.seek(
+                                                Math.min(music.durSec, music.posSec + SEEK_STEP),
+                                            )}
+                                    >
+                                        <span class="s-num mono">{SEEK_STEP}</span>
+                                        <Icon name="skipNext" size={15} />
+                                    </button>
+                                {/if}
+                            </div>
                         {/if}
                         <div class="fp-meta">
                             <h3 class="fp-title">
@@ -283,6 +358,62 @@
                             </h3>
                             <p class="fp-sub">{featured.trackSub || featured.title}</p>
                         </div>
+                        <!-- What you can do about the *song*, as opposed to
+                             about the room: keep it, hear more like it, go and
+                             read about who made it. They ride with the record
+                             for the same reason the scrubber does — their
+                             subject is on this side of the screen — and each
+                             appears only where it can act (§15.1): saving
+                             needs a catalog id, which radio and line-in don't
+                             carry, and the rest need an artist to have been
+                             named at all. -->
+                        {#if !featured.standby && (canSave || music.canRadio)}
+                            <div class="fp-acts">
+                                {#if canSave}
+                                    <button
+                                        class="a-heart"
+                                        class:on={music.saved}
+                                        aria-pressed={music.saved}
+                                        aria-label={music.saved
+                                            ? "Remove from your library"
+                                            : "Save to your library"}
+                                        disabled={!!music.busy["save:" + featured.trackURI]}
+                                        onclick={() => music.toggleSaved()}
+                                    >
+                                        <Icon
+                                            name={music.saved ? "heart" : "heartOutline"}
+                                            size={19}
+                                        />
+                                    </button>
+                                {/if}
+                                {#if music.canRadio}
+                                    <button
+                                        class="a-chip"
+                                        disabled={!!music.busy["radio"]}
+                                        onclick={() => music.startRadio()}
+                                    >
+                                        <Icon name="radio" size={15} /><span>More like this</span>
+                                    </button>
+                                    <!-- The artist page is the depth's, so
+                                         this climbs one rung rather than
+                                         opening a screen on top of a screen.
+                                         By name, because that is all a
+                                         speaker reports about what it is
+                                         playing. -->
+                                    <button class="a-chip" onclick={openArtist}>
+                                        <span>{featured.trackArtist}</span>
+                                        <Icon name="chevronRight" size={15} />
+                                    </button>
+                                {/if}
+                            </div>
+                        {/if}
+                        <!-- Queuing a run of songs changes nothing visible, so
+                             the record says what went in for a few seconds —
+                             not a toast: a kiosk has nobody to dismiss cards
+                             (§10, §16). -->
+                        {#if radioNote}
+                            <p class="fp-note">{radioNote}</p>
+                        {/if}
                     </div>
                 </section>
 
@@ -437,8 +568,10 @@
                                     confirmClear
                                     clearBusy={!!music.busy["qclear:" + featured.id]}
                                     isBusy={(k) => !!music.busy[k]}
+                                    reorder
                                     onJump={(t) => music.jumpTo(t)}
                                     onRemove={(t) => music.removeQueued(t)}
+                                    onMove={(t, dir) => music.moveQueued(t, dir)}
                                     onClear={() => music.clearQueue()}
                                 />
                             </div>
@@ -615,6 +748,133 @@
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
+    }
+
+    /* The rail with a step either side. The steps hold their size and the
+       rail takes what is left, so the record's own width still decides how
+       long the scrubber is. */
+    .fp-scrub {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        min-width: 0;
+    }
+    .fp-scrub :global(.rail-box),
+    .fp-scrub :global(.rail-live) {
+        flex: 1 1 auto;
+        min-width: 0;
+    }
+    .s-step {
+        flex: none;
+        display: inline-flex;
+        align-items: center;
+        gap: 2px;
+        min-width: 44px;
+        height: 44px;
+        padding: 0 6px;
+        border: 0;
+        border-radius: var(--r-sm);
+        background: none;
+        color: var(--text-mute);
+        font-family: inherit;
+        cursor: pointer;
+        transition:
+            color var(--t-fast),
+            transform var(--t-fast);
+    }
+    .s-step:active {
+        color: var(--on);
+        transform: scale(0.94);
+        transition-duration: 80ms;
+    }
+    .s-step:focus-visible {
+        box-shadow: var(--focus-ring);
+        outline: none;
+    }
+    /* The number of seconds is a number (§2). */
+    .s-num {
+        font-size: 11px;
+        letter-spacing: 0.02em;
+    }
+
+    /* What you can do about the song. Centred under its name, because that
+       is what they are about — the room's controls are the other column's. */
+    .fp-acts {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: var(--space-2);
+        min-width: 0;
+        flex-wrap: wrap;
+    }
+    .a-heart {
+        display: grid;
+        place-items: center;
+        width: 44px;
+        height: 44px;
+        border: 1px solid var(--hairline);
+        border-radius: var(--r-pill);
+        background: var(--card-2);
+        color: var(--text-mute);
+        cursor: pointer;
+        transition:
+            color var(--t-fast),
+            transform var(--t-fast);
+    }
+    /* Saved is the accent, not a new colour (§2): the heart is the one
+       control here whose state is worth reading from across the room. */
+    .a-heart.on {
+        color: var(--on);
+        border-color: var(--tile-on-border);
+    }
+    .a-heart:active {
+        transform: scale(0.92);
+        transition-duration: 80ms;
+    }
+    .a-heart:disabled {
+        opacity: 0.55;
+    }
+    .a-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        max-width: 100%;
+        min-height: 44px;
+        padding: 0 var(--space-4);
+        border: 1px solid var(--hairline);
+        border-radius: var(--r-pill);
+        background: var(--card-2);
+        color: var(--text-mute);
+        font-family: inherit;
+        font-size: 13px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: transform var(--t-fast);
+    }
+    .a-chip span {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .a-chip:active {
+        transform: scale(0.96);
+        transition-duration: 80ms;
+    }
+    .a-chip:disabled {
+        opacity: 0.55;
+    }
+    .a-heart:focus-visible,
+    .a-chip:focus-visible {
+        box-shadow: var(--focus-ring);
+        outline: none;
+    }
+
+    .fp-note {
+        margin: 0;
+        text-align: center;
+        font-size: 12.5px;
+        color: var(--text-dim);
     }
 
     /* ── The controls, and what's next ───────────────────────────────── */

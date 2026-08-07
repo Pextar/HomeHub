@@ -32,9 +32,18 @@
          *  the point of the screen and has the width for it (the panel's
          *  full player, §16). */
         art = false,
+        /** Up/down controls on every row. Off by default: on a phone the
+         *  queue is a sheet and the order is set by what you queue next.
+         *  On where the queue is the point of the screen and there is width
+         *  for two more targets (the panel's full player, §16) — and by tap
+         *  rather than by drag, because a hold-then-drag at arm's length
+         *  over a five-second poll is the least reliable gesture a wall
+         *  could pick (the same argument that made grouping tap-based). */
+        reorder = false,
         isBusy,
         onJump,
         onRemove,
+        onMove,
         onClear,
     }: {
         items: SonosQueueItem[];
@@ -45,9 +54,11 @@
         clearBusy?: boolean;
         confirmClear?: boolean;
         art?: boolean;
+        reorder?: boolean;
         isBusy: (key: string) => boolean;
         onJump: (track: number) => void;
         onRemove: (track: number) => void;
+        onMove?: (track: number, dir: -1 | 1) => void;
         onClear: () => void;
     } = $props();
 
@@ -114,6 +125,28 @@
                         <span class="q-dur mono">{trimClock(item.duration)}</span>
                     {/if}
                 </button>
+                {#if reorder && onMove}
+                    <!-- Disabled at the ends rather than hidden: a control
+                         that appears and disappears as rows move is a moving
+                         target, and the row above is where the finger is
+                         already aimed. -->
+                    <button
+                        class="icon-btn q-mv"
+                        aria-label="Move {item.title || 'track ' + item.track} up"
+                        disabled={item.track <= 1 || isBusy("qmv:" + item.track)}
+                        onclick={() => onMove(item.track, -1)}
+                    >
+                        <Icon name="chevronUp" size={14} />
+                    </button>
+                    <button
+                        class="icon-btn q-mv"
+                        aria-label="Move {item.title || 'track ' + item.track} down"
+                        disabled={item.track >= items.length || isBusy("qmv:" + item.track)}
+                        onclick={() => onMove(item.track, 1)}
+                    >
+                        <Icon name="chevronDown" size={14} />
+                    </button>
+                {/if}
                 <button
                     class="icon-btn q-rm"
                     aria-label="Remove {item.title || 'track ' + item.track} from the queue"
@@ -177,10 +210,17 @@
     .q-dur { font-size: 11px; color: var(--text-dim); flex-shrink: 0; }
     .q-rm { width: 36px; height: 36px; flex-shrink: 0; margin-right: 4px; color: var(--text-mute); }
     .q-rm:disabled { opacity: 0.4; }
+    .q-mv { width: 32px; height: 36px; flex-shrink: 0; color: var(--text-dim); }
+    .q-mv:disabled { opacity: 0.3; }
     .q-more { font-size: 10.5px; color: var(--text-dim); text-align: center; }
 
     @media (pointer: coarse) {
         .q-rm { width: 44px; height: 44px; }
+        /* Narrower than the 44 floor on purpose: the row itself is 48 tall,
+           so the hit area clears it vertically, and three full-width targets
+           in a 380px column would leave the title nothing. The pair reads as
+           one control and is aimed at as one. */
+        .q-mv { width: 38px; height: 44px; }
     }
     @media (prefers-reduced-motion: reduce) {
         .q-row { transition-duration: 0.001ms; }

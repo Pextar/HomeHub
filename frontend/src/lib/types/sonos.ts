@@ -15,6 +15,10 @@ export interface SonosTrack {
   album?: string;
   /** Absolute URL or an /api/sonos/{id}/art proxy path — usable as <img src> directly. */
   art_uri?: string;
+  /** The canonical "spotify:track:…" for what is playing, recovered from the
+   *  speaker's own resource string. Absent on radio, line-in and anything
+   *  that isn't Spotify — surfaces that need it render only where it is. */
+  spotify_uri?: string;
 }
 
 export interface SonosState {

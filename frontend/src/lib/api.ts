@@ -57,7 +57,27 @@ import type {
   MediaZone,
   MediaZoneRoutes,
   MediaPlayResult,
+  MediaHistory,
+  AnnounceStatus,
+  AnnounceResult,
 } from "./types";
+
+/**
+ * The body every "play this" endpoint takes.
+ *
+ * Only service/uri/title reach the speaker. The rest is carried so the room's
+ * history has something worth drawing — a shelf tile needs a picture and a
+ * second line, and asking the catalog for them again later would mean a
+ * service round-trip to redraw a row we already had in hand.
+ */
+export interface PlayItemBody {
+  service: string;
+  uri: string;
+  title: string;
+  kind?: string;
+  sub?: string;
+  art_uri?: string;
+}
 
 const BASE = "/api";
 
@@ -381,10 +401,19 @@ export const api = {
   sonosQueueClear(id: string) {
     return req<void>(`/sonos/${encodeURIComponent(id)}/queue`, { method: "DELETE" });
   },
+  // Moves a queued track to another position. Both numbers are read off the
+  // queue as it looks now; the backend converts to the insertion point Sonos
+  // actually wants.
+  sonosQueueMove(id: string, track: number, to: number) {
+    return req<void>(`/sonos/${encodeURIComponent(id)}/queue/${track}`, {
+      method: "PUT",
+      body: json({ to }),
+    });
+  },
 
   // Plays a streaming-service item (from Spotify search) on the group led
   // by speaker {id}; the speaker streams with its own linked account.
-  sonosPlayItem(id: string, body: { service: string; uri: string; title: string }) {
+  sonosPlayItem(id: string, body: PlayItemBody) {
     return req<void>(`/sonos/${encodeURIComponent(id)}/play-item`, { method: "POST", body: json(body) });
   },
 
@@ -433,7 +462,7 @@ export const api = {
   // so this asks Spotify to point Connect playback at it. The backend wakes
   // the speaker onto Wi-Fi first. A 409 means something the user can fix —
   // reconnect Spotify, or pick which Connect device this speaker is.
-  kefPlayItem(id: string, body: { service: string; uri: string; title: string }) {
+  kefPlayItem(id: string, body: PlayItemBody) {
     return req<void>(`/kef/${encodeURIComponent(id)}/play-item`, { method: "POST", body: json(body) });
   },
   // The Connect pairing for one speaker, plus the account's visible devices.
@@ -478,12 +507,30 @@ export const api = {
   // What the account has been playing, for the idle shelves. 409 means the
   // login predates the listening scopes — a reconnect, not a fault.
   spotifyListening() { return req<SpotifyListening>("/spotify/listening"); },
+  // Songs to continue with, seeded from an artist name — the same engine
+  // "play similar" uses when a queue runs dry, asked for on purpose. By
+  // name because that is what a speaker reports about what it is playing.
+  spotifySimilar(artist: string, limit = 8) {
+    return req<SpotifyItem[]>(
+      `/spotify/similar?artist=${encodeURIComponent(artist)}&limit=${limit}`,
+    );
+  },
   // An artist's page — top tracks and albums, behind a search result.
   spotifyArtist(uri: string) {
     return req<SpotifyArtistDetail>(`/spotify/artist?uri=${encodeURIComponent(uri)}`);
   },
   // A playlist or album's own tracks — behind a favorite that turns out to
   // be a list rather than one song.
+  // Whether a track is in the account's library, and putting it there. The
+  // read needs no scope the login didn't already have; the write does, which
+  // is why status.library exists — hide the control rather than offer a tap
+  // that will be refused.
+  spotifySaved(uri: string) {
+    return req<{ saved: boolean }>(`/spotify/saved?uri=${encodeURIComponent(uri)}`);
+  },
+  spotifySetSaved(uri: string, saved: boolean) {
+    return req<void>("/spotify/saved", { method: "PUT", body: json({ uri, saved }) });
+  },
   spotifyContext(uri: string) {
     return req<SpotifyContextDetail>(`/spotify/context?uri=${encodeURIComponent(uri)}`);
   },
@@ -560,11 +607,31 @@ export const api = {
   // the UI is expected to say so rather than present them as equivalent.
   // A 409 means something the user can fix: connect an account, wake a
   // speaker, install librespot, or pick different speakers.
-  mediaZonePlay(id: string, body: { provider?: string; uri: string; title?: string; kind?: string }) {
+  mediaZonePlay(
+    id: string,
+    body: { provider?: string; uri: string; title?: string; kind?: string; sub?: string; art_uri?: string },
+  ) {
     return req<MediaPlayResult>(`/media/zones/${encodeURIComponent(id)}/play`, {
       method: "POST", body: json(body),
     });
   },
+  // What a room has been asked to play, newest first. A room with no history
+  // of its own answers with the household's, flagged as such — the shelf says
+  // "Played here" for one and "Played recently" for the other, because a wall
+  // must never imply a room played something it didn't.
+  mediaHistory(room: string, limit = 12) {
+    return req<MediaHistory>(
+      `/media/history?room=${encodeURIComponent(room)}&limit=${limit}`,
+    );
+  },
+
+  // Calling the house. The status read is what decides whether the control is
+  // drawn at all and whether it offers words or only a chime.
+  announceStatus() { return req<AnnounceStatus>("/announce"); },
+  announce(text: string) {
+    return req<AnnounceResult>("/announce", { method: "POST", body: json({ text }) });
+  },
+
   mediaZoneResume(id: string) {
     return req<void>(`/media/zones/${encodeURIComponent(id)}/resume`, { method: "POST" });
   },

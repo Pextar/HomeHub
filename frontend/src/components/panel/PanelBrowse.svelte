@@ -59,12 +59,19 @@
         spotify,
         recents,
         booted,
+        openArtistNamed = "",
     }: {
         music: PanelMusicStore;
         spotify: SpotifyStore;
         recents: SearchHistory;
         /** False until the Spotify status read has answered either way. */
         booted: boolean;
+        /** An artist to open on arrival, by name — how the full player hands
+         *  "who is this?" back to the depth (§16). A speaker reports what it
+         *  is playing in words and not in catalog ids, so the name has to be
+         *  resolved to a page here; a name nothing matches lands on the
+         *  search results for it, which is the honest fallback. */
+        openArtistNamed?: string;
     } = $props();
 
     // Arriving in the depth pins the destination. Without it the featured
@@ -159,6 +166,33 @@
             if (artistLoadingUri === uri) artistLoadingUri = null;
         }
     }
+
+    /** Resolve a name to an artist page. The panel arrives here from the
+     *  full player, where all that is known about who is playing is what
+     *  the speaker said. */
+    let resolvedName = "";
+    async function openArtistByName(name: string) {
+        pane = "search";
+        try {
+            const res = await api.spotifySearch(name, 5, { kind: "artists" });
+            const hit = res.artists?.[0];
+            if (hit) {
+                await openArtist(hit.uri, { art_url: hit.art_url, round: true });
+                return;
+            }
+        } catch {
+            // Fall through: the results for the name are still an answer,
+            // and a failed lookup should never leave the wall on nothing.
+        }
+        spotify.runQuery(name);
+    }
+
+    $effect(() => {
+        const name = openArtistNamed.trim();
+        if (!name || name === resolvedName) return;
+        resolvedName = name;
+        void openArtistByName(name);
+    });
 
     async function openContext(uri: string) {
         if (topLevel?.kind === "context" && topLevel.uri === uri) return;
@@ -849,12 +883,29 @@
                                     {/if}
                                 </button>
                                 {#if s.kind === "sonos" && featured?.kind === "sonos" && !isFeatured}
+                                    <!-- The pair the wall gets asked for, in
+                                         the order they are wanted: play it
+                                         here as well, or take it here and
+                                         leave. Move is the quieter of the
+                                         two — it is the rarer ask, and it
+                                         stops sound in the room you are
+                                         standing in. -->
                                     <button
                                         class="k-chip rm-join"
-                                        disabled={!!music.busy["join:" + s.id]}
+                                        disabled={!!music.busy["join:" + s.id] ||
+                                            !!music.busy["move:" + s.id]}
                                         onclick={() => music.joinSource(s)}
                                     >
                                         Join {featured.title}
+                                    </button>
+                                    <button
+                                        class="k-chip rm-move"
+                                        aria-label="Move the music to {s.title}"
+                                        disabled={!!music.busy["join:" + s.id] ||
+                                            !!music.busy["move:" + s.id]}
+                                        onclick={() => music.moveTo(s)}
+                                    >
+                                        Move
                                     </button>
                                 {:else if isFeatured && s.kind === "sonos" && (s.members?.length ?? 0) > 1}
                                     <button
@@ -890,8 +941,8 @@
                         {/each}
                     </div>
                     <p class="rm-note">
-                        Sonos rooms group natively — join or split them here. A HomeHub room plays
-                        any mix of speakers together and can be started from this panel, but
+                        Sonos rooms group natively — join, move or split them here. A HomeHub room
+                        plays any mix of speakers together and can be started from this panel, but
                         arranging one is done in the Music view.
                     </p>
                 </div>
@@ -1883,10 +1934,21 @@
     }
     .rm-join {
         flex-shrink: 0;
-        max-width: 45%;
+        max-width: 40%;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
+    }
+    /* The quieter half of the pair: same chip, no border, so the two read
+       as one control with a primary and a secondary rather than as two
+       equal offers. */
+    .rm-move {
+        flex-shrink: 0;
+        border-color: transparent;
+        color: var(--text-dim);
+    }
+    .rm-move:active {
+        color: var(--on);
     }
     .rm-members {
         display: flex;
