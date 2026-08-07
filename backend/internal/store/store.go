@@ -67,6 +67,10 @@ type Store struct {
 	// MediaHistory is what each room has been asked to play, newest first,
 	// keyed by the media layer's destination key. See history.go.
 	MediaHistory map[string][]MediaPlay
+	// MusicTimers start and stop music on their own — the waking and
+	// sleeping half of Schedule/Timer, which can only reach sockets.
+	// See musictimer.go, and internal/api/musictimer.go for the engine.
+	MusicTimers map[string]*MusicTimer
 	Users        map[string]*User
 	Settings     *Settings
 	Activity     *ActivityLog
@@ -138,6 +142,7 @@ const (
 	kefFile         = "kef.json"
 	zonesFile       = "zones.json"
 	historyFile     = "media_history.json"
+	musicTimersFile = "music_timers.json"
 
 	// ReadingsHistorySize caps how many readings are kept per sensor.
 	// At one sample per minute that's ~16 hours; at one per five minutes
@@ -162,6 +167,7 @@ func New(dataDir string, rf RFSender) *Store {
 		Zones:        make(map[string]*Zone),
 		Readings:     make(map[string][]SensorReading),
 		MediaHistory: make(map[string][]MediaPlay),
+		MusicTimers:  make(map[string]*MusicTimer),
 		Users:        make(map[string]*User),
 		Settings:     &Settings{},
 		Activity:     NewActivityLog(200),

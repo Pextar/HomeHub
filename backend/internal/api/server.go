@@ -4,6 +4,7 @@
 package api
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -109,6 +110,14 @@ type Server struct {
 	// the Sonos monitor it can be. Created lazily by kefEvents().
 	kefMonMu sync.Mutex
 	kefMon   *kef.Monitor
+
+	// fades holds the cancel func of each room's in-flight volume ramp,
+	// keyed by media destination key. One ramp per room: anything starting
+	// a new one cancels the old, which is what stops a wake-up fade and a
+	// sleep fade from walking the same speakers in opposite directions.
+	// See musictimer.go.
+	fadeMu sync.Mutex
+	fades  map[string]context.CancelFunc
 
 	// zoneSessions tracks live zone playbacks. Only the stream route
 	// leaves anything running — a decoder holding the account's Spotify

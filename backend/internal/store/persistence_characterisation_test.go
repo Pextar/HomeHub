@@ -121,6 +121,7 @@ func TestSaveWritesExactlyTheExpectedFiles(t *testing.T) {
 		"sockets.json", "schedules.json", "groups.json", "scenes.json",
 		"timers.json", "automations.json", "sensors.json", "settings.json",
 		"users.json", "rooms.json", "sonos.json", "kef.json", "zones.json",
+		"music_timers.json",
 	}
 	for _, f := range want {
 		if !got[f] {

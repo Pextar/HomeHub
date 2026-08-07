@@ -155,13 +155,15 @@ func (s *Server) mediaInsights(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, summary)
 }
 
-// pruneHistory drops history for destinations that no longer exist. Called
-// after a speaker or zone is deleted, mirroring CascadeDeleteSocket's
-// promise that nothing outlives the thing it referenced.
+// pruneDeadRooms drops everything keyed to a destination that no longer
+// exists: a room's shelf and any music timer aimed at it. Called after a
+// speaker or zone is deleted, mirroring CascadeDeleteSocket's promise that
+// nothing outlives the thing it referenced — a deleted speaker must not leave
+// behind either a shelf that plays to nothing or an alarm that fires into it.
 //
 // Caller must not hold Mu.
-func (s *Server) pruneHistory() {
-	var dropped bool
+func (s *Server) pruneDeadRooms() {
+	var droppedHistory, droppedTimers bool
 	s.Store.Mutate(func() {
 		live := make(map[string]bool, len(s.Store.Sonos)+len(s.Store.KEF)+len(s.Store.Zones))
 		for id := range s.Store.Sonos {
@@ -173,11 +175,19 @@ func (s *Server) pruneHistory() {
 		for id := range s.Store.Zones {
 			live["zone:"+id] = true
 		}
-		dropped = s.Store.PruneHistory(func(key string) bool { return live[key] })
+		droppedHistory = s.Store.PruneHistory(func(key string) bool { return live[key] })
+		droppedTimers = s.Store.PruneMusicTimers()
 	})
-	if dropped {
+	if droppedHistory {
 		if err := s.Store.SaveHistory(); err != nil {
 			s.mediaLogf("history: %v", err)
+		}
+	}
+	if droppedTimers {
+		// Timers live in the main save, so this is the whole store — which
+		// is right: a deletion has already rewritten it once.
+		if err := s.Store.Update(func() error { return nil }); err != nil {
+			s.mediaLogf("music timers: %v", err)
 		}
 	}
 }

@@ -240,6 +240,14 @@ func (s *Server) registerMediaRoutes(api *mux.Router) {
 	api.HandleFunc("/media/history", s.requireAdminOrKid(s.mediaHistory)).Methods("GET")
 	api.HandleFunc("/media/history/top", s.requireAdminOrKid(s.mediaTopPlays)).Methods("GET")
 	api.HandleFunc("/media/insights", s.requireAdmin(s.mediaInsights)).Methods("GET")
+	// Music that starts and stops on its own. Registered before the
+	// {id} routes so "sleep" and "fade" are never read as timer ids.
+	api.HandleFunc("/media/timers", s.requireAdmin(s.musicTimers)).Methods("GET")
+	api.HandleFunc("/media/timers", s.requireAdmin(s.musicCreateTimer)).Methods("POST")
+	api.HandleFunc("/media/timers/sleep", s.requireAdmin(s.musicSleep)).Methods("POST")
+	api.HandleFunc("/media/timers/fade/cancel", s.requireAdmin(s.musicCancelFade)).Methods("POST")
+	api.HandleFunc("/media/timers/{id}", s.requireAdmin(s.musicUpdateTimer)).Methods("PUT")
+	api.HandleFunc("/media/timers/{id}", s.requireAdmin(s.musicDeleteTimer)).Methods("DELETE")
 	api.HandleFunc("/announce", s.requireAdmin(s.announceStatus)).Methods("GET")
 	api.HandleFunc("/announce", s.requireAdmin(s.announceSend)).Methods("POST")
 	api.HandleFunc("/media/zones/{id}/stop", s.requireAdmin(s.mediaZoneStop)).Methods("POST")
