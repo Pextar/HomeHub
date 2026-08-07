@@ -146,7 +146,12 @@ async function boot() {
 beforeEach(() => {
   historyFixture = { plays: [], household: false };
   favoritesFixture = [];
-  announceFixture = { available: true, rooms: ["Kitchen"], voice: true, max_text: 200 };
+  announceFixture = {
+    available: true,
+    rooms: [{ id: "kitchen", name: "Kitchen" }],
+    voice: true,
+    max_text: 200,
+  };
   similarFixture = [];
   savedFixture = false;
   sonosFails = false;
@@ -869,7 +874,7 @@ describe("calling the house", () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(api.announce).toHaveBeenCalledWith("Dinner's ready");
+    expect(api.announce).toHaveBeenCalledWith("Dinner's ready", undefined);
     expect(h.value.lastAnnounce?.rooms).toEqual(["Kitchen"]);
     h.stop();
   });

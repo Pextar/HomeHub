@@ -628,8 +628,11 @@ export const api = {
   // Calling the house. The status read is what decides whether the control is
   // drawn at all and whether it offers words or only a chime.
   announceStatus() { return req<AnnounceStatus>("/announce"); },
-  announce(text: string) {
-    return req<AnnounceResult>("/announce", { method: "POST", body: json({ text }) });
+  announce(text: string, rooms?: string[]) {
+    return req<AnnounceResult>("/announce", {
+      method: "POST",
+      body: json(rooms?.length ? { text, rooms } : { text }),
+    });
   },
 
   mediaZoneResume(id: string) {

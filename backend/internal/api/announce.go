@@ -13,14 +13,17 @@ import (
 	"homehub/internal/store"
 )
 
-// Calling the house: one sentence, every room, and the music put back.
+// Calling the house: one sentence, every room by default, and the music put
+// back.
 //
 // This is the panel's feature more than the app's — "dinner's ready" is
 // shouted from a hallway, not typed on a phone — and the shape follows from
-// that. It goes to every reachable Sonos coordinator at once, because a
-// household announcement that reaches one room is a worse answer than none.
-// Followers are not addressed: a grouped speaker plays what its coordinator
-// plays, so announcing to both would double the audio in one room.
+// that. Left unaddressed it goes to every reachable Sonos coordinator at
+// once, because a household announcement that reaches one room is a worse
+// answer than none — but a caller may name specific rooms to narrow it, for
+// the times only one room needs calling. Followers are not addressed: a
+// grouped speaker plays what its coordinator plays, so announcing to both
+// would double the audio in one room.
 //
 // KEF speakers are deliberately not included. Their own API cannot report
 // what they are playing, so there is nothing to snapshot and a clip would end
@@ -105,13 +108,15 @@ func (s *Server) announceEnd() {
 // to, and whether it will be spoken or only chimed.
 func (s *Server) announceStatus(w http.ResponseWriter, r *http.Request) {
 	rooms := s.announceTargets()
-	names := make([]string, 0, len(rooms))
+	// id alongside name: the panel needs something stable to select by, and
+	// a display name isn't it — two rooms can share one.
+	list := make([]map[string]string, 0, len(rooms))
 	for _, t := range rooms {
-		names = append(names, t.Name)
+		list = append(list, map[string]string{"id": t.ID, "name": t.Name})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"available": len(rooms) > 0,
-		"rooms":     names,
+		"rooms":     list,
 		// voice false means the announcement is a chime with no words. The
 		// panel says so rather than letting someone type a sentence that
 		// nobody will hear.
@@ -185,6 +190,9 @@ func (s *Server) announceTargets() []announceTarget {
 func (s *Server) announceSend(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Text string `json:"text"`
+		// Rooms, by ID, to narrow the announcement to. Empty (the panel's
+		// default) means every reachable room.
+		Rooms []string `json:"rooms"`
 	}
 	if !decodeBody(w, r, &body) {
 		return
@@ -215,6 +223,19 @@ func (s *Server) announceSend(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	targets := s.announceTargets()
+	if len(body.Rooms) > 0 {
+		want := make(map[string]bool, len(body.Rooms))
+		for _, id := range body.Rooms {
+			want[id] = true
+		}
+		picked := make([]announceTarget, 0, len(targets))
+		for _, t := range targets {
+			if want[t.ID] {
+				picked = append(picked, t)
+			}
+		}
+		targets = picked
+	}
 	if len(targets) == 0 {
 		writeError(w, http.StatusConflict, "no speaker is answering, so there is nowhere to announce")
 		return
