@@ -238,6 +238,8 @@ func (s *Server) registerMediaRoutes(api *mux.Router) {
 	api.HandleFunc("/media/zones/{id}/routes", s.requireAdmin(s.mediaZoneRoutes)).Methods("GET")
 	api.HandleFunc("/media/zones/{id}/play", s.requireAdmin(s.mediaZonePlay)).Methods("POST")
 	api.HandleFunc("/media/history", s.requireAdminOrKid(s.mediaHistory)).Methods("GET")
+	api.HandleFunc("/media/history/top", s.requireAdminOrKid(s.mediaTopPlays)).Methods("GET")
+	api.HandleFunc("/media/insights", s.requireAdmin(s.mediaInsights)).Methods("GET")
 	api.HandleFunc("/announce", s.requireAdmin(s.announceStatus)).Methods("GET")
 	api.HandleFunc("/announce", s.requireAdmin(s.announceSend)).Methods("POST")
 	api.HandleFunc("/media/zones/{id}/stop", s.requireAdmin(s.mediaZoneStop)).Methods("POST")

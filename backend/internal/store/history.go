@@ -48,11 +48,55 @@ type MediaPlay struct {
 	// may since have gone; the key remains the identity.
 	RoomName string    `json:"room_name,omitempty"`
 	At       time.Time `json:"at"`
+	// Count is how many times this URI has been started in this room. The
+	// de-dupe above is what makes the shelf readable; without a tally it
+	// also threw away the only thing that separates the record this room
+	// lives on from the one someone tried once. Entries written before this
+	// field existed carry 0, which Plays() reads as one play.
+	Count int `json:"count,omitempty"`
+	// FirstAt is when this room first played it — "since March" rather than
+	// just "an hour ago". Zero on entries that predate the field.
+	FirstAt time.Time `json:"first_at,omitempty"`
+	// Hours tallies plays by local hour of day, 24 slots. This is what lets
+	// a shelf answer *put something on* with what this room actually plays
+	// at this hour, which on a wall panel is a different and better answer
+	// than what it played last: the kitchen's breakfast radio and its
+	// dinner records are both "recent" by eight in the evening, and only
+	// one of them is right. Nil until the entry has been recorded once
+	// under the new shape, so an old file costs nothing.
+	Hours []int `json:"hours,omitempty"`
 }
+
+// Plays is the entry's tally, reading a missing count as the one play that
+// must have created the entry.
+func (p MediaPlay) Plays() int {
+	if p.Count < 1 {
+		return 1
+	}
+	return p.Count
+}
+
+// PlaysAt is how many of this entry's plays started in the given local hour.
+// Zero for entries written before the histogram existed, which is honest:
+// they are not evidence about any hour in particular.
+func (p MediaPlay) PlaysAt(hour int) int {
+	if hour < 0 || hour >= hoursInDay || len(p.Hours) != hoursInDay {
+		return 0
+	}
+	return p.Hours[hour]
+}
+
+// hoursInDay sizes the per-entry histogram.
+const hoursInDay = 24
 
 // RecordPlay files one play under a room key, newest first, de-duplicated by
 // URI: starting the same record twice in an evening is one entry with the
 // later time, not two rows saying the same thing.
+//
+// The entry that survives the de-dupe inherits the old one's tally, its
+// first-played time and its hour histogram, so folding two rows into one
+// loses the duplicate row and nothing else. That is the difference between a
+// list of what happened and a memory of what this room listens to.
 //
 // Caller must hold Mu.
 func (s *Store) RecordPlay(roomKey string, p MediaPlay) {
@@ -66,10 +110,12 @@ func (s *Store) RecordPlay(roomKey string, p MediaPlay) {
 	if s.MediaHistory == nil {
 		s.MediaHistory = make(map[string][]MediaPlay)
 	}
+
 	kept := make([]MediaPlay, 0, MediaHistorySize)
-	kept = append(kept, p)
+	kept = append(kept, firstPlay(p))
 	for _, old := range s.MediaHistory[roomKey] {
 		if old.URI == p.URI {
+			kept[0] = carryForward(old, p)
 			continue
 		}
 		kept = append(kept, old)
@@ -78,6 +124,43 @@ func (s *Store) RecordPlay(roomKey string, p MediaPlay) {
 		}
 	}
 	s.MediaHistory[roomKey] = kept
+}
+
+// firstPlay is what a URI this room has never played looks like.
+func firstPlay(p MediaPlay) MediaPlay {
+	p.Count = 1
+	p.FirstAt = p.At
+	p.Hours = make([]int, hoursInDay)
+	p.Hours[p.At.Hour()]++
+	return p
+}
+
+// carryForward folds a new play into what the room already remembered about
+// the same URI.
+//
+// Everything describing the *item* comes from the new play — a title or a
+// picture the catalog has since improved should win — while everything
+// describing the room's relationship to it accumulates.
+func carryForward(old, fresh MediaPlay) MediaPlay {
+	out := firstPlay(fresh)
+	out.Count = old.Plays() + 1
+
+	// An entry written before FirstAt existed can still date itself: the
+	// time it carries is the oldest moment we can honestly claim.
+	out.FirstAt = old.FirstAt
+	if out.FirstAt.IsZero() {
+		out.FirstAt = old.At
+	}
+	if out.FirstAt.IsZero() || out.FirstAt.After(fresh.At) {
+		out.FirstAt = fresh.At
+	}
+
+	if len(old.Hours) == hoursInDay {
+		for h, n := range old.Hours {
+			out.Hours[h] += n
+		}
+	}
+	return out
 }
 
 // History returns one room's plays, newest first. Caller must hold Mu.

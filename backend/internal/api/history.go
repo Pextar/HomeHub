@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"homehub/internal/store"
 )
@@ -77,6 +78,81 @@ func (s *Server) mediaHistory(w http.ResponseWriter, r *http.Request) {
 		// something it didn't.
 		"household": fallback,
 	})
+}
+
+// mediaTopPlays handles GET /api/media/history/top?room=&limit=&hour= — what
+// a room keeps coming back to, rather than what it happened to play last.
+//
+// hour is optional and takes a local hour (0–23) or "now". With it the answer
+// is ranked by what this room plays *at that hour*, which is the difference
+// between offering the kitchen its breakfast radio at eight in the morning
+// and offering it last night's dinner record. A room with no habit at that
+// hour falls back to its overall favourites rather than answering nothing,
+// and the response says which of the two it gave.
+func (s *Server) mediaTopPlays(w http.ResponseWriter, r *http.Request) {
+	limit := 8
+	if n, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && n > 0 && n <= store.MediaHistorySize {
+		limit = n
+	}
+	room := strings.TrimSpace(r.URL.Query().Get("room"))
+
+	hour, byHour := parseHour(r.URL.Query().Get("hour"))
+	var plays []store.MediaPlay
+	matchedHour := false
+	s.Store.View(func() {
+		if byHour {
+			plays = s.Store.PlaysAtHour(room, hour, limit)
+			matchedHour = len(plays) > 0
+		}
+		if len(plays) == 0 {
+			plays = s.Store.TopPlays(room, limit)
+		}
+	})
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"plays": plays,
+		// Whether these are this room's habit at the asked-for hour or its
+		// favourites overall. The shelf's own label depends on it, and a
+		// wall that says "you play this now" about a record this room has
+		// never played in the morning is exactly the kind of confident
+		// wrongness DESIGN.md §15 rules out.
+		"by_hour": matchedHour,
+		"hour":    hour,
+	})
+}
+
+// parseHour reads the hour query parameter: a local hour 0–23, or "now" for
+// the hour it currently is. Anything else asks for no hour at all.
+func parseHour(raw string) (hour int, ok bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0, false
+	}
+	if strings.EqualFold(raw, "now") {
+		return time.Now().Hour(), true
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 0 || n > 23 {
+		return 0, false
+	}
+	return n, true
+}
+
+// mediaInsights handles GET /api/media/insights?limit= — what the household
+// listens to, summed over every room.
+//
+// Deliberately not per-room: the per-room questions are already answered by
+// the two handlers above, and what this adds is the one picture none of them
+// can give — which rooms do the listening, which artists the house keeps
+// coming back to, and when in the day it is loud.
+func (s *Server) mediaInsights(w http.ResponseWriter, r *http.Request) {
+	limit := 8
+	if n, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && n > 0 && n <= store.MediaHistorySize {
+		limit = n
+	}
+	var summary store.Listening
+	s.Store.View(func() { summary = s.Store.Summarise(limit) })
+	writeJSON(w, http.StatusOK, summary)
 }
 
 // pruneHistory drops history for destinations that no longer exist. Called
