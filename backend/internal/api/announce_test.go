@@ -126,7 +126,7 @@ func TestPruneHistoryFollowsDeletedRooms(t *testing.T) {
 		srv.Store.RecordPlay("kef:gone", store.MediaPlay{URI: "spotify:track:2", Title: "Two"})
 	})
 
-	srv.pruneHistory()
+	srv.pruneDeadRooms()
 
 	srv.Store.View(func() {
 		if len(srv.Store.History("kef:gone")) != 0 {

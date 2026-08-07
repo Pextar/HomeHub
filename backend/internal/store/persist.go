@@ -108,6 +108,8 @@ var collections = []collection{
 	with(mapCollection("media history", "MediaHistory", historyFile,
 		func(s *Store) *map[string][]MediaPlay { return &s.MediaHistory }),
 		func(c *collection) { c.inFullSave = false }),
+	mapCollection("music timers", "MusicTimers", musicTimersFile,
+		func(s *Store) *map[string]*MusicTimer { return &s.MusicTimers }),
 }
 
 // loadAll reads every collection in table order.

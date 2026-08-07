@@ -232,6 +232,15 @@ func (c *Client) Context(ctx context.Context, uri string) (*ContextDetail, error
 func (c *Client) MyPlaylists(ctx context.Context, limit int) ([]Item, error) {
 	return c.For("").MyPlaylists(ctx, limit)
 }
+func (c *Client) SavedAlbums(ctx context.Context, limit int) ([]Item, error) {
+	return c.For("").SavedAlbums(ctx, limit)
+}
+func (c *Client) TopArtists(ctx context.Context, limit int) ([]Item, error) {
+	return c.For("").TopArtists(ctx, limit)
+}
+func (c *Client) NewReleases(ctx context.Context, limit int) ([]Item, error) {
+	return c.For("").NewReleases(ctx, limit)
+}
 func (c *Client) IsSaved(ctx context.Context, uri string) (bool, error) {
 	return c.For("").IsSaved(ctx, uri)
 }
@@ -1428,36 +1437,25 @@ func (a *Account) TopTracks(ctx context.Context, limit int) ([]Item, error) {
 	return out, nil
 }
 
-// trackIDFromURI pulls the bare id out of a canonical track URI. Saving is
-// the one place a caller hands us a URI and Spotify wants an id.
-func trackIDFromURI(uri string) (string, error) {
-	const prefix = "spotify:track:"
-	id := strings.TrimPrefix(uri, prefix)
-	if id == uri || id == "" {
-		return "", fmt.Errorf("spotify: %q is not a track URI", uri)
-	}
-	return id, nil
-}
-
-// IsSaved reports whether the track is in the account's own library. Needs
-// no scope beyond the one every login has had, so it answers even for a
-// grant too old to save with — which is the whole reason the heart can be
-// drawn as filled on such an account and simply refuse to change.
+// IsSaved reports whether the track or album is in the account's own
+// library. Needs no scope beyond the one every login has had, so it answers
+// even for a grant too old to save with — which is the whole reason the heart
+// can be drawn as filled on such an account and simply refuse to change.
 func (a *Account) IsSaved(ctx context.Context, uri string) (bool, error) {
-	id, err := trackIDFromURI(uri)
+	path, id, err := savedPath(uri)
 	if err != nil {
 		return false, err
 	}
 	var out []bool
-	if err := a.apiGet(ctx, "/me/tracks/contains", url.Values{"ids": {id}}, &out); err != nil {
+	if err := a.apiGet(ctx, path+"/contains", url.Values{"ids": {id}}, &out); err != nil {
 		return false, err
 	}
 	return len(out) > 0 && out[0], nil
 }
 
-// SetSaved adds or removes one track from the account's library.
+// SetSaved adds or removes one track or album from the account's library.
 func (a *Account) SetSaved(ctx context.Context, uri string, saved bool) error {
-	id, err := trackIDFromURI(uri)
+	path, id, err := savedPath(uri)
 	if err != nil {
 		return err
 	}
@@ -1468,18 +1466,18 @@ func (a *Account) SetSaved(ctx context.Context, uri string, saved bool) error {
 	if saved {
 		method = http.MethodPut
 	}
-	return a.libraryWrite(ctx, method, url.Values{"ids": {id}})
+	return a.libraryWrite(ctx, method, path, url.Values{"ids": {id}})
 }
 
-// libraryWrite sends one /me/tracks mutation. It stays out of apiPut because
+// libraryWrite sends one library mutation. It stays out of apiPut because
 // that method's error mapping is the player's — "wake the speaker", "needs
 // Premium" — and none of those sentences is true of a library write.
-func (a *Account) libraryWrite(ctx context.Context, method string, q url.Values) error {
+func (a *Account) libraryWrite(ctx context.Context, method, path string, q url.Values) error {
 	tok, err := a.accessToken(ctx)
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequestWithContext(ctx, method, apiBase+"/me/tracks?"+q.Encode(), nil)
+	req, err := http.NewRequestWithContext(ctx, method, apiBase+path+"?"+q.Encode(), nil)
 	if err != nil {
 		return err
 	}

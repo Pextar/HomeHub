@@ -301,7 +301,7 @@ func (s *Server) mediaDeleteZone(w http.ResponseWriter, r *http.Request) {
 	}) {
 		return
 	}
-	s.pruneHistory() // a room that no longer exists keeps no shelf
+	s.pruneDeadRooms() // a room that no longer exists keeps no shelf
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -337,6 +337,64 @@ func (s *Server) resolveZone(w http.ResponseWriter, r *http.Request) ([]media.En
 		return nil, nil, false
 	}
 	return members, &zone, true
+}
+
+// mediaRoom resolves a destination key — "sonos:<id>", "kef:<id>" or
+// "zone:<id>" — to live endpoints and the name the house calls it.
+//
+// This is the vocabulary the play history already uses, and having one
+// resolver for it is what lets anything that isn't an HTTP handler address a
+// room: a music timer names a room the same way a shelf does, and a single
+// speaker is simply a zone of one as far as the route engine is concerned.
+//
+// Takes and releases the read lock itself, so callers are off-lock by the
+// time they touch a speaker.
+func (s *Server) mediaRoom(key string) ([]media.Endpoint, string, error) {
+	key = strings.TrimSpace(key)
+	var members []string
+	var name string
+
+	s.Store.View(func() {
+		if id, ok := strings.CutPrefix(key, "zone:"); ok {
+			z, exists := s.Store.Zones[id]
+			if !exists {
+				return
+			}
+			name = z.Name
+			members = append([]string(nil), z.Members...)
+			return
+		}
+		bridge, id, ok := store.SplitMember(key)
+		if !ok {
+			return
+		}
+		if bridge == "kef" {
+			if sp, exists := s.Store.KEF[id]; exists {
+				name, members = sp.Name, []string{key}
+			}
+			return
+		}
+		if sp, exists := s.Store.Sonos[id]; exists {
+			name, members = sp.Name, []string{key}
+		}
+	})
+
+	if name == "" {
+		return nil, "", fmt.Errorf("%w: %q", media.ErrUnknownEndpoint, key)
+	}
+
+	var eps map[string]media.Endpoint
+	s.Store.View(func() { eps = s.endpoints() })
+	out := make([]media.Endpoint, 0, len(members))
+	for _, m := range members {
+		if e, exists := eps[m]; exists {
+			out = append(out, e)
+		}
+	}
+	if len(out) == 0 {
+		return nil, name, fmt.Errorf("%w: %s", media.ErrEmptyZone, name)
+	}
+	return out, name, nil
 }
 
 // mediaZonePlay handles POST /api/media/zones/{id}/play with

@@ -316,6 +316,12 @@ func main() {
 	// out. Same reasoning as the KEF poller — nothing needs a clean release.
 	go server.RunAutoplay(schedCtx)
 
+	// Music that starts and stops on its own: wake-ups and sleep timers.
+	// Shares the scheduler's context so cancelling it also stops any volume
+	// ramp in flight — a fade left running past shutdown would leave a room
+	// at an interim volume with nothing left to move it.
+	go server.RunMusicTimers(schedCtx)
+
 	go func() {
 		log.Printf("HomeHub listening on http://:%s", port)
 		if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
