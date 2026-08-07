@@ -19,6 +19,7 @@ import (
 	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
 
+	"homehub/internal/announce"
 	"homehub/internal/kef"
 	"homehub/internal/llm"
 	"homehub/internal/matter"
@@ -122,6 +123,16 @@ type Server struct {
 	streamMu  sync.Mutex
 	stream    *stream.Host
 	librespot *stream.Librespot
+
+	// announcer serves announcement clips to the speakers (see
+	// announce.go). Created lazily, and only ever holds the last few
+	// seconds of audio someone asked the house to hear.
+	announceMu sync.Mutex
+	announcer  *announce.Host
+	// announcing is held for as long as an announcement is audible, not
+	// just for as long as its request is: a second one starting mid-clip
+	// would snapshot the clip as what the rooms were playing.
+	announcing bool
 }
 
 // sonosAcctEntry is one cached service-account resolution.

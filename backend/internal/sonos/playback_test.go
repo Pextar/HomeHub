@@ -111,3 +111,32 @@ func TestSeekRejectsBadPosition(t *testing.T) {
 		}
 	}
 }
+
+func TestQueueInsertBefore(t *testing.T) {
+	// Moving down passes tracks that have not shifted up yet, so the
+	// insertion point is one past the destination; moving up it is the
+	// destination itself.
+	cases := []struct{ from, to, want int }{
+		{5, 4, 4}, // one up
+		{5, 1, 1}, // to the top
+		{5, 6, 7}, // one down
+		{2, 9, 10},
+	}
+	for _, c := range cases {
+		if got := queueInsertBefore(c.from, c.to); got != c.want {
+			t.Errorf("queueInsertBefore(%d, %d) = %d, want %d", c.from, c.to, got, c.want)
+		}
+	}
+}
+
+func TestMoveInQueueRejectsBadTracks(t *testing.T) {
+	for _, c := range [][2]int{{0, 3}, {3, 0}, {-1, -1}} {
+		if err := MoveInQueue(t.Context(), "192.168.1.50", c[0], c[1]); err == nil {
+			t.Errorf("MoveInQueue(%d, %d) = nil, want error", c[0], c[1])
+		}
+	}
+	// A no-op move never reaches the speaker, so this must not hang on I/O.
+	if err := MoveInQueue(t.Context(), "192.168.1.50", 3, 3); err != nil {
+		t.Errorf("MoveInQueue(3, 3) = %v, want nil", err)
+	}
+}

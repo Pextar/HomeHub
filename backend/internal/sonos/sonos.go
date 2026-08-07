@@ -220,6 +220,13 @@ type Track struct {
 	Title  string `json:"title,omitempty"`
 	Artist string `json:"artist,omitempty"`
 	Album  string `json:"album,omitempty"`
+	// SpotifyURI is the canonical "spotify:track:…" for what is playing,
+	// recovered from the Sonos resource string when the source is Spotify.
+	// Empty for radio, line-in, a local library item, or any other service:
+	// surfaces that need it (saving to the library, opening the artist)
+	// render only where it is present, which is §15.1's rule applied to a
+	// track rather than to a room.
+	SpotifyURI string `json:"spotify_uri,omitempty"`
 	// ArtURI is either an absolute URL or a path relative to the speaker
 	// (e.g. /getaa?...). Relative paths must be proxied by the caller.
 	ArtURI string `json:"art_uri,omitempty"`
@@ -411,7 +418,13 @@ func ParseTrackMeta(meta string) *Track {
 		return nil
 	}
 	it := d.Items[0]
-	t := &Track{Title: it.Title, Artist: it.Creator, Album: it.Album, ArtURI: it.AlbumArtURI}
+	t := &Track{
+		Title:      it.Title,
+		Artist:     it.Creator,
+		Album:      it.Album,
+		ArtURI:     it.AlbumArtURI,
+		SpotifyURI: spotifyTrackURI(it.Res),
+	}
 	if t.Title == "" && t.Artist == "" && t.Album == "" {
 		return nil
 	}
@@ -555,6 +568,23 @@ type Favorite struct {
 // matching loosely on both the encoded and literal forms is cheaper than
 // modelling every Sonos container id scheme.
 var spotifyContainerRe = regexp.MustCompile(`spotify(?:%3[aA]|:)(playlist|album)(?:%3[aA]|:)([A-Za-z0-9]+)`)
+
+// spotifyTrackRe is the same idea for a single track. A Sonos playing from
+// Spotify carries the canonical id inside its resource string, e.g.
+// "x-sonos-spotify:spotify%3atrack%3a4uLU6hMCjMI75M1A2tKUQC?sid=9&flags=8224".
+// That id is the only handle a surface has on what is playing, so saving a
+// song and opening its artist both start here.
+var spotifyTrackRe = regexp.MustCompile(`spotify(?:%3[aA]|:)track(?:%3[aA]|:)([A-Za-z0-9]+)`)
+
+// spotifyTrackURI returns the canonical "spotify:track:…" embedded in a
+// resource string, or "" when the source isn't Spotify.
+func spotifyTrackURI(res string) string {
+	m := spotifyTrackRe.FindStringSubmatch(res)
+	if m == nil {
+		return ""
+	}
+	return "spotify:track:" + m[1]
+}
 
 // spotifyContainerURI returns the canonical "spotify:playlist:…" /
 // "spotify:album:…" URI embedded in a favorite's resource string, or "" when

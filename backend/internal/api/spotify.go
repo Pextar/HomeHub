@@ -92,6 +92,11 @@ func (s *Server) spotifyStatus(w http.ResponseWriter, r *http.Request) {
 		// so the shelves are absent rather than empty, and the offer to
 		// reconnect is made once, quietly, where they would have been.
 		"listening": st.Listening,
+		// Whether this login may save a track to the account's library.
+		// Reading whether one is saved has always been in the grant, so a
+		// heart can be drawn filled on an older login and simply not offer
+		// the tap — same shape as the two above.
+		"library": st.Library,
 	})
 }
 
@@ -331,12 +336,93 @@ func (s *Server) spotifyContext(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, det)
 }
 
+// spotifySimilar handles GET /api/spotify/similar?artist=…&limit=8 — songs
+// to continue with, seeded from an artist name.
+//
+// The engine behind it is the one "play similar" already uses when a queue
+// runs dry (see SimilarTracks); this is the same answer asked for on
+// purpose rather than automatically. Seeded by *name* because that is what
+// a speaker reports about what it is playing — a Sonos on radio has an
+// artist line and no catalog id at all.
+func (s *Server) spotifySimilar(w http.ResponseWriter, r *http.Request) {
+	if !s.requireSpotify(w) {
+		return
+	}
+	artist := strings.TrimSpace(r.URL.Query().Get("artist"))
+	if artist == "" {
+		writeError(w, http.StatusBadRequest, "artist is required")
+		return
+	}
+	limit := 8
+	if n, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && n > 0 && n <= 30 {
+		limit = n
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 2*spotifyTimeout)
+	defer cancel()
+	items, err := s.spotifyAccount(r).SimilarTracks(ctx, artist, nil, limit)
+	if err != nil {
+		writeError(w, spotifyErrStatus(err), err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, items)
+}
+
+// spotifySaved handles GET /api/spotify/saved?uri=spotify:track:… — whether
+// the track is in the account's library. Answered even on a login too old to
+// save with; the write below is the half that refuses.
+func (s *Server) spotifySaved(w http.ResponseWriter, r *http.Request) {
+	if !s.requireSpotify(w) {
+		return
+	}
+	uri := strings.TrimSpace(r.URL.Query().Get("uri"))
+	if uri == "" {
+		writeError(w, http.StatusBadRequest, "uri is required")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), spotifyTimeout)
+	defer cancel()
+	saved, err := s.spotifyAccount(r).IsSaved(ctx, uri)
+	if err != nil {
+		writeError(w, spotifyErrStatus(err), err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"saved": saved})
+}
+
+// spotifySetSaved handles PUT /api/spotify/saved with
+// {"uri": "spotify:track:…", "saved": true} — adds or removes one track from
+// the account's own library.
+func (s *Server) spotifySetSaved(w http.ResponseWriter, r *http.Request) {
+	if !s.requireSpotify(w) {
+		return
+	}
+	var body struct {
+		URI   string `json:"uri"`
+		Saved bool   `json:"saved"`
+	}
+	if !decodeBody(w, r, &body) {
+		return
+	}
+	if strings.TrimSpace(body.URI) == "" {
+		writeError(w, http.StatusBadRequest, "uri is required")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), spotifyTimeout)
+	defer cancel()
+	if err := s.spotifyAccount(r).SetSaved(ctx, strings.TrimSpace(body.URI), body.Saved); err != nil {
+		writeError(w, spotifyErrStatus(err), err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // spotifyErrStatus maps the two things the user can act on — no account
 // linked, and an account linked before HomeHub asked for the scope this
 // call needs — to 409 so the frontend can prompt for a (re)connect.
 // Everything else is the service's problem, not theirs: bad gateway.
 func spotifyErrStatus(err error) int {
-	if errors.Is(err, spotify.ErrPlaybackScope) || errors.Is(err, spotify.ErrListeningScope) {
+	if errors.Is(err, spotify.ErrPlaybackScope) || errors.Is(err, spotify.ErrListeningScope) ||
+		errors.Is(err, spotify.ErrLibraryScope) {
 		return http.StatusConflict
 	}
 	if strings.Contains(err.Error(), "not connected") {

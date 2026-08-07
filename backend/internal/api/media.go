@@ -301,6 +301,7 @@ func (s *Server) mediaDeleteZone(w http.ResponseWriter, r *http.Request) {
 	}) {
 		return
 	}
+	s.pruneHistory() // a room that no longer exists keeps no shelf
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -352,6 +353,8 @@ func (s *Server) mediaZonePlay(w http.ResponseWriter, r *http.Request) {
 		URI      string `json:"uri"`
 		Title    string `json:"title"`
 		Kind     string `json:"kind"`
+		Sub      string `json:"sub"`
+		ArtURI   string `json:"art_uri"`
 	}
 	if !decodeBody(w, r, &body) {
 		return
@@ -405,6 +408,15 @@ func (s *Server) mediaZonePlay(w http.ResponseWriter, r *http.Request) {
 	// Nudge both monitors so now-playing moves off "nothing playing" without
 	// waiting for the next poll.
 	s.touchZone(members)
+
+	s.recordPlay("zone:"+zone.ID, zone.Name, store.MediaPlay{
+		Provider: p.ID(),
+		Kind:     body.Kind,
+		URI:      body.URI,
+		Title:    body.Title,
+		Sub:      body.Sub,
+		ArtURI:   body.ArtURI,
+	})
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"route":      plan.Route,

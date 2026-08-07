@@ -2,6 +2,7 @@
     import PanelPlayerCard from "./PanelPlayerCard.svelte";
     import PanelRoomChips from "./PanelRoomChips.svelte";
     import PanelBandShelf from "./PanelBandShelf.svelte";
+    import PanelAnnounce from "./PanelAnnounce.svelte";
     import Icon from "../Icon.svelte";
     import { route } from "../../lib/stores.svelte";
     import type { PanelMusicStore } from "../../lib/panel-music.svelte";
@@ -34,6 +35,16 @@
      *  head row and the shelf have taken theirs. The cover is sized from it
      *  (see PanelPlayerCard's `artMax`). */
     let stageH = $state(0);
+
+    /** Calling the house takes the shelf's place at the foot of the band —
+     *  a swap, like the full player's grouping pane, because the kiosk has
+     *  no sheets and the player above must keep playing and stay touchable
+     *  while someone shouts up the stairs (§16). */
+    let announcing = $state(false);
+    // Only where there is somewhere for it to land. A house whose speakers
+    // aren't answering gets no control rather than one that explains itself
+    // after the tap (§15.1).
+    const canAnnounce = $derived(!!music.announce?.available);
 </script>
 
 {#if music.hasSpeakers}
@@ -49,6 +60,20 @@
                  as the panel: in the card it wrapped to two and three lines
                  and took that height off the cover (§16). -->
             <PanelRoomChips {music} />
+            {#if canAnnounce}
+                <!-- The one control on this wall that makes a sound in a
+                     room you are not standing in. It rides beside Pause all
+                     because both are whole-house taps aimed at from a step
+                     away, and neither is about the room the chips name. -->
+                <button
+                    class="m-pauseall"
+                    class:on={announcing}
+                    aria-pressed={announcing}
+                    onclick={() => (announcing = !announcing)}
+                >
+                    <Icon name="megaphone" size={14} /><span>Announce</span>
+                </button>
+            {/if}
             {#if music.anyPlaying}
                 <!-- The tap a wall gets asked for on the way to bed, and
                      had no button for: everything, quiet, at once. -->
@@ -81,7 +106,9 @@
         <!-- What to put on next, at the foot of the band. The player is a
              strip and cannot use the band's height on its own; this is what
              that height is for (§16). -->
-        {#if !music.unreachable}
+        {#if announcing}
+            <PanelAnnounce {music} onClose={() => (announcing = false)} />
+        {:else if !music.unreachable}
             <PanelBandShelf {music} />
         {/if}
     </section>
@@ -182,6 +209,13 @@
     }
     .m-pauseall:disabled {
         opacity: 0.55;
+    }
+    /* Open is a ring and a brighter ink, which is how the panel says
+       "chosen" everywhere else (§16) — never the ON gradient, which on this
+       surface belongs to a room that is lit. */
+    .m-pauseall.on {
+        border-color: var(--on);
+        color: var(--text);
     }
 
     /* Nothing answered — said in place, at the column's own size, so the

@@ -222,3 +222,35 @@ func TestNormalizeClock(t *testing.T) {
 		t.Error("real times should pass through")
 	}
 }
+
+// What is playing has to be identifiable to be saved or followed to its
+// artist, and the only handle a Sonos gives is the id buried in its resource
+// string — percent-encoded on the Spotify path, plain on others.
+func TestParseTrackMetaRecoversTheSpotifyURI(t *testing.T) {
+	meta := `<DIDL-Lite><item id="-1"><dc:title>Svarta gummiblues</dc:title>` +
+		`<dc:creator>Bo Kaspers Orkester</dc:creator><upnp:album>Kaos</upnp:album>` +
+		`<res>x-sonos-spotify:spotify%3atrack%3a4uLU6hMCjMI75M1A2tKUQC?sid=9&amp;flags=8224&amp;sn=1</res>` +
+		`</item></DIDL-Lite>`
+	got := ParseTrackMeta(meta)
+	if got == nil {
+		t.Fatal("ParseTrackMeta returned nil for a well-formed item")
+	}
+	if got.SpotifyURI != "spotify:track:4uLU6hMCjMI75M1A2tKUQC" {
+		t.Errorf("SpotifyURI = %q, want the canonical track URI", got.SpotifyURI)
+	}
+}
+
+// Radio, line-in and a local library item carry no Spotify id, and a surface
+// that assumed one would offer a heart that saves the wrong thing.
+func TestParseTrackMetaLeavesTheURIEmptyOffSpotify(t *testing.T) {
+	for _, res := range []string{
+		`x-rincon-mp3radio://ice.stream.example/p3`,
+		`x-rincon-stream:RINCON_000E58FE123401400`,
+		`x-file-cifs://nas/music/track.flac`,
+	} {
+		meta := `<DIDL-Lite><item id="-1"><dc:title>Something</dc:title><res>` + res + `</res></item></DIDL-Lite>`
+		if got := ParseTrackMeta(meta); got == nil || got.SpotifyURI != "" {
+			t.Errorf("res %q gave SpotifyURI %q, want empty", res, got.SpotifyURI)
+		}
+	}
+}

@@ -416,3 +416,65 @@ func TestTopTracksAsksForTheRecentWindow(t *testing.T) {
 		t.Errorf("time_range = %q, want short_term", got)
 	}
 }
+
+// Saving is the one library call split across two grants: reading whether a
+// track is saved has always been in the scope set, writing was added later.
+// An old login must therefore still answer the heart's *state* and refuse
+// only the tap.
+func TestSavedReadsOnAnyGrantAndWritesOnlyOnTheNewOne(t *testing.T) {
+	c := connected(t, "", roundTripFunc(func(r *http.Request) *http.Response {
+		if r.Method != http.MethodGet || r.URL.Path != "/v1/me/tracks/contains" {
+			t.Fatalf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+		if got := r.URL.Query().Get("ids"); got != "abc" {
+			t.Errorf("ids = %q, want the bare id", got)
+		}
+		return jsonResponse(http.StatusOK, `[true]`)
+	}))
+	saved, err := c.For("").IsSaved(context.Background(), "spotify:track:abc")
+	if err != nil || !saved {
+		t.Errorf("IsSaved on an old grant = %v, %v; want true, nil", saved, err)
+	}
+	if err := c.For("").SetSaved(context.Background(), "spotify:track:abc", true); !errors.Is(err, ErrLibraryScope) {
+		t.Errorf("SetSaved on an old grant = %v, want ErrLibraryScope", err)
+	}
+	if st := c.For("").Status(); st.Library {
+		t.Error("Status claims library writes on a grant without the scope")
+	}
+}
+
+func TestSetSavedSendsTheRightVerb(t *testing.T) {
+	var seen []string
+	c := connected(t, scopeLibraryWrite, roundTripFunc(func(r *http.Request) *http.Response {
+		seen = append(seen, r.Method+" "+r.URL.Path+"?"+r.URL.RawQuery)
+		return jsonResponse(http.StatusOK, ``)
+	}))
+	if err := c.For("").SetSaved(context.Background(), "spotify:track:abc", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.For("").SetSaved(context.Background(), "spotify:track:abc", false); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"PUT /v1/me/tracks?ids=abc", "DELETE /v1/me/tracks?ids=abc"}
+	if fmt.Sprint(seen) != fmt.Sprint(want) {
+		t.Errorf("calls = %v, want %v", seen, want)
+	}
+}
+
+// A URI that isn't a track never reaches Spotify: albums and playlists have
+// their own library endpoints, and sending one here would save nothing and
+// report success.
+func TestSavedRejectsNonTrackURIs(t *testing.T) {
+	c := connected(t, scopeLibraryWrite, roundTripFunc(func(*http.Request) *http.Response {
+		t.Error("a non-track URI reached the service")
+		return jsonResponse(http.StatusOK, `[]`)
+	}))
+	for _, uri := range []string{"spotify:album:x", "spotify:track:", "", "nonsense"} {
+		if _, err := c.For("").IsSaved(context.Background(), uri); err == nil {
+			t.Errorf("IsSaved(%q) = nil, want error", uri)
+		}
+		if err := c.For("").SetSaved(context.Background(), uri, true); err == nil {
+			t.Errorf("SetSaved(%q) = nil, want error", uri)
+		}
+	}
+}

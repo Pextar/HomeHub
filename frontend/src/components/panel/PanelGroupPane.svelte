@@ -107,6 +107,15 @@
         say(`${s.title} joined ${featured?.title ?? "the group"}.`);
         music.joinSource(s);
     }
+    /** Take the music with you. Two calls under the hood — the destination
+     *  joins, then this room steps out — because that is what a move *is*
+     *  on a Sonos household: there is no move action, only membership. The
+     *  store does them in that order so the queue is handed over before the
+     *  old room stops coordinating, and the panel follows the sound. */
+    function moveHere(s: PanelSource) {
+        say(`Moved to ${s.title}.`);
+        music.moveTo(s);
+    }
     function joinEverywhere() {
         say("Playing everywhere.");
         music.joinAll();
@@ -212,27 +221,41 @@
             {/if}
         </div>
 
-        <!-- Out of the group: the whole row is the target, because at arm's
+        <!-- Out of the group: nearly the whole row joins, because at arm's
              length a 44px plus sign is a worse aim than a 400px row that
-             does the same thing. -->
+             does the same thing. The trailing target is the other half of
+             the sentence — "take it with me" rather than "play it there
+             too" — and it needs its own button rather than a mode, since
+             which of the two you mean is known before you reach the wall,
+             never after. -->
         <div class="g-list">
             {#each joinable as s (s.key)}
-                <button
-                    class="g-row add"
-                    disabled={!!music.busy["join:" + s.id] || !!music.busy["joinall"]}
-                    onclick={() => join(s)}
-                >
-                    <span class="g-mark">
-                        {#if s.playing}<Waveform />{:else}<Icon name="speaker" size={16} />{/if}
-                    </span>
-                    <span class="g-meta">
-                        <span class="g-name">{s.title}</span>
-                        <span class="g-sub">{busyWith(s)}</span>
-                    </span>
-                    <span class="g-join">
-                        <Icon name="plus" size={16} /><span>Join</span>
-                    </span>
-                </button>
+                {@const rowBusy =
+                    !!music.busy["join:" + s.id] ||
+                    !!music.busy["joinall"] ||
+                    !!music.busy["move:" + s.id]}
+                <div class="g-row add">
+                    <button class="g-open" disabled={rowBusy} onclick={() => join(s)}>
+                        <span class="g-mark">
+                            {#if s.playing}<Waveform />{:else}<Icon name="speaker" size={16} />{/if}
+                        </span>
+                        <span class="g-meta">
+                            <span class="g-name">{s.title}</span>
+                            <span class="g-sub">{busyWith(s)}</span>
+                        </span>
+                        <span class="g-join">
+                            <Icon name="plus" size={16} /><span>Join</span>
+                        </span>
+                    </button>
+                    <button
+                        class="g-move"
+                        aria-label="Move the music to {s.title}"
+                        disabled={rowBusy}
+                        onclick={() => moveHere(s)}
+                    >
+                        <Icon name="chevronRight" size={16} /><span>Move</span>
+                    </button>
+                </div>
             {/each}
         </div>
     {/if}
@@ -243,7 +266,7 @@
         {#if flash}
             {flash}
         {:else if joinable.length}
-            A room that joins stops what it was playing and follows this one.
+            Join plays here as well; Move takes it there and leaves.
         {:else}
             Every Sonos room in the house is playing this one.
         {/if}
@@ -315,19 +338,64 @@
         background: var(--on-soft);
         border-color: var(--tile-on-border);
     }
+    /* An addable room is two targets in one row: the row itself joins, the
+       trailing chip moves. The wrapper carries the edge so the two still
+       read as one row, and the padding moves onto the buttons so each has
+       its full height to be hit in. */
     .g-row.add {
-        cursor: pointer;
+        padding: 0;
         transition:
             border-color var(--t-fast),
-            background var(--t-fast),
-            transform var(--t-fast);
+            background var(--t-fast);
     }
-    .g-row.add:active {
+    .g-open {
+        flex: 1 1 auto;
+        min-width: 0;
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        align-self: stretch;
+        padding: 6px var(--space-3);
+        border: 0;
+        border-radius: var(--r-md);
+        background: none;
+        color: inherit;
+        font-family: inherit;
+        text-align: left;
+        cursor: pointer;
+        transition: transform var(--t-fast);
+    }
+    .g-open:active {
         transform: scale(0.99);
         transition-duration: 80ms;
     }
-    .g-row.add:disabled {
+    .g-open:disabled,
+    .g-move:disabled {
         opacity: 0.55;
+    }
+    /* Quieter than Join, because it is the rarer of the two and the row is
+       already the louder target. A hairline on the leading edge separates
+       them without drawing a second box (§16 draws its own edges). */
+    .g-move {
+        flex: none;
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        align-self: stretch;
+        padding: 0 var(--space-3);
+        border: 0;
+        border-left: 1px solid var(--hairline);
+        border-radius: 0 var(--r-md) var(--r-md) 0;
+        background: none;
+        color: var(--text-mute);
+        font-family: inherit;
+        font-size: 12px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: color var(--t-fast);
+    }
+    .g-move:active {
+        color: var(--on);
     }
     @media (hover: hover) {
         .g-row.add:hover {
@@ -470,7 +538,8 @@
         flex-shrink: 0;
     }
 
-    .g-row.add:focus-visible,
+    .g-open:focus-visible,
+    .g-move:focus-visible,
     .g-chip:focus-visible,
     .g-ico:focus-visible {
         outline: none;
@@ -487,8 +556,15 @@
         }
     }
 
+    @media (pointer: coarse) {
+        .g-move {
+            padding-inline: var(--space-4);
+        }
+    }
+
     @media (prefers-reduced-motion: reduce) {
-        .g-row.add {
+        .g-row.add,
+        .g-open {
             transition-duration: 0.001ms;
         }
     }

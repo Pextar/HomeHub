@@ -59,6 +59,7 @@ func (s *Server) kefPlayItem(w http.ResponseWriter, r *http.Request) {
 		Service string `json:"service"`
 		URI     string `json:"uri"`
 		Title   string `json:"title"`
+		playSuffix
 	}
 	if !decodeBody(w, r, &body) {
 		return
@@ -125,6 +126,14 @@ func (s *Server) kefPlayItem(w http.ResponseWriter, r *http.Request) {
 	// caller's now-playing off "nothing playing".
 	s.kefEvents().Touch(sp.ID)
 	s.kefEvents().TouchAfter(sp.ID, 3*time.Second)
+	s.recordPlay("kef:"+sp.ID, sp.Name, store.MediaPlay{
+		Provider: "spotify",
+		Kind:     body.Kind,
+		URI:      body.URI,
+		Title:    body.Title,
+		Sub:      body.Sub,
+		ArtURI:   body.ArtURI,
+	})
 	w.WriteHeader(http.StatusNoContent)
 }
 

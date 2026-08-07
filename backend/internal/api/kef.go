@@ -220,6 +220,7 @@ func (s *Server) kefDeleteSpeaker(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.kefEvents().Nudge() // stop polling it
+	s.pruneHistory()      // and drop its shelf with it
 	w.WriteHeader(http.StatusNoContent)
 }
 
