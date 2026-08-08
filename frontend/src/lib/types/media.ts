@@ -177,6 +177,18 @@ export interface MediaPlay {
   /** What the room was called when this played. */
   room_name?: string;
   at: string;
+  /**
+   * How many times this room has started it. Absent on entries written
+   * before the tally existed, which read as the one play that created them —
+   * `playCount()` in lib/music/format.ts is the one place that decides so.
+   */
+  count?: number;
+  /** When this room first played it — "since March" rather than "an hour
+   *  ago". Absent on entries that predate the field. */
+  first_at?: string;
+  /** Plays by local hour, 24 slots. Absent on older entries, which is
+   *  honest: they are not evidence about any hour in particular. */
+  hours?: number[];
 }
 
 /** One room's play history, or the household's when it has none of its own. */
@@ -184,6 +196,125 @@ export interface MediaHistory {
   plays: MediaPlay[];
   /** True when these are the household's plays rather than this room's. */
   household: boolean;
+}
+
+/**
+ * What a room keeps coming back to, rather than what it happened to play
+ * last — and, when it has a habit at the hour it currently is, what it plays
+ * *then*. The difference between offering the kitchen its breakfast radio at
+ * eight in the morning and offering it last night's dinner record.
+ */
+export interface MediaTopPlays {
+  plays: MediaPlay[];
+  /** True when these are this room's habit at `hour`, false when they are
+   *  its favourites overall. The shelf's label depends on it: a wall that
+   *  says "you play this now" about a record this room has never played in
+   *  the morning is exactly the confident wrongness §15 rules out. */
+  by_hour: boolean;
+  /** The local hour the ranking was asked for, 0–23. */
+  hour: number;
+}
+
+/** One name and how many plays sit behind it. */
+export interface ListeningTally {
+  /** A room key for rooms, the artist's own line for artists — so a row can
+   *  be acted on rather than only printed. */
+  key: string;
+  name: string;
+  plays: number;
+  /** The most recent play in this tally. */
+  at: string;
+}
+
+/**
+ * What the household's listening adds up to, summed over every room.
+ *
+ * Bounded by what the per-room lists still hold, so every number here is
+ * "plays we remember" and never a lifetime total — `since` is what lets a
+ * surface say which window it is describing instead of implying it covers
+ * everything.
+ */
+export interface Listening {
+  plays: number;
+  /** How many distinct things those plays were. */
+  items: number;
+  /** Which rooms did the listening, busiest first. */
+  rooms: ListeningTally[];
+  /** The artist lines of the tracks and albums played, busiest first.
+   *  Playlists and stations are left out — their second line is an owner or
+   *  a service, and counting those would put "Spotify" at the top. */
+  artists: ListeningTally[];
+  /** The most-played items themselves, merged across rooms. */
+  top: MediaPlay[];
+  /** When the house listens: 24 slots, local time. */
+  hours: number[];
+  /** The oldest play still remembered. Absent when nothing has played. */
+  since?: string;
+}
+
+// ── Music timers ─────────────────────────────────────────────────────────
+// Music that starts and stops without anyone tapping anything: the half the
+// socket scheduler could never reach. One type covers both uses because they
+// differ only in which end of the fade they are on — arrive at 20 over ten
+// minutes at 06:45, or take the room down to nothing in forty.
+
+export type MusicTimerAction = "start" | "stop";
+
+/** What a starting timer puts on. Carried in full rather than as a URI so
+ *  06:45 is not the moment a catalog round trip has to succeed. */
+export interface MusicTimerItem {
+  provider?: string;
+  kind?: string;
+  uri?: string;
+  title?: string;
+  sub?: string;
+  art_uri?: string;
+}
+
+export interface MusicTimer {
+  id: string;
+  name?: string;
+  /** The media layer's destination key — "sonos:…", "kef:…", "zone:…" — the
+   *  same vocabulary the play history uses. */
+  room: string;
+  action: MusicTimerAction;
+  enabled: boolean;
+  /** Set makes this a one-shot: it runs once and is deleted. This is what
+   *  "sleep in forty minutes" is. */
+  fires_at?: string;
+  /** "HH:MM" plus days makes it recurring. Empty days means every day. */
+  time?: string;
+  days?: number[];
+  item?: MusicTimerItem;
+  /** Where the room ends up: the level to arrive at for a start, the level
+   *  to fade down to for a stop. Absent leaves the volume alone. */
+  volume?: number;
+  /** How long to take getting there. Zero is a jump. */
+  fade_minutes?: number;
+  last_fired_at?: string;
+}
+
+/** A timer plus what the backend already knows and the wall would otherwise
+ *  have to work out for itself. */
+export interface MusicTimerView extends MusicTimer {
+  /** What the house calls the room now — not necessarily what it was called
+   *  when the timer was set. */
+  room_name: string;
+  /** When this next fires, so a row can say "in 6 hours" without
+   *  reimplementing weekday arithmetic. Absent when it never will. */
+  next_at?: string;
+  /** A ramp is walking this room right now — the state between "sleep timer
+   *  set" and "room quiet", otherwise invisible except as volume drifting
+   *  on its own. */
+  fading: boolean;
+}
+
+/** What setting a sleep timer answered. */
+export interface MusicSleepResult {
+  timer: MusicTimer;
+  /** When the room actually goes quiet — the number worth reading back,
+   *  rather than when the fade starts. */
+  quiet_at: string;
 }
 
 /** One room an announcement could be sent to. */

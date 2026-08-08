@@ -53,6 +53,9 @@ import type {
     MediaZoneSpeaker,
     MediaRoute,
     MediaPlay,
+    MusicTimer,
+    MusicTimerView,
+    Listening,
     AnnounceStatus,
 } from "./types";
 
@@ -174,10 +177,49 @@ export interface PanelMusicStore {
     // ── KEF ──
     setKefSource(s: PanelSource, source: KEFSource): void;
 
-    // ── Sleep timer (a Sonos group's, group-scoped like the play modes) ──
-    /** Whole minutes left, counted down locally between reads; 0 for none. */
-    readonly sleepMinutes: number;
-    setSleep(minutes: number): void;
+    // ── Sleep and wake (HomeHub's own timers, any room) ──────────────────
+    /** Every music timer in the house, soonest first. */
+    readonly timers: MusicTimerView[];
+    /** The featured room's, soonest first. */
+    readonly roomTimers: MusicTimerView[];
+    /** The featured room's sleep timer — the one-shot stop — if it has one. */
+    readonly sleepTimer: MusicTimerView | undefined;
+    /** Whole minutes until the featured room goes quiet, counted down
+     *  locally between reads; 0 when nothing is going to quiet it. */
+    readonly sleepMinutesLeft: number;
+    /** A ramp is walking the featured room right now: the state between
+     *  "sleep timer set" and "room quiet", otherwise visible only as the
+     *  volume drifting on its own. */
+    readonly fading: boolean;
+    /** "Quiet in forty minutes", on any room — the gesture this whole
+     *  mechanism exists for. Replaces the room's existing sleep timer. */
+    setSleepIn(minutes: number): void;
+    /** Call the whole thing off: the timer goes, and a ramp already in
+     *  flight is cancelled, which puts the volume back and leaves the music
+     *  playing. */
+    clearSleep(): void;
+    /** "I'm still up" — stop the ramp without deleting the timer. */
+    cancelFade(): void;
+    /** Wake this room to something at a time of day. */
+    setWake(opts: {
+        time: string;
+        days: number[];
+        volume?: number;
+        fadeMinutes?: number;
+        item: MusicTimer["item"];
+        name?: string;
+    }): void;
+    setTimerEnabled(t: MusicTimerView, enabled: boolean): void;
+    deleteTimer(t: MusicTimerView): void;
+
+    // ── Sonos' own sleep timer (set in the Sonos app, reported by it) ────
+    /** Whole minutes left on a timer the *speaker* is keeping, which is not
+     *  the same thing as HomeHub's — the panel says so rather than folding
+     *  two different clocks into one number. 0 for none. */
+    readonly sonosSleepMinutes: number;
+    /** Clear the speaker's own timer. Only ever called with 0 from the
+     *  panel: HomeHub's timers are what the wall now sets. */
+    setSonosSleep(minutes: number): void;
 
     // ── Queue (a Sonos group's — empty for anything else) ──
     readonly queue: SonosQueueItem[];
@@ -213,6 +255,24 @@ export interface PanelMusicStore {
      *  something it didn't. */
     readonly historyHousehold: boolean;
     playFromHistory(p: MediaPlay): void;
+
+    // ── What this room keeps coming back to ──────────────────────────────
+    /** Ranked by how often this room has started them — and, when it has a
+     *  habit at the hour it currently is, ranked by what it plays *then*.
+     *  Empty for a room with nothing of its own; the plain history is what
+     *  a shelf falls back to. */
+    readonly topPlays: MediaPlay[];
+    /** True when `topPlays` is this room's habit at `topPlaysHour` rather
+     *  than its favourites overall. The shelf's label depends on it. */
+    readonly topPlaysByHour: boolean;
+    /** The local hour those plays were ranked for. */
+    readonly topPlaysHour: number;
+
+    // ── What the household listens to ────────────────────────────────────
+    /** Summed over every room: who does the listening, which artists the
+     *  house keeps coming back to, and how far back the numbers reach.
+     *  Null while the read is out or when it was refused. */
+    readonly insights: Listening | null;
 
     // ── Saving what's playing ──
     /** The login may write to the library. False hides the heart rather
@@ -273,6 +333,20 @@ const IDLE_POLL_MS = 120_000;
 /** KEF inputs a skip means anything on. There is nothing to step through
  *  on the TV or the analog input — the speaker would simply refuse. */
 const KEF_SKIPPABLE = new Set(["wifi", "bluetooth"]);
+
+/**
+ * The destination key the media layer files a room's plays and timers
+ * under: "sonos:<id>", "kef:<id>", "zone:<id>".
+ *
+ * Exported because it is the vocabulary shared with the backend — a shelf,
+ * a timer and an insights tally all name a room this way — and a second
+ * spelling of it in a component is a room that silently stops matching
+ * itself.
+ */
+export function roomKeyOf(s: PanelSource | undefined): string {
+    if (!s) return "";
+    return (s.kind === "sonos" ? "sonos:" : s.kind === "kef" ? "kef:" : "zone:") + s.id;
+}
 
 export interface PanelMusicOptions {
     /** The kid surface: Sonos only — never poll KEF or zones, never list one. */
@@ -885,13 +959,18 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
         void run("src:" + s.id, () => api.kefSetSource(s.id, source), "Couldn't switch input");
     }
 
-    // ── Sleep timer ──────────────────────────────────────────────────────
-    // Group-scoped like the play modes, and the one setting a wall panel
-    // has more claim to than the phone does: "stop in half an hour" is
-    // asked at the light switch on the way to bed. The full settings read
-    // is a handful of SOAP calls, so it runs once per featured room rather
-    // than on the poll, and the minutes left are counted down locally
-    // between reads instead of being re-read to stay honest.
+    // ── Sonos' own sleep timer ───────────────────────────────────────────
+    // Set in the Sonos app, kept by the speaker, and reported by it. HomeHub
+    // has its own timers now (below) and those are what the wall *sets* —
+    // they reach a KEF and a zone, they fade, and they put the volume back.
+    // This read stays because a timer somebody set elsewhere is still going
+    // to stop this room, and a panel that knows and doesn't say would be
+    // lying by omission. The two are never folded into one number: they are
+    // different clocks kept by different things.
+    //
+    // The full settings read is a handful of SOAP calls, so it runs once per
+    // featured room rather than on the poll, and the minutes left are
+    // counted down locally between reads.
     let sleep = $state<{ mins: number; at: number }>({ mins: 0, at: 0 });
     let sleepFor = "";
     async function loadSleep(coordinatorId: string) {
@@ -911,12 +990,12 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
         sleep = { mins: 0, at: 0 };
         if (id) void loadSleep(id);
     });
-    const sleepMinutes = $derived.by(() => {
+    const sonosSleepMinutes = $derived.by(() => {
         void clock.beat; // the countdown is the display, not another read
         if (!sleep.mins || !sleep.at) return 0;
         return Math.max(0, sleep.mins - Math.floor((Date.now() - sleep.at) / 60_000));
     });
-    function setSleep(minutes: number) {
+    function setSonosSleep(minutes: number) {
         const f = featured;
         if (!f || f.kind !== "sonos") return;
         void run(
@@ -925,9 +1004,177 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
                 await api.sonosUpdateSettings(f.id, { sleep_minutes: minutes });
                 sleep = { mins: minutes, at: Date.now() };
             },
+            "Couldn't change the speaker's timer",
+        );
+    }
+
+    // ── HomeHub's music timers ───────────────────────────────────────────
+    // The wall's own "quiet in forty minutes", and the other end of the same
+    // mechanism: "wake this room at 06:45". Both reach every kind of room
+    // the panel can feature — a Sonos group, a KEF speaker, a HomeHub zone —
+    // where the speaker's own timer reaches only the one make that has one.
+    //
+    // Read on a slow beat of its own rather than on the speaker poll: a
+    // timer changes when somebody sets one and when one fires, and the
+    // countdown between reads is arithmetic, not a round trip. The one thing
+    // that genuinely moves on its own is a ramp in flight, and a minute's
+    // granularity is right for something that takes five.
+    //
+    // Not on the kid surface: the endpoints are admin-only, and asking would
+    // be a guaranteed 403 on every load of a screen with no control to draw
+    // with the answer.
+    const TIMERS_MS = 60_000;
+    let timers = $state<MusicTimerView[]>([]);
+
+    async function loadTimers() {
+        if (opts.sonosOnly) return;
+        try {
+            timers = await api.musicTimers();
+        } catch {
+            timers = [];
+        }
+    }
+
+    const roomTimers = $derived.by(() => {
+        const key = roomKeyOf(featured);
+        return key ? timers.filter((t) => t.room === key) : [];
+    });
+    /** A sleep timer is the one-shot stop: no time of day, nothing to play.
+     *  A recurring "stop at 23:00" is a standing instruction and belongs in
+     *  the list with the wake-ups, not on the "quiet in…" row. */
+    const sleepTimer = $derived(
+        roomTimers.find((t) => t.action === "stop" && !t.time && !!t.fires_at),
+    );
+    const fading = $derived(roomTimers.some((t) => t.fading));
+
+    /** Minutes until the room is actually quiet: the timer fires when the
+     *  fade *starts*, so the fade's own length is still to come. */
+    const sleepMinutesLeft = $derived.by(() => {
+        void clock.beat;
+        const t = sleepTimer;
+        if (!t?.fires_at || !t.enabled) return 0;
+        const quietAt = Date.parse(t.fires_at) + (t.fade_minutes ?? 0) * 60_000;
+        return Math.max(0, Math.ceil((quietAt - Date.now()) / 60_000));
+    });
+
+    function setSleepIn(minutes: number) {
+        const key = roomKeyOf(featured);
+        if (!key) return;
+        void run(
+            "sleepin:" + key,
+            () => api.musicSleep({ room: key, minutes }).then(loadTimers),
             "Couldn't set the sleep timer",
         );
     }
+
+    function clearSleep() {
+        const t = sleepTimer;
+        if (!t) return;
+        // Deleting cancels the ramp too, which puts the volume back and
+        // leaves the music playing — "I'm still up" said with the timer.
+        void run(
+            "sleepin:" + t.room,
+            () => api.musicDeleteTimer(t.id).then(loadTimers),
+            "Couldn't clear the sleep timer",
+        );
+    }
+
+    function cancelFade() {
+        const key = roomKeyOf(featured);
+        if (!key) return;
+        void run(
+            "fade:" + key,
+            () => api.musicCancelFade(key).then(loadTimers),
+            "Couldn't stop the fade",
+        );
+    }
+
+    function setWake(o: {
+        time: string;
+        days: number[];
+        volume?: number;
+        fadeMinutes?: number;
+        item: MusicTimer["item"];
+        name?: string;
+    }) {
+        const key = roomKeyOf(featured);
+        if (!key || !o.item?.uri) return;
+        void run(
+            "wake:" + key + ":" + o.time,
+            () =>
+                api
+                    .musicCreateTimer({
+                        room: key,
+                        action: "start",
+                        enabled: true,
+                        time: o.time,
+                        days: o.days,
+                        item: o.item,
+                        volume: o.volume,
+                        fade_minutes: o.fadeMinutes,
+                        name: o.name,
+                    })
+                    .then(loadTimers),
+            "Couldn't set that alarm",
+        );
+    }
+
+    function setTimerEnabled(t: MusicTimerView, enabled: boolean) {
+        void run(
+            "timer:" + t.id,
+            () =>
+                api
+                    .musicUpdateTimer(t.id, {
+                        room: t.room,
+                        action: t.action,
+                        enabled,
+                        fires_at: t.fires_at,
+                        time: t.time,
+                        days: t.days,
+                        item: t.item,
+                        volume: t.volume,
+                        fade_minutes: t.fade_minutes,
+                        name: t.name,
+                    })
+                    .then(loadTimers),
+            "Couldn't change that timer",
+        );
+    }
+
+    function deleteTimer(t: MusicTimerView) {
+        void run(
+            "timer:" + t.id,
+            () => api.musicDeleteTimer(t.id).then(loadTimers),
+            "Couldn't remove that timer",
+        );
+    }
+
+    // ── What the household listens to ────────────────────────────────────
+    // The one picture no single room can give, and the reason it rides on
+    // the timers' beat rather than the speakers': it changes when something
+    // is played, which the panel finds out about anyway.
+    let insights = $state<Listening | null>(null);
+    async function loadInsights() {
+        if (opts.sonosOnly) return;
+        try {
+            insights = await api.mediaInsights(8);
+        } catch {
+            insights = null;
+        }
+    }
+
+    $effect(() => {
+        if (opts.sonosOnly) return;
+        if (!session.isAdmin) return;
+        void loadTimers();
+        void loadInsights();
+        const t = setInterval(() => {
+            if (document.hidden) return;
+            void loadTimers();
+            void loadInsights();
+        }, TIMERS_MS);
+        return () => clearInterval(t);
+    });
 
     // ── Queue ────────────────────────────────────────────────────────────
     let queue = $state<SonosQueueItem[]>([]);
@@ -1164,34 +1411,73 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
     let historyFor = "";
     let historySeq = 0;
 
-    /** The destination key the media layer files plays under. */
-    function roomKey(s: PanelSource | undefined): string {
-        if (!s) return "";
-        return (s.kind === "sonos" ? "sonos:" : s.kind === "kef" ? "kef:" : "zone:") + s.id;
-    }
+    // And what it keeps *coming back to*, which is a different question and
+    // usually the better answer to "put something on": the plain list says
+    // what was on last, and by eight in the evening the kitchen's breakfast
+    // radio and its dinner records are equally recent. Asked for at the hour
+    // it currently is, so a room with a habit at this hour gets that habit
+    // and a room without one gets its favourites overall — the answer says
+    // which, and the shelf's label repeats it rather than inventing one.
+    let topPlays = $state<MediaPlay[]>([]);
+    let topPlaysByHour = $state(false);
+    // Plain dates throughout this block: each one is read for the hour it
+    // is now and thrown away in the same statement, never held and never
+    // mutated, so there is nothing for a reactive Date to be reactive about.
+    // eslint-disable-next-line svelte/prefer-svelte-reactivity
+    let topPlaysHour = $state(new Date().getHours());
 
     async function loadHistory(key: string) {
         const mine = ++historySeq;
-        try {
-            const h = await api.mediaHistory(key, 12);
-            if (mine !== historySeq) return;
-            history = h.plays;
-            historyHousehold = h.household;
-        } catch {
-            if (mine !== historySeq) return;
+        // Both shelves in one pass, settled: they answer different
+        // questions about the same room and either can come back empty
+        // without costing the other its list.
+        const [plain, top] = await Promise.allSettled([
+            api.mediaHistory(key, 12),
+            api.mediaTopPlays(key, { limit: 8, hour: "now" }),
+        ]);
+        if (mine !== historySeq) return;
+        if (plain.status === "fulfilled") {
+            history = plain.value.plays;
+            historyHousehold = plain.value.household;
+        } else {
             history = [];
             historyHousehold = false;
+        }
+        if (top.status === "fulfilled") {
+            topPlays = top.value.plays;
+            topPlaysByHour = top.value.by_hour;
+            topPlaysHour = top.value.hour;
+        } else {
+            topPlays = [];
+            topPlaysByHour = false;
         }
     }
 
     $effect(() => {
-        const key = roomKey(featured);
+        const key = roomKeyOf(featured);
         if (key === historyFor) return;
         historyFor = key;
         historySeq++;
         history = [];
         historyHousehold = false;
+        topPlays = [];
+        topPlaysByHour = false;
         if (key) void loadHistory(key);
+    });
+
+    // The hour is half of what the ranking above was asked for, so when the
+    // wall clock rolls into a new one the shelf is answering yesterday
+    // evening's question. Re-read on the minute beat the store already has,
+    // and only when the hour has actually changed.
+    // eslint-disable-next-line svelte/prefer-svelte-reactivity
+    let shelfHour = new Date().getHours();
+    $effect(() => {
+        void clock.beat;
+        // eslint-disable-next-line svelte/prefer-svelte-reactivity
+        const h = new Date().getHours();
+        if (h === shelfHour) return;
+        shelfHour = h;
+        if (historyFor) void loadHistory(historyFor);
     });
 
     /** Start something out of the history again.
@@ -1219,7 +1505,7 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
                     kind: p.kind,
                     sub: p.sub,
                     art_uri: p.art_uri,
-                }).then(() => loadHistory(roomKey(s))),
+                }).then(() => loadHistory(roomKeyOf(s))),
             "Couldn't play that again",
         );
     }
@@ -1564,10 +1850,31 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
         toggleCrossfade,
         toggleAutoplay,
         setKefSource,
-        get sleepMinutes() {
-            return sleepMinutes;
+        get timers() {
+            return timers;
         },
-        setSleep,
+        get roomTimers() {
+            return roomTimers;
+        },
+        get sleepTimer() {
+            return sleepTimer;
+        },
+        get sleepMinutesLeft() {
+            return sleepMinutesLeft;
+        },
+        get fading() {
+            return fading;
+        },
+        setSleepIn,
+        clearSleep,
+        cancelFade,
+        setWake,
+        setTimerEnabled,
+        deleteTimer,
+        get sonosSleepMinutes() {
+            return sonosSleepMinutes;
+        },
+        setSonosSleep,
         get queue() {
             return queue;
         },
@@ -1600,6 +1907,18 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
             return historyHousehold;
         },
         playFromHistory,
+        get topPlays() {
+            return topPlays;
+        },
+        get topPlaysByHour() {
+            return topPlaysByHour;
+        },
+        get topPlaysHour() {
+            return topPlaysHour;
+        },
+        get insights() {
+            return insights;
+        },
         get canSave() {
             return canSave;
         },

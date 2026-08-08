@@ -7,6 +7,9 @@ import type {
   KEFSpeakerView,
   MediaZone,
   MediaHistory,
+  MediaTopPlays,
+  Listening,
+  MusicTimerView,
   SonosFavorite,
   AnnounceStatus,
   SpotifyItem,
@@ -27,6 +30,9 @@ let kefFixture: KEFStatus;
 let zonesFixture: MediaZone[];
 let queueFixture: SonosQueueItem[];
 let historyFixture: MediaHistory;
+let topFixture: MediaTopPlays;
+let insightsFixture: Listening;
+let timersFixture: MusicTimerView[];
 let favoritesFixture: SonosFavorite[];
 let announceFixture: AnnounceStatus;
 let similarFixture: SpotifyItem[];
@@ -69,6 +75,14 @@ vi.mock("./api", () => ({
     spotifySimilar: vi.fn(async () => similarFixture),
     sonosQueueAdd: vi.fn(async () => ({ track: 1, length: 1 })),
     mediaHistory: vi.fn(async () => historyFixture),
+    mediaTopPlays: vi.fn(async () => topFixture),
+    mediaInsights: vi.fn(async () => insightsFixture),
+    musicTimers: vi.fn(async () => timersFixture),
+    musicSleep: vi.fn(async () => ({ timer: {}, quiet_at: "" })),
+    musicCreateTimer: vi.fn(async () => ({})),
+    musicUpdateTimer: vi.fn(async () => ({})),
+    musicDeleteTimer: vi.fn(async () => {}),
+    musicCancelFade: vi.fn(async () => ({ cancelled: true })),
     announceStatus: vi.fn(async () => announceFixture),
     announce: vi.fn(async () => ({
       rooms: ["Kitchen"],
@@ -145,6 +159,16 @@ async function boot() {
 
 beforeEach(() => {
   historyFixture = { plays: [], household: false };
+  topFixture = { plays: [], by_hour: false, hour: 0 };
+  insightsFixture = {
+    plays: 0,
+    items: 0,
+    rooms: [],
+    artists: [],
+    top: [],
+    hours: new Array(24).fill(0),
+  };
+  timersFixture = [];
   favoritesFixture = [];
   announceFixture = {
     available: true,
@@ -876,6 +900,219 @@ describe("calling the house", () => {
 
     expect(api.announce).toHaveBeenCalledWith("Dinner's ready", undefined);
     expect(h.value.lastAnnounce?.rooms).toEqual(["Kitchen"]);
+    h.stop();
+  });
+});
+
+// ── What a room comes back to ────────────────────────────────────────────
+// The plain history says what was on last; this says what the room keeps
+// choosing, and at an hour it has a habit at, what it plays *then*. The
+// rules worth guarding are the honest ones: the shelf may never claim a
+// habit the backend didn't report, and a ranked answer is always this
+// room's own — it never softens into the household's the way the plain
+// list may.
+
+describe("what this room comes back to", () => {
+  it("ranks the room's plays at the hour it currently is", async () => {
+    topFixture = {
+      plays: [{ provider: "spotify", uri: "spotify:track:a", title: "Morning", at: "", count: 6 }],
+      by_hour: true,
+      hour: 8,
+    };
+    const h = await boot();
+    for (let i = 0; i < 4; i++) await Promise.resolve();
+    h.flush();
+
+    expect(api.mediaTopPlays).toHaveBeenCalledWith("sonos:kitchen", { limit: 8, hour: "now" });
+    expect(h.value.topPlays).toHaveLength(1);
+    expect(h.value.topPlaysByHour).toBe(true);
+    expect(h.value.topPlaysHour).toBe(8);
+    h.stop();
+  });
+
+  // A room with no habit at this hour is answered with its favourites
+  // overall, and the flag says so — the label above the shelf is the only
+  // thing that separates the two claims.
+  it("says when the ranking is not about this hour", async () => {
+    topFixture = {
+      plays: [{ provider: "spotify", uri: "spotify:track:b", title: "Anytime", at: "", count: 3 }],
+      by_hour: false,
+      hour: 20,
+    };
+    const h = await boot();
+    for (let i = 0; i < 4; i++) await Promise.resolve();
+    h.flush();
+
+    expect(h.value.topPlaysByHour).toBe(false);
+    h.stop();
+  });
+
+  // Two reads, two answers: a room with nothing ranked still has whatever
+  // the plain shelf found, including the household's fallback, and the
+  // ranked list stays empty rather than borrowing it.
+  it("keeps the ranked list empty when the room has no habit of its own", async () => {
+    historyFixture = {
+      plays: [{ provider: "spotify", uri: "spotify:track:c", title: "Elsewhere", at: "" }],
+      household: true,
+    };
+    const h = await boot();
+    for (let i = 0; i < 4; i++) await Promise.resolve();
+    h.flush();
+
+    expect(h.value.topPlays).toEqual([]);
+    expect(h.value.history).toHaveLength(1);
+    expect(h.value.historyHousehold).toBe(true);
+    h.stop();
+  });
+});
+
+// ── Sleep and wake ───────────────────────────────────────────────────────
+// HomeHub's own timers, which is what lets the wall set one on a KEF
+// speaker or a HomeHub room at all — the sleep timer it used to set was a
+// Sonos group's and reached neither.
+
+describe("music timers", () => {
+  function sleepIn(minutes: number, fadeMinutes: number, room = "sonos:kitchen"): MusicTimerView {
+    return {
+      id: "mt_1",
+      room,
+      room_name: room,
+      action: "stop",
+      enabled: true,
+      fires_at: new Date(Date.now() + minutes * 60_000).toISOString(),
+      fade_minutes: fadeMinutes,
+      fading: false,
+    };
+  }
+
+  it("sets a sleep timer on whichever room is featured, KEF included", async () => {
+    sonosFixture = { speakers: [], groups: [] } as unknown as SonosStatus;
+    kefFixture = { speakers: [kefSpeaker("study")] } as KEFStatus;
+    const h = await boot();
+    for (let i = 0; i < 4; i++) await Promise.resolve();
+    h.flush();
+
+    h.value.setSleepIn(40);
+    h.flush();
+    await Promise.resolve();
+
+    expect(api.musicSleep).toHaveBeenCalledWith({ room: "kef:study", minutes: 40 });
+    h.stop();
+  });
+
+  // The timer fires when the *fade* starts, so the minutes left are counted
+  // to the silence at the end of it. Reading the fire time as the answer
+  // would tell someone the room goes quiet five minutes before it does.
+  it("counts down to the silence, not to the start of the fade", async () => {
+    timersFixture = [sleepIn(30, 6)];
+    const h = await boot();
+    for (let i = 0; i < 4; i++) await Promise.resolve();
+    h.flush();
+
+    expect(h.value.sleepTimer?.id).toBe("mt_1");
+    expect(h.value.sleepMinutesLeft).toBe(36);
+    h.stop();
+  });
+
+  // A recurring stop is a standing instruction, not the "quiet in forty
+  // minutes" someone just tapped — and another room's timer is not this
+  // room's at all.
+  it("takes only this room's one-shot stop as its sleep timer", async () => {
+    timersFixture = [
+      { ...sleepIn(30, 5, "sonos:bedroom"), id: "mt_other" },
+      {
+        id: "mt_nightly",
+        room: "sonos:kitchen",
+        room_name: "kitchen",
+        action: "stop",
+        enabled: true,
+        time: "23:00",
+        fading: false,
+      },
+    ];
+    const h = await boot();
+    for (let i = 0; i < 4; i++) await Promise.resolve();
+    h.flush();
+
+    expect(h.value.sleepTimer).toBeUndefined();
+    expect(h.value.roomTimers.map((t) => t.id)).toEqual(["mt_nightly"]);
+    h.stop();
+  });
+
+  // "I'm still up": the ramp stops, the volume goes back and the music
+  // keeps playing — which is why it is a different call from deleting.
+  it("reports a ramp in flight and cancels it by room", async () => {
+    timersFixture = [{ ...sleepIn(2, 5), fading: true }];
+    const h = await boot();
+    for (let i = 0; i < 4; i++) await Promise.resolve();
+    h.flush();
+
+    expect(h.value.fading).toBe(true);
+
+    h.value.cancelFade();
+    h.flush();
+    await Promise.resolve();
+
+    expect(api.musicCancelFade).toHaveBeenCalledWith("sonos:kitchen");
+    h.stop();
+  });
+
+  it("sets a wake-up with the room, the days and something to play", async () => {
+    const h = await boot();
+    for (let i = 0; i < 4; i++) await Promise.resolve();
+    h.flush();
+
+    h.value.setWake({
+      time: "06:45",
+      days: [1, 2, 3, 4, 5],
+      volume: 20,
+      fadeMinutes: 10,
+      item: { uri: "spotify:playlist:x", title: "Mornings" },
+    });
+    h.flush();
+    await Promise.resolve();
+
+    expect(api.musicCreateTimer).toHaveBeenCalledWith(
+      expect.objectContaining({
+        room: "sonos:kitchen",
+        action: "start",
+        time: "06:45",
+        days: [1, 2, 3, 4, 5],
+        volume: 20,
+        fade_minutes: 10,
+      }),
+    );
+    h.stop();
+  });
+
+  // An alarm with nothing to put on is refused here rather than by the
+  // backend: the panel offers the times only where it has something to
+  // point them at, and this is the guard behind that.
+  it("refuses a wake-up with nothing to play", async () => {
+    const h = await boot();
+    for (let i = 0; i < 4; i++) await Promise.resolve();
+    h.flush();
+
+    h.value.setWake({ time: "06:45", days: [], item: { title: "Nothing" } });
+    h.flush();
+    await Promise.resolve();
+
+    expect(api.musicCreateTimer).not.toHaveBeenCalled();
+    h.stop();
+  });
+
+  // The kid surface may only drive Sonos and the timer endpoints are
+  // admin-only, so asking would be a guaranteed 403 on every load of a
+  // screen with no control to draw with the answer.
+  it("never asks for timers or insights on the kid surface", async () => {
+    const h = withRoot(() => createPanelMusic({ sonosOnly: true }));
+    await h.value.refresh();
+    h.flush();
+    for (let i = 0; i < 4; i++) await Promise.resolve();
+    h.flush();
+
+    expect(api.musicTimers).not.toHaveBeenCalled();
+    expect(api.mediaInsights).not.toHaveBeenCalled();
     h.stop();
   });
 });

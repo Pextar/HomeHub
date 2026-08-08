@@ -596,10 +596,16 @@ Two rules keep that from becoming a dumping ground:
   (`lib/panel-music.svelte.ts`). Both depths and the full player share that
   instance, so a room picked on one is featured on the others (§16). Two
   things it owns are HomeHub's own rather than a bridge's: the per-room
-  **play history** the shelves fall back to, and the **announcement** the
+  **play history** the shelves are ranked from, and the **announcement** the
   wall sends — both live in the backend beside the speakers (`internal/
   store/history.go`, `internal/announce/`) because neither Sonos nor
-  Spotify has a concept that fits.
+  Spotify has a concept that fits. So are the two things the panel added
+  next to them: the **music timers** that start and stop a room on their own
+  (`internal/store/musictimer.go` and the engine in `internal/api/`), and the
+  **listening summary** the Rooms pane ends on (`internal/store/listening.go`)
+  — every one of them a question about *this house* that no service can
+  answer. Their surfaces are `components/panel/PanelTimers.svelte` and
+  `PanelInsights.svelte`.
 
 ---
 
@@ -1252,13 +1258,15 @@ player band between them, all always visible. The second depth is the
 panel's **own music screen** (`#/panel?music=1`, one tap in through the player's art and
 meta): the featured room's player riding on the right, and a work area on
 the left switched by chip between three panes — **Search** (the catalog,
-with the room's recent searches, the household's favorites and the
-account's playlists while the box is empty), **Queue** (the featured
-Sonos group's, with jump / remove / two-tap clear), **Rooms** (the
-featured room's own settings at the head of it — play modes, per-speaker
-faders, sleep, the KEF input — then every room, with Sonos-native
-grouping: join the featured room, split one, or step a single speaker
-out). Its back chip returns to the dashboard depth.
+idling on what this room plays, the room's recent searches, the
+household's favorites and the account's collection while the box is
+empty, and taking the *whole* screen the moment the box has the caret),
+**Queue** (the featured Sonos group's, with jump / remove / two-tap
+clear), **Rooms** (the featured room's own settings at the head of it —
+play modes, per-speaker faders, the KEF input — then its sleep timer and
+wake-up, then every room, with Sonos-native grouping: join the featured
+room, split one, or step a single speaker out, and what the house
+listens to at the foot). Its back chip returns to the dashboard depth.
 
 The third is the **full-screen player** (`#/panel?music=1&player=1`,
 `PanelFullPlayer`), reached from the expand control on the depth's cover.
@@ -1565,6 +1573,42 @@ constraint made visible.
   Animations are opacity/transform only, ≤200ms, and the ambient fade is
   the one 600ms exception. The app-shell view transition does not run
   here.
+
+  Three rules follow from that budget, and they are what every animation
+  on this surface was written against:
+  - **Animate what arrives; let what leaves go.** An exit has to hold its
+    place in the layout while it plays, and on this surface that place is
+    a grid row or a 420px column — so the thing being left would squeeze
+    the thing being opened for the length of the exit. The dock flies in
+    and vanishes; the player column fades in and vanishes. Nothing here
+    is symmetric, on purpose.
+  - **Never tween a layout.** A `grid-template` or a `width` that
+    interpolates is a layout pass per frame, which is the one thing this
+    hardware cannot spend. Where a layout has to change it changes in one
+    frame and something cheap covers it: the results fade over their own
+    reflow, the insights bars carry their magnitude in `scaleY` and their
+    room bars in `scaleX` while the real width sits underneath.
+  - **The hitch is the mount, not the motion.** Measured on the depth at
+    a 6× CPU throttle, every animation here is within noise of no
+    animation at all — the dropped frames belong to building the DOM the
+    animation runs on. So the answer to a slow surface is *ordering* the
+    building, not removing the movement: the listening summary waits two
+    frames before mounting, because it is ~35 nodes of chart at the foot
+    of a pane whose job is the room list and it sits below the fold.
+    That does not make the work cheaper and is not meant to — the same
+    frames are spent either way — it spends them in the right order, and
+    the pane appears about a fifth sooner (118ms → 96ms, tap to list
+    painted). Where something feels slow here, look for nodes being
+    built, not for something moving.
+
+  **One loop is allowed on this surface, and only for something that is
+  happening right now.** §6.8's waveform is the original licence: sound
+  is being made, and nothing static says so. The sleep timer's ramp has
+  the same claim — the volume is walking down on its own, over minutes,
+  with no other tell — so its icon breathes at 2.4s, opacity only, and
+  only while the ramp is actually in flight. Reduced motion stops it
+  outright rather than slowing it: a loop is the one kind of motion that
+  someone who asked for less of it keeps seeing.
 - **Music is the panel's second satellite** (after Home's "Playing now",
   §6.8) and carries the waveform by the same licence. One source is
   featured — the user's chip pick, else whatever is playing — with
@@ -1680,9 +1724,10 @@ constraint made visible.
   the shared slider grows to a 44px box on a coarse pointer while the
   rail keeps its drawn weight). **The player is a player, and the room's settings are not on it.**
   Cover, what is playing, scrubber, transport, volume — that is the whole
-  card. Play modes, the sleep timer, one fader per speaker and the KEF
+  card. Play modes, one fader per speaker and the KEF
   input selector live on the **music depth's Rooms pane**
-  (`PanelRoomSettings`), at the head of it, for the featured room. They
+  (`PanelRoomSettings`), at the head of it, for the featured room, with
+  the room's timers (`PanelTimers`) directly under them. They
   were stacked under the cover and they were the reason nothing in that
   column fitted: they came to more height than the column had, so the
   cover was squeezed to a third of its size and the rest went behind a
@@ -1766,8 +1811,10 @@ constraint made visible.
   unused. HomeHub keeps its own per-room play history for this (it
   records what was started, in which room, at what time) because
   Spotify's history is one list for the whole household and cannot say
-  that the kitchen gets radio at breakfast. A room with no history of its
-  own falls back to the household's, and **the label says which**:
+  that the kitchen gets radio at breakfast. It is **ranked rather than
+  listed, and the label says by what** — the shelf rule below, which the
+  depth's own copy of this shelf follows too. A room with no history of its
+  own falls back to the household's, and the label says that as well:
   "Played here" against "Played recently". A wall must never imply a room
   played something it didn't. On the household's list the second line is
   the room rather than the artist, since that is the part which says this
@@ -1867,8 +1914,8 @@ constraint made visible.
   is up** (measured off `visualViewport`, so a docked, floating or split
   keyboard all read true, and no keyboard reads as none): the depth
   re-floors to just above it and the results go dense — single-line
-  rows, no shelf labels, no kind chips, the top-result card folded back
-  into the shelves — because typing should show a handful of matches
+  rows, no kind chips, no destination line, the top-result card folded
+  back into the shelves — because typing should show a handful of matches
   where one card used to fit. The keyboard is part of the flow: Enter
   dismisses it, and so does a tap on any result, so the rich layout
   returns for the choosing. **The household's favorites idle here too**,
@@ -1891,6 +1938,129 @@ constraint made visible.
   more: a list blanked on every keystroke is worst when it is being read
   from across a room, and a failure needs a retry that is a target rather
   than a sentence with a link in it.
+- **Searching takes the screen.** The depth's two-column body is right for
+  browsing and wrong for the one gesture the depth exists for. On the
+  reference wall the results column is 556px — eight rows of a list being
+  read from across a room — while a 420px player sits beside it showing a
+  record nobody is looking at, because looking at a record is not what
+  someone typing is doing. So **the moment the box has the caret the
+  player column folds into a dock along the foot and the results take the
+  whole width, in two columns**: twice the answers, at the same size, on
+  the surface where a second aim costs a walk back to the wall. The rules
+  that keep it honest:
+  - **It is a swap, not a screen** — the same bargain the grouping pane
+    and the announce strip make. Nothing is lost: the **88px dock** keeps
+    the cover, what is playing and the transport, and the room chips never
+    move, because they live on the header and *where a tap plays must not
+    change because a search started*.
+  - **The dock carries the queued line.** A queued track is the one action
+    here that changes nothing visible, and the card that used to say so is
+    exactly what the dock replaced — so the confirmation moves onto it,
+    still in place and still for a few seconds, never as a toast.
+  - **It ends where the searching ends, and never on a play.** Done,
+    Escape, or opening an artist's page — choosing three songs in a row is
+    one search, and a wall that reflowed after each one would move the next
+    target out from under the finger. The dock's cover is the second way
+    back, the way the band's cover is the way in. Escape walks this rung
+    like every other: row menu, then catalog page, then the search, then
+    the depth.
+  - **The catalog's own pages stay in the column.** An artist's page is
+    column-shaped and is *read*, not typed into; opening one is a question
+    answered, so the player comes back beside it.
+  - **The two-column list has a floor, and it is the row's own.** Below
+    about 360px a title and its artist stop fitting on one line, and a
+    shelf of truncated names is worse than a shorter list — so the columns
+    fit to that rather than to a stated count, and the ordinary single
+    column is what a narrower body gets.
+  - **The keyboard is the case this was built for, and the two modes
+    compose.** The reference wall is 768px tall and its docked landscape
+    keyboard takes about 350 of them: the depth re-floors above it (type
+    mode, below) and what is left has to hold the header, the box, the
+    dock and the list. Full-bleed is what makes that survivable — the same
+    dense rows, dealt into two columns, are twice the matches in the same
+    strip. Where the two modes meet, the width buys back two things the
+    narrow column had to drop:
+    - **the artist returns**, on the title's own line. A dense row drops
+      it in a 556px column because there is nowhere to put it; at ~500px
+      a column there is, and ten songs with no artists on them is a list
+      nobody can choose from — worse than one row fewer.
+    - **the shelf labels return**, tight. In one column the sections
+      arrive in a known order and a row's shape says what it is; dealt
+      into two columns an album and a song look alike, and the label is
+      the only thing separating them. 24px for that is a fair trade where
+      a whole row is not.
+    **The dock goes to one line while the keyboard is up** — a 36px cover,
+    what is playing, play/pause; the skips go, because you are typing and
+    not conducting. It may not go away altogether: the queue buttons on
+    the rows are tappable while typing, and the dock is where that answer
+    lives, so removing it would make a tap answer with nothing. It keeps
+    the answer and gives up everything else.
+- **The depth idles on shelves, and the room in front of you leads them.**
+  With an empty box the pane is a browse screen, in the order that answers
+  *put something on* without typing: **what this room plays** (HomeHub's
+  own per-room memory, ranked — see the shelf rule below), then the
+  account's recent listening, the room's recent searches, the household's
+  favorites, what the account plays most, its playlists, **its albums, the
+  artists it plays and what came out this week**. Every shelf is a grid of
+  covers on one grid — a cover is the same size wherever the wall offers
+  one — and every one of them is absent rather than empty when it has
+  nothing: an account with no saved albums and a login whose grant
+  predates a scope both draw nothing, which is the honest answer to both
+  (§15.9). An artist still opens rather than plays, here as everywhere.
+- **A room's shelf is ranked, and it says what it was ranked by.** "What
+  did this room play last" was the wrong question: by eight in the evening
+  the kitchen's breakfast radio and its dinner records are equally recent,
+  and only one of them is right. So the shelf asks for **what this room
+  keeps coming back to at the hour it currently is**, and the label carries
+  exactly the claim the answer supports — "Played here around 08:00" for a
+  habit at this hour, "Played here most" for a ranking without one,
+  "Played here" for the plain list, "Played recently" when it is the
+  household's. A wall must never imply a room played something it didn't,
+  and it must never imply a habit it has no evidence for. The tally rides
+  on the tile in mono (`×4`) and only past one play: `×1` is the shelf
+  saying nothing. This is the band's shelf and the depth's alike.
+- **The sleep timer is the room's, not the speaker's — and the wake-up is
+  the same mechanism run the other way.** The wall used to set a Sonos
+  group's own sleep timer, which meant a KEF speaker and a HomeHub room
+  could not be given one at all, and the one it could cut the music dead.
+  HomeHub's timers reach every room the panel can feature, fade out over
+  the tail of the wait, and **put the volume back afterwards** — a room
+  faded to two and paused is inaudible the next morning, and the person
+  who set the timer at midnight is not the person who finds out at
+  breakfast. On the pane:
+  - **Sleep is chips and a sentence.** 15 / 30 / 45 / 60 / 90, and what it
+    says back is **when the room goes quiet** rather than when the fade
+    starts, because that is the number someone is actually asking for.
+    While the ramp is walking there is one more target — **"I'm still up"**
+    — which stops the fade, puts the volume back and leaves the music
+    playing. Cancelling a sleep timer that silenced the room anyway would
+    be worse than one that did nothing.
+  - **Wake is chips too, and it names what it will play before the tap.**
+    A time, weekdays or every day, and the item: what is playing now if
+    something is, else what this room plays most, else what it played last
+    — and the line says which, along with the volume it will arrive at and
+    how long it will take getting there. An alarm whose contents are a
+    surprise is not something anyone sets, and a wake-up that guesses a
+    volume is how an alarm becomes a fright. A room with nothing it has
+    ever played gets no time chips and one line saying so, rather than four
+    targets that would fail on the tap (§15.1). Anything more particular
+    than four mornings is set in the full app: there are still no forms on
+    a kiosk.
+  - **A timer the speaker is keeping gets its own line.** A Sonos sleep
+    timer set in the Sonos app is going to stop this room, so the panel
+    says so and offers to clear it — as a separate fact, never folded into
+    HomeHub's number. They are different clocks kept by different things.
+- **What the house listens to sits at the foot of the Rooms pane.** Which
+  rooms do the listening, what the house keeps coming back to, and when in
+  the day it is loud — the one picture no single room can give, on the pane
+  that is *about* rooms, because a kiosk gets no screen of its own for
+  something nobody taps. Twenty-four bars for the day with the current hour
+  in the ON ink, a bar per room, and the artists as chips. Two things in it
+  are worth a tap and only two: a room tallied here is a room you might
+  want featured, and an artist the house plays is a search you were about
+  to type. Every figure is bounded by what the store still remembers, so
+  the block says how far back it reaches rather than implying it covers
+  everything.
 - **Grouping on the wall is Sonos-native and tap-based.** The app's
   drag would be imprecise at arm's length, so the Rooms pane names the
   action instead: every other Sonos room gets "Join {featured}", the

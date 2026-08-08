@@ -65,3 +65,69 @@ export function fmtTotalMs(ms: number): string {
 export function capFirst(s: string): string {
   return s ? s[0].toUpperCase() + s.slice(1) : s;
 }
+
+/**
+ * How many times a room has started something, reading a missing tally as
+ * the one play that must have created the entry — the same rule the store
+ * applies on its side, said once here so no surface invents a second one.
+ */
+export function playCount(p: { count?: number }): number {
+  return p.count && p.count > 0 ? p.count : 1;
+}
+
+/**
+ * A local hour as a wall clock says it: `8` → "08:00". Mono digits, because
+ * every number on the wall is (§2), and no am/pm — HomeHub's clock is 24h
+ * everywhere else on the panel.
+ */
+export function fmtHour(hour: number): string {
+  const h = Number.isFinite(hour) ? Math.max(0, Math.min(23, Math.floor(hour))) : 0;
+  return `${String(h).padStart(2, "0")}:00`;
+}
+
+/**
+ * How long until a moment, in the words a row of things-about-to-happen
+ * wants: "now", "in 6 min", "in 3 h 20", "in 9 h", "Mon 06:45".
+ *
+ * Relative for anything inside a day, because the rows this labels already
+ * say what o'clock they are — "06:45 · Weekdays · tomorrow 06:45" repeats
+ * itself, and the part nobody can work out at a glance is how far away that
+ * is. Past a day the weekday becomes the useful half and the clock rejoins
+ * it, since "in 31 h" is a number nobody converts.
+ *
+ * Past its moment it says "now" rather than a negative: the only reason a
+ * scheduled time is behind us on screen is that the tick hasn't landed yet,
+ * and "3 minutes ago" about something that is on its way is worse than
+ * rounding to the truth.
+ */
+export function fmtUntil(iso?: string, from: Date = new Date()): string {
+  if (!iso) return "";
+  const at = new Date(iso);
+  const ms = at.getTime() - from.getTime();
+  if (Number.isNaN(ms)) return "";
+  if (ms <= 30_000) return "now";
+  const mins = Math.round(ms / 60_000);
+  if (mins < 60) return `in ${mins} min`;
+  if (mins < 24 * 60) {
+    const h = Math.floor(mins / 60);
+    const m = mins % 60;
+    return m === 0 ? `in ${h} h` : `in ${h} h ${m}`;
+  }
+  const hhmm = at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return `${at.toLocaleDateString([], { weekday: "short" })} ${hhmm}`;
+}
+
+/**
+ * The days a recurring timer runs, as a row reads them: "Every day",
+ * "Weekdays", "Weekends", else the short names in week order. An empty list
+ * is every day — the store's own normalisation, repeated here rather than
+ * rendered as nothing.
+ */
+export function fmtDays(days?: number[]): string {
+  const set = [...new Set(days ?? [])].sort((a, b) => a - b);
+  if (set.length === 0 || set.length === 7) return "Every day";
+  if (set.length === 5 && set.every((d) => d >= 1 && d <= 5)) return "Weekdays";
+  if (set.length === 2 && set.includes(0) && set.includes(6)) return "Weekends";
+  const names = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  return set.map((d) => names[d] ?? "").filter(Boolean).join(" ");
+}

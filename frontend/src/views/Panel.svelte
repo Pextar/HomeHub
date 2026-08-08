@@ -147,9 +147,20 @@
     // refusal doesn't hang the depth on skeletons.
     let booted = $state(false);
     onMount(() => {
-        void spotify.load().finally(() => {
-            booted = true;
-        });
+        void spotify
+            .load()
+            .then(() => {
+                // The shelves the depth idles on beyond this account's
+                // listening: what it saved, what it keeps, who it plays, and
+                // what came out this week. Asked for here rather than in
+                // `load()` because the app's Music view has a search box and
+                // a dock and never idles on shelves — this is the surface
+                // that browses, so it is the one that pays for them.
+                void spotify.loadBrowse();
+            })
+            .finally(() => {
+                booted = true;
+            });
     });
 
     $effect(() => {
