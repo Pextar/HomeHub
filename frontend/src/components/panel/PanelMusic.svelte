@@ -45,6 +45,17 @@
     // aren't answering gets no control rather than one that explains itself
     // after the tap (§15.1).
     const canAnnounce = $derived(!!music.announce?.available);
+
+    /** The featured room is going to go quiet on its own, and this band is
+     *  the surface anyone actually walks past. The timer was set one depth
+     *  in, on the Rooms pane, and until now it was only *readable* there —
+     *  so "why is the music fading?" and "how long have I got?" were both
+     *  questions the dashboard couldn't answer about its own room. The chip
+     *  states the fact and its tap lands where the controls are: the Rooms
+     *  pane, not the depth's front door. Absent when nothing is going to
+     *  quiet the room, which is most of the time. */
+    const sleepLeft = $derived(music.sleepMinutesLeft);
+    const openSleep = () => route.go("panel", { music: "1", pane: "rooms" });
 </script>
 
 {#if music.hasSpeakers}
@@ -60,6 +71,22 @@
                  as the panel: in the card it wrapped to two and three lines
                  and took that height off the cover (§16). -->
             <PanelRoomChips {music} />
+            {#if sleepLeft > 0}
+                <!-- The one thing on this band that is about to happen
+                     without anyone touching it. It rides with the two
+                     whole-house taps because it is the same kind of fact:
+                     read from a step away, acted on somewhere else. While
+                     the ramp is actually walking, the icon breathes — the
+                     volume is moving on its own over minutes with no other
+                     tell, which is the same licence §6.8's waveform has. -->
+                <button class="m-pauseall m-sleep" class:fading={music.fading} onclick={openSleep}>
+                    <span class="m-sleepico" class:live={music.fading}>
+                        <Icon name={music.fading ? "activity" : "moon"} size={14} />
+                    </span>
+                    <span>{music.fading ? "Fading" : "Quiet in"}</span>
+                    <span class="mono">{sleepLeft}m</span>
+                </button>
+            {/if}
             {#if canAnnounce}
                 <!-- The one control on this wall that makes a sound in a
                      room you are not standing in. It rides beside Pause all
@@ -216,6 +243,42 @@
     .m-pauseall.on {
         border-color: var(--on);
         color: var(--text);
+    }
+
+    /* A statement first and a target second, so it is drawn quieter than the
+       two taps beside it — until the ramp is in flight, when it is the only
+       thing on the panel that says why the volume is dropping. */
+    .m-sleep .mono {
+        color: var(--text);
+    }
+    .m-sleep.fading {
+        border-color: var(--on);
+        color: var(--text);
+    }
+    .m-sleepico {
+        display: inline-flex;
+    }
+    /* The one loop this band is allowed, and only while something is
+       genuinely happening right now (§16). Opacity on a 14px icon. */
+    .m-sleepico.live {
+        animation: breathe 2.4s ease-in-out infinite;
+        color: var(--on);
+    }
+    @keyframes breathe {
+        0%,
+        100% {
+            opacity: 1;
+        }
+        50% {
+            opacity: 0.4;
+        }
+    }
+    /* Reduced motion stops a loop outright rather than slowing it: a loop is
+       the one kind of motion someone who asked for less of it keeps seeing. */
+    @media (prefers-reduced-motion: reduce) {
+        .m-sleepico.live {
+            animation: none;
+        }
     }
 
     /* Nothing answered — said in place, at the column's own size, so the

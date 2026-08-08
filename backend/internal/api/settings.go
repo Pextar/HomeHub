@@ -9,6 +9,13 @@ import (
 func (s *Server) getSettings(w http.ResponseWriter, _ *http.Request) {
 	var out store.Settings
 	s.Store.View(func() { out = *s.Store.Settings })
+	// The announce presets answer resolved rather than raw: nil on disk
+	// means "nobody has set these", and an editor that had to know about
+	// that would be a second place the defaults live. The panel reads them
+	// through the same resolver on /api/announce, so both surfaces are
+	// looking at one list. Saving from the editor then makes the household's
+	// choice explicit on disk, including the choice to have none.
+	out.AnnouncePresets = out.Presets()
 	writeJSON(w, http.StatusOK, out)
 }
 
@@ -30,5 +37,8 @@ func (s *Server) updateSettings(w http.ResponseWriter, r *http.Request) {
 	}) {
 		return
 	}
-	writeJSON(w, http.StatusOK, s.Store.Settings)
+	var out store.Settings
+	s.Store.View(func() { out = *s.Store.Settings })
+	out.AnnouncePresets = out.Presets()
+	writeJSON(w, http.StatusOK, out)
 }

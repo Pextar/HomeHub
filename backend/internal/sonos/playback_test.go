@@ -140,3 +140,30 @@ func TestMoveInQueueRejectsBadTracks(t *testing.T) {
 		t.Errorf("MoveInQueue(3, 3) = %v, want nil", err)
 	}
 }
+
+// AddManyToQueue is what a run of items goes through — "more like this" is
+// eight tracks, and sending them one request at a time from a wall panel was
+// eight round trips that had to be issued backwards to come out in order.
+// Everything it can refuse, it refuses before touching the network.
+func TestAddManyToQueueRefusesBeforeSending(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		items []Enqueue
+	}{
+		{"nothing to queue", nil},
+		{"empty run", []Enqueue{}},
+		{"a blank uri in the run", []Enqueue{{URI: "x:1"}, {URI: "   "}}},
+	} {
+		if _, err := AddManyToQueue(t.Context(), "192.168.1.50", tc.items, false); err == nil {
+			t.Errorf("AddManyToQueue with %s = nil, want error", tc.name)
+		}
+	}
+}
+
+// AddToQueue is now one item through the batch path, and must still refuse an
+// empty URI the way it always did.
+func TestAddToQueueStillRefusesAnEmptyURI(t *testing.T) {
+	if _, err := AddToQueue(t.Context(), "192.168.1.50", "  ", "", false); err == nil {
+		t.Error("AddToQueue(\"  \") = nil, want error")
+	}
+}

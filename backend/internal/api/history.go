@@ -121,6 +121,49 @@ func (s *Server) mediaTopPlays(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// mediaForget handles DELETE /api/media/history?room=sonos:abc&uri=… — one
+// room stops remembering one thing. Without a uri the room forgets the lot.
+//
+// The shelves this file feeds are ranked, and a ranking is only as good as
+// the evidence behind it. A record started by mistake in the living room does
+// not quietly sink: it competes for the first shelf a wall panel offers, and
+// every accidental replay pushes it further up. Until now the only cures were
+// to out-play it thirty times or to delete the speaker, and a memory that can
+// only be added to is one that gets worse the longer a house lives with it.
+//
+// Per room, never household-wide, for the same reason RecordPlay is: the same
+// record is the kids' room's favourite and the living room's mistake.
+//
+// Answers 204 whether or not anything was there. "This room no longer offers
+// that" is the caller's goal, and a wall panel arming a second tap only to be
+// told the entry had already aged out of the list would be reporting a
+// failure to reach a state it is in.
+func (s *Server) mediaForget(w http.ResponseWriter, r *http.Request) {
+	room := strings.TrimSpace(r.URL.Query().Get("room"))
+	if room == "" {
+		writeError(w, http.StatusBadRequest, "room is required")
+		return
+	}
+	uri := strings.TrimSpace(r.URL.Query().Get("uri"))
+
+	var changed bool
+	s.Store.Mutate(func() {
+		if uri == "" {
+			changed = s.Store.ForgetRoomHistory(room)
+			return
+		}
+		changed = s.Store.ForgetPlay(room, uri)
+	})
+	if changed {
+		// Same reasoning as recordPlay: history has its own file so that
+		// touching it never rewrites every socket in the house.
+		if err := s.Store.SaveHistory(); err != nil {
+			s.mediaLogf("history: %v", err)
+		}
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // parseHour reads the hour query parameter: a local hour 0–23, or "now" for
 // the hour it currently is. Anything else asks for no hour at all.
 func parseHour(raw string) (hour int, ok bool) {

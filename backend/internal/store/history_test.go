@@ -106,3 +106,113 @@ func TestHistorySurvivesAReload(t *testing.T) {
 		t.Errorf("after reload history = %+v, want the one play", got)
 	}
 }
+
+// ── Forgetting ───────────────────────────────────────────────────────────
+// The shelves this file feeds are ranked, and a ranking is only as good as
+// the evidence behind it: a record started by mistake competes for the first
+// shelf a wall panel offers, and every accidental replay pushes it up.
+
+func TestForgetPlayDropsOneURIFromOneRoom(t *testing.T) {
+	s := New(t.TempDir(), nil)
+	now := time.Now()
+	s.RecordPlay("sonos:a", play("spotify:track:keep", "Keep", now))
+	s.RecordPlay("sonos:a", play("spotify:track:oops", "Oops", now.Add(time.Minute)))
+	s.RecordPlay("kef:b", play("spotify:track:oops", "Oops", now.Add(time.Minute)))
+
+	if !s.ForgetPlay("sonos:a", "spotify:track:oops") {
+		t.Fatal("ForgetPlay = false, want true — the entry was there")
+	}
+	got := s.History("sonos:a")
+	if len(got) != 1 || got[0].URI != "spotify:track:keep" {
+		t.Errorf("history = %+v, want only the kept track", got)
+	}
+	// The same record is one room's mistake and another's favourite.
+	if n := len(s.History("kef:b")); n != 1 {
+		t.Errorf("other room's history = %d entries, want 1 — forgetting is per room", n)
+	}
+}
+
+func TestForgetPlayReportsWhenThereWasNothingToForget(t *testing.T) {
+	s := New(t.TempDir(), nil)
+	s.RecordPlay("sonos:a", play("spotify:track:x", "X", time.Now()))
+
+	for _, tc := range []struct{ room, uri string }{
+		{"sonos:a", "spotify:track:never"},
+		{"sonos:nope", "spotify:track:x"},
+		{"", "spotify:track:x"},
+		{"sonos:a", ""},
+	} {
+		if s.ForgetPlay(tc.room, tc.uri) {
+			t.Errorf("ForgetPlay(%q, %q) = true, want false", tc.room, tc.uri)
+		}
+	}
+	if n := len(s.History("sonos:a")); n != 1 {
+		t.Errorf("history = %d entries, want 1 — nothing should have been dropped", n)
+	}
+}
+
+// A room emptied by forgetting loses its key rather than keeping an empty
+// list: that is the shape PruneHistory leaves behind, and the shelves read a
+// missing key as "this room has no history of its own".
+func TestForgetPlayDropsTheRoomWhenItEmpties(t *testing.T) {
+	s := New(t.TempDir(), nil)
+	s.RecordPlay("zone:z", play("spotify:track:only", "Only", time.Now()))
+
+	if !s.ForgetPlay("zone:z", "spotify:track:only") {
+		t.Fatal("ForgetPlay = false, want true")
+	}
+	if _, ok := s.MediaHistory["zone:z"]; ok {
+		t.Error("the emptied room kept its key, want it dropped")
+	}
+}
+
+func TestForgetRoomHistoryClearsTheRoomAndOnlyThatRoom(t *testing.T) {
+	s := New(t.TempDir(), nil)
+	now := time.Now()
+	s.RecordPlay("sonos:a", play("spotify:track:1", "One", now))
+	s.RecordPlay("sonos:a", play("spotify:track:2", "Two", now))
+	s.RecordPlay("kef:b", play("spotify:track:3", "Three", now))
+
+	if !s.ForgetRoomHistory("sonos:a") {
+		t.Fatal("ForgetRoomHistory = false, want true")
+	}
+	if n := len(s.History("sonos:a")); n != 0 {
+		t.Errorf("cleared room = %d entries, want 0", n)
+	}
+	if n := len(s.History("kef:b")); n != 1 {
+		t.Errorf("other room = %d entries, want 1", n)
+	}
+	if s.ForgetRoomHistory("sonos:a") {
+		t.Error("ForgetRoomHistory on an already-empty room = true, want false")
+	}
+}
+
+// Forgetting has to reach the ranked reads, not just the plain list — those
+// are the ones a wall actually offers first.
+func TestForgetPlayRemovesItFromTheRankedShelvesToo(t *testing.T) {
+	s := New(t.TempDir(), nil)
+	at := time.Date(2026, 3, 1, 8, 0, 0, 0, time.Local)
+	for i := 0; i < 5; i++ {
+		s.RecordPlay("sonos:a", play("spotify:track:oops", "Oops", at.Add(time.Duration(i)*time.Minute)))
+	}
+	s.RecordPlay("sonos:a", play("spotify:track:good", "Good", at.Add(time.Hour)))
+
+	if top := s.TopPlays("sonos:a", 5); len(top) == 0 || top[0].URI != "spotify:track:oops" {
+		t.Fatalf("TopPlays led with %+v, want the five-play mistake — the setup is wrong otherwise", top)
+	}
+	s.ForgetPlay("sonos:a", "spotify:track:oops")
+
+	for _, got := range [][]MediaPlay{
+		s.TopPlays("sonos:a", 5),
+		s.PlaysAtHour("sonos:a", 8, 5),
+	} {
+		for _, p := range got {
+			if p.URI == "spotify:track:oops" {
+				t.Errorf("a ranked shelf still offers the forgotten track: %+v", got)
+			}
+		}
+	}
+	if n := s.Summarise(8).Plays; n != 1 {
+		t.Errorf("household plays = %d, want 1 — the forgotten five should be gone", n)
+	}
+}

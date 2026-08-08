@@ -261,6 +261,44 @@ func (s *Store) ValidateSettings(set *Settings) error {
 	if set.Longitude < -180 || set.Longitude > 180 {
 		return errors.New("longitude must be between -180 and 180")
 	}
+	if err := validateAnnouncePresets(set); err != nil {
+		return err
+	}
+	return nil
+}
+
+// validateAnnouncePresets normalises the panel's announce list in place.
+//
+// Blanks and duplicates are dropped rather than refused: this is a list of
+// rows in an editor, and a household that empties a row or types the same
+// sentence twice has expressed something perfectly clear. What is refused is
+// a sentence too long to be a chip and a list too long to be a row — both are
+// choices the editor cannot silently make on someone's behalf, because both
+// change what was typed rather than tidying it.
+//
+// Nil stays nil. It is the difference between "nobody has set these" and
+// "this household wants none", and Settings.Presets reads it.
+func validateAnnouncePresets(set *Settings) error {
+	if set.AnnouncePresets == nil {
+		return nil
+	}
+	seen := make(map[string]bool, len(set.AnnouncePresets))
+	out := make([]string, 0, len(set.AnnouncePresets))
+	for _, p := range set.AnnouncePresets {
+		p = strings.TrimSpace(p)
+		if p == "" || seen[strings.ToLower(p)] {
+			continue
+		}
+		if len([]rune(p)) > MaxAnnouncePresetLen {
+			return fmt.Errorf("an announce preset must be %d characters or fewer", MaxAnnouncePresetLen)
+		}
+		seen[strings.ToLower(p)] = true
+		out = append(out, p)
+	}
+	if len(out) > MaxAnnouncePresets {
+		return fmt.Errorf("at most %d announce presets", MaxAnnouncePresets)
+	}
+	set.AnnouncePresets = out
 	return nil
 }
 

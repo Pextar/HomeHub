@@ -114,6 +114,14 @@ func (s *Server) announceStatus(w http.ResponseWriter, r *http.Request) {
 	for _, t := range rooms {
 		list = append(list, map[string]string{"id": t.ID, "name": t.Name})
 	}
+	// The sentences the panel offers before its box. They come from
+	// household settings rather than from the frontend: typing is the worst
+	// thing a wall asks anyone to do, so the presets are most of what the
+	// control is — and they are read out by a voice that speaks one
+	// language, which the household picks. Edited in the full app; the
+	// kiosk only reads them (§16).
+	presets := store.ViewValue(s.Store, func() []string { return s.Store.Settings.Presets() })
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"available": len(rooms) > 0,
 		"rooms":     list,
@@ -122,6 +130,7 @@ func (s *Server) announceStatus(w http.ResponseWriter, r *http.Request) {
 		// nobody will hear.
 		"voice":    announce.VoiceFromEnv() != nil,
 		"max_text": announce.MaxTextLen,
+		"presets":  presets,
 	})
 }
 

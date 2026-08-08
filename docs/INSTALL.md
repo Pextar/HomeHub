@@ -236,6 +236,12 @@ HOMEHUB_TTS_URL=http://127.0.0.1:5000/synthesize
 HOMEHUB_TTS_VOICE=sv_SE-alma-medium
 ```
 
+Then set the panel's presets to match the voice, in **Settings →
+Announcements**. Piper reads whatever text it is handed in the phonetics of
+the voice it was started with — it does not translate — so a preset written in
+another language is one nobody can quite hear. The built-in list is Swedish;
+replace it with your own sentences if your voice is not.
+
 To keep it running, install it as a service beside HomeHub's own:
 
 ```ini

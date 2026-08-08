@@ -279,6 +279,7 @@ zones — sets of speakers that play together regardless of make. See
 | PUT | `/api/media/zones/{id}/volume` | `{"level": 0-100}` across the zone |
 | PUT | `/api/media/zones/{id}/mute` | `{"muted": bool}` across the zone |
 | GET | `/api/media/history?room=&limit=` | What a room has been asked to play, newest first |
+| DELETE | `/api/media/history?room=&uri=` | One room stops remembering one thing; without `uri`, the lot. Admin-only |
 | GET | `/api/media/history/top?room=&limit=&hour=` | What a room keeps coming back to — at a given local hour with `hour=` (`0`–`23` or `now`) |
 | GET | `/api/media/insights?limit=` | The household's listening summed over every room |
 | GET | `/api/media/timers` | Every music timer, soonest first |
@@ -424,10 +425,19 @@ transport snapshotted before and restored after.
 | GET | `/api/announce` | Where an announcement would land, and whether it would be spoken |
 | POST | `/api/announce` | `{"text": "Dinner's ready"}` — announce it |
 
-`GET` answers `{"available": bool, "rooms": [...], "voice": bool, "max_text": 200}`.
+`GET` answers
+`{"available": bool, "rooms": [...], "voice": bool, "max_text": 200, "presets": [...]}`.
 `voice` is false when no text-to-speech endpoint is configured, in which case
 every announcement is the chime alone — clients should say so rather than
 taking a sentence nobody will hear.
+
+`presets` are the sentences a surface should offer before its text box, from
+`announce_presets` in `PUT /api/settings`. They are household settings rather
+than a client constant because the voice reading them speaks one language,
+which the household picks. A household that has never set them gets a built-in
+list, resolved server-side so there is one place the defaults live; an empty
+array is a household that wants no presets and is honoured as such. Bounded at
+8 entries of 60 characters; blanks and duplicates are dropped on write.
 
 `POST` answers **202** once every room has accepted the clip:
 

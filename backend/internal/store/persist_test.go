@@ -1,6 +1,7 @@
 package store
 
 import (
+	"fmt"
 	"reflect"
 	"testing"
 )
@@ -104,5 +105,94 @@ func TestEveryCollectionGuardsAgainstANilMap(t *testing.T) {
 			t.Errorf("collection %q has no nil-guard; a file holding `null` "+
 				"would leave the field nil", c.label)
 		}
+	}
+}
+
+// ── Announce presets ─────────────────────────────────────────────────────
+// The sentences the panel offers before its text box. Household settings
+// rather than a constant in a component: typing is the worst thing a wall
+// asks anyone to do, and the voice that reads them speaks one language.
+
+func TestValidateSettingsTidiesAnnouncePresets(t *testing.T) {
+	s := New(t.TempDir(), nil)
+	set := &Settings{AnnouncePresets: []string{
+		"  Middagen är klar  ",
+		"",
+		"middagen är klar", // the same sentence, differently cased
+		"Läggdags",
+		"   ",
+	}}
+	if err := s.ValidateSettings(set); err != nil {
+		t.Fatalf("ValidateSettings: %v", err)
+	}
+	want := []string{"Middagen är klar", "Läggdags"}
+	if len(set.AnnouncePresets) != len(want) {
+		t.Fatalf("presets = %q, want %q", set.AnnouncePresets, want)
+	}
+	for i, p := range want {
+		if set.AnnouncePresets[i] != p {
+			t.Errorf("preset %d = %q, want %q", i, set.AnnouncePresets[i], p)
+		}
+	}
+}
+
+// Blanks and duplicates are tidied because they are rows in an editor.
+// Length is refused, because trimming a sentence changes what was typed.
+func TestValidateSettingsRefusesOversizedPresets(t *testing.T) {
+	s := New(t.TempDir(), nil)
+
+	long := make([]rune, MaxAnnouncePresetLen+1)
+	for i := range long {
+		long[i] = 'a'
+	}
+	if err := s.ValidateSettings(&Settings{AnnouncePresets: []string{string(long)}}); err == nil {
+		t.Error("an over-long preset was accepted, want an error")
+	}
+
+	many := make([]string, 0, MaxAnnouncePresets+1)
+	for i := 0; i <= MaxAnnouncePresets; i++ {
+		many = append(many, fmt.Sprintf("preset %d", i))
+	}
+	if err := s.ValidateSettings(&Settings{AnnouncePresets: many}); err == nil {
+		t.Error("an over-long preset list was accepted, want an error")
+	}
+}
+
+// Nil and empty are different, and the difference is what lets a household
+// have none. Validation must not collapse one into the other.
+func TestAnnouncePresetsTellNeverSetFromDeliberatelyNone(t *testing.T) {
+	s := New(t.TempDir(), nil)
+
+	never := &Settings{}
+	if err := s.ValidateSettings(never); err != nil {
+		t.Fatalf("ValidateSettings: %v", err)
+	}
+	if never.AnnouncePresets != nil {
+		t.Errorf("nil presets became %q, want nil left alone", never.AnnouncePresets)
+	}
+	if got := never.Presets(); len(got) != len(DefaultAnnouncePresets) {
+		t.Errorf("Presets() on an unset household = %q, want the built-in list", got)
+	}
+
+	none := &Settings{AnnouncePresets: []string{}}
+	if err := s.ValidateSettings(none); err != nil {
+		t.Fatalf("ValidateSettings: %v", err)
+	}
+	if none.AnnouncePresets == nil {
+		t.Error("an explicitly empty list became nil, want it kept — that is a household saying 'none'")
+	}
+	if got := none.Presets(); len(got) != 0 {
+		t.Errorf("Presets() on a household that wants none = %q, want empty", got)
+	}
+}
+
+// Presets hands out a copy: the panel's list must not be a window onto the
+// store's own slice.
+func TestPresetsHandsOutACopy(t *testing.T) {
+	set := &Settings{AnnouncePresets: []string{"Kom ner"}}
+	got := set.Presets()
+	got[0] = "something else"
+	if set.AnnouncePresets[0] != "Kom ner" {
+		t.Errorf("the store's list was rewritten through Presets(): %q", set.AnnouncePresets)
 	}
 }

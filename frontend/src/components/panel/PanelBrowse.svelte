@@ -40,6 +40,7 @@
     import PanelRoomChips from "./PanelRoomChips.svelte";
     import PanelRoomSettings from "./PanelRoomSettings.svelte";
     import PanelTimers from "./PanelTimers.svelte";
+    import PanelRoomMemory from "./PanelRoomMemory.svelte";
     import PanelInsights from "./PanelInsights.svelte";
     import { api } from "../../lib/api";
     import { route, toasts } from "../../lib/stores.svelte";
@@ -68,6 +69,7 @@
         recents,
         booted,
         openArtistNamed = "",
+        openPane = "",
     }: {
         music: PanelMusicStore;
         spotify: SpotifyStore;
@@ -80,6 +82,12 @@
          *  resolved to a page here; a name nothing matches lands on the
          *  search results for it, which is the honest fallback. */
         openArtistNamed?: string;
+        /** Which pane to arrive on, when the way in named one. The dashboard
+         *  band's sleep chip is the case this exists for: it states a fact
+         *  about the featured room whose controls live on the Rooms pane, so
+         *  the tap on it has to land there rather than on the search box a
+         *  step short of it. Empty means the depth's own default. */
+        openPane?: string;
     } = $props();
 
     // Arriving in the depth pins the destination. Without it the featured
@@ -256,6 +264,13 @@
         if (!name || name === resolvedName) return;
         resolvedName = name;
         void openArtistByName(name);
+    });
+
+    // Arriving on a named pane. Once, on the way in: the switcher above is
+    // the pane's owner from then on, and a route parameter that kept
+    // reasserting itself would be a segmented control that snapped back.
+    onMount(() => {
+        if (openPane === "queue" || openPane === "rooms") showPane(openPane);
     });
 
     async function openContext(uri: string) {
@@ -1118,6 +1133,15 @@
                          them, and both reach every kind of room the panel
                          can feature (§16). -->
                     <PanelTimers {music} />
+                    <!-- And what the room remembers, which is a room's
+                         preference like the two above it: the ranked shelves
+                         put what this room keeps coming back to at the front
+                         of the wall, and this is the only place that ranking
+                         can be corrected. A row rather than an × on a cover
+                         — a 132px tile has no room for a second target that
+                         clears the 44px floor without swallowing the tap the
+                         shelf exists for (§16). -->
+                    <PanelRoomMemory {music} />
                     <h3 class="s-label">Rooms</h3>
                     <div class="rm-list">
                         {#each music.sources as s (s.key)}

@@ -33,13 +33,23 @@
     const voice = $derived(!!status?.voice);
     const busy = $derived(!!music.busy["announce"]);
 
-    /** The four things a house shouts. Kept here rather than made editable:
-     *  a preset list that can be configured from the wall is a settings
-     *  screen on a kiosk, and configuration lives in the full app (§16).
-     *  In Swedish because that's this household's voice (sv_SE-alma-medium,
-     *  see docs/INSTALL.md) — Piper reads whatever text it's given in the
-     *  phonetics of the voice it was started with, it doesn't translate. */
-    const PRESETS = ["Middagen är klar", "Dags att komma hem", "Läggdags", "Kom ner"];
+    /** The things this house shouts, from household settings.
+     *
+     *  Not editable *here* — a preset list configurable from the wall is a
+     *  settings screen on a kiosk, and configuration lives in the full app
+     *  (§16) — but not hardcoded either, which is what they were. Two things
+     *  make them the household's rather than the app's: typing is the worst
+     *  thing a wall asks anyone to do, so the presets are most of what this
+     *  control is; and they are read out by a text-to-speech voice that
+     *  speaks one language, which the household picks. Piper reads whatever
+     *  text it is handed in the phonetics of the voice it was started with —
+     *  it does not translate — so four sentences compiled into everybody's
+     *  app is four sentences most households cannot use.
+     *
+     *  An empty list is a household that wants the box and nothing above it,
+     *  and is honoured: the row is then the box and Say it, which is exactly
+     *  what "no presets" should look like. */
+    const presets = $derived(status?.presets ?? []);
 
     let text = $state("");
     let box = $state<HTMLInputElement | null>(null);
@@ -158,7 +168,7 @@
     {:else}
         {@render roomPicker()}
         <div class="a-row">
-            {#each PRESETS as p (p)}
+            {#each presets as p (p)}
                 <button class="a-preset" disabled={busy} onclick={() => say(p)}>{p}</button>
             {/each}
             <label class="a-box">

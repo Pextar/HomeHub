@@ -363,6 +363,17 @@ export const api = {
     return req<void>(`/sonos/${encodeURIComponent(id)}/join`, { method: "POST", body: json({ target_id: targetId }) });
   },
   sonosLeave(id: string) { return req<void>(`/sonos/${encodeURIComponent(id)}/leave`, { method: "POST" }); },
+  // Regroup a household in one ordered request: `join` land on {id}, then
+  // `leave` step out into groups of their own. The order is the feature —
+  // "take the music with me" is join-then-leave, because the destination has
+  // to be handed the queue and the stream while the old room is still
+  // coordinating. Looping over the two calls above from a browser keeps that
+  // order only as long as the page does; here the run *is* the request, so a
+  // panel that is navigated away from mid-gesture can't leave a household
+  // half moved.
+  sonosGroup(id: string, body: { join?: string[]; leave?: string[] }) {
+    return req<void>(`/sonos/${encodeURIComponent(id)}/group`, { method: "POST", body: json(body) });
+  },
   sonosFavorites(id: string) { return req<SonosFavorite[]>(`/sonos/${encodeURIComponent(id)}/favorites`); },
   sonosPlayFavorite(id: string, fav: SonosFavorite) {
     return req<void>(`/sonos/${encodeURIComponent(id)}/favorites/play`, { method: "POST", body: json(fav) });
@@ -400,6 +411,22 @@ export const api = {
       method: "POST",
       body: json(body),
     });
+  },
+  // A whole run in one request. Reach for this over a loop of sonosQueueAdd
+  // whenever there is more than one item: "more like this" is eight tracks,
+  // and as eight requests from a wall panel — a 2015 iPad on household Wi-Fi
+  // — it is eight round trips, each carrying its own position read, sent
+  // backwards so that Sonos resolves each "next" into the right slot. Here
+  // the order of the array is the order they land in.
+  sonosQueueAddMany(
+    id: string,
+    items: { service?: string; uri: string; title?: string; metadata?: string }[],
+    next = false,
+  ) {
+    return req<{ track: number; length: number; added: number }>(
+      `/sonos/${encodeURIComponent(id)}/queue`,
+      { method: "POST", body: json({ items, next }) },
+    );
   },
   sonosQueueRemove(id: string, track: number) {
     return req<void>(`/sonos/${encodeURIComponent(id)}/queue/${track}`, { method: "DELETE" });
@@ -643,6 +670,16 @@ export const api = {
     return req<MediaHistory>(
       `/media/history?room=${encodeURIComponent(room)}&limit=${limit}`,
     );
+  },
+  // One room stops remembering one thing; without a uri it forgets the lot.
+  // The shelves are *ranked*, so a record started by mistake doesn't sink —
+  // it competes for the first shelf the wall offers, and every accidental
+  // replay pushes it up. Per room, never household-wide: the same record is
+  // the kids' room's favourite and the living room's mistake.
+  mediaForgetPlay(room: string, uri?: string) {
+    const p = new URLSearchParams({ room });
+    if (uri) p.set("uri", uri);
+    return req<void>(`/media/history?${p}`, { method: "DELETE" });
   },
   // What a room keeps coming back to, rather than what it happened to play
   // last. `hour` takes a local hour or "now", and ranks by what this room

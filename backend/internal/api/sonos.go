@@ -460,63 +460,110 @@ func (s *Server) sonosQueue(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, items)
 }
 
+// queueAddItem is one thing to enqueue, before it has been resolved against
+// the household's service account.
+type queueAddItem struct {
+	Service  string `json:"service"`
+	URI      string `json:"uri"`
+	Title    string `json:"title"`
+	Metadata string `json:"metadata"`
+}
+
 // sonosQueueAdd handles POST /api/sonos/{id}/queue — enqueue without
 // disturbing what is playing. The body is either a streaming-service item
 // ({"service":"Spotify","uri":"spotify:track:…","title":"…"}) or a favorite's
 // raw uri/metadata pair. With {"next": true} it lands after the current
 // track instead of at the end.
+//
+// A run of items may be sent as {"items":[…], "next":true} instead of one
+// item's fields, and that is the shape a caller should reach for whenever it
+// has more than one. "More like this" is eight tracks: as eight requests from
+// a wall panel that is a 2015 iPad on household Wi-Fi, it is eight round trips
+// each carrying its own position read, and the run has to be sent backwards
+// so that Sonos resolves each "next" into the right slot. Sent as one batch
+// it is one round trip, one position read, and the order is simply the order
+// of the array. The single-item shape stays exactly as it was — a favorite
+// queued from a tap is genuinely one item.
 func (s *Server) sonosQueueAdd(w http.ResponseWriter, r *http.Request) {
 	sp, ok := s.sonosSpeaker(w, r)
 	if !ok {
 		return
 	}
 	var body struct {
-		Service  string `json:"service"`
-		URI      string `json:"uri"`
-		Title    string `json:"title"`
-		Metadata string `json:"metadata"`
-		Next     bool   `json:"next"`
+		queueAddItem
+		Items []queueAddItem `json:"items"`
+		Next  bool           `json:"next"`
 	}
 	if !decodeBody(w, r, &body) {
 		return
 	}
-	if strings.TrimSpace(body.URI) == "" {
-		writeError(w, http.StatusBadRequest, "uri is required")
-		return
+	items := body.Items
+	if len(items) == 0 {
+		items = []queueAddItem{body.queueAddItem}
+	}
+	for _, it := range items {
+		if strings.TrimSpace(it.URI) == "" {
+			writeError(w, http.StatusBadRequest, "uri is required")
+			return
+		}
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 3*sonos.DefaultTimeout)
+	// The budget scales with the run: each item is its own SOAP call, and a
+	// batch that timed out half way through would leave a queue nobody asked
+	// for. Still bounded — a caller cannot buy unlimited time by sending a
+	// longer array (see maxQueueBatch).
+	if len(items) > maxQueueBatch {
+		writeError(w, http.StatusBadRequest,
+			fmt.Sprintf("at most %d items can be queued at once", maxQueueBatch))
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), time.Duration(2+len(items))*sonos.DefaultTimeout)
 	defer cancel()
 
-	uri, meta := body.URI, body.Metadata
 	// A service item arrives as a canonical service URI and has to be
 	// resolved against the household's linked account first; a favorite
 	// already carries a playable uri/metadata pair, so it passes straight
-	// through.
-	if body.Service != "" {
-		if !strings.EqualFold(body.Service, "Spotify") {
+	// through. The account lookup is hoisted out of the loop: every item in
+	// a run comes from the same service, and asking the speaker once per
+	// track is the cost this batch endpoint exists to remove.
+	resolved := make([]sonos.Enqueue, 0, len(items))
+	var acct *sonos.ServiceAccount
+	for _, it := range items {
+		if it.Service == "" {
+			resolved = append(resolved, sonos.Enqueue{URI: it.URI, Metadata: it.Metadata})
+			continue
+		}
+		if !strings.EqualFold(it.Service, "Spotify") {
 			writeError(w, http.StatusBadRequest, "only Spotify items are supported so far")
 			return
 		}
-		acct, err := s.sonosServiceAccount(ctx, sp.IP, body.Service)
-		if err != nil {
-			writeError(w, http.StatusBadGateway, err.Error())
-			return
+		if acct == nil {
+			var err error
+			if acct, err = s.sonosServiceAccount(ctx, sp.IP, it.Service); err != nil {
+				writeError(w, http.StatusBadGateway, err.Error())
+				return
+			}
 		}
-		uri, meta, err = sonos.SpotifyItem(body.URI, body.Title, acct)
+		uri, meta, err := sonos.SpotifyItem(it.URI, it.Title, acct)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
+		resolved = append(resolved, sonos.Enqueue{URI: uri, Metadata: meta})
 	}
 
-	added, err := sonos.AddToQueue(ctx, sp.IP, uri, meta, body.Next)
+	added, err := sonos.AddManyToQueue(ctx, sp.IP, resolved, body.Next)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, added)
 }
+
+// maxQueueBatch caps one batch. Well above what any surface asks for — "more
+// like this" is eight — and low enough that a single request cannot hold a
+// speaker for minutes.
+const maxQueueBatch = 50
 
 // sonosQueueMove handles PUT /api/sonos/{id}/queue/{track} with {"to": 4} —
 // the track moves to that 1-based position, both numbers read off the queue
@@ -620,6 +667,110 @@ func (s *Server) sonosJoin(w http.ResponseWriter, r *http.Request) {
 	if err := sonos.Join(ctx, sp.IP, targetUUID); err != nil {
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// maxGroupBatch caps how many speakers one grouping call may move. A
+// household has a handful; the bound is here so a single request cannot hold
+// the household for minutes.
+const maxGroupBatch = 32
+
+// sonosGroup handles POST /api/sonos/{id}/group with
+// {"join":["spk1","spk2"],"leave":["spk3"]} — {id} is the coordinator the
+// joiners land on, and the leavers step out into groups of their own.
+//
+// One call rather than the caller looping over /join and /leave, because the
+// *order* is the feature and a caller cannot be trusted to keep it. Every
+// grouping gesture a wall panel offers is really a pair:
+//
+//	join {a,b} to c        play it in the kitchen as well
+//	join {a} then leave{c} take the music with me — c hands the queue and the
+//	                       stream to a while it is still coordinating, and
+//	                       only then steps out
+//
+// Doing those in the other order stops the music between the two calls, and
+// doing them from a browser means the ordering survives only as long as the
+// page does: a panel that is navigated away from — or an iPad that sleeps —
+// mid-run leaves the household half-moved. Here the run is the request.
+//
+// Sequential on purpose, like a single join. A household handed four
+// SetAVTransportURIs in the same instant re-elects its coordinators
+// mid-flight and lands with a speaker or two left out.
+func (s *Server) sonosGroup(w http.ResponseWriter, r *http.Request) {
+	sp, ok := s.sonosSpeaker(w, r)
+	if !ok {
+		return
+	}
+	var body struct {
+		Join  []string `json:"join"`
+		Leave []string `json:"leave"`
+	}
+	if !decodeBody(w, r, &body) {
+		return
+	}
+	if len(body.Join) == 0 && len(body.Leave) == 0 {
+		writeError(w, http.StatusBadRequest, "join or leave is required")
+		return
+	}
+	if len(body.Join)+len(body.Leave) > maxGroupBatch {
+		writeError(w, http.StatusBadRequest,
+			fmt.Sprintf("at most %d speakers can be regrouped at once", maxGroupBatch))
+		return
+	}
+
+	// Resolve everything under one read: a speaker that is not registered is
+	// a bad request, not a device error half way through the run.
+	var (
+		coordUUID string
+		joinIPs   []string
+		leaveIPs  []string
+		unknown   string
+	)
+	s.Store.View(func() {
+		coordUUID = sp.UUID
+		resolve := func(ids []string) []string {
+			out := make([]string, 0, len(ids))
+			for _, id := range ids {
+				target, exists := s.Store.Sonos[id]
+				if !exists {
+					if unknown == "" {
+						unknown = id
+					}
+					continue
+				}
+				out = append(out, target.IP)
+			}
+			return out
+		}
+		joinIPs = resolve(body.Join)
+		leaveIPs = resolve(body.Leave)
+	})
+	if unknown != "" {
+		writeError(w, http.StatusNotFound, fmt.Sprintf("speaker %q not found", unknown))
+		return
+	}
+	if len(joinIPs) > 0 && coordUUID == "" {
+		writeError(w, http.StatusBadRequest, "target speaker has no device id — re-add it")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(),
+		time.Duration(2+len(joinIPs)+len(leaveIPs))*sonos.DefaultTimeout)
+	defer cancel()
+
+	// Joins first, always — that is the whole ordering contract above.
+	for _, ip := range joinIPs {
+		if err := sonos.Join(ctx, ip, coordUUID); err != nil {
+			writeError(w, http.StatusBadGateway, err.Error())
+			return
+		}
+	}
+	for _, ip := range leaveIPs {
+		if err := sonos.Leave(ctx, ip); err != nil {
+			writeError(w, http.StatusBadGateway, err.Error())
+			return
+		}
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

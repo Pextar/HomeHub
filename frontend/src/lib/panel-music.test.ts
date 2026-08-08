@@ -56,6 +56,7 @@ vi.mock("./api", () => ({
     sonosQueue: vi.fn(async () => queueFixture),
     sonosJoin: vi.fn(async () => {}),
     sonosLeave: vi.fn(async () => {}),
+    sonosGroup: vi.fn(async () => {}),
     sonosSettings: vi.fn(async () => ({ sleep_minutes: 0 })),
     sonosFavorites: vi.fn(async () => favoritesFixture),
     sonosPlayFavorite: vi.fn(async () => {}),
@@ -74,6 +75,8 @@ vi.mock("./api", () => ({
     spotifySetSaved: vi.fn(async () => {}),
     spotifySimilar: vi.fn(async () => similarFixture),
     sonosQueueAdd: vi.fn(async () => ({ track: 1, length: 1 })),
+    sonosQueueAddMany: vi.fn(async () => ({ track: 1, length: 1, added: 1 })),
+    mediaForgetPlay: vi.fn(async () => {}),
     mediaHistory: vi.fn(async () => historyFixture),
     mediaTopPlays: vi.fn(async () => topFixture),
     mediaInsights: vi.fn(async () => insightsFixture),
@@ -175,6 +178,9 @@ beforeEach(() => {
     rooms: [{ id: "kitchen", name: "Kitchen" }],
     voice: true,
     max_text: 200,
+    // The wall's presets are household settings now, so they arrive with
+    // the status read rather than being compiled into the component.
+    presets: ["Middagen är klar", "Läggdags"],
   };
   similarFixture = [];
   savedFixture = false;
@@ -543,8 +549,10 @@ describe("grouping", () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(api.sonosJoin).toHaveBeenCalledWith("bedroom", "kitchen");
-    expect(api.sonosJoin).toHaveBeenCalledWith("study", "kitchen");
+    // One request, and the whole card in it: the hub walks the household
+    // through the joins in order, which is what stops a wall that sleeps
+    // mid-gesture from leaving the house half grouped.
+    expect(api.sonosGroup).toHaveBeenCalledWith("kitchen", { join: ["bedroom", "study"] });
     h.stop();
   });
 
@@ -567,8 +575,7 @@ describe("grouping", () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(api.sonosJoin).toHaveBeenCalledWith("bedroom", "kitchen");
-    expect(api.sonosJoin).toHaveBeenCalledWith("study", "kitchen");
+    expect(api.sonosGroup).toHaveBeenCalledWith("kitchen", { join: ["bedroom", "study"] });
     // The room the wall was driving is still the room the wall is driving.
     expect(h.value.selected).toBe("s:kitchen");
     h.stop();
@@ -584,7 +591,7 @@ describe("grouping", () => {
     h.flush();
     await Promise.resolve();
 
-    expect(api.sonosJoin).not.toHaveBeenCalled();
+    expect(api.sonosGroup).not.toHaveBeenCalled();
     h.stop();
   });
 
@@ -616,9 +623,9 @@ describe("grouping", () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(api.sonosLeave).toHaveBeenCalledWith("bedroom");
-    expect(api.sonosLeave).toHaveBeenCalledWith("study");
-    expect(api.sonosLeave).not.toHaveBeenCalledWith("kitchen");
+    expect(api.sonosGroup).toHaveBeenCalledWith("kitchen", { leave: ["bedroom", "study"] });
+    // The coordinator carries the queue and the stream; it never leaves.
+    expect(vi.mocked(api.sonosGroup).mock.calls[0][1].leave).not.toContain("kitchen");
     h.stop();
   });
 });
@@ -640,14 +647,6 @@ describe("moving the music", () => {
     h.value.selected = "s:kitchen";
     h.flush();
 
-    const order: string[] = [];
-    vi.mocked(api.sonosJoin).mockImplementation(async (id: string) => {
-      order.push("join:" + id);
-    });
-    vi.mocked(api.sonosLeave).mockImplementation(async (id: string) => {
-      order.push("leave:" + id);
-    });
-
     h.value.moveTo(h.value.sources.find((s) => s.key === "s:study")!);
     h.flush();
     await Promise.resolve();
@@ -659,7 +658,13 @@ describe("moving the music", () => {
     await new Promise((r) => setTimeout(r, 0));
     h.flush();
 
-    expect(order).toEqual(["join:study", "leave:kitchen"]);
+    // The pair is stated in one request and the hub keeps the order: the
+    // destination joins while the old room is still coordinating, so the
+    // queue and the stream are handed over before anything steps out.
+    expect(api.sonosGroup).toHaveBeenCalledWith("kitchen", {
+      join: ["study"],
+      leave: ["kitchen"],
+    });
     // The wall follows the sound.
     expect(h.value.selected).toBe("s:study");
     h.stop();
@@ -679,8 +684,7 @@ describe("moving the music", () => {
     h.flush();
     await Promise.resolve();
 
-    expect(api.sonosJoin).not.toHaveBeenCalled();
-    expect(api.sonosLeave).not.toHaveBeenCalled();
+    expect(api.sonosGroup).not.toHaveBeenCalled();
     h.stop();
   });
 });
@@ -808,14 +812,16 @@ describe("more like this", () => {
     for (let i = 0; i < 6; i++) await Promise.resolve();
 
     expect(api.spotifySimilar).toHaveBeenCalledWith("Bo Kaspers", 8);
-    // Backwards, every one "next": Sonos resolves "play next" against the
-    // queue as it is at that moment, so inserting in reverse is what lands
-    // the run in order and contiguous behind the current track.
-    expect(vi.mocked(api.sonosQueueAdd).mock.calls.map((c) => c[1].uri)).toEqual([
-      "spotify:track:2",
-      "spotify:track:1",
-    ]);
-    expect(vi.mocked(api.sonosQueueAdd).mock.calls.every((c) => c[1].next)).toBe(true);
+    // The whole run in one request, forwards. This used to be one call per
+    // track sent *backwards* — Sonos resolves each "play next" against the
+    // queue as it is at that moment, so a reversed loop happened to come out
+    // in order. The hub deals them into consecutive slots now, so the array
+    // is simply the order they land in.
+    expect(api.sonosQueueAddMany).toHaveBeenCalledTimes(1);
+    const [room, run, next] = vi.mocked(api.sonosQueueAddMany).mock.calls[0];
+    expect(room).toBe("kitchen");
+    expect(run.map((i) => i.uri)).toEqual(["spotify:track:1", "spotify:track:2"]);
+    expect(next).toBe(true);
     h.stop();
   });
 
@@ -880,6 +886,50 @@ describe("what the room played before", () => {
     await Promise.resolve();
 
     expect(api.sonosPlayFavorite).not.toHaveBeenCalled();
+    h.stop();
+  });
+
+  // The counterweight to a ranked shelf. What a room keeps coming back to
+  // leads the wall, and a record started by mistake is exactly what gets
+  // replayed — because it is the tile in the first slot.
+  it("forgets one play from the featured room, and re-reads the shelf", async () => {
+    historyFixture = {
+      plays: [{ provider: "spotify", uri: "spotify:track:oops", title: "Oops", at: "" }],
+      household: false,
+    };
+    const h = await boot();
+    for (let i = 0; i < 4; i++) await Promise.resolve();
+    h.flush();
+
+    expect(h.value.canForget).toBe(true);
+    h.value.forgetPlay(h.value.history[0]);
+    h.flush();
+    for (let i = 0; i < 4; i++) await Promise.resolve();
+
+    expect(api.mediaForgetPlay).toHaveBeenCalledWith("sonos:kitchen", "spotify:track:oops");
+    // The shelf is re-read rather than spliced: forgetting one entry can
+    // change the ranking of everything left, and the ranking is the point.
+    expect(api.mediaHistory).toHaveBeenCalledTimes(2);
+    h.stop();
+  });
+
+  // The fallback shelf is other rooms' plays. One room is not the place to
+  // edit them, so the control is absent rather than refused (§15.1).
+  it("never forgets from the household's fallback list", async () => {
+    historyFixture = {
+      plays: [{ provider: "spotify", uri: "spotify:track:x", title: "X", at: "" }],
+      household: true,
+    };
+    const h = await boot();
+    for (let i = 0; i < 4; i++) await Promise.resolve();
+    h.flush();
+
+    expect(h.value.canForget).toBe(false);
+    h.value.forgetPlay(h.value.history[0]);
+    h.flush();
+    await Promise.resolve();
+
+    expect(api.mediaForgetPlay).not.toHaveBeenCalled();
     h.stop();
   });
 });

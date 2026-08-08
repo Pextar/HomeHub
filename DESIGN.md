@@ -1649,6 +1649,30 @@ constraint made visible.
   column. The same reasoning runs the poll: while the ambient face is up
   the panel is a clock, so the backstop drops to two minutes and a pushed
   change still lands at once.
+- **A gesture that takes several calls is one request, and the hub makes
+  them.** The wall is the slowest client this app has — a 2015 iPad on
+  household Wi-Fi — and it is also the one most likely to be walked away
+  from mid-thought. Three of its gestures were loops in the browser, and
+  each was wrong for both reasons: "more like this" was eight queue
+  requests, "play it everywhere" and "take it with me" were a join or a
+  leave per speaker. Two things follow from moving them to the hub, and
+  they are the reason rather than the speed:
+  - **Order that matters must not live on a page that can go away.** A
+    move is join-then-leave, because the destination has to be handed the
+    queue and the stream while the old room is still coordinating; a
+    household grouping four rooms at once has to be walked through them,
+    because four `SetAVTransportURI`s in the same instant re-elect its
+    coordinators mid-flight. An iPad that slept between two of those calls
+    left the house half moved. The run is the request now.
+  - **A trick that works is still a trick.** Sonos resolves "play next"
+    against the queue as it is at that moment, so a run inserted forwards
+    scatters and a run inserted *backwards* happens to come out in order.
+    The hub reads the position once and deals the run into consecutive
+    slots, which is what "these, next, in this order" actually means — and
+    the array's order is the order they land in, which is what a caller
+    can be expected to reason about.
+  This is the same instinct as `store/staged.go`'s fan-out: multi-device
+  work belongs where the devices are, not on the surface that asked for it.
 - **The player card is one component with two shapes** (§16 keeps them
   in `components/panel/`). Both depths get the scrubber — seek on a
   Sonos track, a read-only rail elsewhere, an honest no-position line
@@ -1836,6 +1860,22 @@ constraint made visible.
   - **leads with presets**, because typing is the worst thing a wall asks
     anyone to do, and because a house shouts the same four sentences. A
     box follows them for anything else, at the search box's 17px floor.
+    **The presets are the household's, set in the app and only read here.**
+    They were a constant in the component, which made one house's four
+    Swedish sentences part of everybody's build — and the language is not
+    incidental: the voice reading them speaks whichever one it was started
+    with and does not translate, so a preset in the wrong language is a
+    preset nobody can hear properly. So they live in Settings, next to the
+    location, edited there and never on the wall: a preset list
+    configurable from the kiosk is a settings screen on a kiosk, which is
+    the thing this surface does not have. A household that has never set
+    them gets a built-in list — resolved on the *server*, so there is one
+    place the defaults live and the editor never has to know about them —
+    and a household that clears every row gets the box with nothing above
+    it, which is honoured rather than read as "unset". Bounded at eight,
+    sixty characters each: past a handful they wrap into the height the
+    player above them is using, and a preset you have to hunt for is worth
+    less than the sentence you would have typed.
   - **names the rooms before the tap.** A wall must never be vague about
     which rooms are about to be interrupted.
   - **says when there will be no words.** Speech needs a text-to-speech
@@ -2043,6 +2083,35 @@ constraint made visible.
   and it must never imply a habit it has no evidence for. The tally rides
   on the tile in mono (`×4`) and only past one play: `×1` is the shelf
   saying nothing. This is the band's shelf and the depth's alike.
+- **A room can forget, and forgetting is a list rather than an × on a
+  cover.** The counterweight to the rule above. A ranking works by
+  counting, so a record started by mistake does not sink out of the way on
+  its own: it competes for the first tile on the wall, and a mistake is
+  precisely what gets replayed, because it is the tile in the first slot.
+  Until the control existed the cures were to out-play it thirty times or
+  to delete the speaker. So the depth's **Rooms pane carries the featured
+  room's own remembered plays** (`PanelRoomMemory`), under its settings and
+  its timers, because what a room remembers is a room's preference like the
+  play modes are — the same argument that moved those off the player. The
+  rules on it:
+  - **It is a list, and that is the reason it is not on the shelf.** A
+    132px tile has no room for a second target that clears §2's 44px floor
+    without swallowing taps meant for the art, and the art's tap is what
+    the shelf exists for. A full-width row has room for both, so the row
+    plays and the trailing button forgets.
+  - **It shows what the wall is actually offering** — the same ranked read
+    the shelves use, under the same label. Being asked to remove a row you
+    cannot see somewhere else is a strange thing to trust.
+  - **Forgetting arms for a second tap**, like every destructive tap on a
+    kiosk, and it says "Forget?" in words: an × already tapped once looks
+    exactly like one that hasn't, from a step away. One arm at a time — a
+    wall gets poked in passing, and two armed rows are two things one
+    stray tap can remove.
+  - **Only the room's own memory, never the household's fallback.** A room
+    with nothing of its own is shown other rooms' plays (above); one room
+    is not the place to edit them, so the whole block is absent there
+    rather than offering a control that would reach the wrong list
+    (§15.1).
 - **The sleep timer is the room's, not the speaker's — and the wake-up is
   the same mechanism run the other way.** The wall used to set a Sonos
   group's own sleep timer, which meant a KEF speaker and a HomeHub room
@@ -2058,7 +2127,26 @@ constraint made visible.
     While the ramp is walking there is one more target — **"I'm still up"**
     — which stops the fade, puts the volume back and leaves the music
     playing. Cancelling a sleep timer that silenced the room anyway would
-    be worse than one that did nothing.
+    be worse than one that did nothing. Beside the countdown there is
+    **"+15m"**, which is the third thing anyone says to a sleep timer and
+    the only one the row had no target for: the chips *replace* the wait and
+    "I'm still up" cancels the fade, so "a bit longer" meant reading the
+    minutes left, adding in your head, and picking the chip nearest the
+    answer. One step, and the shortest one — the ask is always small, or it
+    would have been a different wait to begin with.
+  - **The band says the room is going quiet, and the depth is where that is
+    changed.** The timer is set one depth in, and until the chip existed it
+    was only *readable* there: "why is the music fading?" and "how long have
+    I got?" were both questions the dashboard could not answer about its own
+    room. So the band's head row carries **"Quiet in 12m"** whenever
+    something is going to silence the featured room, beside Pause all and
+    Announce — the same kind of fact as those two, read from a step away and
+    acted on somewhere else. Its tap opens the depth **on the Rooms pane**
+    (`#/panel?music=1&pane=rooms`), not the depth's front door: a control
+    named by a chip has to be under the finger after the tap. While the ramp
+    is actually walking, the chip's icon breathes at 2.4s, opacity only —
+    the same licence §6.8's waveform has, and stopped outright rather than
+    slowed under reduced motion.
   - **Wake is chips too, and it names what it will play before the tap.**
     A time, weekdays or every day, and the item: what is playing now if
     something is, else what this room plays most, else what it played last

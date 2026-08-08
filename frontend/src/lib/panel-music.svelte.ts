@@ -255,6 +255,16 @@ export interface PanelMusicStore {
      *  something it didn't. */
     readonly historyHousehold: boolean;
     playFromHistory(p: MediaPlay): void;
+    /** This room stops remembering something. The shelves are ranked, so a
+     *  record started by mistake doesn't sink out of the way on its own — it
+     *  competes for the first thing the wall offers, and every accidental
+     *  replay pushes it further up. Only ever the featured room's own list;
+     *  the household's fallback is not this room's to edit. */
+    forgetPlay(p: MediaPlay): void;
+    /** Whether `forgetPlay` would reach anything: the shelf is showing this
+     *  room's own memory rather than the household's, and the login may
+     *  write. Absent rather than refused, per §15.1. */
+    readonly canForget: boolean;
 
     // ── What this room keeps coming back to ──────────────────────────────
     /** Ranked by how often this room has started them — and, when it has a
@@ -1510,6 +1520,30 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
         );
     }
 
+    /** Forget one thing this room played.
+     *
+     *  The counterweight to a ranked shelf. `topPlays` puts what a room keeps
+     *  coming back to at the front of the wall, which is the right answer
+     *  right up until the thing it keeps coming back to is a mistake — and a
+     *  mistake is exactly what gets replayed, because it is the tile in the
+     *  first slot. Until this existed the cures were to out-play it thirty
+     *  times or to delete the speaker.
+     *
+     *  Never the household's list: the fallback shelf is other rooms' plays,
+     *  and one room is not the place to edit them. `canForget` is what keeps
+     *  the control off that shelf. */
+    function forgetPlay(p: MediaPlay) {
+        const key = roomKeyOf(featured);
+        if (!key || historyHousehold || !session.isAdmin) return;
+        void run(
+            "forget:" + p.uri,
+            () => api.mediaForgetPlay(key, p.uri).then(() => loadHistory(key)),
+            "Couldn't forget that",
+        );
+    }
+
+    const canForget = $derived(!!featured && !historyHousehold && session.isAdmin);
+
     // ── Saving what's playing ────────────────────────────────────────────
     // The heart. It needs a catalog id, which only a Spotify source has —
     // radio and line-in carry an artist line and nothing to save — so the
@@ -1597,23 +1631,26 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
                 const items = await api.spotifySimilar(artist, 8);
                 if (!items.length) throw new Error(`Nothing else by ${artist} came back`);
                 if (s.kind === "sonos") {
-                    // Backwards, every one of them "next". Sonos resolves
-                    // "play next" against wherever the queue is *now*, so
-                    // each insert lands directly after the current track and
-                    // pushes the previous one down: adding them in reverse
-                    // is what makes the run come out in order, contiguous,
-                    // and immediately after what is playing rather than
-                    // scattered behind whatever was already queued.
-                    for (const item of [...items].reverse()) {
-                        await api.sonosQueueAdd(s.id, {
+                    // The whole run in one request. This used to be eight
+                    // sequential calls sent *backwards* — Sonos resolves each
+                    // "play next" against wherever the queue is at that
+                    // moment, so a forwards loop scatters the run and a
+                    // reversed one happens to come out in order. That trick
+                    // worked and was a trick, and it cost eight round trips
+                    // from the slowest client this app has. The hub does the
+                    // dealing now: one request, one position read, and the
+                    // order of the array is the order they land in.
+                    const added = await api.sonosQueueAddMany(
+                        s.id,
+                        items.map((item) => ({
                             service: "Spotify",
                             uri: item.uri,
                             title: item.name,
-                            next: true,
-                        });
-                    }
+                        })),
+                        true,
+                    );
                     await loadQueue(s.id);
-                    lastRadio = { count: items.length, artist, at: Date.now() };
+                    lastRadio = { count: added.added || items.length, artist, at: Date.now() };
                 } else {
                     await startOn(s, {
                         service: "Spotify",
@@ -1702,9 +1739,7 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
         if (!members.length) return;
         void run(
             "join:" + src.id,
-            async () => {
-                for (const id of members) await api.sonosJoin(id, f.id);
-            },
+            () => api.sonosGroup(f.id, { join: members }),
             "Grouping failed",
             () => {
                 selected = f.key; // the group stays featured through the reshuffle
@@ -1712,9 +1747,13 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
         );
     }
 
-    /** Everything at once. Sequential, like a single join: a household that
-     *  is handed four `SetAVTransportURI`s in the same instant re-elects its
-     *  coordinators mid-flight and lands with a speaker or two left out. */
+    /** Everything at once — one request, and the hub walks the household
+     *  through it in order. It has to be walked rather than fired off at
+     *  once: a household handed four `SetAVTransportURI`s in the same instant
+     *  re-elects its coordinators mid-flight and lands with a speaker or two
+     *  left out. That sequencing used to live here, which meant it survived
+     *  only as long as the page did — an iPad that slept in the middle of
+     *  "play it everywhere" left the house half grouped. */
     function joinAll() {
         const f = featured;
         if (!f || f.kind !== "sonos") return;
@@ -1722,9 +1761,7 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
         if (!ids.length) return;
         void run(
             "joinall",
-            async () => {
-                for (const id of ids) await api.sonosJoin(id, f.id);
-            },
+            () => api.sonosGroup(f.id, { join: ids }),
             "Grouping failed",
             () => {
                 selected = f.key;
@@ -1741,11 +1778,14 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
      *  bridge of its own — Sonos has no "move", and what a move *is* on a
      *  household is exactly this pair.
      *
-     *  Order matters and is the whole reason this is a function: the
-     *  destination joins the group *first*, so the queue and the stream are
-     *  handed over while the old room is still coordinating, and only then
-     *  does the old room step out. Doing it the other way round stops the
-     *  music between the two calls. */
+     *  Order matters and is the whole reason this is one call rather than a
+     *  loop: the destination joins the group *first*, so the queue and the
+     *  stream are handed over while the old room is still coordinating, and
+     *  only then does the old room step out. Doing it the other way round
+     *  stops the music between the two calls — and doing it from here meant
+     *  the ordering held only as long as this page did, so a wall that fell
+     *  asleep between the two halves left the music where you weren't. The
+     *  hub owns the sequence now; this states the pair. */
     function moveTo(dest: PanelSource) {
         const f = featured;
         if (!f || f.kind !== "sonos" || dest.kind !== "sonos" || dest.key === f.key) return;
@@ -1754,10 +1794,7 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
         if (!leaving.length || !arriving.length) return;
         void run(
             "move:" + dest.id,
-            async () => {
-                for (const id of arriving) await api.sonosJoin(id, f.id);
-                for (const id of leaving) await api.sonosLeave(id);
-            },
+            () => api.sonosGroup(f.id, { join: arriving, leave: leaving }),
             "Couldn't move the music",
             () => {
                 // Follow the sound: the destination is what the panel should
@@ -1774,9 +1811,7 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
         if (!members.length) return;
         void run(
             "ungroup:" + f.id,
-            async () => {
-                for (const m of members) await api.sonosLeave(m.id);
-            },
+            () => api.sonosGroup(f.id, { leave: members.map((m) => m.id) }),
             "Ungrouping failed",
         );
     }
@@ -1907,6 +1942,10 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
             return historyHousehold;
         },
         playFromHistory,
+        forgetPlay,
+        get canForget() {
+            return canForget;
+        },
         get topPlays() {
             return topPlays;
         },
