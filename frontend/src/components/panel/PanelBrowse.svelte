@@ -28,7 +28,7 @@
      * has it first.
      */
     import { onMount, tick as flushDOM } from "svelte";
-    import { fade } from "svelte/transition";
+    import { fade, fly } from "svelte/transition";
     import Icon from "../Icon.svelte";
     import Waveform from "../music/Waveform.svelte";
     import EmptyState from "../EmptyState.svelte";
@@ -694,7 +694,11 @@
                              not a keystroke nobody standing at a wall has.
                              The dock's own cover does the same thing. -->
                         {#if fullBleed}
-                            <button class="k-chip s-done" onclick={endSearch}>Done</button>
+                            <button
+                                class="k-chip s-done"
+                                in:fade={{ duration: dur(120) }}
+                                onclick={endSearch}>Done</button
+                            >
                         {/if}
                     </div>
 
@@ -1174,7 +1178,12 @@
                  is playing, what just went into the queue — and the cover is
                  the way back to the column, the same bargain the band's
                  cover makes one depth out. -->
-            <div class="b-dock">
+            <!-- In only, and it is a rule rather than an omission (§16's
+                 motion budget): on the way out the body is already back to
+                 two columns, so a dock still holding a grid row for the
+                 length of an exit would squeeze the results for 180ms.
+                 Animate what arrives; let what leaves go. -->
+            <div class="b-dock" in:fly={{ y: 14, duration: dur(180) }}>
                 {#if featured}
                     <button class="d-open" onclick={endSearch} aria-label="Back to the player">
                         {#if featured.art}
@@ -1231,7 +1240,10 @@
                 {/if}
             </div>
         {:else}
-            <section class="b-player" aria-label="Now playing">
+            <!-- Same rule the other way: the column fades in as it takes
+                 its 420px back, and is gone in a frame when the search
+                 claims them. One element, opacity only. -->
+            <section class="b-player" aria-label="Now playing" in:fade={{ duration: dur(140) }}>
                 {#if featured}
                     <PanelPlayerCard
                         {music}
@@ -1512,6 +1524,23 @@
     .browse.full .b-body {
         grid-template-columns: minmax(0, 1fr);
         grid-template-rows: minmax(0, 1fr) auto;
+    }
+    /* The reflow into two columns is one layout pass and it is not worth
+       animating — a grid-template that tweens is a layout on every frame,
+       which is exactly what an A8X cannot spend (§16). The list fades over
+       its own reflow instead: one element, opacity only, and the eye reads
+       the whole thing as the results taking the screen rather than as rows
+       jumping sideways. */
+    .browse.full .s-results {
+        animation: results-widen 140ms ease-out both;
+    }
+    @keyframes results-widen {
+        from {
+            opacity: 0.4;
+        }
+        to {
+            opacity: 1;
+        }
     }
 
     .b-left {
@@ -2457,9 +2486,24 @@
         text-overflow: ellipsis;
     }
     /* The queued line takes the same slot in the ON ink for its few
-       seconds: it is the answer to the tap that was just made. */
+       seconds: it is the answer to the tap that was just made — so it
+       arrives rather than appearing, which is what tells a glance that
+       something just happened. A class-triggered animation, not a keyed
+       block: swapping the node would put two lines in the flex column for
+       the length of a crossfade and move the title above it. */
     .d-sub.said {
         color: var(--on);
+        animation: dock-said 160ms ease-out both;
+    }
+    @keyframes dock-said {
+        from {
+            opacity: 0;
+            transform: translateY(3px);
+        }
+        to {
+            opacity: 1;
+            transform: none;
+        }
     }
     .d-transport {
         display: flex;
@@ -2596,6 +2640,13 @@
     @media (prefers-reduced-motion: reduce) {
         .s-results {
             transition-duration: 0.001ms;
+        }
+        /* The JS-driven transitions above are gated by `dur()`; these two
+           are CSS and are gated here. Collapsed, not removed: the states
+           they animate into are the states either way. */
+        .browse.full .s-results,
+        .d-sub.said {
+            animation-duration: 0.001ms;
         }
     }
 

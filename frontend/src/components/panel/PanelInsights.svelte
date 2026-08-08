@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { onMount } from "svelte";
     import { roomKeyOf } from "../../lib/panel-music.svelte";
     import type { PanelMusicStore } from "../../lib/panel-music.svelte";
 
@@ -34,6 +35,32 @@
 
     const data = $derived(music.insights);
 
+    /**
+     * Mounted a couple of frames after the pane it sits in.
+     *
+     * This block is ~35 nodes of chart at the foot of a pane whose job is
+     * the room list, and it is below the fold on the wall this is drawn
+     * for. Built in the same frame as the list it put about seven dropped
+     * frames into the pane switch on A8X-class hardware — a visible hitch
+     * on the thing that was just tapped, paid for by content nobody has
+     * scrolled to yet.
+     *
+     * So the list paints first and the summary fills in behind it. Two
+     * frames rather than a timeout: it is "after the browser has drawn",
+     * not "in a while", and there is nothing to see if it is missed.
+     */
+    let ready = $state(false);
+    onMount(() => {
+        let second = 0;
+        const first = requestAnimationFrame(() => {
+            second = requestAnimationFrame(() => (ready = true));
+        });
+        return () => {
+            cancelAnimationFrame(first);
+            cancelAnimationFrame(second);
+        };
+    });
+
     /** The busiest hour, which is what scales the day strip. Zero when the
      *  house has never played anything, and then the strip is not drawn: a
      *  row of empty bars is a chart of nothing. */
@@ -57,7 +84,7 @@
     }
 </script>
 
-{#if data && data.plays > 0}
+{#if ready && data && data.plays > 0}
     <section class="in" aria-label="What this house listens to">
         <h3 class="s-label">What this house listens to</h3>
         <p class="in-stat">
@@ -72,6 +99,12 @@
                  glance, from across a room, which is the only question a
                  wall panel asks of a histogram. The hour it is now is
                  marked, so the shape has a place in it. -->
+            <!-- The bars rise from the baseline once, when the pane is
+                 opened: the motion is the only thing that says these are
+                 magnitudes rather than a decorative comb. `scaleY` on 24
+                 spans is a compositor job on hardware that cannot afford a
+                 layout one (§16), and the stagger is 6ms a bar so the whole
+                 sweep lands inside a fifth of a second. -->
             <div class="in-day" aria-hidden="true">
                 {#each data.hours as n, h (h)}
                     <span
@@ -79,6 +112,7 @@
                         class:now={h === nowHour}
                         class:empty={n === 0}
                         style:height="{Math.max(3, Math.round((n / peak) * 100))}%"
+                        style:animation-delay="{h * 6}ms"
                     ></span>
                 {/each}
             </div>
@@ -167,6 +201,16 @@
         min-width: 0;
         border-radius: 2px 2px 0 0;
         background: var(--border-strong);
+        transform-origin: bottom;
+        animation: bar-rise 180ms ease-out both;
+    }
+    @keyframes bar-rise {
+        from {
+            transform: scaleY(0);
+        }
+        to {
+            transform: scaleY(1);
+        }
     }
     .in-bar.empty {
         background: var(--hairline);
@@ -231,11 +275,24 @@
         background: var(--card-2);
         overflow: hidden;
     }
+    /* Same argument as the bars, on the other axis: `scaleX` from the left,
+       so the fill grows rather than the row re-laying out. The width is
+       still the truth — the transform only carries it in. */
     .in-fill {
         display: block;
         height: 100%;
         border-radius: var(--r-pill);
         background: var(--border-strong);
+        transform-origin: left;
+        animation: fill-grow 220ms ease-out both;
+    }
+    @keyframes fill-grow {
+        from {
+            transform: scaleX(0);
+        }
+        to {
+            transform: scaleX(1);
+        }
     }
     .in-rn {
         width: 3ch;
@@ -283,6 +340,16 @@
         }
         .in-room:not(:disabled):hover .in-rname {
             color: var(--text);
+        }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        /* Collapsed rather than removed: the chart is its final shape
+           either way, and `both` keeps the end state. */
+        .in-bar,
+        .in-fill {
+            animation-duration: 0.001ms;
+            animation-delay: 0ms !important;
         }
     }
 

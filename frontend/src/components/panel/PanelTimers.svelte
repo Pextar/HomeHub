@@ -1,5 +1,7 @@
 <script lang="ts">
+    import { fade, fly } from "svelte/transition";
     import Icon from "../Icon.svelte";
+    import { dur } from "../../lib/motion";
     import { fmtUntil, fmtDays } from "../../lib/music/format";
     import { clock } from "../../lib/music/clock.svelte";
     import { roomKeyOf } from "../../lib/panel-music.svelte";
@@ -162,9 +164,24 @@
                  the volume there is one more thing to offer, and it is the
                  sentence someone says out loud — the fade stops, the volume
                  goes back, and the music keeps playing. -->
-            <p class="tm-state" class:live={music.fading}>
+            <!-- A line that arrives because a tap set something going, and
+                 leaves when it is called off. Both directions here: it is
+                 one line of text in a column, so nothing else has to hold
+                 its place while it goes. -->
+            <p
+                class="tm-state"
+                class:live={music.fading}
+                transition:fly={{ y: -4, duration: dur(150) }}
+            >
                 {#if music.fading}
-                    <Icon name="activity" size={14} />
+                    <!-- The one looping animation this block has, and it
+                         earns it the way §6.8's waveform does: a ramp is
+                         *happening right now*, and nothing else on screen
+                         says so — the volume is moving on its own, over
+                         minutes, with no other tell. Opacity on a 14px
+                         icon, and only while the ramp is actually in
+                         flight. -->
+                    <span class="tm-ramp"><Icon name="activity" size={14} /></span>
                     <span>Fading out — quiet at {quietAt}</span>
                     <button
                         class="p-chip tm-still"
@@ -257,7 +274,12 @@
             <p class="tm-sub mono">Set for this room</p>
             <div class="tm-list">
                 {#each standing as t (t.id)}
-                    <div class="tm-item" class:off={!t.enabled}>
+                    <div
+                        class="tm-item"
+                        class:off={!t.enabled}
+                        in:fly={{ y: -6, duration: dur(160) }}
+                        out:fade={{ duration: dur(120) }}
+                    >
                         <Icon name={t.action === "start" ? "sunrise" : "moon"} size={15} />
                         <span class="tm-meta">
                             <span class="tm-name">{label(t)}</span>
@@ -329,6 +351,23 @@
     }
     .tm-state.live {
         color: var(--on);
+    }
+    /* Slow enough to read as breathing rather than blinking, and opacity
+       only — a 14px icon is the cheapest thing on this surface that could
+       carry a loop, which is the whole reason it is the thing carrying it
+       (§16's motion budget). */
+    .tm-ramp {
+        display: inline-flex;
+        animation: ramp-breathe 2.4s ease-in-out infinite;
+    }
+    @keyframes ramp-breathe {
+        0%,
+        100% {
+            opacity: 1;
+        }
+        50% {
+            opacity: 0.4;
+        }
     }
     .tm-still {
         margin-left: auto;
@@ -434,6 +473,15 @@
     }
     .p-chip:disabled {
         opacity: 0.55;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        /* The breathing stops rather than slowing: a loop is the one kind
+           of motion someone who asked for less of it will keep seeing. The
+           line still says what is happening. */
+        .tm-ramp {
+            animation: none;
+        }
     }
 
     /* Distance-scaled targets: this is a wall, so every chip clears the §2

@@ -1573,6 +1573,40 @@ constraint made visible.
   Animations are opacity/transform only, ≤200ms, and the ambient fade is
   the one 600ms exception. The app-shell view transition does not run
   here.
+
+  Three rules follow from that budget, and they are what every animation
+  on this surface was written against:
+  - **Animate what arrives; let what leaves go.** An exit has to hold its
+    place in the layout while it plays, and on this surface that place is
+    a grid row or a 420px column — so the thing being left would squeeze
+    the thing being opened for the length of the exit. The dock flies in
+    and vanishes; the player column fades in and vanishes. Nothing here
+    is symmetric, on purpose.
+  - **Never tween a layout.** A `grid-template` or a `width` that
+    interpolates is a layout pass per frame, which is the one thing this
+    hardware cannot spend. Where a layout has to change it changes in one
+    frame and something cheap covers it: the results fade over their own
+    reflow, the insights bars carry their magnitude in `scaleY` and their
+    room bars in `scaleX` while the real width sits underneath.
+  - **The hitch is the mount, not the motion.** Measured on the depth at
+    a 6× CPU throttle, every animation here is within noise of no
+    animation at all — the dropped frames belong to building the DOM the
+    animation runs on. That is why the listening summary waits two frames
+    before mounting: it is ~35 nodes of chart at the foot of a pane whose
+    job is the room list, below the fold, and building it in the same
+    frame as the list cost about a fifth of the tap-to-pane time. The
+    list paints, then the chart fills in behind it — and its bars rising
+    are what says it arrived. Where something feels slow here, look for
+    nodes being built, not for something moving.
+
+  **One loop is allowed on this surface, and only for something that is
+  happening right now.** §6.8's waveform is the original licence: sound
+  is being made, and nothing static says so. The sleep timer's ramp has
+  the same claim — the volume is walking down on its own, over minutes,
+  with no other tell — so its icon breathes at 2.4s, opacity only, and
+  only while the ramp is actually in flight. Reduced motion stops it
+  outright rather than slowing it: a loop is the one kind of motion that
+  someone who asked for less of it keeps seeing.
 - **Music is the panel's second satellite** (after Home's "Playing now",
   §6.8) and carries the waveform by the same licence. One source is
   featured — the user's chip pick, else whatever is playing — with
