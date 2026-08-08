@@ -332,6 +332,14 @@ export interface AnnounceStatus {
   /** False when no voice service is configured: a chime, and no words. */
   voice: boolean;
   max_text: number;
+  /** The sentences the wall offers before its box, from household settings
+   *  (edited in Settings, only read by the kiosk). They come from the server
+   *  rather than a constant here for two reasons pulling the same way:
+   *  typing is the worst thing a wall asks anyone to do, so the presets are
+   *  most of what the control is — and they are read out by a voice that
+   *  speaks one language, which the household picks. An empty list is a
+   *  household that wants the box and nothing above it. */
+  presets: string[];
 }
 
 /** What an announcement did. */

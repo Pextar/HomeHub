@@ -283,6 +283,62 @@ type Settings struct {
 	Latitude     float64 `json:"latitude"`
 	Longitude    float64 `json:"longitude"`
 	LocationName string  `json:"location_name,omitempty"` // free-form label for the UI ("Home", "Stockholm")
+
+	// AnnouncePresets are the sentences the panel offers before its text
+	// box (DESIGN.md §16). Household settings rather than a constant in a
+	// component, for two reasons that pull the same way: typing is the
+	// worst thing a wall asks anyone to do, so the presets are most of what
+	// the control is — and they are read out by a text-to-speech voice that
+	// speaks one language, which the household picks. A default list shipped
+	// in the frontend was a household's four Swedish sentences compiled into
+	// everybody's app.
+	//
+	// Edited in the full app, never on the kiosk: a preset list configurable
+	// from the wall is a settings screen on a kiosk, and configuration lives
+	// in the app (§16). The panel only reads them.
+	//
+	// Nil and empty are different on purpose, and it is the distinction that
+	// lets a household have none. Nil means nobody has ever set these, so
+	// DefaultAnnouncePresets stand in; an empty list is a household saying
+	// it wants the box and nothing above it. Hence no `omitempty` — that
+	// tag encodes an empty slice as absent, which would collapse exactly
+	// the two cases this has to keep apart.
+	AnnouncePresets []string `json:"announce_presets"`
+}
+
+// DefaultAnnouncePresets is what a household that has never touched them
+// gets: the four things a house actually shouts. Swedish because the voice
+// this was built against speaks Swedish (sv_SE-alma-medium, see
+// docs/INSTALL.md) — Piper reads whatever text it is handed in the phonetics
+// of the voice it was started with, it does not translate, so a preset in the
+// wrong language is a preset nobody can hear properly. A household on another
+// voice replaces these in Settings.
+var DefaultAnnouncePresets = []string{
+	"Middagen är klar",
+	"Dags att komma hem",
+	"Läggdags",
+	"Kom ner",
+}
+
+// MaxAnnouncePresets caps the list. The panel draws them as one row of chips
+// above a box on a 1024px wall; past a handful they wrap into the height the
+// player above them is using, and a preset you have to hunt for is worth less
+// than the sentence you would have typed.
+const MaxAnnouncePresets = 8
+
+// MaxAnnouncePresetLen caps one preset. A preset is a sentence — the length
+// bound on what will actually be spoken lives with the announcement itself
+// (announce.MaxTextLen); this is the tighter bound that keeps a chip a chip.
+const MaxAnnouncePresetLen = 60
+
+// Presets resolves what the panel should offer: the household's list, or the
+// built-in one when nobody has ever set it. An explicitly empty list is
+// honoured as empty — see the field comment.
+func (s *Settings) Presets() []string {
+	if s == nil || s.AnnouncePresets == nil {
+		return append([]string(nil), DefaultAnnouncePresets...)
+	}
+	return append([]string(nil), s.AnnouncePresets...)
 }
 
 // HasLocation reports whether a real location has been configured.

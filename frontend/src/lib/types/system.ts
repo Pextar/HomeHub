@@ -5,6 +5,11 @@ export interface Settings {
   latitude: number;
   longitude: number;
   location_name?: string;
+  /** What the panel's announce strip offers before its text box. Always
+   *  present on a read — the server resolves a household that has never set
+   *  them to the built-in list, so there is no second place the defaults
+   *  live. An empty array is a household that wants none, and is honoured. */
+  announce_presets?: string[];
 }
 
 export interface BulkResult {

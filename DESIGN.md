@@ -1860,6 +1860,22 @@ constraint made visible.
   - **leads with presets**, because typing is the worst thing a wall asks
     anyone to do, and because a house shouts the same four sentences. A
     box follows them for anything else, at the search box's 17px floor.
+    **The presets are the household's, set in the app and only read here.**
+    They were a constant in the component, which made one house's four
+    Swedish sentences part of everybody's build — and the language is not
+    incidental: the voice reading them speaks whichever one it was started
+    with and does not translate, so a preset in the wrong language is a
+    preset nobody can hear properly. So they live in Settings, next to the
+    location, edited there and never on the wall: a preset list
+    configurable from the kiosk is a settings screen on a kiosk, which is
+    the thing this surface does not have. A household that has never set
+    them gets a built-in list — resolved on the *server*, so there is one
+    place the defaults live and the editor never has to know about them —
+    and a household that clears every row gets the box with nothing above
+    it, which is honoured rather than read as "unset". Bounded at eight,
+    sixty characters each: past a handful they wrap into the height the
+    player above them is using, and a preset you have to hunt for is worth
+    less than the sentence you would have typed.
   - **names the rooms before the tap.** A wall must never be vague about
     which rooms are about to be interrupted.
   - **says when there will be no words.** Speech needs a text-to-speech

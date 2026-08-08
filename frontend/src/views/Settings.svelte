@@ -74,12 +74,56 @@
         }
     });
 
-    const dirty = $derived(
+    const locationDirty = $derived(
         latitude     !== v.settings.latitude  ||
         longitude    !== v.settings.longitude ||
         (locationName || "") !== (v.settings.location_name ?? "")
     );
 
+    // ── The panel's announce presets ─────────────────────────────────────
+    // The sentences the wall offers before its text box (DESIGN.md §16).
+    // They are edited here and only *read* there: a preset list configurable
+    // from the wall would be a settings screen on a kiosk. And they are the
+    // household's rather than the app's because a text-to-speech voice
+    // speaks one language, which the household picks — a default list
+    // compiled into the frontend was one house's four Swedish sentences
+    // shipped to everybody.
+    //
+    // The server answers a household that has never set them with the
+    // built-in list, so there is exactly one place the defaults live and
+    // this editor never has to know about them.
+    const serverPresets = $derived(v.settings.announce_presets ?? []);
+    let presets = $state<string[]>(untrack(() => [...(data.value.settings.announce_presets ?? [])]));
+    let presetsApplied = $state(untrack(() => (data.value.settings.announce_presets ?? []).join("\n")));
+    $effect(() => {
+        const next = serverPresets.join("\n");
+        if (next !== presetsApplied) {
+            presets = [...serverPresets];
+            presetsApplied = next;
+        }
+    });
+
+    /** Blanks are dropped on save rather than refused — an emptied row is a
+     *  perfectly clear way to say "remove this", and it is how the × behaves
+     *  anyway. The server tidies the same way; this keeps the dirty check
+     *  comparing like with like. */
+    const cleanPresets = $derived(presets.map((p) => p.trim()).filter(Boolean));
+    const presetsDirty = $derived(cleanPresets.join("\n") !== serverPresets.join("\n"));
+    const PRESET_MAX = 8;
+    const PRESET_LEN = 60;
+
+    function addPreset() {
+        if (presets.length >= PRESET_MAX) return;
+        presets = [...presets, ""];
+    }
+    function removePreset(i: number) {
+        presets = presets.filter((_, n) => n !== i);
+    }
+
+    /** One save for the page, because a settings PUT replaces the object
+     *  wholesale: sending only the card that was touched would quietly reset
+     *  the other one. Each card's button watches its own section so it reads
+     *  the way a Save button should, and either commits whatever is pending. */
     async function save() {
         if (saving) return;
         saving = true;
@@ -88,6 +132,7 @@
                 latitude:      Number(latitude),
                 longitude:     Number(longitude),
                 location_name: locationName.trim() || undefined,
+                announce_presets: cleanPresets,
             });
             await data.refresh();
         } catch (e) {
@@ -331,15 +376,79 @@
             <button type="button" class="btn btn-ghost" onclick={useBrowserLocation} disabled={locating}>
                 {locating ? "Locating…" : "Use this device's location"}
             </button>
-            <button type="submit" class="btn btn-primary" disabled={!dirty || saving}>
+            <button type="submit" class="btn btn-primary" disabled={!locationDirty || saving}>
                 {saving ? "Saving…" : "Save"}
             </button>
         </div>
     </form>
 </section>
 
+<!-- The wall panel's announce presets. They live here rather than on the
+     panel because configuration lives in the app (DESIGN.md §16), and they
+     live in settings rather than in the panel's own code because the voice
+     that reads them speaks whatever language the household picked. -->
 <section class="card"
     in:fly={{ y: 10, duration: dur(220), delay: stagger(3), easing: cubicOut }}>
+    <header>
+        <h2>Announcements</h2>
+        <p>
+            The sentences the wall panel offers before its text box. Typing on a wall is the
+            worst thing it can ask for, so these are most of what the control is — and they are
+            read out by the voice you configured, so they should be in its language.
+        </p>
+    </header>
+
+    <form onsubmit={(e) => { e.preventDefault(); save(); }}>
+        <div class="presets">
+            {#each presets as _, i (i)}
+                <div class="preset-row">
+                    <label class="sr-only" for="preset-{i}">Preset {i + 1}</label>
+                    <input
+                        id="preset-{i}"
+                        type="text"
+                        bind:value={presets[i]}
+                        maxlength={PRESET_LEN}
+                        placeholder="Dinner's ready"
+                    />
+                    <button
+                        type="button"
+                        class="preset-x"
+                        aria-label="Remove preset {i + 1}"
+                        onclick={() => removePreset(i)}
+                    >
+                        <Icon name="close" size={14} />
+                    </button>
+                </div>
+            {/each}
+            {#if presets.length === 0}
+                <!-- Honest about what saving this would mean, rather than an
+                     empty box that reads like something failed to load. -->
+                <p class="field-help">
+                    No presets — the panel will show just the text box.
+                </p>
+            {/if}
+        </div>
+        <div class="actions">
+            <button
+                type="button"
+                class="btn btn-ghost"
+                onclick={addPreset}
+                disabled={presets.length >= PRESET_MAX}
+            >
+                Add a preset
+            </button>
+            <button type="submit" class="btn btn-primary" disabled={!presetsDirty || saving}>
+                {saving ? "Saving…" : "Save"}
+            </button>
+        </div>
+        <div class="field-help">
+            Up to {PRESET_MAX}, {PRESET_LEN} characters each. Blank rows are dropped when you save.
+        </div>
+    </form>
+</section>
+
+<section class="card"
+    in:fly={{ y: 10, duration: dur(220), delay: stagger(4), easing: cubicOut }}>
     <header>
         <h2>Integrations</h2>
         <p>Control your devices from outside the app.</p>
@@ -353,7 +462,7 @@
 
 {#if spotify.status}
     <section class="card"
-        in:fly={{ y: 10, duration: dur(220), delay: stagger(4), easing: cubicOut }}>
+        in:fly={{ y: 10, duration: dur(220), delay: stagger(5), easing: cubicOut }}>
         <header>
             <h2>Spotify</h2>
             <p>The account Music searches and plays from.</p>
@@ -377,7 +486,7 @@
 {/if}
 
 <section class="card"
-    in:fly={{ y: 10, duration: dur(220), delay: stagger(5), easing: cubicOut }}>
+    in:fly={{ y: 10, duration: dur(220), delay: stagger(6), easing: cubicOut }}>
     <header>
         <h2>Push notifications</h2>
         <p>
@@ -500,7 +609,7 @@
 </section>
 
 <section class="card"
-    in:fly={{ y: 10, duration: dur(220), delay: stagger(6), easing: cubicOut }}>
+    in:fly={{ y: 10, duration: dur(220), delay: stagger(7), easing: cubicOut }}>
     <header>
         <h2>Backup &amp; restore</h2>
         <p>Export your full configuration to a file, or restore it from one. Profiles and passwords are never included.</p>
@@ -523,7 +632,7 @@
 </section>
 
 <section class="card"
-    in:fly={{ y: 10, duration: dur(220), delay: stagger(7), easing: cubicOut }}>
+    in:fly={{ y: 10, duration: dur(220), delay: stagger(8), easing: cubicOut }}>
     <header>
         <h2>System</h2>
         <p>Power-user tools for inspecting and driving the hub directly.</p>
@@ -616,6 +725,46 @@
     }
     .optional { color: var(--text-mute); font-weight: 400; font-size: 12px; }
     .hint { margin: 0; color: var(--text-mute); font-size: 13px; }
+
+    /* Announce presets: a stack of rows, each a sentence and a way to drop
+       it. No numbering — the order is the order they appear on the wall, and
+       the rows already say that by sitting one under the other. */
+    .presets {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-2);
+    }
+    .preset-row {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+    }
+    .preset-row input {
+        flex: 1 1 auto;
+        min-width: 0;
+    }
+    .preset-x {
+        flex: none;
+        width: 44px;
+        height: 44px;
+        display: grid;
+        place-items: center;
+        border: 1px solid var(--hairline);
+        border-radius: var(--r-sm);
+        background: none;
+        color: var(--text-dim);
+        cursor: pointer;
+        transition:
+            color var(--t-fast),
+            border-color var(--t-fast);
+    }
+    .preset-x:hover {
+        color: var(--bad);
+        border-color: var(--bad);
+    }
+    .preset-x:focus-visible {
+        box-shadow: var(--focus-ring);
+    }
 
     /* Coordinates are numeric — render them with tabular mono figures. */
     form input[type="number"] {

@@ -1,11 +1,21 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"homehub/internal/store"
 )
+
+// decodeJSON reads a handler's answer into v.
+func decodeJSON(t *testing.T, rec *httptest.ResponseRecorder, v any) {
+	t.Helper()
+	if err := json.Unmarshal(rec.Body.Bytes(), v); err != nil {
+		t.Fatalf("decode %q: %v", rec.Body.String(), err)
+	}
+}
 
 // The three routes the wall panel's fan-outs moved onto: a queue that takes a
 // run in one request, a grouping call that keeps join-before-leave ordering
@@ -189,4 +199,98 @@ func TestForgetPlayRouteNeedsARoom(t *testing.T) {
 
 	mustStatus(t, doAs(t, srv, admin, pass, http.MethodDelete,
 		"/api/media/history?uri=spotify:track:x", ""), http.StatusBadRequest)
+}
+
+// ── Announce presets ─────────────────────────────────────────────────────
+// The wall's presets are household settings, edited in the app and only read
+// by the kiosk. Both surfaces have to be looking at one list, or a household
+// would edit four sentences and see a different four on the wall.
+
+func TestAnnouncePresetsDefaultUntilAHouseholdSetsThem(t *testing.T) {
+	srv, _ := actionServer(t)
+	admin, pass := seedAdmin(t, srv)
+
+	rec := doAs(t, srv, admin, pass, http.MethodGet, "/api/settings", "")
+	mustStatus(t, rec, http.StatusOK)
+	var got struct {
+		Presets []string `json:"announce_presets"`
+	}
+	decodeJSON(t, rec, &got)
+	if len(got.Presets) != len(store.DefaultAnnouncePresets) {
+		t.Errorf("settings presets = %q, want the built-in list", got.Presets)
+	}
+}
+
+func TestAnnouncePresetsSurviveTheRoundTripAndReachThePanel(t *testing.T) {
+	srv, _ := actionServer(t)
+	admin, pass := seedAdmin(t, srv)
+
+	mustStatus(t, doAs(t, srv, admin, pass, http.MethodPut, "/api/settings",
+		`{"latitude":59.3,"longitude":18.1,"announce_presets":["Dinner","  Dinner  ","Bedtime",""]}`),
+		http.StatusOK)
+
+	// Tidied on the way in: a duplicated row and a blank one are things an
+	// editor produces, not things to refuse.
+	var saved struct {
+		Presets []string `json:"announce_presets"`
+	}
+	rec := doAs(t, srv, admin, pass, http.MethodGet, "/api/settings", "")
+	decodeJSON(t, rec, &saved)
+	if len(saved.Presets) != 2 || saved.Presets[0] != "Dinner" || saved.Presets[1] != "Bedtime" {
+		t.Errorf("saved presets = %q, want [Dinner Bedtime]", saved.Presets)
+	}
+
+	// And the panel reads the same list, through the same resolver.
+	var status struct {
+		Presets []string `json:"presets"`
+	}
+	rec = doAs(t, srv, admin, pass, http.MethodGet, "/api/announce", "")
+	mustStatus(t, rec, http.StatusOK)
+	decodeJSON(t, rec, &status)
+	if len(status.Presets) != 2 || status.Presets[0] != "Dinner" {
+		t.Errorf("announce presets = %q, want the household's saved list", status.Presets)
+	}
+}
+
+// A household that clears every row wants the box and nothing above it —
+// which must not read as "nobody has set these" and hand back the defaults.
+func TestAnnouncePresetsCanBeClearedToNone(t *testing.T) {
+	srv, _ := actionServer(t)
+	admin, pass := seedAdmin(t, srv)
+
+	mustStatus(t, doAs(t, srv, admin, pass, http.MethodPut, "/api/settings",
+		`{"announce_presets":[]}`), http.StatusOK)
+
+	var status struct {
+		Presets []string `json:"presets"`
+	}
+	rec := doAs(t, srv, admin, pass, http.MethodGet, "/api/announce", "")
+	decodeJSON(t, rec, &status)
+	if len(status.Presets) != 0 {
+		t.Errorf("announce presets = %q, want none — the household cleared them", status.Presets)
+	}
+}
+
+func TestAnnouncePresetsRefuseWhatAnEditorCannotTidy(t *testing.T) {
+	srv, _ := actionServer(t)
+	admin, pass := seedAdmin(t, srv)
+
+	long := `"`
+	for i := 0; i <= store.MaxAnnouncePresetLen; i++ {
+		long += "a"
+	}
+	long += `"`
+	mustStatus(t, doAs(t, srv, admin, pass, http.MethodPut, "/api/settings",
+		`{"announce_presets":[`+long+`]}`), http.StatusBadRequest)
+}
+
+// Configuration is the app's job, not the kiosk's (§16) — and settings are
+// where the rest of the household's configuration already lives.
+func TestAnnouncePresetsAreNotEditableByANonAdmin(t *testing.T) {
+	srv, _ := actionServer(t)
+	seedAdmin(t, srv)
+	kid, kidPass := seedKid(t, srv, "u_kid", "kid")
+
+	mustStatus(t, doAs(t, srv, kid, kidPass, http.MethodPut, "/api/settings",
+		`{"announce_presets":["Anything"]}`), http.StatusForbidden)
 }

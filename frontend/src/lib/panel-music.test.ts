@@ -178,6 +178,9 @@ beforeEach(() => {
     rooms: [{ id: "kitchen", name: "Kitchen" }],
     voice: true,
     max_text: 200,
+    // The wall's presets are household settings now, so they arrive with
+    // the status read rather than being compiled into the component.
+    presets: ["Middagen är klar", "Läggdags"],
   };
   similarFixture = [];
   savedFixture = false;
