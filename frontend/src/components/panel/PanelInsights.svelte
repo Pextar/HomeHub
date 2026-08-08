@@ -39,15 +39,21 @@
      * Mounted a couple of frames after the pane it sits in.
      *
      * This block is ~35 nodes of chart at the foot of a pane whose job is
-     * the room list, and it is below the fold on the wall this is drawn
-     * for. Built in the same frame as the list it put about seven dropped
-     * frames into the pane switch on A8X-class hardware — a visible hitch
-     * on the thing that was just tapped, paid for by content nobody has
-     * scrolled to yet.
+     * the room list, and on the wall this is drawn for it is below the
+     * fold. Built in the same frame as the list it delayed the pane by
+     * about a fifth — 118ms to 96ms, tap to list painted, measured at a 6×
+     * CPU throttle — which is time paid on the thing that was tapped for
+     * content nobody has scrolled to.
      *
-     * So the list paints first and the summary fills in behind it. Two
-     * frames rather than a timeout: it is "after the browser has drawn",
-     * not "in a while", and there is nothing to see if it is missed.
+     * It does not make the work cheaper and is not meant to: the same
+     * frames are spent either way (measured: no difference in dropped
+     * frames across the switch). It spends them in the right order. The
+     * list paints, the summary fills in behind it, and its bars rising are
+     * what says it arrived.
+     *
+     * Two frames rather than a timeout: it is "after the browser has
+     * drawn", not "in a while", and there is nothing to see if it is
+     * missed.
      */
     let ready = $state(false);
     onMount(() => {

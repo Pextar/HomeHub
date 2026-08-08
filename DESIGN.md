@@ -1591,13 +1591,15 @@ constraint made visible.
   - **The hitch is the mount, not the motion.** Measured on the depth at
     a 6× CPU throttle, every animation here is within noise of no
     animation at all — the dropped frames belong to building the DOM the
-    animation runs on. That is why the listening summary waits two frames
-    before mounting: it is ~35 nodes of chart at the foot of a pane whose
-    job is the room list, below the fold, and building it in the same
-    frame as the list cost about a fifth of the tap-to-pane time. The
-    list paints, then the chart fills in behind it — and its bars rising
-    are what says it arrived. Where something feels slow here, look for
-    nodes being built, not for something moving.
+    animation runs on. So the answer to a slow surface is *ordering* the
+    building, not removing the movement: the listening summary waits two
+    frames before mounting, because it is ~35 nodes of chart at the foot
+    of a pane whose job is the room list and it sits below the fold.
+    That does not make the work cheaper and is not meant to — the same
+    frames are spent either way — it spends them in the right order, and
+    the pane appears about a fifth sooner (118ms → 96ms, tap to list
+    painted). Where something feels slow here, look for nodes being
+    built, not for something moving.
 
   **One loop is allowed on this surface, and only for something that is
   happening right now.** §6.8's waveform is the original licence: sound
