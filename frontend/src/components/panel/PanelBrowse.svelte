@@ -447,6 +447,29 @@
         return all.filter((s) => s.id === spotify.kindFilter);
     });
 
+    /** The artist the query names, pulled out of the shelf it would
+     *  otherwise sit in.
+     *
+     *  Songs lead the shelves and artists close them, which is right for
+     *  "play this song" and wrong for the other thing people type into a
+     *  search box: a name. Typing "adele" answered with ten songs, ten
+     *  albums and ten playlists before her page — and while the keyboard
+     *  is up the kind chips, the labels and the top-result card are all
+     *  folded away, so there was no way to her at all without dismissing
+     *  the keyboard first. So the artist being named rides at the top of
+     *  the results, one row, saying what it is.
+     *
+     *  Not when a chip has narrowed the list — that is an explicit choice
+     *  about what to see — and not when the top-result card is already
+     *  showing that same artist at full size. */
+    const artistLead = $derived.by(() => {
+        if (spotify.kindFilter !== "all") return null;
+        const a = spotify.artistMatch;
+        if (!a) return null;
+        if (!kbOpen && spotify.topResult?.uri === a.uri) return null;
+        return a;
+    });
+
     /** What a row says under its name — different per kind, because what
      *  makes each one worth choosing is different. */
     function sub(item: SpotifyItem): string {
@@ -835,6 +858,14 @@
                                          would be the only thing visible. -->
                                     <h3 class="s-label">Top result</h3>
                                     {@render resultRow(spotify.topResult, true)}
+                                {/if}
+                                {#if artistLead}
+                                    <!-- The name that was typed, before the
+                                         songs it turns up in: an artist is
+                                         shelved last and is the one thing
+                                         type mode cannot otherwise reach. -->
+                                    <h3 class="s-label">Artist</h3>
+                                    {@render resultRow(artistLead, false, true)}
                                 {/if}
                                 {#each sections as sec (sec.id)}
                                     <h3 class="s-label">{sec.label}</h3>
@@ -1347,8 +1378,8 @@
      tap to choose and a tap to dismiss, and at arm's length two named
      44px targets beat all three. `big` is the search's top result: the
      same row at full size, saying what it is and where the tap goes. -->
-{#snippet resultRow(item: SpotifyItem, big: boolean)}
-    <div class="row" class:big>
+{#snippet resultRow(item: SpotifyItem, big: boolean, lead = false)}
+    <div class="row" class:big class:lead>
         <button
             class="r-open"
             disabled={item.kind !== "artist" && music.busy["item:" + item.uri]}
@@ -1383,6 +1414,13 @@
                             /></span
                         >
                     {/if}
+                {:else if lead}
+                    <!-- The one row that keeps its line in type mode, and
+                         leads it with the kind: dense rows are a name and a
+                         chevron, and "Adele" over a list of Adele songs has
+                         to say it is the artist or it reads as one more
+                         song. -->
+                    <span class="r-sub">{topLine(item)}</span>
                 {:else if sub(item)}
                     <span class="r-sub">{sub(item)}</span>
                 {/if}
@@ -1765,6 +1803,11 @@
     }
     .kb-open .r-sub {
         display: none;
+    }
+    /* Except the named artist's. It is the row that isn't a song, sitting
+       above a list of them, and one line is what says so. */
+    .kb-open .row.lead .r-sub {
+        display: block;
     }
     .kb-open .sk-row {
         min-height: 48px;

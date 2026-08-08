@@ -24,6 +24,12 @@ export interface SpotifyStore {
    *  an artist whose name matches the query outright, otherwise the top
    *  track, falling back down the kind order. Null with no results. */
   readonly topResult: SpotifyItem | null;
+  /** The artist the query is *naming*, when it names one: their name starts
+   *  with what was typed, so a half-typed "adel" is aiming at Adele just as
+   *  "adele" is. Null when nothing matched from the start of a name — which
+   *  is what a song title does. A surface that shelves artists last uses
+   *  this to put the one being named where it can be reached. */
+  readonly artistMatch: SpotifyItem | null;
   readonly results: SpotifyResults | null;
   /** A search is in flight. On its own this is *not* a reason to clear the
    *  screen — see `pending` and `stale`. */
@@ -119,9 +125,31 @@ const PAGE = 10;
  */
 function topOf(r: SpotifyResults, q: string): SpotifyItem | null {
   const { tracks, artists, albums, playlists } = r;
-  const ql = q.trim().toLowerCase();
-  if (artists[0] && artists[0].name.toLowerCase() === ql) return artists[0];
+  const ql = norm(q);
+  if (artists[0] && norm(artists[0].name) === ql) return artists[0];
   return tracks[0] ?? artists[0] ?? albums[0] ?? playlists[0] ?? null;
+}
+
+/** Comparable form of a name or a query: case and stray spacing are not
+ *  differences anyone typing means. */
+function norm(s: string): string {
+  return s.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+/**
+ * The artist a query names. Typing a name is the one search where the
+ * answer isn't a song: "adel" halfway to Adele is aiming at her page, and
+ * so is "adele hello" — the name leads and the rest qualifies it. A song
+ * title matches no artist from the start, which is exactly when this
+ * answers nothing.
+ */
+function artistNamed(r: SpotifyResults, q: string): SpotifyItem | null {
+  const ql = norm(q);
+  if (!ql) return null;
+  return r.artists.find((a) => {
+    const n = norm(a.name);
+    return n.startsWith(ql) || ql.startsWith(n + " ");
+  }) ?? null;
 }
 
 /** Every result across the four kinds — "did this search find anything". */
@@ -348,6 +376,12 @@ export function createSpotify(
       // name is almost always after — otherwise the top track wins, since
       // playing a song is the most common reason to search at all.
       return s.results ? topOf(s.results, s.query) : null;
+    },
+    get artistMatch() {
+      // Against the query the results actually answer, not what is in the
+      // box: mid-word the two differ, and a name matched against a query
+      // the list hasn't caught up with is a row nobody asked for.
+      return s.results ? artistNamed(s.results, s.resultsQuery) : null;
     },
     get query() {
       return s.query;

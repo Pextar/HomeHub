@@ -1926,7 +1926,23 @@ constraint made visible.
   back into the shelves — because typing should show a handful of matches
   where one card used to fit. The keyboard is part of the flow: Enter
   dismisses it, and so does a tap on any result, so the rich layout
-  returns for the choosing. **The household's favorites idle here too**,
+  returns for the choosing.
+  **The artist being named leads the results.** Songs lead the shelves and
+  artists close them, which is right for "play this song" and wrong for the
+  other thing people type into a search box: a name. Typing `adele`
+  answered with ten songs, ten albums and ten playlists before her page —
+  and in type mode the kind chips, the shelf labels and the top-result card
+  are all folded away, so there was no way to her at all without dismissing
+  the keyboard first. So an artist whose name the query matches **from the
+  start** (`artistMatch` on the search store — `adel` is aiming at Adele
+  just as `adele` is, and a query that runs on past the name still names
+  her) is lifted out of its shelf and drawn as one row at the top, under an
+  `Artist` label. It is the one dense row that keeps its subtitle, and that
+  subtitle leads with the kind: a bare `Adele` above a list of Adele songs
+  reads as one more song. A song title matches no name from the start, so a
+  search for one is unchanged — and neither a narrowed kind chip nor a
+  top-result card already showing that same artist draws it twice.
+  **The household's favorites idle here too**,
   under the recents: a station is the one thing on this depth that needs
   no typing at all, and typing is the worst thing a wall asks anyone to
   do. They earn their place twice over — without a linked Spotify account

@@ -241,6 +241,59 @@ describe("typing", () => {
   });
 });
 
+// ── The other thing people type: a name ──────────────────────────────────
+
+describe("the artist a query names", () => {
+  function artist(name: string): SpotifyItem {
+    return { kind: "artist", uri: "spotify:artist:" + name, name } as SpotifyItem;
+  }
+
+  it("is found from a half-typed name", async () => {
+    const { store } = make();
+    results = { ...withTracks("Someone Like You"), artists: [artist("Adele")] };
+    await type(store, "adel");
+
+    expect(store.artistMatch?.name).toBe("Adele");
+  });
+
+  it("ignores case and stray spacing", async () => {
+    const { store } = make();
+    results = { ...empty(), artists: [artist("Adele")] };
+    await type(store, "  ADELE ");
+
+    expect(store.artistMatch?.name).toBe("Adele");
+  });
+
+  it("still finds the name when the query goes on past it", async () => {
+    const { store } = make();
+    results = { ...withTracks("Hello"), artists: [artist("Adele")] };
+    await type(store, "adele hello");
+
+    expect(store.artistMatch?.name).toBe("Adele");
+  });
+
+  it("answers nothing for a song title that merely turns up artists", async () => {
+    // Spotify answers a title with artists too; matching one anywhere in
+    // the name would put a stranger above the song that was asked for.
+    const { store } = make();
+    results = { ...withTracks("Rolling in the Deep"), artists: [artist("Adele")] };
+    await type(store, "rolling in the deep");
+
+    expect(store.artistMatch).toBeNull();
+  });
+
+  it("answers against the query the results are for, not the box", async () => {
+    // Mid-word the two differ, and a name matched against a query the list
+    // hasn't caught up with is a row nobody asked for.
+    const { store } = make();
+    results = { ...empty(), artists: [artist("Adele")] };
+    await type(store, "adele");
+    store.query = "adele rolling";
+
+    expect(store.artistMatch?.name).toBe("Adele");
+  });
+});
+
 // ── The shelves that mean nobody has to type ─────────────────────────────
 
 describe("listening shelves", () => {
