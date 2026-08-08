@@ -1910,6 +1910,14 @@ constraint made visible.
   with the pane switcher and had to be the thing you found: the switcher is
   on the header now and the results are what the column is for. Its text
   stays at 17px — that floor is iOS's, not a preference.
+  **The box says when it isn't listening yet.** §15.8's rule holds here too
+  — the caret arrives pre-set only on `(pointer: fine)` — but on the wall
+  that leaves an empty box that reads exactly like one that's focused,
+  and a tap that raises no keyboard reads as broken rather than as
+  waiting for a second one. Idle and unfocused, the placeholder reads
+  "Tap to search" instead of naming what to type; the moment the box is
+  actually focused it switches to the ordinary placeholder, same as it
+  always has for a pointer that arrived pre-focused.
   **The box knows when the software keyboard
   is up** (measured off `visualViewport`, so a docked, floating or split
   keyboard all read true, and no keyboard reads as none): the depth

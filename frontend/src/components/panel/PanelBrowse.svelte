@@ -358,6 +358,15 @@
         void flushDOM().then(() => searchEl?.focus());
     });
 
+    // On a touch wall the box arrives unfocused (above) and *looks* exactly
+    // like it would once tapped — nothing about a bordered box reading
+    // "Search songs, artists, albums" says the keyboard hasn't been asked
+    // for yet. So the placeholder itself carries that: idle, it reads as an
+    // instruction rather than a finished sentence, and the moment the box
+    // is actually focused it switches to naming what to type, same as it
+    // always has for a pointing device that arrived pre-focused.
+    let boxFocused = $state(false);
+
     // ── Type mode: the box knows the software keyboard is up ─────────────
     // The iPad's docked keyboard takes ~350pt off the bottom of the depth,
     // which used to leave the results a one-row strip. While it is up the
@@ -665,7 +674,9 @@
                             <input
                                 bind:this={searchEl}
                                 value={spotify.query}
-                                placeholder="Search songs, artists, albums"
+                                placeholder={boxFocused
+                                    ? "Search songs, artists, albums"
+                                    : "Tap to search"}
                                 aria-label="Search music"
                                 autocapitalize="off"
                                 autocomplete="off"
@@ -681,6 +692,8 @@
                                     spotify.onQueryInput();
                                 }}
                                 onpointerdown={() => (searching = true)}
+                                onfocus={() => (boxFocused = true)}
+                                onblur={() => (boxFocused = false)}
                                 onkeydown={onQueryKey}
                             />
                             {#if spotify.query}
