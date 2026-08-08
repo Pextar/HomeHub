@@ -279,6 +279,7 @@ zones — sets of speakers that play together regardless of make. See
 | PUT | `/api/media/zones/{id}/volume` | `{"level": 0-100}` across the zone |
 | PUT | `/api/media/zones/{id}/mute` | `{"muted": bool}` across the zone |
 | GET | `/api/media/history?room=&limit=` | What a room has been asked to play, newest first |
+| DELETE | `/api/media/history?room=&uri=` | One room stops remembering one thing; without `uri`, the lot. Admin-only |
 | GET | `/api/media/history/top?room=&limit=&hour=` | What a room keeps coming back to — at a given local hour with `hour=` (`0`–`23` or `now`) |
 | GET | `/api/media/insights?limit=` | The household's listening summed over every room |
 | GET | `/api/media/timers` | Every music timer, soonest first |

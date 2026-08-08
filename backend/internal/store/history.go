@@ -213,6 +213,70 @@ func (s *Store) PruneHistory(live func(roomKey string) bool) bool {
 	return dropped
 }
 
+// ForgetPlay drops one remembered URI from one room, reporting whether it was
+// there to drop.
+//
+// A memory that can only be added to is a memory that gets worse. Everything
+// this file feeds is *ranked* — what a room keeps coming back to, what it
+// plays at this hour, what the household listens to — so a record started by
+// mistake does not merely sit at the bottom of a list: it competes for the
+// shelf a wall panel offers first, and every accidental replay of it wins
+// that competition a little harder. The tally that makes the ranking worth
+// having is exactly what makes a wrong entry hard to outlive.
+//
+// Forgetting is per room on purpose. The same record may be the kids' room's
+// favourite and the living room's mistake, and there is nothing about "this
+// room stops offering it" that should reach across the house.
+//
+// Caller must hold Mu.
+func (s *Store) ForgetPlay(roomKey, uri string) bool {
+	roomKey = strings.TrimSpace(roomKey)
+	uri = strings.TrimSpace(uri)
+	if roomKey == "" || uri == "" {
+		return false
+	}
+	plays, ok := s.MediaHistory[roomKey]
+	if !ok {
+		return false
+	}
+	kept := make([]MediaPlay, 0, len(plays))
+	for _, p := range plays {
+		if p.URI == uri {
+			continue
+		}
+		kept = append(kept, p)
+	}
+	if len(kept) == len(plays) {
+		return false
+	}
+	// An emptied room loses its key rather than keeping an empty list: that
+	// is the shape PruneHistory leaves behind too, and the shelves already
+	// read a missing key as "this room has no history of its own".
+	if len(kept) == 0 {
+		delete(s.MediaHistory, roomKey)
+	} else {
+		s.MediaHistory[roomKey] = kept
+	}
+	return true
+}
+
+// ForgetRoomHistory drops everything one room remembers, reporting whether it
+// had anything. The "start this room over" that ForgetPlay is the precise
+// version of.
+//
+// Caller must hold Mu.
+func (s *Store) ForgetRoomHistory(roomKey string) bool {
+	roomKey = strings.TrimSpace(roomKey)
+	if roomKey == "" {
+		return false
+	}
+	if _, ok := s.MediaHistory[roomKey]; !ok {
+		return false
+	}
+	delete(s.MediaHistory, roomKey)
+	return true
+}
+
 // SaveHistory writes only the history file. Recording a play is not a reason
 // to rewrite the whole store, and it happens on every tap of a shelf.
 func (s *Store) SaveHistory() error {

@@ -200,7 +200,14 @@
             onClose={() => route.go("panel")}
         />
     {:else if musicOpen}
-        <PanelBrowse {music} {spotify} {recents} {booted} openArtistNamed={route.query.artist ?? ""} />
+        <PanelBrowse
+            {music}
+            {spotify}
+            {recents}
+            {booted}
+            openArtistNamed={route.query.artist ?? ""}
+            openPane={route.query.pane ?? ""}
+        />
     {:else}
         <PanelClock {timeLabel} {dateLabel} {lightsOn} {lightsTotal} {insideTemp} onExit={exit} />
         <PanelMusic {music} />

@@ -254,40 +254,108 @@ type QueueAdd struct {
 	Length int `json:"length"` // queue length afterwards
 }
 
+// Enqueue is one thing to add to the queue: a playable URI and the DIDL-Lite
+// the speaker files it under. Both are already resolved by the time they get
+// here — resolving a service item against the household's account is the
+// caller's job, and for a run of items it is a job worth doing once. (Not
+// QueueItem: that is a track already *in* the queue, which is a different
+// thing with a different shape.)
+type Enqueue struct {
+	URI      string
+	Metadata string
+}
+
 // AddToQueue appends an item to the group queue, or drops it directly after
 // the current track when next is true. Unlike PlayServiceItem this never
 // clears the queue or touches the transport: what is playing keeps playing.
 func AddToQueue(ctx context.Context, ip, uri, metadata string, next bool) (*QueueAdd, error) {
-	if strings.TrimSpace(uri) == "" {
-		return nil, fmt.Errorf("sonos: item has no URI")
+	add, err := AddManyToQueue(ctx, ip, []Enqueue{{URI: uri, Metadata: metadata}}, next)
+	if err != nil {
+		return nil, err
 	}
+	return &QueueAdd{Track: add.Track, Length: add.Length}, nil
+}
+
+// QueueAddBatch is the outcome of enqueuing a run of items.
+type QueueAddBatch struct {
+	// Track is where the *first* item landed, 1-based. The rest follow it,
+	// contiguously, in the order they were given.
+	Track int `json:"track"`
+	// Length is the queue length once the whole run is in.
+	Length int `json:"length"`
+	// Added is how many items went in.
+	Added int `json:"added"`
+}
+
+// AddManyToQueue enqueues a run of items in one pass, in the order given.
+//
+// The whole reason this exists rather than a loop at the call site: a run
+// inserted as "play next" has to name the slot each item goes into, and the
+// slot comes from where playback currently sits. Done item by item that is a
+// GetPositionInfo before every insert — and worse, a caller that only has
+// AddToQueue has to insert the run *backwards*, because each "next" resolves
+// against the queue as it is now and pushes the previous insert down. That
+// trick worked and was a trick; here the position is read once and the run is
+// dealt into consecutive slots, which is what "these, next, in this order"
+// actually means.
+//
+// It is not atomic and does not pretend to be: each item is its own SOAP
+// call, and a failure part-way through reports the error with the items that
+// did land already in the queue. Rolling back would mean removing tracks from
+// a queue the room may have moved on through, which is a worse outcome than
+// a short run.
+func AddManyToQueue(ctx context.Context, ip string, items []Enqueue, next bool) (*QueueAddBatch, error) {
+	if len(items) == 0 {
+		return nil, fmt.Errorf("sonos: no items to queue")
+	}
+	for _, it := range items {
+		if strings.TrimSpace(it.URI) == "" {
+			return nil, fmt.Errorf("sonos: item has no URI")
+		}
+	}
+
 	// "0" means append. For "play next" we have to name the slot, which
-	// takes reading where playback currently sits.
-	desired := "0"
+	// takes reading where playback currently sits — once, for the run.
+	slot := 0
 	asNext := "0"
 	if next {
 		asNext = "1"
 		if body, err := soapCall(ctx, ip, avTransport, "GetPositionInfo",
 			[]arg{{"InstanceID", instance0}}); err == nil {
 			if cur, cerr := strconv.Atoi(extractTag(body, "Track")); cerr == nil && cur > 0 {
-				desired = strconv.Itoa(cur + 1)
+				slot = cur + 1
 			}
 		}
 	}
-	body, err := soapCall(ctx, ip, avTransport, "AddURIToQueue", []arg{
-		{"InstanceID", instance0},
-		{"EnqueuedURI", uri},
-		{"EnqueuedURIMetaData", metadata},
-		{"DesiredFirstTrackNumberEnqueued", desired},
-		{"EnqueueAsNext", asNext},
-	})
-	if err != nil {
-		return nil, err
+
+	out := &QueueAddBatch{}
+	for i, it := range items {
+		desired := "0"
+		if slot > 0 {
+			desired = strconv.Itoa(slot + i)
+		}
+		body, err := soapCall(ctx, ip, avTransport, "AddURIToQueue", []arg{
+			{"InstanceID", instance0},
+			{"EnqueuedURI", it.URI},
+			{"EnqueuedURIMetaData", it.Metadata},
+			{"DesiredFirstTrackNumberEnqueued", desired},
+			{"EnqueueAsNext", asNext},
+		})
+		if err != nil {
+			// Say how far it got: the caller's UI has to be honest about a
+			// run that half landed, and "nothing happened" would be a lie
+			// the queue itself contradicts.
+			return out, fmt.Errorf("sonos: queued %d of %d items: %w", out.Added, len(items), err)
+		}
+		track, _ := strconv.Atoi(extractTag(body, "FirstTrackNumberEnqueued"))
+		length, _ := strconv.Atoi(extractTag(body, "NewQueueLength"))
+		if i == 0 {
+			out.Track = track
+		}
+		out.Length = length
+		out.Added++
 	}
-	add := &QueueAdd{}
-	add.Track, _ = strconv.Atoi(extractTag(body, "FirstTrackNumberEnqueued"))
-	add.Length, _ = strconv.Atoi(extractTag(body, "NewQueueLength"))
-	return add, nil
+	return out, nil
 }
 
 // RemoveFromQueue drops one 1-based track from the group queue.

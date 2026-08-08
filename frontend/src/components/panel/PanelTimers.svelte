@@ -41,6 +41,12 @@
      *  ramping down, so "30m" means quiet at thirty minutes and not at
      *  thirty-six. */
     const SLEEP_CHOICES = [15, 30, 45, 60, 90] as const;
+    /** One more chapter. A running timer's only targets were five that
+     *  *replace* it and one that cancels it, so "a bit longer" meant reading
+     *  the minutes left, adding in your head and picking the chip nearest
+     *  the answer. The shortest chip is the right step: the ask is always
+     *  small, or it would have been a different wait to begin with. */
+    const SLEEP_EXTEND = 15;
     /** The key the backend files this room's timers under — the media
      *  layer's own vocabulary, taken from the store rather than spelled a
      *  second time here. */
@@ -197,6 +203,22 @@
                             >{music.sleepMinutesLeft} min</span
                         > left</span
                     >
+                    <!-- The third thing anyone says to a sleep timer, and
+                         the only one the row had no target for. "I'm still
+                         up" is the whole cancellation; the chips above
+                         replace the timer with a fixed wait, so pushing a
+                         30-minute timer with 8 minutes left out to 23 meant
+                         doing the arithmetic and tapping 30. This says the
+                         sentence instead. It only appears while there is a
+                         timer to extend, and it is the same call the chips
+                         make — one sleep timer per room, replaced. -->
+                    <button
+                        class="p-chip tm-still"
+                        disabled={sleepBusy}
+                        onclick={() => music.setSleepIn(music.sleepMinutesLeft + SLEEP_EXTEND)}
+                    >
+                        +{SLEEP_EXTEND}m
+                    </button>
                 {/if}
             </p>
         {/if}

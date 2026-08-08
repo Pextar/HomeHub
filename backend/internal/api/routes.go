@@ -175,6 +175,10 @@ func (s *Server) registerSonosRoutes(api *mux.Router) {
 	api.HandleFunc("/sonos/{id}/previous", s.requireAdminOrKid(s.sonosTransport(sonos.Previous))).Methods("POST")
 	api.HandleFunc("/sonos/{id}/leave", s.requireAdminOrKid(s.sonosTransport(sonos.Leave))).Methods("POST")
 	api.HandleFunc("/sonos/{id}/join", s.requireAdminOrKid(s.sonosJoin)).Methods("POST")
+	// Join and leave in one ordered request — see sonosGroup on why the
+	// order is the feature and why a caller looping over the two routes
+	// above cannot be trusted to keep it.
+	api.HandleFunc("/sonos/{id}/group", s.requireAdminOrKid(s.sonosGroup)).Methods("POST")
 	api.HandleFunc("/sonos/{id}/volume", s.requireAdminOrKid(s.sonosSetVolume)).Methods("PUT")
 	api.HandleFunc("/sonos/{id}/mute", s.requireAdminOrKid(s.sonosSetMute)).Methods("PUT")
 	api.HandleFunc("/sonos/{id}/favorites", s.requireAdmin(s.sonosFavorites)).Methods("GET")
@@ -238,6 +242,10 @@ func (s *Server) registerMediaRoutes(api *mux.Router) {
 	api.HandleFunc("/media/zones/{id}/routes", s.requireAdmin(s.mediaZoneRoutes)).Methods("GET")
 	api.HandleFunc("/media/zones/{id}/play", s.requireAdmin(s.mediaZonePlay)).Methods("POST")
 	api.HandleFunc("/media/history", s.requireAdminOrKid(s.mediaHistory)).Methods("GET")
+	// Forgetting is admin-only where reading is not: a kid profile reads its
+	// own room's shelf, and editing what the house remembers is a household
+	// decision like every other write on this surface.
+	api.HandleFunc("/media/history", s.requireAdmin(s.mediaForget)).Methods("DELETE")
 	api.HandleFunc("/media/history/top", s.requireAdminOrKid(s.mediaTopPlays)).Methods("GET")
 	api.HandleFunc("/media/insights", s.requireAdmin(s.mediaInsights)).Methods("GET")
 	// Music that starts and stops on its own. Registered before the

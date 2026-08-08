@@ -70,6 +70,9 @@ func TestKidReachesMusicBrowseAndControl(t *testing.T) {
 		{http.MethodPost, "/api/sonos/sp1/previous", ""},
 		{http.MethodPost, "/api/sonos/sp1/leave", ""},
 		{http.MethodPost, "/api/sonos/sp1/join", `{"target_id":"sp2"}`},
+		// Join and leave in one ordered request — the same gesture as the
+		// two routes above, so the same gate.
+		{http.MethodPost, "/api/sonos/sp1/group", `{"join":["sp2"]}`},
 		{http.MethodPut, "/api/sonos/sp1/volume", `{"level":10}`},
 		{http.MethodPut, "/api/sonos/sp1/mute", `{"muted":true}`},
 		{http.MethodGet, "/api/sonos/sp1/art", ""},
@@ -81,6 +84,7 @@ func TestKidReachesMusicBrowseAndControl(t *testing.T) {
 		{http.MethodGet, "/api/sonos/sp1/queue", ""},
 		{http.MethodDelete, "/api/sonos/sp1/queue", ""},
 		{http.MethodDelete, "/api/sonos/sp1/queue/2", ""},
+		{http.MethodGet, "/api/media/history?room=sonos:sp1", ""},
 		{http.MethodGet, "/api/spotify/status", ""},
 		{http.MethodGet, "/api/spotify/search?q=adele", ""},
 		{http.MethodGet, "/api/spotify/playlists", ""},
@@ -130,6 +134,9 @@ func TestKidIsRefusedConfigurationAndOtherBridges(t *testing.T) {
 		{http.MethodPost, "/api/kef/k1/play", ""},
 		{http.MethodGet, "/api/media/endpoints", ""},
 		{http.MethodGet, "/api/media/search?q=x", ""},
+		// Reading a room's shelf is a kid-allowed job (above); editing what
+		// the house remembers is a household decision like every other write.
+		{http.MethodDelete, "/api/media/history?room=sonos:sp1", ""},
 	} {
 		rec := doAs(t, srv, kid, kidPass, tc.method, tc.path, tc.body)
 		if rec.Code != http.StatusForbidden {
