@@ -12,12 +12,10 @@
  * cheap idempotent re-read that no-ops when nothing moved.
  */
 
-export type ThemeMode = "dark" | "light" | "auto";
-export type Resolved = "dark" | "light";
+import { BAR_COLOR, type Resolved } from "./theme-colors";
 
-/** `--bg` for each theme, restated here because the browser chrome is painted
- *  from a meta tag rather than from CSS. Keep in step with app.css. */
-const BAR_COLOR: Record<Resolved, string> = { dark: "#14130f", light: "#f5f1ea" };
+export type ThemeMode = "dark" | "light" | "auto";
+export type { Resolved };
 
 const STORAGE_KEY = "theme";
 

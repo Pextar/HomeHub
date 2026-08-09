@@ -535,6 +535,13 @@ Is it a list of things?
       while it's backgrounded and never receives the event. Nothing else may
       write `data-theme` or the `theme-color` meta tag — except the pre-paint
       script in `index.html`, which settles both before the bundle loads
+- [ ] `--bg` changed? The status bar, the pre-paint script and the PWA
+      manifest each keep a copy they can't resolve from CSS.
+      `lib/theme-colors.test.ts` fails until all three agree. The manifest's
+      `theme_color` / `background_color` can't be media-queried, so they are
+      the dark value on purpose: they paint the launch splash and the window
+      chrome before any of our code runs, and the meta tag takes over from
+      there
 
 ---
 
