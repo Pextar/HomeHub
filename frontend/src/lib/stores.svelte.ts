@@ -177,78 +177,10 @@ function createRouteStore() {
   };
 }
 
-export type ThemeMode = "dark" | "light" | "auto";
-
-function createThemeStore() {
-  const media = window.matchMedia("(prefers-color-scheme: light)");
-  // `--bg` for each theme, restated here because the browser chrome is
-  // painted from a meta tag rather than from CSS. Keep in step with app.css.
-  const BAR_COLOR = { dark: "#14130f", light: "#f5f1ea" } as const;
-
-  function resolve(mode: ThemeMode): "dark" | "light" {
-    return mode === "auto" ? (media.matches ? "light" : "dark") : mode;
-  }
-  function initialMode(): ThemeMode {
-    const saved = localStorage.getItem("theme");
-    if (saved === "dark" || saved === "light" || saved === "auto") return saved;
-    return "auto";
-  }
-
-  const startMode = initialMode();
-  const t = $state<{ mode: ThemeMode; resolved: "dark" | "light"; system: "dark" | "light" }>({
-    mode: startMode,
-    resolved: resolve(startMode),
-    system: resolve("auto"),
-  });
-
-  function apply() {
-    document.documentElement.dataset.theme = t.resolved;
-    // The status bar / address bar is the one surface CSS can't reach, and
-    // on an installed PWA it is half the screen's edge. Left alone it stayed
-    // the dark value forever, which is what made light — and so auto — look
-    // like it hadn't taken.
-    document
-      .querySelector('meta[name="theme-color"]')
-      ?.setAttribute("content", BAR_COLOR[t.resolved]);
-  }
-  apply();
-
-  function setMode(mode: ThemeMode) {
-    t.mode = mode;
-    t.resolved = resolve(mode);
-    localStorage.setItem("theme", mode);
-    apply();
-  }
-
-  // Follow the OS live while in auto mode, rather than only reading it once
-  // at load — a change to the system setting must not need a reload here.
-  // `addListener` is the Safari < 14 spelling, and an iPhone that old is
-  // exactly the device most likely to be left running this on a shelf.
-  const onSystemChange = () => {
-    t.system = resolve("auto");
-    if (t.mode !== "auto") return;
-    t.resolved = t.system;
-    apply();
-  };
-  if (typeof media.addEventListener === "function") media.addEventListener("change", onSystemChange);
-  else media.addListener?.(onSystemChange);
-
-  return {
-    /** The resolved dark/light value — what CSS and icons key off. */
-    get current() { return t.resolved; },
-    /** The stored preference: "dark", "light", or "auto". */
-    get mode() { return t.mode; },
-    /** What the system is asking for right now — what "Auto" would pick. */
-    get system() { return t.system; },
-    setMode,
-    /** The rail's one-tap shortcut. It steps through all three modes rather
-     *  than flipping dark/light, because a binary toggle silently threw away
-     *  an "Auto" the user had chosen and gave no way back to it from here. */
-    cycle() {
-      setMode(t.mode === "dark" ? "light" : t.mode === "light" ? "auto" : "dark");
-    },
-  };
-}
+// Theme lives in its own module — it is the one store that has to survive an
+// app being frozen and thawed by the OS, and that logic is worth testing on
+// its own without dragging the API layer in behind it.
+export { theme, type ThemeMode } from "./theme.svelte";
 
 // Device-local interface preferences. These describe this screen, not the
 // home, so they live in localStorage next to the theme rather than in the
@@ -478,7 +410,6 @@ export const session = createSessionStore();
 export const data = createDataStore();
 export const toasts = createToastStore();
 export const route = createRouteStore();
-export const theme = createThemeStore();
 export const sidebar = createSidebarStore();
 export const uiPrefs = createUIPrefsStore();
 export const bottomBar = createBottomBarStore();

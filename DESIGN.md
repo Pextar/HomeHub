@@ -529,7 +529,12 @@ Is it a list of things?
 - [ ] Nothing announces its own success — no `toasts.success` / `toasts.info`
       (they don't exist); confirmation is the UI that changed
 - [ ] Theme reads `theme.current` (resolved dark/light), never `theme.mode`
-      — which can be `"auto"`, and follows the OS live
+      — which can be `"auto"`, and follows the OS live. `lib/theme.svelte.ts`
+      owns that: it re-reads `prefers-color-scheme` on the media query's
+      `change` **and** on every resume, because a home-screen PWA is frozen
+      while it's backgrounded and never receives the event. Nothing else may
+      write `data-theme` or the `theme-color` meta tag — except the pre-paint
+      script in `index.html`, which settles both before the bundle loads
 
 ---
 
@@ -551,6 +556,7 @@ frontend/src/
 │   ├── Icon.svelte          ← single <Icon name="..."> wrapping the path map
 │   └── music/               ← the Music module's own pieces (see below)
 ├── lib/music/               ← the Music module's state (see below)
+├── lib/theme.svelte.ts      ← dark/light/auto; the only writer of data-theme
 ├── views/                   ← one .svelte per top-level surface
 └── modals/                  ← sheets and confirms; one per flow
 ```
