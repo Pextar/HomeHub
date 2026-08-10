@@ -34,12 +34,34 @@ export interface SceneAction {
   color?: string; // "RRGGBB", smart lights only
 }
 
+/**
+ * What a scene or an automation does to the house's *audio*, beside what it
+ * does to the sockets.
+ *
+ * The three verbs are the ones that need nothing but a room. A scene
+ * expresses a moment — "we're watching a film", "everyone's out" — and
+ * "start playing this record" needs a catalog item to name, which is what
+ * the music timers are for. `room` is the media layer's own key
+ * ("sonos:<id>" / "kef:<id>" / "zone:<id>"), the same vocabulary the timers,
+ * the play shelves and the listening tallies use.
+ */
+export type MusicActionKind = "pause" | "resume" | "volume";
+
+export interface MusicAction {
+  room: string;
+  action: MusicActionKind;
+  /** 0-100; required by "volume" and ignored by the other two. */
+  volume?: number;
+}
+
 // One time-phased stage within a scene.
 // delay_minutes=0 means "run immediately on activation".
 // The same socket can appear in multiple steps with different settings.
 export interface SceneStep {
   delay_minutes: number;
   actions: SceneAction[];
+  /** One row per room, at most. Absent on scenes written before this. */
+  music?: MusicAction[];
 }
 
 /** Accent preset keys for a scene tile; each maps to a design token. */
@@ -137,6 +159,9 @@ export interface RuleDraft {
   trigToState: "on" | "off";
   conditions: AutomationCondition[];
   actions: RuleActionDraft[];
+  /** The rule's music rows, edited in place. Same shape as what is saved —
+   *  unlike the socket actions, there is nothing to compile. */
+  music: MusicAction[];
 }
 
 // One independent trigger → optional conditions → actions rule. An automation
@@ -145,6 +170,9 @@ export interface AutomationRule {
   trigger: AutomationTrigger;
   conditions?: AutomationCondition[];
   actions: AutomationAction[];
+  /** Same shape and same reasons as SceneStep.music. A rule may carry only
+   *  music — quieting the house is something to do. */
+  music?: MusicAction[];
 }
 
 export interface Automation {

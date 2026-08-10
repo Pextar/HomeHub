@@ -1084,6 +1084,21 @@ _up one_.
     as the EQ block above: a mains speaker answers nothing and the field
     stays absent, which is a different statement from a flat battery and must
     render differently.
+- **A scene or an automation can quiet a room, and that is all it can do to
+  the music.** Until it could, the house was two houses: "Film" dimmed the
+  lamps and left the kitchen radio on, "everyone's out" switched off every
+  socket and played to an empty room, and the master All off meant all
+  *sockets* off. A step or a rule now carries music rows beside its socket
+  actions — one per room, one of **pause / resume / set volume**
+  (`components/MusicActionRows.svelte`, the one row shape both editors use).
+  The three verbs are the ones that need nothing but a room. **There is no
+  "play this" here**, deliberately: a scene expresses a *moment*, and
+  starting a particular record needs something named to start, which is what
+  the music timers are (§16). A control that can't finish its own sentence
+  is worse than one that isn't there — §15.1, applied to an editor. A room
+  already spoken for is absent from the next row's picker rather than
+  offered and refused on save, and a room that is deleted takes its rows
+  with it, the same promise `CascadeDeleteSocket` makes for sockets.
 - **KEF is a second bridge, not a second Sonos.** `internal/kef` speaks the
   local HTTP API on KEF's wireless speakers (LS50 Wireless II, LSX II, LS60).
   It sits _beside_ the Sonos bridge, and the shared layer above them

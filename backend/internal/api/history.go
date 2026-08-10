@@ -219,7 +219,11 @@ func (s *Server) pruneDeadRooms() {
 			live["zone:"+id] = true
 		}
 		droppedHistory = s.Store.PruneHistory(func(key string) bool { return live[key] })
+		// Both live in the main save, so one flag covers them: a timer that
+		// fires into nothing and a scene step that quiets a speaker nobody
+		// owns any more are the same kind of leftover.
 		droppedTimers = s.Store.PruneMusicTimers()
+		droppedTimers = s.Store.PruneMusicRooms() || droppedTimers
 	})
 	if droppedHistory {
 		if err := s.Store.SaveHistory(); err != nil {

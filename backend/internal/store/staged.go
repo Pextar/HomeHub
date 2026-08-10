@@ -178,6 +178,9 @@ func (s *Store) stageSocket(socketID, action string) StagedSend {
 // FlushLights). Mirrors execStepLocked — keep the two in sync. Caller must
 // hold Mu.
 func (s *Store) stageStep(step SceneStep) []StagedSend {
+	// The step's music rides in the same buffer the lights do, so every
+	// caller that already drains those gets this for free (QueueMusic).
+	s.QueueMusic(step.Music)
 	out := make([]StagedSend, 0, len(step.Actions))
 	for _, a := range step.Actions {
 		out = append(out, s.stageSocket(a.SocketID, a.Action))

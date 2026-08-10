@@ -214,8 +214,17 @@ func (s *Store) validateRule(a *AutomationRule) error {
 		}
 	}
 
-	// ── Actions (ordered, at least one) ──────────────────────
-	if len(a.Actions) == 0 {
+	// ── Music (beside the sockets, not through them) ─────────
+	// Validated before the socket actions so a rule that only touches the
+	// music passes the "at least one action" test below on its own merit.
+	music, err := s.validateMusicActions(a.Music)
+	if err != nil {
+		return err
+	}
+	a.Music = music
+
+	// ── Actions (ordered, at least one — of either kind) ─────
+	if len(a.Actions) == 0 && len(a.Music) == 0 {
 		return errors.New("at least one action is required")
 	}
 	for i := range a.Actions {
@@ -397,18 +406,66 @@ func (s *Store) ValidateScene(sc *Scene) error {
 			out = append(out, a)
 		}
 		step.Actions = out
+
+		music, err := s.validateMusicActions(step.Music)
+		if err != nil {
+			return err
+		}
+		step.Music = music
 	}
 
-	// Drop empty steps (steps that had only blank/duplicate socket IDs).
+	// Drop empty steps — ones left with nothing to do after the blanks and
+	// duplicates went. A step that only touches the music is a real step.
 	active := sc.Steps[:0]
 	for _, step := range sc.Steps {
-		if len(step.Actions) > 0 {
+		if len(step.Actions) > 0 || len(step.Music) > 0 {
 			active = append(active, step)
 		}
 	}
 	sc.Steps = active
 
 	return nil
+}
+
+// validateMusicActions normalises a scene step's or automation rule's music
+// list: known verb, a room this house actually has, a volume where the verb
+// needs one, and one action per room — the last write to a room would win
+// anyway, and two rows disagreeing about the same speaker is a scene nobody
+// can read. Caller must hold Mu.
+func (s *Store) validateMusicActions(in []MusicAction) ([]MusicAction, error) {
+	if len(in) == 0 {
+		return nil, nil
+	}
+	seen := make(map[string]bool, len(in))
+	out := make([]MusicAction, 0, len(in))
+	for _, m := range in {
+		m.Room = strings.TrimSpace(m.Room)
+		m.Action = strings.ToLower(strings.TrimSpace(m.Action))
+		if m.Room == "" || seen[m.Room] {
+			continue
+		}
+		if !s.mediaRoomExists(m.Room) {
+			return nil, fmt.Errorf("%q is not a speaker or zone in this house", m.Room)
+		}
+		switch m.Action {
+		case MusicPause, MusicResume:
+			// Neither needs to know anything about what is playing.
+			m.Volume = nil
+		case MusicVolume:
+			if m.Volume == nil {
+				return nil, errors.New("a volume action needs a level")
+			}
+			if *m.Volume < 0 || *m.Volume > 100 {
+				return nil, errors.New("music volume must be between 0 and 100")
+			}
+		default:
+			return nil, fmt.Errorf("music action must be %q, %q or %q",
+				MusicPause, MusicResume, MusicVolume)
+		}
+		seen[m.Room] = true
+		out = append(out, m)
+	}
+	return out, nil
 }
 
 // ValidateSensor normalizes and validates a sensor. Caller must hold Mu.

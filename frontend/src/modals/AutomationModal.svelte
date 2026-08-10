@@ -38,6 +38,7 @@
             trigToState: "on",
             conditions: [],
             actions: [blankRuleAction()],
+            music: [],
         };
     }
 
@@ -64,6 +65,9 @@
             trigToState: (t.to_state ?? "on") as "on" | "off",
             conditions: (r.conditions ?? []).map(c => ({ ...c })),
             actions: actions.length ? actions : [blankRuleAction()],
+            // Copied, not shared: the rows are edited in place and the saved
+            // automation must not change before Save is pressed.
+            music: (r.music ?? []).map(m => ({ ...m })),
         };
     }
 
@@ -109,7 +113,7 @@
         // compileAction expands per-lamp group/room actions into one socket
         // action per member; every other action maps 1:1.
         const actions: AutomationAction[] = d.actions.flatMap(compileAction);
-        return { trigger: buildTrigger(d), conditions, actions };
+        return { trigger: buildTrigger(d), conditions, actions, music: d.music };
     }
 
     function buildPayload(): Partial<Automation> {

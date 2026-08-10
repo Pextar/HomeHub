@@ -149,6 +149,9 @@ type AutomationRule struct {
 	Trigger    AutomationTrigger     `json:"trigger"`
 	Conditions []AutomationCondition `json:"conditions,omitempty"`
 	Actions    []AutomationAction    `json:"actions"`
+	// Music is what the rule does to the house's audio, beside whatever it
+	// does to the sockets. Same shape and same reasons as SceneStep.Music.
+	Music []MusicAction `json:"music,omitempty"`
 }
 
 // Automation is a named group of independent trigger → conditions → actions
@@ -378,6 +381,38 @@ type SceneAction struct {
 	Color    string `json:"color,omitempty"` // "RRGGBB", smart lights only
 }
 
+// Music action verbs. Deliberately the three that need nothing but a room:
+// what a scene expresses is a *moment* in the house, and "put this record on"
+// needs a catalog item, which is what the music timers are for (musictimer.go).
+const (
+	MusicPause  = "pause"
+	MusicResume = "resume"
+	// MusicVolume sets a room's level without touching what it is doing —
+	// "Film" turning the kitchen down rather than off.
+	MusicVolume = "volume"
+)
+
+// MusicAction drives a room's audio when a scene or an automation fires.
+//
+// It is deliberately not a SceneAction with a different target: the staged
+// flow those go through is socket-shaped end to end — it resolves sockets,
+// transmits on 433 MHz, and writes socket state back — and a speaker is none
+// of those things. So music rides beside the sockets rather than through
+// them, and the API layer executes it against the vendor-neutral media layer
+// after the sockets have been applied (Store.OnMusic).
+type MusicAction struct {
+	// Room is the media layer's own key: "sonos:<id>", "kef:<id>",
+	// "zone:<id>". The same vocabulary a music timer, a play shelf and a
+	// listening tally use — a second spelling would be a room that silently
+	// stops matching itself.
+	Room   string `json:"room"`
+	Action string `json:"action"`
+	// Volume is required by MusicVolume and ignored otherwise. A pointer so
+	// "set it to 0" and "didn't say" stay distinguishable, the same rule the
+	// settings patch follows.
+	Volume *int `json:"volume,omitempty"`
+}
+
 // SceneStep is one time-phased stage within a multi-step scene.
 // DelayMinutes=0 means "run immediately on scene activation".
 // Subsequent steps fire DelayMinutes after the scene was activated,
@@ -386,6 +421,9 @@ type SceneAction struct {
 type SceneStep struct {
 	DelayMinutes int           `json:"delay_minutes"`
 	Actions      []SceneAction `json:"actions"`
+	// Music is what this step does to the house's audio. Omitted when empty
+	// so scenes written before it existed round-trip unchanged.
+	Music []MusicAction `json:"music,omitempty"`
 }
 
 // Scene is a named preset that drives sockets through one or more

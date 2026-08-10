@@ -161,6 +161,7 @@ func executeTimer(st *store.Store, t store.Timer, pushSvc *push.Service) error {
 	}
 	st.Mu.Unlock()
 	st.FlushLights() // off-lock bridge calls for scene brightness/colour
+	st.FlushMusic()  // and a scene step's music, queued while it was staged
 	if err == nil {
 		log.Printf("timer fired: %s on %s/%s", t.Action, t.TargetType, t.TargetID)
 		if pushSvc != nil {
@@ -209,6 +210,7 @@ func executeSchedule(st *store.Store, s store.Schedule, pushSvc *push.Service) e
 	}
 	st.Mu.Unlock()
 	st.FlushLights() // off-lock bridge calls for scene brightness/colour
+	st.FlushMusic()  // and a scene step's music, queued while it was staged
 	if err != nil {
 		return err
 	}

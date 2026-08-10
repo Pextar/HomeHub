@@ -146,12 +146,14 @@ func (s *Server) runAutomation(w http.ResponseWriter, r *http.Request) {
 	var ok bool
 	var name string
 	var actions []store.AutomationAction
+	var music []store.MusicAction
 	s.Store.View(func() {
 		var a *store.Automation
 		if a, ok = s.Store.Automations[id]; ok {
 			name = a.Name
 			for _, rl := range a.Rules {
 				actions = append(actions, rl.Actions...)
+				music = append(music, rl.Music...)
 			}
 		}
 	})
@@ -159,7 +161,7 @@ func (s *Server) runAutomation(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "automation not found")
 		return
 	}
-	s.runAutomationActions(w, id, name, actions)
+	s.runAutomationActions(w, id, name, actions, music)
 }
 
 // runAutomationRule fires just one rule's actions immediately — the per-rule
@@ -176,31 +178,36 @@ func (s *Server) runAutomationRule(w http.ResponseWriter, r *http.Request) {
 	var ok bool
 	var name string
 	var actions []store.AutomationAction
+	var music []store.MusicAction
 	s.Store.View(func() {
 		a, found := s.Store.Automations[id]
 		if found && idx < len(a.Rules) {
 			ok = true
 			name = a.Name
 			actions = append(actions, a.Rules[idx].Actions...)
+			music = append(music, a.Rules[idx].Music...)
 		}
 	})
 	if !ok {
 		writeError(w, http.StatusNotFound, "automation or rule not found")
 		return
 	}
-	s.runAutomationActions(w, id, name, actions)
+	s.runAutomationActions(w, id, name, actions, music)
 }
 
 // runAutomationActions transmits a set of actions immediately and records the
 // run against the automation. Shared by the whole-automation and per-rule run
 // endpoints.
-func (s *Server) runAutomationActions(w http.ResponseWriter, id, name string, actions []store.AutomationAction) {
+func (s *Server) runAutomationActions(w http.ResponseWriter, id, name string, actions []store.AutomationAction, music []store.MusicAction) {
 	s.Store.Mu.Lock()
 	kind := "bulk"
 	if len(actions) == 1 {
 		kind = actions[0].TargetType
 	}
 	staged := s.Store.StageAutomationActions(actions)
+	// A rule's own music, queued beside whatever a scene target may have
+	// added; both come out at FlushMusic below.
+	s.Store.QueueMusic(music)
 	s.Store.Mu.Unlock()
 
 	s.Store.SendStaged(staged)
@@ -228,6 +235,7 @@ func (s *Server) runAutomationActions(w http.ResponseWriter, id, name string, ac
 	}
 	s.Store.Mu.Unlock()
 	s.Store.FlushLights()
+	s.Store.FlushMusic()
 	if firstErr != nil {
 		writeError(w, http.StatusInternalServerError, firstErr.Error())
 		return

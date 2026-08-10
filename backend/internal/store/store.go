@@ -71,13 +71,13 @@ type Store struct {
 	// sleeping half of Schedule/Timer, which can only reach sockets.
 	// See musictimer.go, and internal/api/musictimer.go for the engine.
 	MusicTimers map[string]*MusicTimer
-	Users        map[string]*User
-	Settings     *Settings
-	Activity     *ActivityLog
-	Discovery    *Discovery
-	DataDir      string
-	RF           RFSender
-	Light        LightController
+	Users       map[string]*User
+	Settings    *Settings
+	Activity    *ActivityLog
+	Discovery   *Discovery
+	DataDir     string
+	RF          RFSender
+	Light       LightController
 
 	// OnChange, if set, is invoked whenever a socket's state changes via
 	// ApplyState (manual control, scheduler, or timer). It must be cheap and
@@ -89,6 +89,18 @@ type Store struct {
 	// successfully (same conditions as OnChange). It receives a copy of the
 	// socket and its new state. Runs while Mu is held — keep it non-blocking.
 	OnStateChange func(socket Socket, newState bool)
+
+	// OnMusic, if set, carries out a scene step's or automation rule's music
+	// actions. It is a hook rather than a method because this package must
+	// not know how a room is reached: the media layer, the three bridges and
+	// the route engine all live above it, and a store that imported them
+	// would invert the dependency the whole design rests on. Installed at
+	// wiring time, exactly like OnChange.
+	//
+	// Called *off* Mu and expected to return quickly by handing the work on
+	// — a speaker on a slow network must never be something the store lock
+	// is waiting for (the same rule FlushLights follows for smart lights).
+	OnMusic func(actions []MusicAction)
 
 	// OnSensorAlert, if set, is called when a sensor reading crosses a
 	// threshold for the first time (rising edge only — not on every reading
@@ -107,6 +119,13 @@ type Store struct {
 	// while executing a scene under Mu. They are drained by FlushLights after
 	// the lock is released, so the (network) bridge calls never block the lock.
 	pendingLights []lightCmd
+
+	// pendingMusic is the same buffer for a scene step's or automation rule's
+	// music, drained by FlushMusic. Same reason, and deliberately the same
+	// shape: every path that runs a scene already drains the lights, so the
+	// music rides along rather than being a sixth thing each caller has to
+	// remember.
+	pendingMusic []MusicAction
 
 	// sensorsDirty + sensorSaveTimer implement the readings-persistence
 	// debounce (see scheduleSensorSave). Guarded by Mu.

@@ -22,6 +22,7 @@ var notPersisted = map[string]string{
 	"Light":               "injected dependency",
 	"OnChange":            "callback",
 	"OnStateChange":       "callback",
+	"OnMusic":             "callback",
 	"OnSensorAlert":       "callback",
 	"SuppressStateChange": "a transient flag held across one bulk operation",
 }

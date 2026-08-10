@@ -88,6 +88,14 @@ is already up-to-date it's skipped.
   transmissions can't overlap on air.
 - Smart-light bridge calls (Tasmota, Matter) are always deferred to
   `FlushLights()` so they never block the store lock.
+- **A scene step or automation rule may also drive music** (`MusicAction`:
+  pause / resume / volume, aimed at a media room key). It rides the same
+  buffer the lights do — `QueueMusic` under `Mu`, `FlushMusic()` off it —
+  because a scene is activated from six places and every one of them
+  already stages and drains. The store never reaches a speaker itself: it
+  calls `Store.OnMusic`, installed by the API as `runSceneMusic`, which
+  drives the vendor-neutral media layer. **Call `FlushMusic()` beside every
+  `FlushLights()`.**
 
 ---
 
