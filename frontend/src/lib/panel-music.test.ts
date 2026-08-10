@@ -332,6 +332,104 @@ describe("up next", () => {
   });
 });
 
+// ── What the sleeping wall says ──────────────────────────────────────────
+
+describe("the ambient face", () => {
+  const playingKitchen = (
+    state: Record<string, unknown> = {},
+    gs: Record<string, unknown> = {},
+    bedroomPlaying = false,
+  ) => {
+    sonosFixture = {
+      speakers: [
+        sonosSpeaker("kitchen", {
+          state: {
+            volume: 30,
+            muted: false,
+            playing: true,
+            queue_track: 2,
+            track: { title: "Sixteen Going On Seventeen", artist: "Band", album: "Record" },
+            position: "0:01:00",
+            duration: "0:03:20",
+            ...state,
+          } as never,
+          group_state: {
+            shuffle: false,
+            repeat: "off",
+            crossfade: false,
+            queue_length: 12,
+            from_queue: true,
+            ...gs,
+          } as never,
+        }),
+        sonosSpeaker("bedroom", {
+          state: { volume: 20, muted: false, playing: bedroomPlaying } as never,
+        }),
+      ],
+      groups: [
+        { coordinator_id: "kitchen", member_ids: ["kitchen"] },
+        { coordinator_id: "bedroom", member_ids: ["bedroom"] },
+      ],
+    } as SonosStatus;
+    queueFixture = [
+      { track: 1, title: "One" },
+      { track: 2, title: "Two" },
+      { track: 3, title: "Three", artist: "Band", album: "Record" },
+    ] as SonosQueueItem[];
+  };
+
+  it("names the record, the room and where it is in the queue", async () => {
+    playingKitchen();
+    const h = await boot();
+    const np = h.value.nowPlaying;
+
+    expect(np?.title).toBe("Sixteen Going On Seventeen");
+    // The room is its own fact now, not the tail of the artist line: the
+    // face gives it a row beside the waveform.
+    expect(np?.sub).toBe("Band · Record");
+    expect(np?.room).toBe("kitchen");
+    expect(np?.queueTrack).toBe(2);
+    expect(np?.queueLength).toBe(12);
+    expect(np?.next).toEqual({ title: "Three", sub: "Band · Record" });
+    h.stop();
+  });
+
+  it("shows nothing at all in a quiet house", async () => {
+    const h = await boot();
+    expect(h.value.nowPlaying).toBeNull();
+    h.stop();
+  });
+
+  it("withholds the queue position on a stream, which is nowhere in a queue", async () => {
+    // Radio and line-in report no track number. "2 of 0" is worse than
+    // saying nothing (§15.1 applied to a fact rather than a control).
+    playingKitchen({ queue_track: undefined, duration: "" }, { from_queue: false, queue_length: 0 });
+    const h = await boot();
+
+    expect(h.value.nowPlaying?.queueTrack).toBeUndefined();
+    expect(h.value.nowPlaying?.queueLength).toBeUndefined();
+    h.stop();
+  });
+
+  it("names no next track under shuffle, where the speaker picks its own", async () => {
+    playingKitchen({}, { shuffle: true });
+    const h = await boot();
+
+    expect(h.value.nowPlaying?.next).toBeUndefined();
+    expect(h.value.nowPlaying?.queueTrack).toBe(2); // still a fact
+    h.stop();
+  });
+
+  it("says which other rooms are playing, and never counts the featured one", async () => {
+    playingKitchen({}, {}, true);
+    const h = await boot();
+
+    expect(h.value.nowPlaying?.room).toBe("kitchen");
+    expect(h.value.nowPlaying?.elsewhere).toEqual(["bedroom"]);
+    h.stop();
+  });
+});
+
 // ── The destination ──────────────────────────────────────────────────────
 
 describe("the featured room", () => {

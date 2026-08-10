@@ -27,6 +27,12 @@
          *  row. A source with no duration just renders nothing — the bar
          *  doesn't need the caption. */
         inline = false,
+        /** The panel's ambient face: the same rail and the same two times,
+         *  at the size a wall is read from across a room (DESIGN.md §16).
+         *  A prop rather than a second component — there is one thing in
+         *  this app that draws a track's position, and a copy of it would
+         *  be the one that drifts. */
+        large = false,
         onSeek = undefined,
     }: {
         position: number;
@@ -35,6 +41,7 @@
         liveLabel?: string;
         idle?: boolean;
         inline?: boolean;
+        large?: boolean;
         onSeek?: (sec: number) => void;
     } = $props();
 
@@ -78,7 +85,7 @@
             <span class="rt mono">{fmtSecs(duration)}</span>
         </div>
     {:else}
-        <div class="rail-box">
+        <div class="rail-box" class:large>
             {#if seekable && onSeek}
                 <Slider
                     variant="scrub"
@@ -128,6 +135,20 @@
         height: 100%;
         background: var(--on);
         transition: width 1s linear;
+    }
+    /* Wall scale: a thicker bar and times that read from a sofa. The times
+       also step up from --text-dim, which is a caption colour on a phone
+       held at reading distance and unreadable at four metres. */
+    .rail-box.large {
+        gap: 10px;
+    }
+    .rail-box.large .ro-rail {
+        height: 10px;
+        border-radius: 5px;
+    }
+    .rail-box.large .rail-times {
+        font-size: 16px;
+        color: var(--text-mute);
     }
     .rail-live {
         text-align: center;

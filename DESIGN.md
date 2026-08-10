@@ -1433,11 +1433,13 @@ pair coherent:
   walks the device back to `#/panel?idle=1` — arriving on the ambient
   face, not waking the UI. Open modals are dismissed first: a kiosk must
   never strand a sheet over its home screen.
-- **The ambient face carries music.** While something plays, the idle face
-  adds one line under the status — art thumbnail, track, "Artist · Album ·
-  Zone" (`PanelNowPlaying`, fed by the same binding that sizes the music
-  column). The clock stays the subject; playback is the footnote. Nothing
-  playing, nothing shown.
+- **The ambient face carries music, and while a record is on it _is_ the
+  music.** The face has two subjects and swaps between them: nothing
+  playing, the clock is the subject; something playing, the panel rests on
+  the listening face instead (`PanelAmbientMusic`, fed by `PanelNowPlaying`
+  off the same shared store the band reads). It is one face either way —
+  the same fade, the same drift, the same tap to wake, the same night
+  dimming — not a second screen. What it says is §16's own rule below.
 
 The reference hardware is an iPad Air 2 — 1024×768, Safari 15, an A8X that
 drops frames on blur and stacked shadows. Every rule below is that
@@ -1569,7 +1571,9 @@ constraint made visible.
 - **Type and targets are distance-scaled, not phone-scaled — and each band
   is scaled to its own job.** The strip's clock is 32px, because on the
   dashboard the clock is a fact you glance at; the ambient face is where
-  the clock is the *subject*, at `clamp(104px, 20vw, 168px)`. Stat figures
+  the clock is the *subject*, at `clamp(104px, 20vw, 168px)` — and on the
+  listening face, where the record is the subject and the column beside it
+  has a great deal else to say, `clamp(48px, 9vw, 112px)`. Stat figures
   19px over an 11px label; band tile names 14px over an 11.5px status line
   (19px in the room grid, where there is height to spend); track title 19px
   on the band *and* in the depth's column, 22px on the full player, which
@@ -1904,11 +1908,11 @@ constraint made visible.
     dismiss a card, so the confirmation names the rooms that heard it,
     and the strip goes away a few seconds later.
 - **The ambient face has two subjects: the clock, and the record.** While
-  something is playing, the panel rests on the **listening face** — the
-  cover at the size a record deserves, with the clock demoted beside it
-  and the status line under the track. It replaced a 40px thumbnail under
-  a full-size clock, which spent the most-looked-at surface the panel has
-  on the least interesting thing in the room. It is one face with two
+  something is playing, the panel rests on the **listening face**
+  (`PanelAmbientMusic`) — the cover at the size a record deserves, with a
+  column of facts beside it. It replaced a 40px thumbnail under a
+  full-size clock, which spent the most-looked-at surface the panel has on
+  the least interesting thing in the room. It is one face with two
   subjects and not a second screen: the same fade, the same
   minute-by-minute drift, the same tap to wake, and the same night
   dimming. The cover is sized in viewport units and capped rather than
@@ -1916,6 +1920,41 @@ constraint made visible.
   is no reading that could chase its own tail (contrast the band and the
   full player, which both measure). Nothing playing, and the clock is the
   subject again.
+  - **The column says everything about the record that a tap isn't needed
+    for**, in one order, most important first: clock, title, artist and
+    album, how far through, which room, what's next, what else is
+    playing, and the house's own two figures. This is the one surface in
+    the app with the space *and* the attention for all of it — a wall
+    shows one record for three or four minutes, and nobody is standing at
+    it waiting to act. Everywhere else the same facts are a tap away and
+    the screen is better spent on controls.
+  - **Every line below the title is absent when the room can't answer
+    it**, exactly as a control would be (§15.1). Radio reports no
+    duration, so there is no rail and no fabricated position; it is in no
+    queue, so there is no "4 / 18"; a shuffled group has no knowable next
+    track (`queueOrderKnown`), so nothing claims one; a house with one
+    room playing has no "also playing". A station on in the kitchen
+    collapses back to almost exactly the face this grew out of.
+  - **A title too long for the column rolls** (`PanelMarquee`). Everywhere
+    else in the app an ellipsis is right — a title is read at arm's length
+    by someone who can tap it — but this is the surface with no one at it,
+    and a name that ended in "…" for the length of a song had no other way
+    to be read. It only moves when it has to (the overrun is measured; a
+    title that fits animates nothing at all), it holds at both ends and
+    comes back rather than looping, so a glance in passing lands on the
+    start of the name far more often than the middle, and it is one
+    composited transform — the A8X rule (§16) applies to scenery too.
+    **Only the title rolls.** One thing moving on a resting screen reads
+    as the record announcing itself; two read as a ticker, so the artist
+    line truncates. Under reduced motion the roll is *the ellipsis back*,
+    not a 0.001ms animation: the point of the motion is to reveal the rest
+    of the name over time, and with the motion gone there is nothing to
+    collapse.
+  - **The position is read live, never carried.** `PanelNowPlaying` is
+    rebuilt when the poll brings a new track; the seconds elapsed come
+    from `posSec` / `durSec` on each beat (§15.1). Folding a ticking value
+    into that object would rebuild every field on it once a second, on a
+    screen that stays lit for years.
 - **On the music depth, a song plays; an artist opens.** The wall keeps
   the flat gesture where it's about starting sound: a song found by
   search plays, an album or playlist plays whole — the player names what

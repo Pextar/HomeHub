@@ -667,16 +667,6 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
 
     const anyPlaying = $derived(sources.some((s) => s.playing));
 
-    const nowPlaying = $derived<PanelNowPlaying | null>(
-        featured?.playing
-            ? {
-                title: featured.trackTitle ?? "Playing",
-                sub: [featured.trackSub, featured.title].filter(Boolean).join(" · "),
-                art: featured.art,
-            }
-            : null,
-    );
-
     // ── Actions ──────────────────────────────────────────────────────────
     async function run(key: string, fn: () => Promise<unknown>, errTitle: string, ok?: () => void) {
         if (busy[key]) return;
@@ -1240,6 +1230,50 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
     const nextInQueue = $derived(
         queueOrderKnown ? queue.find((q) => q.track > (featured?.queueTrack ?? 0)) : undefined,
     );
+
+    // ── What the ambient face says ───────────────────────────────────────
+    // It lives down here rather than up with the sources because the face
+    // now says more than the record's name (§16): where the room is in its
+    // queue, and what comes after this — both the queue's facts, and both
+    // held to the same rule as the player's own Up-next row. Under shuffle
+    // or repeat-one the speaker picks its own next track, so the wall says
+    // nothing rather than guessing.
+    //
+    // Everything here changes on a poll. The position doesn't — it ticks
+    // once a second — so it stays a live value the face reads (`posSec`),
+    // never a field in here that would rebuild the object every beat.
+    const nowPlaying = $derived.by((): PanelNowPlaying | null => {
+        const f = featured;
+        if (!f?.playing) return null;
+        const gs = f.groupState;
+        // A queue position is only a fact while the room is walking through
+        // a queue: radio and line-in report no track number, and "3 of 0"
+        // is worse than saying nothing.
+        const inQueue = !!gs?.from_queue && !!gs.queue_length && !!f.queueTrack;
+        const n = nextInQueue;
+        return {
+            title: f.trackTitle ?? "Playing",
+            // The room used to be the tail of this line. It is a different
+            // kind of fact from the artist and the album, and the face has
+            // a row for it now, beside the waveform that says this is the
+            // room making the noise.
+            sub: f.trackSub ?? "",
+            art: f.art,
+            room: f.title,
+            queueTrack: inQueue ? f.queueTrack : undefined,
+            queueLength: inQueue ? gs?.queue_length : undefined,
+            next: n
+                ? {
+                      title: n.title || "Untitled",
+                      sub: [n.artist, n.album].filter(Boolean).join(" · ") || undefined,
+                  }
+                : undefined,
+            // The other rooms with something of their own on. A wall panel
+            // is the one screen in the house that can answer "is anything
+            // still playing upstairs" without being walked over to.
+            elsewhere: sources.filter((s) => s.playing && s.key !== f.key).map((s) => s.title),
+        };
+    });
 
     function jumpTo(track: number) {
         const f = featured;
