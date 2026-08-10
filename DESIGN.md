@@ -1665,7 +1665,16 @@ constraint made visible.
   that waits. Only a home with no speakers registered at all loses the
   column. The same reasoning runs the poll: while the ambient face is up
   the panel is a clock, so the backstop drops to two minutes and a pushed
-  change still lands at once.
+  change still lands at once. **Asleep on a record is the exception, and
+  it is not really asleep** — the listening face is *displaying* the track
+  and how far through it is, so it keeps a 30s backstop instead of the
+  two-minute one. A now-playing display that is two minutes behind is
+  wrong rather than economical, and the rooms it is wrong about are
+  exactly the ones with nothing to push: a Sonos household wakes the poll
+  on its own events, a KEF and a zone never do. It is still half the
+  awake rate, because a wall asleep on a record must not cost more than
+  one open browser tab. The whole rule is `pollEveryMs`, stated once and
+  under test rather than spelled out inside the effect that uses it.
 - **A gesture that takes several calls is one request, and the hub makes
   them.** The wall is the slowest client this app has — a 2015 iPad on
   household Wi-Fi — and it is also the one most likely to be walked away

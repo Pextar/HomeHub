@@ -336,9 +336,30 @@ export interface PanelMusicStore {
 
 const POLL_MS = 15_000;
 const LIVE_POLL_MS = 45_000;
-/** Asleep on the ambient face: the screen shows a clock, so the speakers
- *  only need catching up with often enough that waking is current. */
+/** Asleep on the ambient face with a quiet house: the screen shows a clock,
+ *  so the speakers only need catching up with often enough that waking is
+ *  current. */
 const IDLE_POLL_MS = 120_000;
+/** Asleep on the ambient face with a record on. The face is *showing* the
+ *  track and how far through it is (§16), so this is not a sleeping screen
+ *  in the sense the number above was chosen for — it is a now-playing
+ *  display, and a display that is two minutes behind is wrong rather than
+ *  economical. Still half the awake rate: a wall asleep on a record must
+ *  not cost more than one open browser tab. */
+const IDLE_PLAYING_POLL_MS = 30_000;
+
+/**
+ * How often to ask, given what the panel is doing and what the bridge can
+ * do. Pure and exported so the rule is one statement under test rather than
+ * a nested ternary inside an effect.
+ *
+ * `live` is the Sonos event monitor answering from its own cache: pushed
+ * changes already wake the poll, so the interval is only a backstop.
+ */
+export function pollEveryMs(opts: { idle: boolean; playing: boolean; live: boolean }): number {
+    if (opts.idle) return opts.playing ? IDLE_PLAYING_POLL_MS : IDLE_POLL_MS;
+    return opts.live ? LIVE_POLL_MS : POLL_MS;
+}
 
 /** KEF inputs a skip means anything on. There is nothing to step through
  *  on the TV or the analog input — the speaker would simply refuse. */
@@ -423,7 +444,7 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
     const livePush = $derived(!!status?.live);
 
     // The panel tells the store when it falls asleep, so the poll can slow
-    // to a crawl while the ambient face is up. A pushed change still wakes
+    // right down while the ambient face is up. A pushed change still wakes
     // it immediately — this only changes the backstop's cadence.
     let idle = $state(false);
 
@@ -433,7 +454,12 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
         const onVisible = () => {
             if (!document.hidden) void refresh();
         };
-        const every = idle ? IDLE_POLL_MS : livePush ? LIVE_POLL_MS : POLL_MS;
+        // `anyPlaying` belongs in here for the same reason `livePush` does,
+        // and with the same care: it is a *derived boolean*, so the effect
+        // re-runs when the house starts or stops playing and not on every
+        // poll. Reading `status` directly here would retrigger forever,
+        // since refresh() reassigns it.
+        const every = pollEveryMs({ idle, playing: anyPlaying, live: livePush });
         const t = setInterval(onVisible, every);
         const stopLive = onLive("music", () => {
             if (!document.hidden) void refresh();

@@ -104,7 +104,7 @@ vi.mock("./stores.svelte", () => ({
 vi.mock("./live", () => ({ onLive: () => () => {} }));
 
 const { api } = await import("./api");
-const { createPanelMusic } = await import("./panel-music.svelte");
+const { createPanelMusic, pollEveryMs } = await import("./panel-music.svelte");
 const { withRoot } = await import("../test-runes.svelte");
 
 // ── Fixtures ─────────────────────────────────────────────────────────────
@@ -329,6 +329,33 @@ describe("up next", () => {
     expect(h.value.queueOrderKnown).toBe(false);
     expect(h.value.nextInQueue).toBeUndefined();
     h.stop();
+  });
+});
+
+// ── How often the wall asks ──────────────────────────────────────────────
+
+describe("the poll's cadence", () => {
+  it("crawls while the panel sleeps on a clock", () => {
+    expect(pollEveryMs({ idle: true, playing: false, live: false })).toBe(120_000);
+    // A quiet house is a clock whether or not the bridge can push.
+    expect(pollEveryMs({ idle: true, playing: false, live: true })).toBe(120_000);
+  });
+
+  it("keeps up while it sleeps on a record, which it is displaying", () => {
+    // The ambient face shows the track and how far through it is (§16), so
+    // asleep-on-a-record is a now-playing display rather than a screensaver.
+    expect(pollEveryMs({ idle: true, playing: true, live: false })).toBe(30_000);
+    expect(pollEveryMs({ idle: true, playing: true, live: true })).toBe(30_000);
+  });
+
+  it("still costs less asleep than one awake tab", () => {
+    const awake = pollEveryMs({ idle: false, playing: true, live: false });
+    expect(pollEveryMs({ idle: true, playing: true, live: false })).toBeGreaterThan(awake);
+  });
+
+  it("backs off awake when the bridge pushes its own changes", () => {
+    expect(pollEveryMs({ idle: false, playing: true, live: true })).toBe(45_000);
+    expect(pollEveryMs({ idle: false, playing: true, live: false })).toBe(15_000);
   });
 });
 
