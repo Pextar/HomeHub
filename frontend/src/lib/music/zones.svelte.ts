@@ -10,6 +10,7 @@ import type {
 import type { Busy } from "./busy.svelte";
 import { clock } from "./clock.svelte";
 import { clampVol, createVolumeThrottle } from "./volume";
+import { trackLines } from "./format";
 
 /**
  * Zones, as state: the third bridge, and the only one that isn't a bridge.
@@ -273,15 +274,14 @@ export function createZonesBridge(busy: Busy): ZonesBridge {
     },
 
     nowLine(z) {
-      const t = leadOf(z)?.state?.track;
-      if (t?.title) return t.title;
+      const line = trackLines(leadOf(z)?.state?.track).title;
+      if (line) return line;
       if (speakersOf(z).length === 0) return "No speakers yet";
       return isPlaying(z) ? "Live audio" : "Nothing playing";
     },
 
     subLine(z) {
-      const t = leadOf(z)?.state?.track;
-      return [t?.artist, t?.album].filter(Boolean).join(" · ");
+      return trackLines(leadOf(z)?.state?.track).sub;
     },
 
     memberLine(z) {

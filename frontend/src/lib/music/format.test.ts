@@ -9,6 +9,7 @@ import {
   fmtHour,
   fmtUntil,
   fmtDays,
+  trackLines,
 } from "./format";
 
 describe("fmtCount", () => {
@@ -110,5 +111,48 @@ describe("fmtDays", () => {
     expect(fmtDays([1, 2, 3, 4, 5])).toBe("Weekdays");
     expect(fmtDays([0, 6])).toBe("Weekends");
     expect(fmtDays([3, 1])).toBe("Mon Wed");
+  });
+});
+
+describe("trackLines", () => {
+  it("names a queued track by its title over artist and album", () => {
+    expect(trackLines({ title: "Karma Police", artist: "Radiohead", album: "OK Computer" })).toEqual(
+      { title: "Karma Police", sub: "Radiohead · OK Computer" },
+    );
+  });
+
+  it("leads with the song on air, and says which station it came from", () => {
+    // The case the old rule got wrong: dc:title is the *stream*, so a room
+    // playing radio announced the station and never the music.
+    expect(trackLines({ title: "P2", stream: "Kate Bush - Cloudbusting", station: "Sveriges Radio P2" }))
+      .toEqual({ title: "Kate Bush - Cloudbusting", sub: "Sveriges Radio P2" });
+  });
+
+  it("falls back to the stream's own name when the station didn't come through", () => {
+    expect(trackLines({ title: "P2", stream: "Kate Bush - Cloudbusting" })).toEqual({
+      title: "Kate Bush - Cloudbusting",
+      sub: "P2",
+    });
+  });
+
+  it("names the station when nothing is on air yet", () => {
+    expect(trackLines({ station: "Sveriges Radio P2" })).toEqual({
+      title: "Sveriges Radio P2",
+      sub: "",
+    });
+  });
+
+  it("never says the same thing on both lines", () => {
+    // A card that reads "P2" over "P2" has said it once and wasted a line.
+    expect(trackLines({ title: "P2", station: "P2" }).sub).toBe("");
+    expect(trackLines({ title: "P2", stream: "Nothing", station: "Nothing" })).toEqual({
+      title: "Nothing",
+      sub: "P2",
+    });
+  });
+
+  it("says nothing about nothing", () => {
+    expect(trackLines(undefined)).toEqual({ title: "", sub: "" });
+    expect(trackLines({})).toEqual({ title: "", sub: "" });
   });
 });

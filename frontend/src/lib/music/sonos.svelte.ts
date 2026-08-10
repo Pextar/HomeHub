@@ -12,6 +12,7 @@ import type { Busy } from "./busy.svelte";
 import { clock } from "./clock.svelte";
 import { secs, toClock, sinceRead } from "./time";
 import { clampVol, createVolumeThrottle } from "./volume";
+import { trackLines } from "./format";
 
 /**
  * The Sonos bridge, as state: the topology poll, the optimistic overrides
@@ -383,9 +384,9 @@ export function createSonosBridge(busy: Busy): SonosBridge {
 
     speakerNowLine(id) {
       const g = groupOfSpeaker(id);
-      const st = g && coordinatorOf(g)?.state;
-      if (!st?.track?.title) return "Idle";
-      return isPlaying(g) ? st.track.title : `Paused · ${st.track.title}`;
+      const line = trackLines(g && coordinatorOf(g)?.state?.track).title;
+      if (!line) return "Idle";
+      return isPlaying(g) ? line : `Paused · ${line}`;
     },
 
     joinables: (g) => reachable.filter((x) => !g.member_ids.includes(x.id)),

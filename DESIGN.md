@@ -807,6 +807,19 @@ _which device_. Nothing appears on two of them.
   queue and only if it was heard playing within the last quarter hour. **A
   pause is a decision.** Nothing autoplay does may restart a room somebody
   paused, or wake one that has been quiet all evening.
+- **A live source names itself differently, and the UI asks once.** A queued
+  track is a title over "artist · album"; a **radio stream isn't that shape**
+  — the song on air arrives in Sonos' own `r:streamContent` and `dc:title`
+  holds the stream rather than the music, so a station rendered by the track
+  rule announced itself as "P2" for three hours while the song went unnamed.
+  The wire carries both facts (`stream`, `station`) rather than one
+  flattened line, and `trackLines` in `lib/music/format.ts` is the single
+  place that turns them into a headline and a subline: the most specific
+  name the source knows — song on air, else track, else station — over
+  where it is coming from, and never the same string twice. Five surfaces
+  used to assemble those two lines themselves; a sixth must call this
+  instead. Nothing is invented on the way: "Artist - Title" is a habit
+  stations have, not a format, so the line is never split.
 - **Progress rides on the playing surface.** A 2px hairline along a card's
   bottom edge (`ProgressLine`), extrapolated between polls by `clock.beat`
   so it creeps rather than stepping. Zero duration renders nothing at all

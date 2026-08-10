@@ -34,6 +34,7 @@ import { onLive } from "./live";
 import { kefSourceLabel } from "./kef";
 import { haptic } from "./utils";
 import { secs, toClock, sinceRead } from "./music/time";
+import { trackLines } from "./music/format";
 import { NEXT_REPEAT } from "./music/sonos.svelte";
 import { clock } from "./music/clock.svelte";
 import { clampVol, createVolumeThrottle } from "./music/volume";
@@ -551,6 +552,7 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
               )
             : 0;
         const at = lead?.state?.at ? Date.parse(lead.state.at) : NaN;
+        const zoneLines = trackLines(lead?.state?.track);
         return {
             key: "z:" + z.id,
             kind: "zone",
@@ -565,10 +567,8 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
             // On the stream route HomeHub is the Spotify device and the
             // speakers pull a live stream: `next` is a call they refuse.
             canSkip: z.route !== "stream",
-            trackTitle: lead?.state?.track?.title,
-            trackSub: [lead?.state?.track?.artist, lead?.state?.track?.album]
-                .filter(Boolean)
-                .join(" · "),
+            trackTitle: zoneLines.title || undefined,
+            trackSub: zoneLines.sub,
             trackArtist: lead?.state?.track?.artist,
             art: lead?.state?.track?.art_uri,
             members:
@@ -614,6 +614,7 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
             const groupVolume = memberVols.length
                 ? Math.round(memberVols.reduce((a, b) => a + b, 0) / memberVols.length)
                 : (st?.volume ?? 0);
+            const lines = trackLines(st?.track);
             out.push({
                 key: "s:" + g.coordinator_id,
                 kind: "sonos",
@@ -628,8 +629,11 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
                 // what the button then did.
                 muted: members.length > 0 && members.every((x) => !!x.state?.muted),
                 canSkip: true,
-                trackTitle: st?.track?.title,
-                trackSub: [st?.track?.artist, st?.track?.album].filter(Boolean).join(" · "),
+                // Radio names itself in its own fields, so the two lines
+                // are composed once for every make (`trackLines`) rather
+                // than assembled from artist and album here.
+                trackTitle: lines.title || undefined,
+                trackSub: lines.sub,
                 trackArtist: st?.track?.artist,
                 trackURI: st?.track?.spotify_uri,
                 art: st?.track?.art_uri,
@@ -653,6 +657,7 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
         for (const sp of kef?.speakers ?? []) {
             if (!sp.reachable || claimed.kef.has(sp.id)) continue;
             const st = sp.state;
+            const kefLines = trackLines(st?.track);
             out.push({
                 key: "k:" + sp.id,
                 kind: "kef",
@@ -666,9 +671,9 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
                 // the analog input there is nothing to step through.
                 canSkip: !!st && st.powered_on && KEF_SKIPPABLE.has(st.source),
                 trackTitle:
-                    st?.track?.title ??
+                    kefLines.title ||
                     (st?.playing && st.source ? `${kefSourceLabel(st.source)} input` : undefined),
-                trackSub: [st?.track?.artist, st?.track?.album].filter(Boolean).join(" · "),
+                trackSub: kefLines.sub,
                 trackArtist: st?.track?.artist,
                 art: st?.track?.art_uri,
                 input: st?.source,

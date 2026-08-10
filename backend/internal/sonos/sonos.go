@@ -230,6 +230,20 @@ type Track struct {
 	// ArtURI is either an absolute URL or a path relative to the speaker
 	// (e.g. /getaa?...). Relative paths must be proxied by the caller.
 	ArtURI string `json:"art_uri,omitempty"`
+	// Stream is what a radio station says it is playing right now, from the
+	// Sonos-private <r:streamContent> beside the DIDL fields above. A
+	// station puts the song there and leaves dc:title as the stream itself,
+	// so without this a room playing radio could only be described by the
+	// station it was tuned to. One free-text line as the station sends it —
+	// usually "Artist - Title", but that is a convention rather than a
+	// format, and splitting it on a dash would invent structure the wire
+	// never carried.
+	Stream string `json:"stream,omitempty"`
+	// Station is what the room is tuned to, from the *media* metadata
+	// rather than the track's — the two are different things for a stream
+	// and the same thing for nothing else, which is why this is only ever
+	// filled for a source with no duration.
+	Station string `json:"station,omitempty"`
 }
 
 // State is one speaker's live playback state.
@@ -382,7 +396,39 @@ func GetState(ctx context.Context, ip string) (*State, error) {
 	if m, err := GetMute(ctx, ip); err == nil {
 		st.Muted = m
 	}
+	// What the room is *tuned to* lives in the media metadata, not the
+	// track's, and only a stream has the two be different things — so this
+	// costs a fifth SOAP call on radio and line-in and nothing at all on the
+	// queue, which is the case that dominates the poll. A track's own title
+	// already says everything a queued track has to say.
+	if st.Duration == "" && st.QueueTrack == 0 {
+		if name := currentMediaTitle(ctx, ip); name != "" {
+			if st.Track == nil {
+				st.Track = &Track{}
+			}
+			st.Track.Station = name
+		}
+	}
 	return st, nil
+}
+
+// currentMediaTitle reads what the room is tuned to out of GetMediaInfo's
+// CurrentURIMetaData. Empty whenever the call fails or the source has no
+// name to give — a caller must treat this as "no answer", never as "none".
+func currentMediaTitle(ctx context.Context, ip string) string {
+	body, err := soapCall(ctx, ip, avTransport, "GetMediaInfo", []arg{{"InstanceID", instance0}})
+	if err != nil {
+		return ""
+	}
+	meta := extractTag(body, "CurrentURIMetaData")
+	if meta == "" || meta == "NOT_IMPLEMENTED" {
+		return ""
+	}
+	var d didlLite
+	if err := xml.Unmarshal([]byte(meta), &d); err != nil || len(d.Items) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(d.Items[0].Title)
 }
 
 // normalizeClock maps UPnP's "NOT_IMPLEMENTED" and zero-duration
@@ -408,6 +454,10 @@ type didlItem struct {
 	Res         string `xml:"res"`
 	ResMD       string `xml:"resMD"`
 	Description string `xml:"description"`
+	// streamContent is Sonos' own namespace rather than DIDL's, but the
+	// fields above are matched on local name too (dc:title, upnp:album), so
+	// it needs no special handling.
+	StreamContent string `xml:"streamContent"`
 }
 
 // ParseTrackMeta parses a DIDL-Lite fragment (already XML-unescaped) into a
@@ -424,8 +474,16 @@ func ParseTrackMeta(meta string) *Track {
 		Album:      it.Album,
 		ArtURI:     it.AlbumArtURI,
 		SpotifyURI: spotifyTrackURI(it.Res),
+		Stream:     strings.TrimSpace(it.StreamContent),
 	}
-	if t.Title == "" && t.Artist == "" && t.Album == "" {
+	// A station that has nothing on air right now sends the field with its
+	// own name in it, or a placeholder. Neither is a song, and both would
+	// end up displayed as one.
+	if t.Stream == t.Title || strings.EqualFold(t.Stream, "ZPSTR_BUFFERING") ||
+		strings.EqualFold(t.Stream, "ZPSTR_CONNECTING") {
+		t.Stream = ""
+	}
+	if t.Title == "" && t.Artist == "" && t.Album == "" && t.Stream == "" {
 		return nil
 	}
 	return t

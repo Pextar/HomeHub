@@ -96,10 +96,12 @@ func (e *SonosEndpoint) State(ctx context.Context) (*media.NowPlaying, error) {
 	}
 	if st.Track != nil {
 		np.Track = &media.Track{
-			Title:  st.Track.Title,
-			Artist: st.Track.Artist,
-			Album:  st.Track.Album,
-			ArtURI: st.Track.ArtURI,
+			Title:   st.Track.Title,
+			Artist:  st.Track.Artist,
+			Album:   st.Track.Album,
+			ArtURI:  st.Track.ArtURI,
+			Stream:  st.Track.Stream,
+			Station: st.Track.Station,
 		}
 	}
 	np.SyncWire()

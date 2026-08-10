@@ -7,6 +7,7 @@ import type { KEFBridge } from "./kef.svelte";
 import type { ZonesBridge } from "./zones.svelte";
 import { secs } from "./time";
 import { clampVol } from "./volume";
+import { trackLines } from "./format";
 import type {
   KEFSpeakerView,
   MediaZone,
@@ -449,9 +450,11 @@ export function createRooms(
     nowLine(r) {
       if (r.zone) return zones.nowLine(r.zone);
       if (r.speaker) return kef.nowLine(r.speaker);
-      const st = sonos.coordinatorOf(r.group!)?.state;
-      if (!st?.track?.title) return "Idle";
-      return isPlaying(r) ? st.track.title : `Paused · ${st.track.title}`;
+      // `trackLines` rather than the title outright: a room on radio names
+      // itself in its own fields, and the title there is the stream.
+      const line = trackLines(sonos.coordinatorOf(r.group!)?.state?.track).title;
+      if (!line) return "Idle";
+      return isPlaying(r) ? line : `Paused · ${line}`;
     },
 
     subLine(r) {
@@ -461,8 +464,7 @@ export function createRooms(
         if (line) return line;
         return r.speaker.state?.source ? kefSourceLabel(r.speaker.state.source) : "";
       }
-      const t = sonos.coordinatorOf(r.group!)?.state?.track;
-      return [t?.artist, t?.album].filter(Boolean).join(" · ");
+      return trackLines(sonos.coordinatorOf(r.group!)?.state?.track).sub;
     },
 
     memberLine(r) {

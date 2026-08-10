@@ -15,6 +15,16 @@ export interface SonosTrack {
   album?: string;
   /** Absolute URL or an /api/sonos/{id}/art proxy path — usable as <img src> directly. */
   art_uri?: string;
+  /**
+   * What a radio station says is on air right now, as one free-text line in
+   * whatever shape the station sends it — usually "Artist - Title", but that
+   * is a habit rather than a format, so the backend never splits it.
+   * Present only on a live source, and only while it has something to say.
+   */
+  stream?: string;
+  /** What the room is tuned to — the *media*'s name rather than the track's.
+   *  Only ever filled for a source with no duration. */
+  station?: string;
   /** The canonical "spotify:track:…" for what is playing, recovered from the
    *  speaker's own resource string. Absent on radio, line-in and anything
    *  that isn't Spotify — surfaces that need it render only where it is. */

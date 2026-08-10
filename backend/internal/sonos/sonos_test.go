@@ -254,3 +254,72 @@ func TestParseTrackMetaLeavesTheURIEmptyOffSpotify(t *testing.T) {
 		}
 	}
 }
+
+// A radio stream describes itself in two places at once, and neither is the
+// one a queued track uses: the song on air arrives in Sonos' own
+// <r:streamContent>, while dc:title names the stream. Reading only the DIDL
+// fields left a room playing radio describable by nothing but its station.
+func TestParseTrackMetaRadioStreamContent(t *testing.T) {
+	meta := `<DIDL-Lite xmlns:dc="http://purl.org/dc/elements/1.1/" ` +
+		`xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/" ` +
+		`xmlns:r="urn:schemas-rinconnetworks-com:metadata-1-0/" ` +
+		`xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/">` +
+		`<item id="-1" parentID="-1">` +
+		`<dc:title>ZPSTR_CONNECTING</dc:title>` +
+		`<r:streamContent>Talking Heads - This Must Be the Place</r:streamContent>` +
+		`</item></DIDL-Lite>`
+	tr := ParseTrackMeta(meta)
+	if tr == nil {
+		t.Fatal("ParseTrackMeta returned nil for a stream with something on air")
+	}
+	if tr.Stream != "Talking Heads - This Must Be the Place" {
+		t.Errorf("stream = %q", tr.Stream)
+	}
+	// Left exactly as the station sent it: "Artist - Title" is a habit, not
+	// a format, and splitting on the dash would invent structure the wire
+	// never carried.
+	if tr.Artist != "" || tr.Album != "" {
+		t.Errorf("stream content was split into fields it never had: %+v", tr)
+	}
+}
+
+// A station with nothing on air says so in the same field, and a station
+// that repeats its own name there is saying nothing either. Both would
+// otherwise be displayed as the song currently playing.
+func TestParseTrackMetaDropsEmptyStreamContent(t *testing.T) {
+	didl := func(title, stream string) string {
+		return `<DIDL-Lite xmlns:dc="http://purl.org/dc/elements/1.1/" ` +
+			`xmlns:r="urn:schemas-rinconnetworks-com:metadata-1-0/" ` +
+			`xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/">` +
+			`<item id="-1"><dc:title>` + title + `</dc:title>` +
+			`<r:streamContent>` + stream + `</r:streamContent></item></DIDL-Lite>`
+	}
+	for _, tc := range []struct{ name, title, stream string }{
+		{"buffering", "P2", "ZPSTR_BUFFERING"},
+		{"connecting", "P2", "ZPSTR_CONNECTING"},
+		{"echoes the title", "P2", "P2"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tr := ParseTrackMeta(didl(tc.title, tc.stream))
+			if tr == nil {
+				t.Fatal("ParseTrackMeta returned nil although dc:title was present")
+			}
+			if tr.Stream != "" {
+				t.Errorf("stream = %q, want empty — that is not a song", tr.Stream)
+			}
+		})
+	}
+}
+
+// Stream content alone is enough to describe a room: a station that sends
+// only <r:streamContent> used to parse to nil and read as "nothing playing".
+func TestParseTrackMetaStreamContentAlone(t *testing.T) {
+	meta := `<DIDL-Lite xmlns:r="urn:schemas-rinconnetworks-com:metadata-1-0/" ` +
+		`xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/">` +
+		`<item id="-1"><r:streamContent>Kate Bush - Cloudbusting</r:streamContent></item>` +
+		`</DIDL-Lite>`
+	tr := ParseTrackMeta(meta)
+	if tr == nil || tr.Stream != "Kate Bush - Cloudbusting" {
+		t.Fatalf("track = %+v", tr)
+	}
+}

@@ -9,6 +9,7 @@
     import { fly } from "svelte/transition";
     import { cubicOut } from "svelte/easing";
     import { kefSourceLabel } from "../lib/kef";
+    import { trackLines } from "../lib/music/format";
     import type {
         SonosStatus, SonosGroupView, SonosSpeakerView,
         KEFStatus, KEFSpeakerView,
@@ -214,10 +215,11 @@
                     {@const c = coordinatorOf(g)}
                     {@const st = c?.state}
                     {@const track = st?.track}
+                    {@const lines = trackLines(track)}
                     <article class="np playing"
                         in:fly={{ y: 8, duration: dur(220), delay: stagger(i), easing: cubicOut }}>
                         <button class="np-open" onclick={() => route.go("music")}
-                            aria-label="Open {track?.title ?? 'playback'} in Music">
+                            aria-label="Open {lines.title || 'playback'} in Music">
                             {#if track?.art_uri}
                                 <img class="np-art" src={track.art_uri} alt="" loading="lazy" />
                             {:else}
@@ -228,10 +230,8 @@
                                     <Waveform />
                                     <span class="np-room">{groupTitle(g)}</span>
                                 </span>
-                                <span class="np-title">{track?.title ?? "Playing"}</span>
-                                <span class="np-sub">
-                                    {[track?.artist, track?.album].filter(Boolean).join(" · ") || "Live audio"}
-                                </span>
+                                <span class="np-title">{lines.title || "Playing"}</span>
+                                <span class="np-sub">{lines.sub || "Live audio"}</span>
                             </span>
                         </button>
                         <div class="np-transport">
@@ -261,10 +261,11 @@
                      where they do apply. -->
                 {#each kefPlaying as sp, i (sp.id)}
                     {@const track = sp.state?.track}
+                    {@const lines = trackLines(track)}
                     <article class="np playing"
                         in:fly={{ y: 8, duration: dur(220), delay: stagger(playing.length + i), easing: cubicOut }}>
                         <button class="np-open" onclick={() => route.go("music")}
-                            aria-label="Open {track?.title ?? 'playback'} in Music">
+                            aria-label="Open {lines.title || 'playback'} in Music">
                             {#if track?.art_uri}
                                 <img class="np-art" src={track.art_uri} alt="" loading="lazy" />
                             {:else}
@@ -276,9 +277,7 @@
                                     <span class="np-room">{sp.name}</span>
                                 </span>
                                 <span class="np-title">{kefLine(sp)}</span>
-                                <span class="np-sub">
-                                    {[track?.artist, track?.album].filter(Boolean).join(" · ") || "Live audio"}
-                                </span>
+                                <span class="np-sub">{lines.sub || "Live audio"}</span>
                             </span>
                         </button>
                         <div class="np-transport">
