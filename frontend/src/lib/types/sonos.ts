@@ -182,6 +182,22 @@ export interface SonosZoneInfo {
  * absent means "this model doesn't have it", which is a different statement
  * from a zero value — check `capabilities` rather than truthiness.
  */
+/**
+ * A portable speaker's power state — Roam, Move and nothing else. Absent on
+ * every mains model, which is a different statement from a flat battery and
+ * has to stay distinguishable.
+ */
+export interface SonosBattery {
+  /** Charge percentage, 0–100. */
+  level: number;
+  /** Drawing power rather than draining — the ring, USB or a dock. */
+  charging: boolean;
+  /** The speaker's own words, worth showing only when they aren't the
+   *  normal ones ("GREEN" / "NORMAL"). Absent when it didn't say. */
+  health?: string;
+  temperature?: string;
+}
+
 export interface SonosSettings {
   capabilities: SonosCapabilities;
   bass?: number;      // -10…10
@@ -203,6 +219,8 @@ export interface SonosSettings {
   display_name?: string;
   /** The speaker publishes a picture of itself — otherwise use the placeholder. */
   has_image: boolean;
+  /** Portable models only; absent means this speaker runs on mains. */
+  battery?: SonosBattery;
 }
 
 /**

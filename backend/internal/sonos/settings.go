@@ -118,6 +118,12 @@ type Settings struct {
 	// HasImage says the speaker publishes a picture of itself, so the UI can
 	// fall back to the striped placeholder instead of a broken <img>.
 	HasImage bool `json:"has_image"`
+
+	// Battery is present only on the portable models (battery.go). Nil is
+	// "this speaker runs on mains", which is a different statement from a
+	// flat battery and has to stay distinguishable — the same rule the
+	// pointer fields above follow.
+	Battery *Battery `json:"battery,omitempty"`
 }
 
 // LoadSettings reads everything above from one speaker.
@@ -232,6 +238,12 @@ func LoadSettings(ctx context.Context, ip string) (*Settings, error) {
 				s.DisplayName = info.DisplayName
 				s.HasImage = info.IconPath != ""
 			})
+		}
+		// Portable models only, and the ask *is* the probe — there is no
+		// action that says which models have one. A mains speaker answers
+		// nothing here and stays nil, which is the answer (battery.go).
+		if bat, err := GetBattery(ctx, ip); err == nil && bat != nil {
+			set(func(s *Settings) { s.Battery = bat })
 		}
 	}()
 

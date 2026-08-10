@@ -1052,7 +1052,8 @@ _up one_.
   play-next, remove, clear), and — per speaker — bass, treble, loudness, the
   home-theatre EQ block (night mode, speech enhancement, sub on/off + level,
   surround), the status LED, the touch-control lock, the group sleep timer,
-  the serial/firmware/MAC block and the device's own product image.
+  the serial/firmware/MAC block, the device's own product image and — on the
+  portable models only — the battery.
   It does **not** expose line-in or TV sources, music-library browsing beyond
   favorites, stereo balance, renaming a speaker's Sonos-side zone name, or
   creating and breaking stereo pairs — so there is no UI for any of those.
@@ -1073,6 +1074,16 @@ _up one_.
     Only _state_ — what is playing, how loud, grouped with what — belongs in
     the status poll. Adding a setting to that poll would cost every open tab
     eleven extra calls per speaker every five seconds to watch nothing happen.
+    **The battery is the one deliberate exception**, and it proves the rule
+    rather than breaking it: it is state, but state that moves over hours, so
+    polling the whole house every five seconds to watch 84 become 83 is
+    exactly the cost this is here to prevent. It is read with the snapshot,
+    on a screen someone opened, and is stale by minutes at worst. It is also
+    the only thing in the bridge that isn't UPnP — a plain document at
+    `/status/batterystatus` — and the ask *is* the capability probe, the same
+    as the EQ block above: a mains speaker answers nothing and the field
+    stays absent, which is a different statement from a flat battery and must
+    render differently.
 - **KEF is a second bridge, not a second Sonos.** `internal/kef` speaks the
   local HTTP API on KEF's wireless speakers (LS50 Wireless II, LSX II, LS60).
   It sits _beside_ the Sonos bridge, and the shared layer above them
