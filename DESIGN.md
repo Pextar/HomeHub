@@ -811,6 +811,20 @@ _which device_. Nothing appears on two of them.
   bottom edge (`ProgressLine`), extrapolated between polls by `clock.beat`
   so it creeps rather than stepping. Zero duration renders nothing at all
   rather than a made-up position.
+- **A position is extrapolated from when the speaker was _read_, never from
+  when we asked** (`sinceRead` in `lib/music/time.ts`). The two are not the
+  same and the gap is not small: the hub answers a status poll from its
+  event cache, and Sonos pushes a track change but never a `RelTime`, so
+  the position is as old as the last authoritative read — up to a resync
+  interval — while the response carrying it is milliseconds old. Counting
+  from the request ran that whole gap into every scrubber and hairline in
+  the app: a rail reading 45% on a song 53% through. Every make now states
+  when its reading was taken (`read_at`, already KEF's convention), the
+  hub's clock is mixed with the browser's exactly once — at the poll, and
+  clamped, so a wall panel with a drifting clock gets a bounded error
+  rather than a wild one — and everything after the poll ticks on the
+  browser's clock alone. A reading with no timestamp falls back to counting
+  from the poll rather than inventing an age.
 
 ### 15.6 Screens, sheets and getting back
 

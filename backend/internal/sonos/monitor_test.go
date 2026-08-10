@@ -708,3 +708,36 @@ func TestRetryWithNoSpeakersIsANoop(t *testing.T) {
 	m := NewMonitor(MonitorConfig{})
 	m.Retry() // must not panic or block
 }
+
+// The snapshot carries when each reading was taken. Clients extrapolate the
+// track position from it, and the cache is normally what answers a status
+// request: events bring a track change but never a position, so a cached
+// position is as old as the last authoritative read, not as old as the
+// request that fetched it.
+func TestSnapshotCarriesReadTime(t *testing.T) {
+	sp := Speaker{ID: "sonos_1", IP: "192.168.1.42"}
+	m := NewMonitor(MonitorConfig{Speakers: func() []Speaker { return []Speaker{sp} }})
+	e := subscribed(m, sp, map[string]string{EventTransport.Key: "uuid:s"})
+	read := time.Now().Add(-25 * time.Second)
+	m.mu.Lock()
+	e.state = &State{Volume: 30, Position: "0:01:00"}
+	e.at = read
+	m.mu.Unlock()
+
+	got := m.read().Speakers["sonos_1"]
+	if !got.At.Equal(read) {
+		t.Errorf("At = %v, want %v — the reading's own timestamp", got.At, read)
+	}
+}
+
+// A speaker that has never been read has no timestamp to offer, and must not
+// invent one: the API drops the field, and the client falls back to counting
+// from its own poll rather than from an age that was made up here.
+func TestSnapshotHasNoReadTimeBeforeTheFirstRead(t *testing.T) {
+	sp := Speaker{ID: "sonos_1", IP: "192.168.1.42"}
+	m := NewMonitor(MonitorConfig{Speakers: func() []Speaker { return []Speaker{sp} }})
+	m.ensureEntry(sp)
+	if got := m.read().Speakers["sonos_1"]; !got.At.IsZero() {
+		t.Errorf("At = %v, want zero for a speaker never read", got.At)
+	}
+}

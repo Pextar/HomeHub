@@ -62,6 +62,13 @@ export interface SonosQueueItem {
 export interface SonosSpeakerView extends SonosSpeaker {
   reachable: boolean;
   state?: SonosState;
+  /**
+   * Unix ms the reading was taken — extrapolate position from this, not from
+   * when the request landed. The hub usually answers from its event cache,
+   * and Sonos events carry a track change but never a position, so `state`
+   * can be a resync interval older than the response carrying it.
+   */
+  read_at?: number;
   group_state?: SonosGroupState;
   /** HomeHub's own "continue with similar music once the queue runs out"
    *  setting for this coordinator — a preference layered on top of what the

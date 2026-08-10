@@ -332,6 +332,58 @@ describe("up next", () => {
   });
 });
 
+// ── How far through the track it says we are ─────────────────────────────
+
+describe("the position", () => {
+  const playingFor = (over: Partial<SonosSpeakerView>, position = "0:01:00") => {
+    sonosFixture = {
+      speakers: [
+        sonosSpeaker("kitchen", {
+          state: {
+            volume: 30,
+            muted: false,
+            playing: true,
+            track: { title: "One" },
+            position,
+            duration: "0:03:20",
+          } as never,
+          ...over,
+        }),
+      ],
+      groups: [{ coordinator_id: "kitchen", member_ids: ["kitchen"] }],
+    } as SonosStatus;
+  };
+
+  it("counts from when the hub read the speaker, not from when we polled", async () => {
+    // The hub answers from its event cache, and Sonos pushes track changes
+    // but never a position — so a reading can be half a minute old while the
+    // response carrying it is milliseconds old. Extrapolating from the
+    // request drew a rail well behind the song.
+    playingFor({ read_at: Date.now() - 20_000 });
+    const h = await boot();
+    expect(h.value.posSec).toBeGreaterThan(79);
+    expect(h.value.posSec).toBeLessThan(82);
+    h.stop();
+  });
+
+  it("falls back to the poll when the hub doesn't say", async () => {
+    playingFor({});
+    const h = await boot();
+    expect(h.value.posSec).toBeGreaterThan(59);
+    expect(h.value.posSec).toBeLessThan(62);
+    h.stop();
+  });
+
+  it("never runs past the end of the track", async () => {
+    // A reading old enough to overshoot is exactly what a stopped poll
+    // looks like; the rail pins at the end rather than claiming more.
+    playingFor({ read_at: Date.now() - 90_000 }, "0:03:00");
+    const h = await boot();
+    expect(h.value.posSec).toBe(200); // 3:20, not 4:30
+    h.stop();
+  });
+});
+
 // ── How often the wall asks ──────────────────────────────────────────────
 
 describe("the poll's cadence", () => {

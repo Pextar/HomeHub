@@ -70,6 +70,13 @@ type SpeakerState struct {
 	Reachable  bool
 	State      *State
 	GroupState *GroupState
+	// At is when this reading was taken. It matters because the one field
+	// in State that keeps moving on its own — the track position — is only
+	// ever as current as the read it came from, and events don't carry it:
+	// Sonos pushes transport and track changes, never RelTime, so a cached
+	// position is up to a resync interval old. A client extrapolating from
+	// "now" would run that whole error into the number it draws.
+	At time.Time
 }
 
 // Snapshot is the household as the monitor currently understands it.
@@ -742,6 +749,7 @@ func (m *Monitor) read() Snapshot {
 			Reachable:  e.reachable,
 			State:      cloneState(e.state),
 			GroupState: cloneGroupState(e.groupState),
+			At:         e.at,
 		}
 	}
 	return out

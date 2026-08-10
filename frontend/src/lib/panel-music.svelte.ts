@@ -33,7 +33,7 @@ import { session, toasts } from "./stores.svelte";
 import { onLive } from "./live";
 import { kefSourceLabel } from "./kef";
 import { haptic } from "./utils";
-import { secs, toClock } from "./music/time";
+import { secs, toClock, sinceRead } from "./music/time";
 import { NEXT_REPEAT } from "./music/sonos.svelte";
 import { clock } from "./music/clock.svelte";
 import { clampVol, createVolumeThrottle } from "./music/volume";
@@ -107,10 +107,12 @@ export interface PanelSource {
     duration?: string;
     // KEF extras.
     input?: string; // current physical input
-    // KEF + zone extras: milliseconds, and when the reading was taken.
+    // KEF + zone extras: milliseconds. (Sonos speaks H:MM:SS, above.)
     positionMs?: number;
     durationMs?: number;
-    readAt?: number; // unix ms the reading was taken
+    /** Unix ms the reading was taken, on every make — what the position
+     *  extrapolates from, rather than from when the poll happened to land. */
+    readAt?: number
     // Zone extras.
     zone?: MediaZone;
     /** How content reaches a zone right now — what makes skip honest. */
@@ -399,8 +401,11 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
     let failed = $state(false);
     const busy = $state<Record<string, boolean>>({});
     let seq = 0;
-    /** Wall-clock of the last successful Sonos read — the position deriveds
-     *  advance from here so the rail creeps instead of stepping. */
+    /** Browser wall-clock of the last poll that got an answer from any
+     *  bridge. Every position derivation ticks from here so the rail creeps
+     *  instead of stepping — and pairs it with the reading's own `readAt`
+     *  (`sinceRead`), because a poll landing now does not mean the position
+     *  in it was read now. */
     let polledAt = 0;
 
     async function refresh() {
@@ -413,12 +418,19 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
                 : [api.sonosStatus(), api.kefStatus(), api.mediaZones()],
         );
         if (mine !== seq) return;
-        if (sonosRes.status === "fulfilled") {
-            status = sonosRes.value;
-            polledAt = Date.now();
-        }
+        if (sonosRes.status === "fulfilled") status = sonosRes.value;
         if (kefRes?.status === "fulfilled") kef = kefRes.value;
         if (zoneRes?.status === "fulfilled") zones = zoneRes.value;
+        // Any bridge answering stamps the pass: the positions below are all
+        // extrapolated from it, and a KEF that answered while Sonos was down
+        // still has a fresh reading to tick forward from.
+        if (
+            sonosRes.status === "fulfilled" ||
+            kefRes?.status === "fulfilled" ||
+            zoneRes?.status === "fulfilled"
+        ) {
+            polledAt = Date.now();
+        }
         failed =
             sonosRes.status === "rejected" &&
             kefRes?.status !== "fulfilled" &&
@@ -634,6 +646,8 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
                 queueTrack: st?.queue_track,
                 position: st?.position,
                 duration: st?.duration,
+                // The coordinator's, because its state is the group's.
+                readAt: c.read_at,
             });
         }
         for (const sp of kef?.speakers ?? []) {
@@ -779,15 +793,19 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
         const f = featured;
         if (!f) return 0;
         const now = Date.now();
+        // A just-issued seek is the user's own number on the user's own
+        // clock, so it advances from the tap rather than from any reading.
+        const held = seekOv && now - seekOv.at < 4000;
         if (f.kind === "sonos") {
-            const base = seekOv && now - seekOv.at < 4000 ? seekOv.sec : secs(f.position);
+            const base = held ? seekOv!.sec : secs(f.position);
             if (!f.playing || !polledAt) return base;
-            const adv = base + (now - (seekOv && now - seekOv.at < 4000 ? seekOv.at : polledAt)) / 1000;
+            const since = held ? (now - seekOv!.at) / 1000 : sinceRead(f.readAt, polledAt, now);
+            const adv = base + since;
             return durSec ? Math.min(durSec, adv) : adv;
         }
         const base = (f.positionMs ?? 0) / 1000;
-        if (!f.playing || !f.readAt) return base;
-        const adv = base + (now - f.readAt) / 1000;
+        if (!f.playing || !polledAt) return base;
+        const adv = base + sinceRead(f.readAt, polledAt, now);
         return durSec ? Math.min(durSec, adv) : adv;
     });
 
