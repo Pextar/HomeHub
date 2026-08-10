@@ -3,8 +3,34 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="theme-color" content="#14130f" />
+    <meta name="theme-color" content="__THEME_DARK__" />
     <meta name="description" content="Control 433MHz RF sockets from anywhere." />
+    <script>
+      // Settle the theme before the first paint. The bundle's theme store does
+      // the same thing, but it only runs once the module graph has loaded — so
+      // a light-mode device spent that whole time showing the dark `data-theme`
+      // baked into this file. The two placeholders are substituted at serve
+      // and build time by the themeColors plugin in vite.config.ts — don't
+      // paste hex in here; theme-colors.test.ts checks that nobody has.
+      (function () {
+        try {
+          var mode = localStorage.getItem("theme");
+          if (mode !== "dark" && mode !== "light") mode = "auto";
+          var resolved =
+            mode === "auto"
+              ? matchMedia("(prefers-color-scheme: light)").matches
+                ? "light"
+                : "dark"
+              : mode;
+          document.documentElement.dataset.theme = resolved;
+          document
+            .querySelector('meta[name="theme-color"]')
+            .setAttribute("content", resolved === "light" ? "__THEME_LIGHT__" : "__THEME_DARK__");
+        } catch (e) {
+          /* private browsing, or a browser without matchMedia — stay dark */
+        }
+      })();
+    </script>
     <title>HomeHub</title>
     <link rel="icon" href="/pwa-icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/pwa-icon.svg" />
