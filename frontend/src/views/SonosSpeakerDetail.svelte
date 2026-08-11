@@ -175,6 +175,22 @@
         return rows.filter((r) => r.value !== "");
     });
 
+    /**
+     * What the speaker is unhappy about, in the two fields that can say so —
+     * or "" when it isn't. Both are its own words and both have one normal
+     * value, so anything else is the thing worth naming. A battery that is
+     * simply low says so with its own number and needs no sentence.
+     */
+    const batteryComplaint = $derived.by(() => {
+        const b = settings?.battery;
+        if (!b) return "";
+        const parts: string[] = [];
+        if (b.health && b.health.toUpperCase() !== "GREEN") parts.push("battery health");
+        if (b.temperature && b.temperature.toUpperCase() !== "NORMAL") parts.push("temperature");
+        if (!parts.length) return "";
+        return `Speaker reports a problem with its ${parts.join(" and ")}`;
+    });
+
     const subline = $derived(
         [settings?.display_name || speaker.model, speaker.room].filter(Boolean).join(" · ")
             || "Speaker settings",
@@ -244,6 +260,27 @@
                 <span class="hero-sub mono">{settings.model_number}</span>
             {/if}
             <span class="hero-ip mono">{speaker.ip}</span>
+            <!-- Portable models only. A mains speaker reports nothing here
+                 and gets no row — an empty battery meter on a speaker that
+                 is plugged into a wall would be a reading of something that
+                 doesn't exist. -->
+            {#if settings?.battery}
+                {@const bat = settings.battery}
+                {@const low = bat.level <= 20 && !bat.charging}
+                <span class="hero-bat" class:low>
+                    <span class="bat-meter" aria-hidden="true">
+                        <i style:width="{Math.max(2, bat.level)}%"></i>
+                    </span>
+                    <span class="bat-pct mono">{bat.level}%</span>
+                    {#if bat.charging}<span class="bat-note">charging</span>{/if}
+                </span>
+                <!-- The speaker's own complaint, and only when it has one:
+                     a four-year-old Roam saying anything but GREEN/NORMAL is
+                     why someone opened this screen. -->
+                {#if batteryComplaint}
+                    <span class="hero-warn">{batteryComplaint}</span>
+                {/if}
+            {/if}
         </div>
     </section>
 
@@ -562,6 +599,43 @@
     .hero-name { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
     .hero-sub { font-size: 11px; color: var(--text-mute); }
     .hero-ip { font-size: 11px; color: var(--text-dim); }
+
+    /* Battery — a meter and its number, on the portable models only. Amber
+       like every other fill in the app; only a low battery off the charger
+       earns the alarm colour, because that is the only state anyone can do
+       something about. */
+    .hero-bat {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        margin-top: 4px;
+    }
+    .bat-meter {
+        width: 34px;
+        height: 8px;
+        border-radius: 4px;
+        background: var(--card-3);
+        overflow: hidden;
+        flex-shrink: 0;
+    }
+    .bat-meter i {
+        display: block;
+        height: 100%;
+        background: var(--on);
+        transition: width var(--t-med);
+    }
+    .hero-bat.low .bat-meter i { background: var(--bad); }
+    .bat-pct { font-size: 11px; color: var(--text-mute); }
+    .hero-bat.low .bat-pct { color: var(--bad); }
+    .bat-note { font-size: 11px; color: var(--text-dim); }
+    .hero-warn {
+        font-size: 11px;
+        color: var(--warn);
+        margin-top: 2px;
+    }
+    @media (prefers-reduced-motion: reduce) {
+        .bat-meter i { transition-duration: 0.001ms; }
+    }
 
     /* ── Cards ──
        The global rule is space-between, which would fling the title to the

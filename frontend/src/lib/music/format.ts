@@ -129,5 +129,54 @@ export function fmtDays(days?: number[]): string {
   if (set.length === 5 && set.every((d) => d >= 1 && d <= 5)) return "Weekdays";
   if (set.length === 2 && set.includes(0) && set.includes(6)) return "Weekends";
   const names = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-  return set.map((d) => names[d] ?? "").filter(Boolean).join(" ");
+  return set
+    .map((d) => names[d] ?? "")
+    .filter(Boolean)
+    .join(" ");
+}
+
+/** The fields any bridge's now-playing metadata may carry. */
+export interface TrackLike {
+  title?: string;
+  artist?: string;
+  album?: string;
+  /** Radio: what the station says is on air. */
+  stream?: string;
+  /** Radio: what the room is tuned to. */
+  station?: string;
+}
+
+/** The two lines every surface names a room's audio with. */
+export interface TrackLines {
+  title: string;
+  /** "" when there is nothing to say that the title doesn't already. */
+  sub: string;
+}
+
+/**
+ * What is playing, as a headline and a subline.
+ *
+ * A queued track answers this trivially — title over "artist · album" — and
+ * that is all this used to do, in five places that each did it themselves.
+ * A **radio stream doesn't fit that shape**: the song on air arrives in its
+ * own field (`stream`), and `title` holds the stream rather than the music,
+ * so a station played through the old rule announced itself as "P2" for
+ * three hours while the actual song went unnamed.
+ *
+ * So the rule is: the headline is the most specific thing the source knows —
+ * the song on air, else the track, else the station — and the subline is
+ * where it is coming from, or the record it is off. A line is never repeated
+ * across the two, because a card saying "P2" twice says it once.
+ */
+export function trackLines(t: TrackLike | null | undefined): TrackLines {
+  const meta = [t?.artist, t?.album].filter(Boolean).join(" · ");
+  const title = t?.stream || t?.title || t?.station || "";
+  // On air: the station is the source, and its own name for the stream is
+  // the fallback when the station didn't come through.
+  // On air: where it is coming from, in descending order of how specific
+  // the name is — the station, else the stream's own name for itself. Off a
+  // record: the record. Whichever it is, the first candidate that isn't
+  // already the headline wins, so no line is ever said twice.
+  const candidates = t?.stream ? [t.station, t.title, meta] : [meta, t?.station];
+  return { title, sub: candidates.find((c) => !!c && c !== title) ?? "" };
 }

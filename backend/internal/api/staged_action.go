@@ -88,6 +88,9 @@ func (s *Server) runStaged(a stagedAction) (label string, ok int, failures []map
 
 	if a.FlushLights {
 		s.Store.FlushLights()
+		// And the speakers, on the same terms — a scene's music is queued
+		// while it is staged (Store.QueueMusic).
+		s.Store.FlushMusic()
 	}
 	if err != nil {
 		return label, ok, failures, true, err

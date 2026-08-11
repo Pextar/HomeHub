@@ -182,6 +182,15 @@ type Track struct {
 	// documents, carried through rather than resolved here, because this
 	// package has no HTTP client and should not grow one.
 	ArtURI string `json:"art_uri,omitempty"`
+	// Stream and Station describe a live source rather than a track: what
+	// the station says is on air, and what the room is tuned to. Only the
+	// Sonos bridge fills them — a KEF reports a title and an artist for
+	// everything it plays and has no equivalent — and a surface that finds
+	// them absent falls back to the fields above rather than inventing a
+	// station name, which is the same capability honesty the rest of this
+	// package keeps.
+	Stream  string `json:"stream,omitempty"`
+	Station string `json:"station,omitempty"`
 }
 
 // NowPlaying is one endpoint's live state, normalised.

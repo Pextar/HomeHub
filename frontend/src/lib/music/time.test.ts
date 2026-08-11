@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { secs, trimClock, fmtSecs, toClock } from "./time";
+import { secs, trimClock, fmtSecs, toClock, sinceRead } from "./time";
 
 describe("secs", () => {
   it("parses the H:MM:SS Sonos sends", () => {
@@ -78,5 +78,37 @@ describe("toClock", () => {
     for (const t of [0, 1, 59, 60, 192, 3599, 3600, 3840, 86399]) {
       expect(secs(toClock(t))).toBe(t);
     }
+  });
+});
+
+describe("sinceRead", () => {
+  const POLL = 1_000_000;
+
+  it("counts from when the hub read the speaker, not from when we asked", () => {
+    // The whole point: the hub answered from its event cache with a position
+    // it had read 20s earlier, and the request itself took no time at all.
+    expect(sinceRead(POLL - 20_000, POLL, POLL)).toBe(20);
+    // …and it keeps ticking on our own clock afterwards.
+    expect(sinceRead(POLL - 20_000, POLL, POLL + 5_000)).toBe(25);
+  });
+
+  it("falls back to the old behaviour when the hub doesn't say", () => {
+    // An older hub, or a speaker that was never read. Guessing an age would
+    // be worse than the answer we already had.
+    expect(sinceRead(undefined, POLL, POLL)).toBe(0);
+    expect(sinceRead(undefined, POLL, POLL + 7_000)).toBe(7);
+  });
+
+  it("bounds two clocks that disagree", () => {
+    // A wall panel whose clock has drifted is the case this protects: the
+    // mixed-clock term is clamped, so the error is bounded rather than wild.
+    expect(sinceRead(POLL + 600_000, POLL, POLL)).toBe(0); // read "in the future"
+    expect(sinceRead(POLL - 600_000, POLL, POLL)).toBe(95); // impossibly old
+    // And whatever the skew, the part after the poll is our clock alone.
+    expect(sinceRead(POLL + 600_000, POLL, POLL + 3_000)).toBe(3);
+  });
+
+  it("never runs backwards if the browser clock steps back", () => {
+    expect(sinceRead(POLL - 10_000, POLL, POLL - 5_000)).toBe(10);
   });
 });

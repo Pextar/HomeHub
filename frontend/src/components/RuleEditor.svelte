@@ -103,6 +103,9 @@
     import Segmented from "./Segmented.svelte";
     import DayPicker from "./DayPicker.svelte";
     import Icon from "./Icon.svelte";
+    import MusicActionRows from "./MusicActionRows.svelte";
+    import { loadMediaRooms, type MediaRoomOption } from "../lib/media-rooms";
+    import { onMount } from "svelte";
     // isSmartProtocol is imported in the module script above (shared scope).
 
     interface Props {
@@ -112,6 +115,19 @@
         idPrefix: string;
     }
     let { draft = $bindable(), idPrefix }: Props = $props();
+
+    // The speakers and zones this rule can aim music at. Read once per
+    // editor: the list changes when somebody adds a speaker, which doesn't
+    // happen while a rule is being written.
+    let rooms = $state<MediaRoomOption[]>([]);
+    let roomsLoading = $state(true);
+    let roomsFailed = $state(false);
+    onMount(() => {
+        void loadMediaRooms()
+            .then((r) => (rooms = r))
+            .catch(() => (roomsFailed = true))
+            .finally(() => (roomsLoading = false));
+    });
 
     const v = data.value;
     const isSmart = isSmartProtocol;
@@ -593,9 +609,42 @@
             {/if}
         </div>
     {/each}
+
+    <!-- The other half of the house, under the same Then. A rule that turns
+         everything off and leaves a speaker playing to an empty room was the
+         gap this closes; the rows are the same ones a scene step gets. -->
+    <div class="then-music">
+        <span class="music-lbl">Music</span>
+        <MusicActionRows
+            bind:music={draft.music}
+            {rooms}
+            loading={roomsLoading}
+            failed={roomsFailed}
+            idPrefix="{idPrefix}-music"
+        />
+    </div>
 </div>
 
 <style>
+    /* Music under the socket actions, behind its own rule: part of the same
+       Then, not a fourth block that would need its own trigger. */
+    .then-music {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        margin-top: 10px;
+        padding-top: 10px;
+        border-top: 1px solid var(--hairline);
+    }
+    .music-lbl {
+        font-family: var(--font-mono);
+        font-size: 11px;
+        font-weight: 500;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--text-dim);
+    }
+
     /* ── WHEN / ONLY-IF / THEN blocks ─────────────────────────────── */
     .block {
         border: 1px solid var(--hairline);

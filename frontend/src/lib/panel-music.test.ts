@@ -104,7 +104,7 @@ vi.mock("./stores.svelte", () => ({
 vi.mock("./live", () => ({ onLive: () => () => {} }));
 
 const { api } = await import("./api");
-const { createPanelMusic } = await import("./panel-music.svelte");
+const { createPanelMusic, pollEveryMs } = await import("./panel-music.svelte");
 const { withRoot } = await import("../test-runes.svelte");
 
 // ── Fixtures ─────────────────────────────────────────────────────────────
@@ -328,6 +328,183 @@ describe("up next", () => {
     const h = await boot();
     expect(h.value.queueOrderKnown).toBe(false);
     expect(h.value.nextInQueue).toBeUndefined();
+    h.stop();
+  });
+});
+
+// ── How far through the track it says we are ─────────────────────────────
+
+describe("the position", () => {
+  const playingFor = (over: Partial<SonosSpeakerView>, position = "0:01:00") => {
+    sonosFixture = {
+      speakers: [
+        sonosSpeaker("kitchen", {
+          state: {
+            volume: 30,
+            muted: false,
+            playing: true,
+            track: { title: "One" },
+            position,
+            duration: "0:03:20",
+          } as never,
+          ...over,
+        }),
+      ],
+      groups: [{ coordinator_id: "kitchen", member_ids: ["kitchen"] }],
+    } as SonosStatus;
+  };
+
+  it("counts from when the hub read the speaker, not from when we polled", async () => {
+    // The hub answers from its event cache, and Sonos pushes track changes
+    // but never a position — so a reading can be half a minute old while the
+    // response carrying it is milliseconds old. Extrapolating from the
+    // request drew a rail well behind the song.
+    playingFor({ read_at: Date.now() - 20_000 });
+    const h = await boot();
+    expect(h.value.posSec).toBeGreaterThan(79);
+    expect(h.value.posSec).toBeLessThan(82);
+    h.stop();
+  });
+
+  it("falls back to the poll when the hub doesn't say", async () => {
+    playingFor({});
+    const h = await boot();
+    expect(h.value.posSec).toBeGreaterThan(59);
+    expect(h.value.posSec).toBeLessThan(62);
+    h.stop();
+  });
+
+  it("never runs past the end of the track", async () => {
+    // A reading old enough to overshoot is exactly what a stopped poll
+    // looks like; the rail pins at the end rather than claiming more.
+    playingFor({ read_at: Date.now() - 90_000 }, "0:03:00");
+    const h = await boot();
+    expect(h.value.posSec).toBe(200); // 3:20, not 4:30
+    h.stop();
+  });
+});
+
+// ── How often the wall asks ──────────────────────────────────────────────
+
+describe("the poll's cadence", () => {
+  it("crawls while the panel sleeps on a clock", () => {
+    expect(pollEveryMs({ idle: true, playing: false, live: false })).toBe(120_000);
+    // A quiet house is a clock whether or not the bridge can push.
+    expect(pollEveryMs({ idle: true, playing: false, live: true })).toBe(120_000);
+  });
+
+  it("keeps up while it sleeps on a record, which it is displaying", () => {
+    // The ambient face shows the track and how far through it is (§16), so
+    // asleep-on-a-record is a now-playing display rather than a screensaver.
+    expect(pollEveryMs({ idle: true, playing: true, live: false })).toBe(30_000);
+    expect(pollEveryMs({ idle: true, playing: true, live: true })).toBe(30_000);
+  });
+
+  it("still costs less asleep than one awake tab", () => {
+    const awake = pollEveryMs({ idle: false, playing: true, live: false });
+    expect(pollEveryMs({ idle: true, playing: true, live: false })).toBeGreaterThan(awake);
+  });
+
+  it("backs off awake when the bridge pushes its own changes", () => {
+    expect(pollEveryMs({ idle: false, playing: true, live: true })).toBe(45_000);
+    expect(pollEveryMs({ idle: false, playing: true, live: false })).toBe(15_000);
+  });
+});
+
+// ── What the sleeping wall says ──────────────────────────────────────────
+
+describe("the ambient face", () => {
+  const playingKitchen = (
+    state: Record<string, unknown> = {},
+    gs: Record<string, unknown> = {},
+    bedroomPlaying = false,
+  ) => {
+    sonosFixture = {
+      speakers: [
+        sonosSpeaker("kitchen", {
+          state: {
+            volume: 30,
+            muted: false,
+            playing: true,
+            queue_track: 2,
+            track: { title: "Sixteen Going On Seventeen", artist: "Band", album: "Record" },
+            position: "0:01:00",
+            duration: "0:03:20",
+            ...state,
+          } as never,
+          group_state: {
+            shuffle: false,
+            repeat: "off",
+            crossfade: false,
+            queue_length: 12,
+            from_queue: true,
+            ...gs,
+          } as never,
+        }),
+        sonosSpeaker("bedroom", {
+          state: { volume: 20, muted: false, playing: bedroomPlaying } as never,
+        }),
+      ],
+      groups: [
+        { coordinator_id: "kitchen", member_ids: ["kitchen"] },
+        { coordinator_id: "bedroom", member_ids: ["bedroom"] },
+      ],
+    } as SonosStatus;
+    queueFixture = [
+      { track: 1, title: "One" },
+      { track: 2, title: "Two" },
+      { track: 3, title: "Three", artist: "Band", album: "Record" },
+    ] as SonosQueueItem[];
+  };
+
+  it("names the record, the room and where it is in the queue", async () => {
+    playingKitchen();
+    const h = await boot();
+    const np = h.value.nowPlaying;
+
+    expect(np?.title).toBe("Sixteen Going On Seventeen");
+    // The room is its own fact now, not the tail of the artist line: the
+    // face gives it a row beside the waveform.
+    expect(np?.sub).toBe("Band · Record");
+    expect(np?.room).toBe("kitchen");
+    expect(np?.queueTrack).toBe(2);
+    expect(np?.queueLength).toBe(12);
+    expect(np?.next).toEqual({ title: "Three", sub: "Band · Record" });
+    h.stop();
+  });
+
+  it("shows nothing at all in a quiet house", async () => {
+    const h = await boot();
+    expect(h.value.nowPlaying).toBeNull();
+    h.stop();
+  });
+
+  it("withholds the queue position on a stream, which is nowhere in a queue", async () => {
+    // Radio and line-in report no track number. "2 of 0" is worse than
+    // saying nothing (§15.1 applied to a fact rather than a control).
+    playingKitchen({ queue_track: undefined, duration: "" }, { from_queue: false, queue_length: 0 });
+    const h = await boot();
+
+    expect(h.value.nowPlaying?.queueTrack).toBeUndefined();
+    expect(h.value.nowPlaying?.queueLength).toBeUndefined();
+    h.stop();
+  });
+
+  it("names no next track under shuffle, where the speaker picks its own", async () => {
+    playingKitchen({}, { shuffle: true });
+    const h = await boot();
+
+    expect(h.value.nowPlaying?.next).toBeUndefined();
+    expect(h.value.nowPlaying?.queueTrack).toBe(2); // still a fact
+    h.stop();
+  });
+
+  it("says which other rooms are playing, and never counts the featured one", async () => {
+    playingKitchen({}, {}, true);
+    const h = await boot();
+
+    expect(h.value.nowPlaying?.room).toBe("kitchen");
+    expect(h.value.nowPlaying?.elsewhere).toEqual(["bedroom"]);
     h.stop();
   });
 });

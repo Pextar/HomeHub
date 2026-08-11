@@ -175,6 +175,11 @@ func (s *Server) Handler() http.Handler {
 	// also flow through Store.ApplyState.
 	s.Store.OnChange = s.events.broadcast
 
+	// Let a scene or an automation reach the speakers. The store holds the
+	// actions and knows nothing about how a room is reached; this is the
+	// half that does (scene_music.go).
+	s.Store.OnMusic = s.runSceneMusic
+
 	// Wire push notification callbacks when the push service is available.
 	if s.Push != nil {
 		s.Store.OnStateChange = func(socket store.Socket, newState bool) {

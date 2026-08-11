@@ -7,7 +7,10 @@
     import { data, toasts } from "../lib/stores.svelte";
     import { sortedSockets, isSmartProtocol } from "../lib/utils";
     import { untrack } from "svelte";
-    import type { Scene, SceneStep, SceneAccent } from "../lib/types";
+    import MusicActionRows from "../components/MusicActionRows.svelte";
+    import { loadMediaRooms, type MediaRoomOption } from "../lib/media-rooms";
+    import { onMount } from "svelte";
+    import type { Scene, SceneStep, SceneAccent, MusicAction } from "../lib/types";
 
     interface Props { existing?: Scene | null; }
     let { existing = null }: Props = $props();
@@ -39,6 +42,8 @@
         perSocket: Record<string, "ignore" | "on" | "off">;
         levels: Record<string, number>;
         colors: Record<string, string>;
+        /** What this step does to the speakers, beside the sockets. */
+        music: MusicAction[];
     };
 
     function blankStepState(delay = 0): StepState {
@@ -47,6 +52,7 @@
             perSocket: Object.fromEntries(sockets.map(s => [s.id, "ignore" as const])),
             levels:    Object.fromEntries(sockets.map(s => [s.id, 100])),
             colors:    Object.fromEntries(sockets.map(s => [s.id, ""])),
+            music:     [],
         };
     }
 
@@ -62,7 +68,15 @@
             if (a.level != null) levels[a.socket_id] = a.level;
             if (a.color)         colors[a.socket_id] = a.color;
         }
-        return { delay_minutes: step.delay_minutes, perSocket, levels, colors };
+        return {
+            delay_minutes: step.delay_minutes,
+            perSocket,
+            levels,
+            colors,
+            // Copied, not shared: the rows are edited in place and the saved
+            // scene must not change under the editor before Save is pressed.
+            music: (step.music ?? []).map(m => ({ ...m })),
+        };
     }
 
     let steps = $state<StepState[]>(untrack(() => {
@@ -81,7 +95,8 @@
 
     // Auto-expand snapshot section if the existing scene has configured devices.
     const existingHasSnapshot = untrack(() =>
-        !!(existing?.steps?.some(s => s.actions.length > 0) || existing?.actions?.length)
+        !!(existing?.steps?.some(s => s.actions.length > 0 || (s.music?.length ?? 0) > 0)
+            || existing?.actions?.length)
     );
     let snapshotOpen = $state(true);
 
@@ -195,8 +210,25 @@
                     }
                     return a;
                 }),
-        })).filter(s => s.actions.length > 0);
+            music: step.music,
+        })).filter(s => s.actions.length > 0 || s.music.length > 0);
     }
+
+    // The speakers and zones a step can aim music at. Read once when the
+    // editor opens: the list changes when somebody adds a speaker, which is
+    // not something that happens while a scene is being written.
+    let rooms = $state<MediaRoomOption[]>([]);
+    let roomsLoading = $state(true);
+    let roomsFailed = $state(false);
+    onMount(() => {
+        void loadMediaRooms()
+            .then((r) => (rooms = r))
+            .catch(() => (roomsFailed = true))
+            .finally(() => (roomsLoading = false));
+    });
+
+    /** How many rooms this scene speaks to, for the section's own count. */
+    const musicCount = $derived(steps.reduce((n, st) => n + st.music.length, 0));
 
     // ── Form state ─────────────────────────────────────────────────────
     let name = $state(untrack(() => existing?.name ?? ""));
@@ -334,8 +366,15 @@
                         <Icon name="chevronDown" size={14} />
                     </span>
                     <span class="form-sec-label">Lights &amp; devices</span>
-                    {#if !snapshotOpen && snapshotDeviceCount > 0}
-                        <span class="snapshot-count mono">{snapshotDeviceCount} device{snapshotDeviceCount > 1 ? "s" : ""}</span>
+                    {#if !snapshotOpen && (snapshotDeviceCount > 0 || musicCount > 0)}
+                        <span class="snapshot-count mono">
+                            {[
+                                snapshotDeviceCount > 0
+                                    ? `${snapshotDeviceCount} device${snapshotDeviceCount > 1 ? "s" : ""}`
+                                    : "",
+                                musicCount > 0 ? `${musicCount} room${musicCount > 1 ? "s" : ""} of music` : "",
+                            ].filter(Boolean).join(" · ")}
+                        </span>
                     {/if}
                 </button>
 
@@ -503,6 +542,21 @@
                                                 <span class="mono">{hiddenConfigured(step)}</span> configured device{hiddenConfigured(step) === 1 ? "" : "s"} hidden by this filter
                                             </div>
                                         {/if}
+                                    </div>
+
+                                    <!-- The other half of the house. A scene
+                                         is a moment, and until this existed a
+                                         moment could dim the lamps but not
+                                         quiet the room. -->
+                                    <div class="step-music">
+                                        <span class="music-lbl">Music</span>
+                                        <MusicActionRows
+                                            bind:music={step.music}
+                                            {rooms}
+                                            loading={roomsLoading}
+                                            failed={roomsFailed}
+                                            idPrefix="scene-step-{i}"
+                                        />
                                     </div>
                                 </div>
                             {/each}
@@ -682,6 +736,25 @@
 
     /* ── Steps (inside snapshot) ────────────────────────────────── */
     .steps-wrap { display: flex; flex-direction: column; gap: 10px; }
+
+    /* Music sits under the devices inside the same step card, behind its own
+       rule: it is part of what the step does, not a separate section that
+       would have to repeat the step's timing. */
+    .step-music {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        padding: 12px;
+        border-top: 1px solid var(--hairline);
+    }
+    .music-lbl {
+        font-family: var(--font-mono);
+        font-size: 11px;
+        font-weight: 500;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--text-dim);
+    }
     .step-card {
         border: 1px solid var(--border);
         border-radius: var(--radius-md);

@@ -203,6 +203,7 @@ func (e *autoEngine) execute(st *store.Store, a store.Automation, ruleIdx int, n
 	// stall the scheduler tick or the API.
 	st.Mu.Lock()
 	staged := st.StageAutomationActions(actions)
+	st.QueueMusic(a.Rules[ruleIdx].Music)
 	st.Mu.Unlock()
 
 	st.SendStaged(staged)
@@ -232,6 +233,7 @@ func (e *autoEngine) execute(st *store.Store, a store.Automation, ruleIdx int, n
 	}
 	st.Mu.Unlock()
 	st.FlushLights() // off-lock bridge calls for scene brightness/colour
+	st.FlushMusic()  // and the speakers, on the same terms
 
 	if firstErr == nil {
 		log.Printf("automation fired: %s (%s)", a.Name, a.ID)

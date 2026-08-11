@@ -807,10 +807,37 @@ _which device_. Nothing appears on two of them.
   queue and only if it was heard playing within the last quarter hour. **A
   pause is a decision.** Nothing autoplay does may restart a room somebody
   paused, or wake one that has been quiet all evening.
+- **A live source names itself differently, and the UI asks once.** A queued
+  track is a title over "artist · album"; a **radio stream isn't that shape**
+  — the song on air arrives in Sonos' own `r:streamContent` and `dc:title`
+  holds the stream rather than the music, so a station rendered by the track
+  rule announced itself as "P2" for three hours while the song went unnamed.
+  The wire carries both facts (`stream`, `station`) rather than one
+  flattened line, and `trackLines` in `lib/music/format.ts` is the single
+  place that turns them into a headline and a subline: the most specific
+  name the source knows — song on air, else track, else station — over
+  where it is coming from, and never the same string twice. Five surfaces
+  used to assemble those two lines themselves; a sixth must call this
+  instead. Nothing is invented on the way: "Artist - Title" is a habit
+  stations have, not a format, so the line is never split.
 - **Progress rides on the playing surface.** A 2px hairline along a card's
   bottom edge (`ProgressLine`), extrapolated between polls by `clock.beat`
   so it creeps rather than stepping. Zero duration renders nothing at all
   rather than a made-up position.
+- **A position is extrapolated from when the speaker was _read_, never from
+  when we asked** (`sinceRead` in `lib/music/time.ts`). The two are not the
+  same and the gap is not small: the hub answers a status poll from its
+  event cache, and Sonos pushes a track change but never a `RelTime`, so
+  the position is as old as the last authoritative read — up to a resync
+  interval — while the response carrying it is milliseconds old. Counting
+  from the request ran that whole gap into every scrubber and hairline in
+  the app: a rail reading 45% on a song 53% through. Every make now states
+  when its reading was taken (`read_at`, already KEF's convention), the
+  hub's clock is mixed with the browser's exactly once — at the poll, and
+  clamped, so a wall panel with a drifting clock gets a bounded error
+  rather than a wild one — and everything after the poll ticks on the
+  browser's clock alone. A reading with no timestamp falls back to counting
+  from the poll rather than inventing an age.
 
 ### 15.6 Screens, sheets and getting back
 
@@ -1025,7 +1052,8 @@ _up one_.
   play-next, remove, clear), and — per speaker — bass, treble, loudness, the
   home-theatre EQ block (night mode, speech enhancement, sub on/off + level,
   surround), the status LED, the touch-control lock, the group sleep timer,
-  the serial/firmware/MAC block and the device's own product image.
+  the serial/firmware/MAC block, the device's own product image and — on the
+  portable models only — the battery.
   It does **not** expose line-in or TV sources, music-library browsing beyond
   favorites, stereo balance, renaming a speaker's Sonos-side zone name, or
   creating and breaking stereo pairs — so there is no UI for any of those.
@@ -1046,6 +1074,31 @@ _up one_.
     Only _state_ — what is playing, how loud, grouped with what — belongs in
     the status poll. Adding a setting to that poll would cost every open tab
     eleven extra calls per speaker every five seconds to watch nothing happen.
+    **The battery is the one deliberate exception**, and it proves the rule
+    rather than breaking it: it is state, but state that moves over hours, so
+    polling the whole house every five seconds to watch 84 become 83 is
+    exactly the cost this is here to prevent. It is read with the snapshot,
+    on a screen someone opened, and is stale by minutes at worst. It is also
+    the only thing in the bridge that isn't UPnP — a plain document at
+    `/status/batterystatus` — and the ask *is* the capability probe, the same
+    as the EQ block above: a mains speaker answers nothing and the field
+    stays absent, which is a different statement from a flat battery and must
+    render differently.
+- **A scene or an automation can quiet a room, and that is all it can do to
+  the music.** Until it could, the house was two houses: "Film" dimmed the
+  lamps and left the kitchen radio on, "everyone's out" switched off every
+  socket and played to an empty room, and the master All off meant all
+  *sockets* off. A step or a rule now carries music rows beside its socket
+  actions — one per room, one of **pause / resume / set volume**
+  (`components/MusicActionRows.svelte`, the one row shape both editors use).
+  The three verbs are the ones that need nothing but a room. **There is no
+  "play this" here**, deliberately: a scene expresses a *moment*, and
+  starting a particular record needs something named to start, which is what
+  the music timers are (§16). A control that can't finish its own sentence
+  is worse than one that isn't there — §15.1, applied to an editor. A room
+  already spoken for is absent from the next row's picker rather than
+  offered and refused on save, and a room that is deleted takes its rows
+  with it, the same promise `CascadeDeleteSocket` makes for sockets.
 - **KEF is a second bridge, not a second Sonos.** `internal/kef` speaks the
   local HTTP API on KEF's wireless speakers (LS50 Wireless II, LSX II, LS60).
   It sits _beside_ the Sonos bridge, and the shared layer above them
@@ -1433,11 +1486,13 @@ pair coherent:
   walks the device back to `#/panel?idle=1` — arriving on the ambient
   face, not waking the UI. Open modals are dismissed first: a kiosk must
   never strand a sheet over its home screen.
-- **The ambient face carries music.** While something plays, the idle face
-  adds one line under the status — art thumbnail, track, "Artist · Album ·
-  Zone" (`PanelNowPlaying`, fed by the same binding that sizes the music
-  column). The clock stays the subject; playback is the footnote. Nothing
-  playing, nothing shown.
+- **The ambient face carries music, and while a record is on it _is_ the
+  music.** The face has two subjects and swaps between them: nothing
+  playing, the clock is the subject; something playing, the panel rests on
+  the listening face instead (`PanelAmbientMusic`, fed by `PanelNowPlaying`
+  off the same shared store the band reads). It is one face either way —
+  the same fade, the same drift, the same tap to wake, the same night
+  dimming — not a second screen. What it says is §16's own rule below.
 
 The reference hardware is an iPad Air 2 — 1024×768, Safari 15, an A8X that
 drops frames on blur and stacked shadows. Every rule below is that
@@ -1569,7 +1624,9 @@ constraint made visible.
 - **Type and targets are distance-scaled, not phone-scaled — and each band
   is scaled to its own job.** The strip's clock is 32px, because on the
   dashboard the clock is a fact you glance at; the ambient face is where
-  the clock is the *subject*, at `clamp(104px, 20vw, 168px)`. Stat figures
+  the clock is the *subject*, at `clamp(104px, 20vw, 168px)` — and on the
+  listening face, where the record is the subject and the column beside it
+  has a great deal else to say, `clamp(48px, 9vw, 112px)`. Stat figures
   19px over an 11px label; band tile names 14px over an 11.5px status line
   (19px in the room grid, where there is height to spend); track title 19px
   on the band *and* in the depth's column, 22px on the full player, which
@@ -1661,7 +1718,16 @@ constraint made visible.
   that waits. Only a home with no speakers registered at all loses the
   column. The same reasoning runs the poll: while the ambient face is up
   the panel is a clock, so the backstop drops to two minutes and a pushed
-  change still lands at once.
+  change still lands at once. **Asleep on a record is the exception, and
+  it is not really asleep** — the listening face is *displaying* the track
+  and how far through it is, so it keeps a 30s backstop instead of the
+  two-minute one. A now-playing display that is two minutes behind is
+  wrong rather than economical, and the rooms it is wrong about are
+  exactly the ones with nothing to push: a Sonos household wakes the poll
+  on its own events, a KEF and a zone never do. It is still half the
+  awake rate, because a wall asleep on a record must not cost more than
+  one open browser tab. The whole rule is `pollEveryMs`, stated once and
+  under test rather than spelled out inside the effect that uses it.
 - **A gesture that takes several calls is one request, and the hub makes
   them.** The wall is the slowest client this app has — a 2015 iPad on
   household Wi-Fi — and it is also the one most likely to be walked away
@@ -1904,11 +1970,11 @@ constraint made visible.
     dismiss a card, so the confirmation names the rooms that heard it,
     and the strip goes away a few seconds later.
 - **The ambient face has two subjects: the clock, and the record.** While
-  something is playing, the panel rests on the **listening face** — the
-  cover at the size a record deserves, with the clock demoted beside it
-  and the status line under the track. It replaced a 40px thumbnail under
-  a full-size clock, which spent the most-looked-at surface the panel has
-  on the least interesting thing in the room. It is one face with two
+  something is playing, the panel rests on the **listening face**
+  (`PanelAmbientMusic`) — the cover at the size a record deserves, with a
+  column of facts beside it. It replaced a 40px thumbnail under a
+  full-size clock, which spent the most-looked-at surface the panel has on
+  the least interesting thing in the room. It is one face with two
   subjects and not a second screen: the same fade, the same
   minute-by-minute drift, the same tap to wake, and the same night
   dimming. The cover is sized in viewport units and capped rather than
@@ -1916,6 +1982,41 @@ constraint made visible.
   is no reading that could chase its own tail (contrast the band and the
   full player, which both measure). Nothing playing, and the clock is the
   subject again.
+  - **The column says everything about the record that a tap isn't needed
+    for**, in one order, most important first: clock, title, artist and
+    album, how far through, which room, what's next, what else is
+    playing, and the house's own two figures. This is the one surface in
+    the app with the space *and* the attention for all of it — a wall
+    shows one record for three or four minutes, and nobody is standing at
+    it waiting to act. Everywhere else the same facts are a tap away and
+    the screen is better spent on controls.
+  - **Every line below the title is absent when the room can't answer
+    it**, exactly as a control would be (§15.1). Radio reports no
+    duration, so there is no rail and no fabricated position; it is in no
+    queue, so there is no "4 / 18"; a shuffled group has no knowable next
+    track (`queueOrderKnown`), so nothing claims one; a house with one
+    room playing has no "also playing". A station on in the kitchen
+    collapses back to almost exactly the face this grew out of.
+  - **A title too long for the column rolls** (`PanelMarquee`). Everywhere
+    else in the app an ellipsis is right — a title is read at arm's length
+    by someone who can tap it — but this is the surface with no one at it,
+    and a name that ended in "…" for the length of a song had no other way
+    to be read. It only moves when it has to (the overrun is measured; a
+    title that fits animates nothing at all), it holds at both ends and
+    comes back rather than looping, so a glance in passing lands on the
+    start of the name far more often than the middle, and it is one
+    composited transform — the A8X rule (§16) applies to scenery too.
+    **Only the title rolls.** One thing moving on a resting screen reads
+    as the record announcing itself; two read as a ticker, so the artist
+    line truncates. Under reduced motion the roll is *the ellipsis back*,
+    not a 0.001ms animation: the point of the motion is to reveal the rest
+    of the name over time, and with the motion gone there is nothing to
+    collapse.
+  - **The position is read live, never carried.** `PanelNowPlaying` is
+    rebuilt when the poll brings a new track; the seconds elapsed come
+    from `posSec` / `durSec` on each beat (§15.1). Folding a ticking value
+    into that object would rebuild every field on it once a second, on a
+    screen that stays lit for years.
 - **On the music depth, a song plays; an artist opens.** The wall keeps
   the flat gesture where it's about starting sound: a song found by
   search plays, an album or playlist plays whole — the player names what

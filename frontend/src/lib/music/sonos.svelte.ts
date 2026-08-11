@@ -10,8 +10,9 @@ import type {
 } from "../types";
 import type { Busy } from "./busy.svelte";
 import { clock } from "./clock.svelte";
-import { secs, toClock } from "./time";
+import { secs, toClock, sinceRead } from "./time";
 import { clampVol, createVolumeThrottle } from "./volume";
+import { trackLines } from "./format";
 
 /**
  * The Sonos bridge, as state: the topology poll, the optimistic overrides
@@ -224,11 +225,14 @@ export function createSonosBridge(busy: Busy): SonosBridge {
 
   function positionOf(g: SonosGroupView): number {
     void clock.beat; // re-derive once a second
-    const st = coordinatorOf(g)?.state;
+    const c = coordinatorOf(g);
+    const st = c?.state;
     const base = secs(st?.position);
     if (!isPlaying(g) || !s.polledAt) return base;
     const total = secs(st?.duration);
-    const advanced = base + (Date.now() - s.polledAt) / 1000;
+    // From when the hub read the speaker, not from when we polled it — the
+    // two are the same only when the hub had to go and ask (`sinceRead`).
+    const advanced = base + sinceRead(c?.read_at, s.polledAt, Date.now());
     return total ? Math.min(total, advanced) : advanced;
   }
 
@@ -380,9 +384,9 @@ export function createSonosBridge(busy: Busy): SonosBridge {
 
     speakerNowLine(id) {
       const g = groupOfSpeaker(id);
-      const st = g && coordinatorOf(g)?.state;
-      if (!st?.track?.title) return "Idle";
-      return isPlaying(g) ? st.track.title : `Paused · ${st.track.title}`;
+      const line = trackLines(g && coordinatorOf(g)?.state?.track).title;
+      if (!line) return "Idle";
+      return isPlaying(g) ? line : `Paused · ${line}`;
     },
 
     joinables: (g) => reachable.filter((x) => !g.member_ids.includes(x.id)),
@@ -403,15 +407,19 @@ export function createSonosBridge(busy: Busy): SonosBridge {
     livePosition(g) {
       void clock.beat; // re-derive once a second
       if (!g) return 0;
-      const st = coordinatorOf(g)?.state;
+      const c = coordinatorOf(g);
+      const st = c?.state;
       const total = secs(st?.duration);
       const now = Date.now();
       const ov = seekOverride;
       const held = ov && now - ov.at < 4000;
       const base = held ? ov.sec : secs(st?.position);
-      const since = held ? ov.at : s.polledAt;
-      if (!isPlaying(g) || !since) return base;
-      const advanced = base + (now - since) / 1000;
+      if (!isPlaying(g) || (!held && !s.polledAt)) return base;
+      // A held seek is the user's own number on the user's own clock, so it
+      // ticks from the tap; the speaker's own position ticks from when the
+      // hub read it (`sinceRead`).
+      const since = held ? (now - ov.at) / 1000 : sinceRead(c?.read_at, s.polledAt, now);
+      const advanced = base + since;
       return total ? Math.min(total, advanced) : advanced;
     },
 

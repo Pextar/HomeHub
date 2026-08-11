@@ -15,6 +15,16 @@ export interface SonosTrack {
   album?: string;
   /** Absolute URL or an /api/sonos/{id}/art proxy path — usable as <img src> directly. */
   art_uri?: string;
+  /**
+   * What a radio station says is on air right now, as one free-text line in
+   * whatever shape the station sends it — usually "Artist - Title", but that
+   * is a habit rather than a format, so the backend never splits it.
+   * Present only on a live source, and only while it has something to say.
+   */
+  stream?: string;
+  /** What the room is tuned to — the *media*'s name rather than the track's.
+   *  Only ever filled for a source with no duration. */
+  station?: string;
   /** The canonical "spotify:track:…" for what is playing, recovered from the
    *  speaker's own resource string. Absent on radio, line-in and anything
    *  that isn't Spotify — surfaces that need it render only where it is. */
@@ -62,6 +72,13 @@ export interface SonosQueueItem {
 export interface SonosSpeakerView extends SonosSpeaker {
   reachable: boolean;
   state?: SonosState;
+  /**
+   * Unix ms the reading was taken — extrapolate position from this, not from
+   * when the request landed. The hub usually answers from its event cache,
+   * and Sonos events carry a track change but never a position, so `state`
+   * can be a resync interval older than the response carrying it.
+   */
+  read_at?: number;
   group_state?: SonosGroupState;
   /** HomeHub's own "continue with similar music once the queue runs out"
    *  setting for this coordinator — a preference layered on top of what the
@@ -165,6 +182,22 @@ export interface SonosZoneInfo {
  * absent means "this model doesn't have it", which is a different statement
  * from a zero value — check `capabilities` rather than truthiness.
  */
+/**
+ * A portable speaker's power state — Roam, Move and nothing else. Absent on
+ * every mains model, which is a different statement from a flat battery and
+ * has to stay distinguishable.
+ */
+export interface SonosBattery {
+  /** Charge percentage, 0–100. */
+  level: number;
+  /** Drawing power rather than draining — the ring, USB or a dock. */
+  charging: boolean;
+  /** The speaker's own words, worth showing only when they aren't the
+   *  normal ones ("GREEN" / "NORMAL"). Absent when it didn't say. */
+  health?: string;
+  temperature?: string;
+}
+
 export interface SonosSettings {
   capabilities: SonosCapabilities;
   bass?: number;      // -10…10
@@ -186,6 +219,8 @@ export interface SonosSettings {
   display_name?: string;
   /** The speaker publishes a picture of itself — otherwise use the placeholder. */
   has_image: boolean;
+  /** Portable models only; absent means this speaker runs on mains. */
+  battery?: SonosBattery;
 }
 
 /**

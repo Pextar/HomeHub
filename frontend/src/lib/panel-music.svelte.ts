@@ -33,7 +33,8 @@ import { session, toasts } from "./stores.svelte";
 import { onLive } from "./live";
 import { kefSourceLabel } from "./kef";
 import { haptic } from "./utils";
-import { secs, toClock } from "./music/time";
+import { secs, toClock, sinceRead } from "./music/time";
+import { trackLines } from "./music/format";
 import { NEXT_REPEAT } from "./music/sonos.svelte";
 import { clock } from "./music/clock.svelte";
 import { clampVol, createVolumeThrottle } from "./music/volume";
@@ -107,10 +108,12 @@ export interface PanelSource {
     duration?: string;
     // KEF extras.
     input?: string; // current physical input
-    // KEF + zone extras: milliseconds, and when the reading was taken.
+    // KEF + zone extras: milliseconds. (Sonos speaks H:MM:SS, above.)
     positionMs?: number;
     durationMs?: number;
-    readAt?: number; // unix ms the reading was taken
+    /** Unix ms the reading was taken, on every make — what the position
+     *  extrapolates from, rather than from when the poll happened to land. */
+    readAt?: number
     // Zone extras.
     zone?: MediaZone;
     /** How content reaches a zone right now — what makes skip honest. */
@@ -336,9 +339,30 @@ export interface PanelMusicStore {
 
 const POLL_MS = 15_000;
 const LIVE_POLL_MS = 45_000;
-/** Asleep on the ambient face: the screen shows a clock, so the speakers
- *  only need catching up with often enough that waking is current. */
+/** Asleep on the ambient face with a quiet house: the screen shows a clock,
+ *  so the speakers only need catching up with often enough that waking is
+ *  current. */
 const IDLE_POLL_MS = 120_000;
+/** Asleep on the ambient face with a record on. The face is *showing* the
+ *  track and how far through it is (§16), so this is not a sleeping screen
+ *  in the sense the number above was chosen for — it is a now-playing
+ *  display, and a display that is two minutes behind is wrong rather than
+ *  economical. Still half the awake rate: a wall asleep on a record must
+ *  not cost more than one open browser tab. */
+const IDLE_PLAYING_POLL_MS = 30_000;
+
+/**
+ * How often to ask, given what the panel is doing and what the bridge can
+ * do. Pure and exported so the rule is one statement under test rather than
+ * a nested ternary inside an effect.
+ *
+ * `live` is the Sonos event monitor answering from its own cache: pushed
+ * changes already wake the poll, so the interval is only a backstop.
+ */
+export function pollEveryMs(opts: { idle: boolean; playing: boolean; live: boolean }): number {
+    if (opts.idle) return opts.playing ? IDLE_PLAYING_POLL_MS : IDLE_POLL_MS;
+    return opts.live ? LIVE_POLL_MS : POLL_MS;
+}
 
 /** KEF inputs a skip means anything on. There is nothing to step through
  *  on the TV or the analog input — the speaker would simply refuse. */
@@ -378,8 +402,11 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
     let failed = $state(false);
     const busy = $state<Record<string, boolean>>({});
     let seq = 0;
-    /** Wall-clock of the last successful Sonos read — the position deriveds
-     *  advance from here so the rail creeps instead of stepping. */
+    /** Browser wall-clock of the last poll that got an answer from any
+     *  bridge. Every position derivation ticks from here so the rail creeps
+     *  instead of stepping — and pairs it with the reading's own `readAt`
+     *  (`sinceRead`), because a poll landing now does not mean the position
+     *  in it was read now. */
     let polledAt = 0;
 
     async function refresh() {
@@ -392,12 +419,19 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
                 : [api.sonosStatus(), api.kefStatus(), api.mediaZones()],
         );
         if (mine !== seq) return;
-        if (sonosRes.status === "fulfilled") {
-            status = sonosRes.value;
-            polledAt = Date.now();
-        }
+        if (sonosRes.status === "fulfilled") status = sonosRes.value;
         if (kefRes?.status === "fulfilled") kef = kefRes.value;
         if (zoneRes?.status === "fulfilled") zones = zoneRes.value;
+        // Any bridge answering stamps the pass: the positions below are all
+        // extrapolated from it, and a KEF that answered while Sonos was down
+        // still has a fresh reading to tick forward from.
+        if (
+            sonosRes.status === "fulfilled" ||
+            kefRes?.status === "fulfilled" ||
+            zoneRes?.status === "fulfilled"
+        ) {
+            polledAt = Date.now();
+        }
         failed =
             sonosRes.status === "rejected" &&
             kefRes?.status !== "fulfilled" &&
@@ -423,7 +457,7 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
     const livePush = $derived(!!status?.live);
 
     // The panel tells the store when it falls asleep, so the poll can slow
-    // to a crawl while the ambient face is up. A pushed change still wakes
+    // right down while the ambient face is up. A pushed change still wakes
     // it immediately — this only changes the backstop's cadence.
     let idle = $state(false);
 
@@ -433,7 +467,12 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
         const onVisible = () => {
             if (!document.hidden) void refresh();
         };
-        const every = idle ? IDLE_POLL_MS : livePush ? LIVE_POLL_MS : POLL_MS;
+        // `anyPlaying` belongs in here for the same reason `livePush` does,
+        // and with the same care: it is a *derived boolean*, so the effect
+        // re-runs when the house starts or stops playing and not on every
+        // poll. Reading `status` directly here would retrigger forever,
+        // since refresh() reassigns it.
+        const every = pollEveryMs({ idle, playing: anyPlaying, live: livePush });
         const t = setInterval(onVisible, every);
         const stopLive = onLive("music", () => {
             if (!document.hidden) void refresh();
@@ -513,6 +552,7 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
               )
             : 0;
         const at = lead?.state?.at ? Date.parse(lead.state.at) : NaN;
+        const zoneLines = trackLines(lead?.state?.track);
         return {
             key: "z:" + z.id,
             kind: "zone",
@@ -527,10 +567,8 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
             // On the stream route HomeHub is the Spotify device and the
             // speakers pull a live stream: `next` is a call they refuse.
             canSkip: z.route !== "stream",
-            trackTitle: lead?.state?.track?.title,
-            trackSub: [lead?.state?.track?.artist, lead?.state?.track?.album]
-                .filter(Boolean)
-                .join(" · "),
+            trackTitle: zoneLines.title || undefined,
+            trackSub: zoneLines.sub,
             trackArtist: lead?.state?.track?.artist,
             art: lead?.state?.track?.art_uri,
             members:
@@ -576,6 +614,7 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
             const groupVolume = memberVols.length
                 ? Math.round(memberVols.reduce((a, b) => a + b, 0) / memberVols.length)
                 : (st?.volume ?? 0);
+            const lines = trackLines(st?.track);
             out.push({
                 key: "s:" + g.coordinator_id,
                 kind: "sonos",
@@ -590,8 +629,11 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
                 // what the button then did.
                 muted: members.length > 0 && members.every((x) => !!x.state?.muted),
                 canSkip: true,
-                trackTitle: st?.track?.title,
-                trackSub: [st?.track?.artist, st?.track?.album].filter(Boolean).join(" · "),
+                // Radio names itself in its own fields, so the two lines
+                // are composed once for every make (`trackLines`) rather
+                // than assembled from artist and album here.
+                trackTitle: lines.title || undefined,
+                trackSub: lines.sub,
                 trackArtist: st?.track?.artist,
                 trackURI: st?.track?.spotify_uri,
                 art: st?.track?.art_uri,
@@ -608,11 +650,14 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
                 queueTrack: st?.queue_track,
                 position: st?.position,
                 duration: st?.duration,
+                // The coordinator's, because its state is the group's.
+                readAt: c.read_at,
             });
         }
         for (const sp of kef?.speakers ?? []) {
             if (!sp.reachable || claimed.kef.has(sp.id)) continue;
             const st = sp.state;
+            const kefLines = trackLines(st?.track);
             out.push({
                 key: "k:" + sp.id,
                 kind: "kef",
@@ -626,9 +671,9 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
                 // the analog input there is nothing to step through.
                 canSkip: !!st && st.powered_on && KEF_SKIPPABLE.has(st.source),
                 trackTitle:
-                    st?.track?.title ??
+                    kefLines.title ||
                     (st?.playing && st.source ? `${kefSourceLabel(st.source)} input` : undefined),
-                trackSub: [st?.track?.artist, st?.track?.album].filter(Boolean).join(" · "),
+                trackSub: kefLines.sub,
                 trackArtist: st?.track?.artist,
                 art: st?.track?.art_uri,
                 input: st?.source,
@@ -666,16 +711,6 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
     const unreachable = $derived(hasSpeakers && sources.length === 0);
 
     const anyPlaying = $derived(sources.some((s) => s.playing));
-
-    const nowPlaying = $derived<PanelNowPlaying | null>(
-        featured?.playing
-            ? {
-                title: featured.trackTitle ?? "Playing",
-                sub: [featured.trackSub, featured.title].filter(Boolean).join(" · "),
-                art: featured.art,
-            }
-            : null,
-    );
 
     // ── Actions ──────────────────────────────────────────────────────────
     async function run(key: string, fn: () => Promise<unknown>, errTitle: string, ok?: () => void) {
@@ -763,15 +798,19 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
         const f = featured;
         if (!f) return 0;
         const now = Date.now();
+        // A just-issued seek is the user's own number on the user's own
+        // clock, so it advances from the tap rather than from any reading.
+        const held = seekOv && now - seekOv.at < 4000;
         if (f.kind === "sonos") {
-            const base = seekOv && now - seekOv.at < 4000 ? seekOv.sec : secs(f.position);
+            const base = held ? seekOv!.sec : secs(f.position);
             if (!f.playing || !polledAt) return base;
-            const adv = base + (now - (seekOv && now - seekOv.at < 4000 ? seekOv.at : polledAt)) / 1000;
+            const since = held ? (now - seekOv!.at) / 1000 : sinceRead(f.readAt, polledAt, now);
+            const adv = base + since;
             return durSec ? Math.min(durSec, adv) : adv;
         }
         const base = (f.positionMs ?? 0) / 1000;
-        if (!f.playing || !f.readAt) return base;
-        const adv = base + (now - f.readAt) / 1000;
+        if (!f.playing || !polledAt) return base;
+        const adv = base + sinceRead(f.readAt, polledAt, now);
         return durSec ? Math.min(durSec, adv) : adv;
     });
 
@@ -1240,6 +1279,50 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
     const nextInQueue = $derived(
         queueOrderKnown ? queue.find((q) => q.track > (featured?.queueTrack ?? 0)) : undefined,
     );
+
+    // ── What the ambient face says ───────────────────────────────────────
+    // It lives down here rather than up with the sources because the face
+    // now says more than the record's name (§16): where the room is in its
+    // queue, and what comes after this — both the queue's facts, and both
+    // held to the same rule as the player's own Up-next row. Under shuffle
+    // or repeat-one the speaker picks its own next track, so the wall says
+    // nothing rather than guessing.
+    //
+    // Everything here changes on a poll. The position doesn't — it ticks
+    // once a second — so it stays a live value the face reads (`posSec`),
+    // never a field in here that would rebuild the object every beat.
+    const nowPlaying = $derived.by((): PanelNowPlaying | null => {
+        const f = featured;
+        if (!f?.playing) return null;
+        const gs = f.groupState;
+        // A queue position is only a fact while the room is walking through
+        // a queue: radio and line-in report no track number, and "3 of 0"
+        // is worse than saying nothing.
+        const inQueue = !!gs?.from_queue && !!gs.queue_length && !!f.queueTrack;
+        const n = nextInQueue;
+        return {
+            title: f.trackTitle ?? "Playing",
+            // The room used to be the tail of this line. It is a different
+            // kind of fact from the artist and the album, and the face has
+            // a row for it now, beside the waveform that says this is the
+            // room making the noise.
+            sub: f.trackSub ?? "",
+            art: f.art,
+            room: f.title,
+            queueTrack: inQueue ? f.queueTrack : undefined,
+            queueLength: inQueue ? gs?.queue_length : undefined,
+            next: n
+                ? {
+                      title: n.title || "Untitled",
+                      sub: [n.artist, n.album].filter(Boolean).join(" · ") || undefined,
+                  }
+                : undefined,
+            // The other rooms with something of their own on. A wall panel
+            // is the one screen in the house that can answer "is anything
+            // still playing upstairs" without being walked over to.
+            elsewhere: sources.filter((s) => s.playing && s.key !== f.key).map((s) => s.title),
+        };
+    });
 
     function jumpTo(track: number) {
         const f = featured;

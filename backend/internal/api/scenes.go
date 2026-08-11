@@ -160,6 +160,10 @@ func (s *Server) activateScene(w http.ResponseWriter, r *http.Request) {
 // assistant's activate_scene tool. found is false when no scene has the given
 // id. Caller must NOT hold Mu.
 func (s *Server) doActivateScene(id string) (name string, okCount int, failures []map[string]string, found bool, err error) {
+	// Music needs nothing here: staging the scene queues the immediate
+	// step's actions in the same buffer the lights use, and runStaged drains
+	// both once the lock is released. Later steps carry their own and go out
+	// with them when they fire (Store.ScheduleStep).
 	return s.runStaged(stagedAction{
 		Kind: "scene", Action: "activate", Source: "manual",
 		Stage: func() (string, []store.StagedSend, bool) {

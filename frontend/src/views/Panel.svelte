@@ -5,6 +5,7 @@
     import PanelMusic from "../components/panel/PanelMusic.svelte";
     import PanelBrowse from "../components/panel/PanelBrowse.svelte";
     import PanelFullPlayer from "../components/panel/PanelFullPlayer.svelte";
+    import PanelAmbientMusic from "../components/panel/PanelAmbientMusic.svelte";
     import { route, data, uiPrefs } from "../lib/stores.svelte";
     import { isPanelNight, panelIdleMs } from "../lib/panel";
     import { createPanelMusic } from "../lib/panel-music.svelte";
@@ -114,13 +115,12 @@
     // exist — the music band only exists then; a home without speakers
     // gives the room tiles the whole surface as a grid again.
     const music = createPanelMusic();
-    // And what's playing — the ambient face carries it.
-    const playing = $derived(music.nowPlaying);
-    /** Which face the panel rests on. A room with music on gets the record;
+    /** What's playing — the ambient face carries it, and its presence is
+     *  which face the panel rests on. A room with music on gets the record;
      *  a quiet house gets the clock. Both are the same fade, the same drift
      *  and the same tap to wake — this is one face with two subjects, not a
      *  second screen (§16). */
-    const listening = $derived(!!playing);
+    const playing = $derived(music.nowPlaying);
 
     // Which rooms are making noise, by name. The room band marks the
     // playing room with the waveform instead of a switch (§16), and a
@@ -226,7 +226,7 @@
             transition:fade={{ duration: dur(600) }}
             onclick={wake}
         >
-            {#if listening}
+            {#if playing}
                 <!-- The listening face. While a record is on, the resting
                      state of a wall in a room where music is playing should
                      be the record — it is the most-looked-at surface the
@@ -234,23 +234,21 @@
                      under a clock nobody is reading at that moment. The
                      clock stays, demoted to a corner: it is still a wall
                      panel, and the time is still the thing you glance up
-                     for. Same drift, same fade, same tap to wake. -->
+                     for. Same drift, same fade, same tap to wake.
+
+                     The face itself stays here — the drift, the fade and
+                     the night dimming belong to the ambient face whichever
+                     subject it has, and this element is the flex container
+                     the two parts lay out in. What goes *in* it is the
+                     component's (PanelAmbientMusic). -->
                 <div class="face listening" style:transform={drift}>
-                    <div class="l-art">
-                        {#if playing?.art}
-                            <img src={playing.art} alt="" />
-                        {:else}
-                            <span class="placeholder">[ art ]</span>
-                        {/if}
-                    </div>
-                    <div class="l-meta">
-                        <div class="l-clock mono">{timeLabel}</div>
-                        <div class="l-track">{playing?.title}</div>
-                        {#if playing?.sub}
-                            <div class="l-sub">{playing.sub}</div>
-                        {/if}
-                        <div class="l-status mono">{statusLine}</div>
-                    </div>
+                    <PanelAmbientMusic
+                        {playing}
+                        position={music.posSec}
+                        duration={music.durSec}
+                        {timeLabel}
+                        {statusLine}
+                    />
                 </div>
             {:else}
                 <div class="face" style:transform={drift}>
@@ -362,98 +360,26 @@
        the height, and stacking a big cover under a big clock would leave
        both small on a 768px panel.
 
-       The cover is sized in viewport units and capped, not measured: this
-       face has nothing else competing for the space, so there is no
-       reading that could chase its own tail (contrast the band and the
-       full player, which both measure — §16). */
+       Only the frame is here — the direction the two parts run in, and the
+       air between them. The parts themselves are PanelAmbientMusic's, so
+       the face keeps what belongs to it as a whole (the drift, the fade,
+       the night dimming) whichever subject it has. */
     .face.listening {
         flex-direction: row;
         align-items: center;
-        gap: clamp(var(--space-7), 7vw, 88px);
+        gap: clamp(var(--space-7), 6vw, 76px);
         text-align: left;
         max-width: 96vw;
     }
-    .l-art {
-        flex: none;
-        width: clamp(220px, 58vh, 620px);
-        height: clamp(220px, 58vh, 620px);
-        border-radius: var(--r-lg);
-        overflow: hidden;
-        background: var(--card-2);
-        border: 1px solid var(--hairline);
-        display: grid;
-        place-items: center;
-    }
-    .l-art img {
-        width: 100%;
-        height: 100%;
-        object-fit: cover;
-        display: block;
-    }
-    .l-art .placeholder {
-        width: 100%;
-        height: 100%;
-        display: grid;
-        place-items: center;
-        font-size: 12px;
-        color: var(--text-dim);
-    }
-    .l-meta {
-        min-width: 0;
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-3);
-    }
-    /* Still a wall panel: the time is what you glance up for, so it keeps
-       its place at the top of the column — one size down from the clock
-       face, where it is no longer the subject. */
-    .l-clock {
-        font-size: clamp(56px, 12vw, 140px);
-        font-weight: 500;
-        letter-spacing: -0.03em;
-        line-height: 1;
-    }
-    .l-track {
-        font-size: clamp(24px, 3.6vw, 48px);
-        font-weight: 600;
-        letter-spacing: -0.02em;
-        max-width: 46vw;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-    }
-    .l-sub {
-        font-size: clamp(15px, 2vw, 24px);
-        color: var(--text-mute);
-        max-width: 46vw;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-    }
-    .l-status {
-        margin-top: var(--space-3);
-        font-size: 15px;
-        color: var(--text-dim);
-    }
 
-    /* Portrait: the same two parts, stacked, with the cover giving way
-       first — the fallback the rest of the panel already takes (§16). */
+    /* Portrait: the same two parts, stacked — the fallback the rest of the
+       panel already takes (§16). The cover gives way first, in the
+       component's own query. */
     @media (orientation: portrait), (max-width: 900px) {
         .face.listening {
             flex-direction: column;
             text-align: center;
             gap: var(--space-5);
-        }
-        .l-art {
-            width: min(68vw, 440px);
-            height: min(68vw, 440px);
-        }
-        .l-meta {
-            align-items: center;
-        }
-        .l-track,
-        .l-sub {
-            max-width: 84vw;
         }
     }
     /* Night: the face drops to a murmur — readable across a dark room,

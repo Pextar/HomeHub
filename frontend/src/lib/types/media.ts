@@ -43,6 +43,10 @@ export interface MediaTrack {
   artist?: string;
   album?: string;
   art_uri?: string;
+  /** A live source describes itself differently — see SonosTrack. Only the
+   *  Sonos bridge fills these; a KEF reports a title for everything. */
+  stream?: string;
+  station?: string;
 }
 
 export interface MediaNowPlaying {

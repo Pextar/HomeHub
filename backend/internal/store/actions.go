@@ -158,6 +158,33 @@ func (s *Store) FlushLights() {
 	}
 }
 
+// QueueMusic buffers a step's or rule's music actions for FlushMusic once the
+// lock is released — the same deal QueueLight makes for smart lights, and for
+// the same reason: a speaker is network I/O and must not be reached under Mu.
+//
+// Buffering rather than calling OnMusic directly is what makes this reliable.
+// A scene can be activated from six places (the API, the assistant, a timer,
+// a schedule, an automation action, another scene's later step) and every one
+// of them already resolves the scene through StageAction and drains the
+// lights afterwards. Riding in that buffer means none of them had to
+// remember the music, which is exactly the kind of thing five callers out of
+// six forget. Caller must hold Mu (write lock).
+func (s *Store) QueueMusic(actions []MusicAction) {
+	s.pendingMusic = append(s.pendingMusic, actions...)
+}
+
+// FlushMusic drains queued music actions and hands them to OnMusic. Takes Mu
+// briefly to swap the buffer, then calls out WITHOUT the lock held. Caller
+// must NOT hold Mu. Safe to call when empty, and when nothing installed the
+// hook. Call it wherever FlushLights is called.
+func (s *Store) FlushMusic() {
+	s.Mu.Lock()
+	queued := s.pendingMusic
+	s.pendingMusic = nil
+	s.Mu.Unlock()
+	s.RunMusic(queued)
+}
+
 // execStepLocked executes all actions in a single SceneStep, transmitting
 // synchronously under the lock. Multi-socket callers should prefer the staged
 // flow (stageStep/SendStaged/ApplyStaged — keep stageStep in sync with this).
@@ -198,7 +225,22 @@ func (s *Store) ScheduleStep(step SceneStep) {
 		_ = s.Save()
 		s.Mu.Unlock()
 		s.FlushLights()
+		// Off the lock, beside the lights, and for the same reason: a
+		// speaker is device I/O and device I/O never runs under Mu. The
+		// step's own music was queued by stageStep above.
+		s.FlushMusic()
 	})
+}
+
+// RunMusic hands a step's or rule's music actions to whoever installed
+// OnMusic. A no-op when nothing did — which is every test that builds a bare
+// Store, and is why this is a method rather than a raw call at each site.
+// Caller must NOT hold Mu.
+func (s *Store) RunMusic(actions []MusicAction) {
+	if len(actions) == 0 || s.OnMusic == nil {
+		return
+	}
+	s.OnMusic(actions)
 }
 
 // CascadeDeleteTarget removes everything that pointed at a deleted

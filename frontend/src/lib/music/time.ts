@@ -37,6 +37,38 @@ export function fmtSecs(t: number): string {
   return `${Math.floor(m / 60)}:${String(m % 60).padStart(2, "0")}:${s}`;
 }
 
+/**
+ * How stale a reading may honestly claim to be, in ms. The Sonos monitor
+ * re-reads every speaker on a 30s ticker and refuses to serve anything older
+ * than 95s, and the KEF poller is faster still — so an age past this is two
+ * clocks disagreeing, not a genuinely old reading.
+ */
+const MAX_READ_AGE_MS = 95_000;
+
+/**
+ * Seconds elapsed since the reading a position is being extrapolated from
+ * was actually taken.
+ *
+ * The naive answer — `now - whenWePolled` — assumes the number arrived fresh,
+ * and for Sonos it usually hasn't: the hub answers from its event cache, and
+ * events carry a track change but never a position (Sonos pushes no RelTime),
+ * so the position is as old as the last authoritative read. Extrapolating
+ * from the request instead of from the read ran that whole gap into every
+ * scrubber, hairline and elapsed time in the app — a rail reading 45% on a
+ * song that was 53% through.
+ *
+ * `readAt` is the hub's clock and `polledAt`/`now` are the browser's, so the
+ * two are mixed exactly once, at the poll, and the result is clamped: a wall
+ * panel with a drifting clock then gets a bounded error instead of a wild
+ * one, and everything after the poll ticks on the browser's clock alone. An
+ * absent `readAt` — an older hub, a speaker never read — collapses to the
+ * old behaviour rather than guessing.
+ */
+export function sinceRead(readAt: number | undefined, polledAt: number, now: number): number {
+  const ageAtPoll = readAt ? Math.min(Math.max(0, polledAt - readAt), MAX_READ_AGE_MS) : 0;
+  return (ageAtPoll + Math.max(0, now - polledAt)) / 1000;
+}
+
 /** Seconds → `"0:03:12"`, the `H:MM:SS` form the Sonos seek endpoint takes. */
 export function toClock(t: number): string {
   const total = Math.max(0, Math.round(t));

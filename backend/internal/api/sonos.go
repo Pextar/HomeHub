@@ -39,6 +39,15 @@ type sonosSpeakerView struct {
 	// it is on by default, so false is the interesting value and an absent
 	// field would be indistinguishable from a room that opted out.
 	Autoplay bool `json:"autoplay"`
+	// ReadAt is when the state was taken, in unix milliseconds, so the
+	// client can extrapolate playback position from the right instant
+	// rather than from when its own request happened to land. The same
+	// field, for the same reason, as kefSpeakerView's — and it matters
+	// more here, because this answer usually comes from the monitor's
+	// cache: events carry a track change but never a position, so the
+	// number can be a resync interval old while the request that fetched
+	// it is milliseconds old.
+	ReadAt int64 `json:"read_at,omitempty"`
 }
 
 // sonosGroupView is one live zone group mapped onto registered speaker IDs.
@@ -87,6 +96,9 @@ func (s *Server) sonosStatus(w http.ResponseWriter, r *http.Request) {
 			State:        cached.State,
 			GroupState:   cached.GroupState,
 			Autoplay:     s.autoplayEnabled(sp.ID),
+		}
+		if !cached.At.IsZero() {
+			views[i].ReadAt = cached.At.UnixMilli()
 		}
 	}
 

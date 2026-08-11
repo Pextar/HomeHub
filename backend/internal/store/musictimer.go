@@ -234,6 +234,69 @@ func (s *Store) PruneMusicTimers() bool {
 	return dropped
 }
 
+// PruneMusicRooms drops music actions aimed at a room that no longer exists,
+// out of every scene step and every automation rule, and then drops anything
+// those emptied. Same promise as PruneMusicTimers and CascadeDeleteSocket: a
+// deleted speaker leaves nothing behind that fires into nothing.
+//
+// A step or rule that had *only* music goes with it, because what is left is
+// an instruction to do nothing. One that still has sockets to switch keeps
+// them — the scene has lost a part, not its purpose. Reports whether
+// anything changed. Caller must hold Mu.
+func (s *Store) PruneMusicRooms() bool {
+	changed := false
+
+	keep := func(in []MusicAction) []MusicAction {
+		if len(in) == 0 {
+			return in
+		}
+		out := in[:0]
+		for _, m := range in {
+			if s.mediaRoomExists(m.Room) {
+				out = append(out, m)
+				continue
+			}
+			changed = true
+		}
+		if len(out) == 0 {
+			return nil
+		}
+		return out
+	}
+
+	for _, sc := range s.Scenes {
+		steps := sc.Steps[:0]
+		for _, step := range sc.Steps {
+			step.Music = keep(step.Music)
+			if len(step.Actions) > 0 || len(step.Music) > 0 {
+				steps = append(steps, step)
+			}
+		}
+		sc.Steps = steps
+	}
+
+	for _, a := range s.Automations {
+		rules := a.Rules[:0]
+		for _, r := range a.Rules {
+			r.Music = keep(r.Music)
+			if len(r.Actions) > 0 || len(r.Music) > 0 {
+				rules = append(rules, r)
+			}
+		}
+		a.Rules = rules
+	}
+	// An automation with no rules left can never fire again. Dropping it is
+	// what CascadeDeleteTarget already does for the same situation reached
+	// from the other direction (a deleted socket).
+	for id, a := range s.Automations {
+		if len(a.Rules) == 0 {
+			delete(s.Automations, id)
+			changed = true
+		}
+	}
+	return changed
+}
+
 // musicTimeInWindow is timeWindowMatches from the scheduler, kept here rather
 // than shared because the scheduler package imports this one and not the
 // reverse. The two are small, tested separately, and describe the same
