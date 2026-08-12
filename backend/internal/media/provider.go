@@ -108,10 +108,41 @@ type Stream struct {
 	// ContentType is what to advertise to endpoints ("audio/flac",
 	// "audio/mpeg"). Endpoints differ in what they accept, so the transport
 	// picks per listener and this is the default.
+	//
+	// It describes what a *listener* will be served, which is not always
+	// the bytes in Body: the WAV transport prepends a header per listener
+	// rather than expecting one in the stream. PCM says what Body itself
+	// is.
 	ContentType string
+	// PCM, when set, says Body is raw uncompressed samples in this format —
+	// no container, no header, nothing to parse. The AirPlay route needs
+	// that: it packs samples into RTP packets and cannot skip past a header
+	// it did not expect, and a route that guessed would put a container's
+	// first bytes through a speaker as noise.
+	PCM *PCMFormat
 	// Meta is what the endpoints should display. It is a snapshot at open
 	// time; live updates come over the transport's metadata channel.
 	Meta Metadata
+}
+
+// PCMFormat describes raw samples.
+type PCMFormat struct {
+	SampleRate int
+	BitDepth   int
+	Channels   int
+	// LittleEndian is how the samples are ordered in Body. Worth stating
+	// rather than assuming: decoders write host order, and the wire formats
+	// that carry PCM are big-endian.
+	LittleEndian bool
+}
+
+// CDQuality is 44.1 kHz 16-bit stereo little-endian — what every decoder in
+// this codebase produces and what AirPlay 1 carries.
+var CDQuality = PCMFormat{SampleRate: 44100, BitDepth: 16, Channels: 2, LittleEndian: true}
+
+// Matches reports whether f is the same format as want.
+func (f *PCMFormat) Matches(want PCMFormat) bool {
+	return f != nil && *f == want
 }
 
 // StreamProvider serves RouteStream: HomeHub decodes the content once and

@@ -102,6 +102,14 @@ type nativeOnlyProv struct {
 	nativeImpl
 }
 
+// streamOnlyProv is a service HomeHub can decode but that no speaker can
+// serve for itself — the shape that matters for the two routes HomeHub
+// decodes for, where the provider's own availability is the gate.
+type streamOnlyProv struct {
+	*fakeProvider
+	streamImpl
+}
+
 // build returns the provider in the shape its flags describe. A flag left
 // false means the interface is genuinely absent, which is how the "advertises
 // a route it doesn't implement" case is constructed.
@@ -111,6 +119,8 @@ func (f *fakeProvider) build() Provider {
 		return fullProv{f, nativeImpl{}, connectImpl{}, streamImpl{f.streamAvail}}
 	case f.native:
 		return nativeOnlyProv{f, nativeImpl{}}
+	case f.stream:
+		return streamOnlyProv{f, streamImpl{f.streamAvail}}
 	default:
 		return f
 	}

@@ -45,6 +45,9 @@ import type {
   KEFSettingsPatch,
   KEFSource,
   KEFSpotifyView,
+  AirPlaySpeaker,
+  AirPlaySpeakerView,
+  AirPlayCandidate,
   SpotifyStatus,
   SpotifyItem,
   SpotifyListening,
@@ -58,6 +61,8 @@ import type {
   MediaZoneRoutes,
   MediaPlayResult,
   MediaHistory,
+  MediaQualityReport,
+  StreamQuality,
   MediaTopPlays,
   Listening,
   MusicTimer,
@@ -619,6 +624,39 @@ export const api = {
     return req<AssistantStatus>("/assistant/status");
   },
 
+  // AirPlay receivers (RoPieee, shairport-sync, Apple TV). Registration and
+  // volume only: a receiver holds nothing to control, so playing to one is a
+  // zone operation under /media. See internal/airplay.
+  airplayStatus() { return req<AirPlaySpeakerView[]>("/airplay/status"); },
+  airplayDiscover() { return req<AirPlayCandidate[]>("/airplay/discover"); },
+  // The body may carry everything a scan learned, or nothing but an address.
+  // A bare address is probed, which proves something answers AirPlay there
+  // and no more — the codecs live in the mDNS advertisement a direct
+  // connection never sees.
+  airplayCreateSpeaker(body: {
+    ip: string; name?: string; room?: string; port?: number;
+    device_id?: string; model?: string;
+    pcm?: boolean; alac?: boolean; needs_encryption?: boolean; metadata?: boolean;
+  }) {
+    return req<AirPlaySpeaker>("/airplay/speakers", { method: "POST", body: json(body) });
+  },
+  airplayUpdateSpeaker(id: string, body: { ip?: string; name?: string; room?: string; port?: number }) {
+    return req<AirPlaySpeaker>(`/airplay/speakers/${encodeURIComponent(id)}`, {
+      method: "PUT", body: json(body),
+    });
+  },
+  airplayDeleteSpeaker(id: string) {
+    return req<void>(`/airplay/speakers/${encodeURIComponent(id)}`, { method: "DELETE" });
+  },
+  // Always remembered, and sent as well when a cast is running: a receiver
+  // only accepts a level inside a session, and the stored one is what the
+  // next cast opens with.
+  airplaySetVolume(id: string, level: number) {
+    return req<void>(`/airplay/${encodeURIComponent(id)}/volume`, {
+      method: "PUT", body: json({ level }),
+    });
+  },
+
   // ── Media protocol ─────────────────────────────────────────────────────
   // Speakers and services addressed uniformly, plus zones — sets of speakers
   // that play together regardless of make. The sonos*/kef* calls above stay:
@@ -661,6 +699,19 @@ export const api = {
     return req<MediaPlayResult>(`/media/zones/${encodeURIComponent(id)}/play`, {
       method: "POST", body: json(body),
     });
+  },
+  // What the audio actually is on every path through the house, and the one
+  // setting that changes it. Read rather than inferred: whether something is
+  // lossless depends on the service *and* the route, and only the backend
+  // knows both.
+  mediaQuality() { return req<MediaQualityReport>("/media/quality"); },
+  // Lands on the next thing played, not on what is playing: the bitrate is
+  // baked into the decoder's command line, so applying it now would mean
+  // cutting off the music to improve it.
+  setMediaQuality(quality: StreamQuality) {
+    return req<{ stream_quality: StreamQuality; bitrate_kbps: number; applies: string }>(
+      "/media/quality", { method: "PUT", body: json({ stream_quality: quality }) },
+    );
   },
   // What a room has been asked to play, newest first. A room with no history
   // of its own answers with the household's, flagged as such — the shelf says

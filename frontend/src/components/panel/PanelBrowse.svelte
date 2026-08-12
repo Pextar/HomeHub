@@ -560,7 +560,12 @@
             // backend already worded it, so the wall repeats it rather than
             // inferring one (§15).
             const n = s.members?.length ?? 0;
-            const how = s.route === "stream" ? "streamed together" : "played together";
+            const how =
+                s.route === "stream"
+                    ? "streamed together"
+                    : s.route === "airplay"
+                      ? "sent together over AirPlay"
+                      : "played together";
             return [n > 1 ? `${n} speakers` : "HomeHub room", how].filter(Boolean).join(" · ");
         }
         return s.members && s.members.length > 1 ? `${s.members.length} speakers` : "Sonos";

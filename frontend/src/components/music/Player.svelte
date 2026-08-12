@@ -295,6 +295,7 @@
                             sync={r.zone.sync}
                             reason={r.zone.reason}
                             problem={r.zone.problem}
+                            quality={r.zone.quality}
                         />
                     {/if}
 

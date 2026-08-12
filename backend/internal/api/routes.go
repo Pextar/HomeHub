@@ -30,6 +30,7 @@ func (s *Server) registerRoutes(api *mux.Router) {
 	s.registerTasmotaRoutes(api)
 	s.registerSonosRoutes(api)
 	s.registerKEFRoutes(api)
+	s.registerAirPlayRoutes(api)
 	s.registerMediaRoutes(api)
 	s.registerSpotifyRoutes(api)
 	s.registerMatterRoutes(api)
@@ -226,6 +227,19 @@ func (s *Server) registerKEFRoutes(api *mux.Router) {
 	api.HandleFunc("/kef/{id}/spotify", s.requireAdmin(s.kefSetSpotifyDevice)).Methods("PUT")
 }
 
+// registerAirPlayRoutes mounts the AirPlay receivers: discovery, registration
+// and volume. Everything about playing to one is a zone operation under
+// /media, because an AirPlay receiver has no playback of its own to control —
+// see internal/airplay.
+func (s *Server) registerAirPlayRoutes(api *mux.Router) {
+	api.HandleFunc("/airplay/status", s.requireAdmin(s.airplayStatus)).Methods("GET")
+	api.HandleFunc("/airplay/discover", s.requireAdmin(s.airplayDiscover)).Methods("GET")
+	api.HandleFunc("/airplay/speakers", s.requireAdmin(s.airplayCreateSpeaker)).Methods("POST")
+	api.HandleFunc("/airplay/speakers/{id}", s.requireAdmin(s.airplayUpdateSpeaker)).Methods("PUT")
+	api.HandleFunc("/airplay/speakers/{id}", s.requireAdmin(s.airplayDeleteSpeaker)).Methods("DELETE")
+	api.HandleFunc("/airplay/{id}/volume", s.requireAdmin(s.airplaySetVolume)).Methods("PUT")
+}
+
 // registerMediaRoutes mounts the media protocol: speakers and services
 // addressed uniformly, and zones — sets of speakers that play together
 // regardless of make. The vendor routes above stay: they expose specifics
@@ -248,6 +262,9 @@ func (s *Server) registerMediaRoutes(api *mux.Router) {
 	api.HandleFunc("/media/history", s.requireAdmin(s.mediaForget)).Methods("DELETE")
 	api.HandleFunc("/media/history/top", s.requireAdminOrKid(s.mediaTopPlays)).Methods("GET")
 	api.HandleFunc("/media/insights", s.requireAdmin(s.mediaInsights)).Methods("GET")
+	// What the audio actually is, and the one setting that changes it.
+	api.HandleFunc("/media/quality", s.requireAdmin(s.mediaQuality)).Methods("GET")
+	api.HandleFunc("/media/quality", s.requireAdmin(s.mediaSetQuality)).Methods("PUT")
 	// Music that starts and stops on its own. Registered before the
 	// {id} routes so "sleep" and "fade" are never read as timer ids.
 	api.HandleFunc("/media/timers", s.requireAdmin(s.musicTimers)).Methods("GET")

@@ -31,6 +31,12 @@ type SpotifyProvider struct {
 	// Optional: without it the provider is fully functional for search and
 	// for both native routes, and only the stream route reports unavailable.
 	decoder Decoder
+	// bitrate is what the decoder is currently configured to ask Spotify
+	// for, in kbps. Carried on the provider rather than read from the
+	// decoder so that quality can be reported for a household that has no
+	// librespot installed — the answer to "what would this sound like" does
+	// not depend on whether the binary is there.
+	bitrate int
 }
 
 // Decoder produces playable audio for a provider URI. Implemented by
@@ -45,11 +51,12 @@ type Decoder interface {
 	Available() media.Availability
 }
 
-// NewSpotifyProvider wraps a Spotify client. Both arguments may be nil: a nil
-// client makes the provider report itself unconfigured rather than panicking,
-// which is what the API layer already relies on for an unwired integration.
-func NewSpotifyProvider(c *spotify.Client, d Decoder) *SpotifyProvider {
-	return &SpotifyProvider{client: c, decoder: d}
+// NewSpotifyProvider wraps a Spotify client at the household's chosen stream
+// quality. Both the client and the decoder may be nil: a nil client makes the
+// provider report itself unconfigured rather than panicking, which is what the
+// API layer already relies on for an unwired integration.
+func NewSpotifyProvider(c *spotify.Client, d Decoder, q media.StreamQuality) *SpotifyProvider {
+	return &SpotifyProvider{client: c, decoder: d, bitrate: q.Normalize().Bitrate()}
 }
 
 func (p *SpotifyProvider) ID() string   { return "spotify" }
@@ -82,8 +89,34 @@ func (p *SpotifyProvider) Available() media.Availability {
 // used depends on the speakers, and is the route engine's decision.
 func (p *SpotifyProvider) Routes() media.RouteSet {
 	return media.RouteSet{
-		media.RouteNative, media.RouteGroup, media.RouteConnect, media.RouteStream,
+		media.RouteNative, media.RouteGroup, media.RouteConnect,
+		media.RouteAirPlay, media.RouteStream,
 	}
+}
+
+// SourceQuality implements media.QualityReporter: what Spotify hands over, per
+// route.
+//
+// Two different answers, because they are two different clients. On the routes
+// HomeHub decodes for itself the bitrate is the one this household configured,
+// and it is known exactly. On the routes the speaker plays for itself, the
+// speaker's own Spotify client negotiates with the service and never tells
+// HomeHub what it settled on — so that answer is marked approximate and shown
+// as "up to", rather than printed as a measurement it isn't.
+//
+// Either way the codec is Vorbis and the answer to "is this lossless" is no.
+// Spotify's catalogue is compressed at the source; no route, no setting and no
+// speaker changes that, and this is the one place in the system that knows it.
+func (p *SpotifyProvider) SourceQuality(r media.Route) media.Quality {
+	q := media.Quality{Codec: media.CodecVorbis, SampleRate: 44100, Channels: 2}
+	switch r {
+	case media.RouteStream, media.RouteAirPlay:
+		q.BitrateKbps = p.bitrate
+	default:
+		q.BitrateKbps = media.QualityBest.Bitrate()
+		q.Approximate = true
+	}
+	return q
 }
 
 func (p *SpotifyProvider) Search(ctx context.Context, query string, limit int) (*media.Results, error) {

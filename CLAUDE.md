@@ -29,6 +29,7 @@ homehub/
 │       ├── tasmota/       ← Wi-Fi smart-light bridge
 │       ├── sonos/         ← Sonos speaker bridge (local UPnP/SOAP)
 │       ├── kef/           ← KEF speaker bridge (local HTTP JSON API)
+│       ├── airplay/       ← AirPlay (RAOP) sender: mDNS discovery + RTP
 │       └── matter/        ← Matter/Thread bridge
 └── frontend/              ← Svelte 5 + Vite
     └── src/

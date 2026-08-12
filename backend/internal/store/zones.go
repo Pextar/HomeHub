@@ -30,13 +30,16 @@ type Zone struct {
 // Speaker id prefixes. Exported because the api layer builds and splits
 // qualified ids when it resolves a zone to live endpoints.
 const (
-	SonosPrefix = "sonos:"
-	KEFPrefix   = "kef:"
+	SonosPrefix   = "sonos:"
+	KEFPrefix     = "kef:"
+	AirPlayPrefix = "airplay:"
 )
 
-// QualifySonos and QualifyKEF build a member id for a stored speaker.
-func QualifySonos(id string) string { return SonosPrefix + id }
-func QualifyKEF(id string) string   { return KEFPrefix + id }
+// QualifySonos, QualifyKEF and QualifyAirPlay build a member id for a stored
+// speaker.
+func QualifySonos(id string) string   { return SonosPrefix + id }
+func QualifyKEF(id string) string     { return KEFPrefix + id }
+func QualifyAirPlay(id string) string { return AirPlayPrefix + id }
 
 // SplitMember separates a qualified member id into its bridge and bare id.
 // Returns ok=false for anything unqualified, which is how a member written by
@@ -47,6 +50,8 @@ func SplitMember(member string) (bridge, id string, ok bool) {
 		return "sonos", strings.TrimPrefix(member, SonosPrefix), true
 	case strings.HasPrefix(member, KEFPrefix):
 		return "kef", strings.TrimPrefix(member, KEFPrefix), true
+	case strings.HasPrefix(member, AirPlayPrefix):
+		return "airplay", strings.TrimPrefix(member, AirPlayPrefix), true
 	}
 	return "", "", false
 }
@@ -90,6 +95,10 @@ func (s *Store) ValidateZone(z *Zone) error {
 		case "kef":
 			if _, exists := s.KEF[id]; !exists {
 				return errors.New("no such KEF speaker: " + id)
+			}
+		case "airplay":
+			if _, exists := s.AirPlay[id]; !exists {
+				return errors.New("no such AirPlay receiver: " + id)
 			}
 		}
 		if seen[m] {

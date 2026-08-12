@@ -16,9 +16,15 @@
      * quiet mono line about sync and no more, and a zone of one gets nothing
      * at all — there is nothing to be honest about when there is nothing to
      * keep in step.
+     *
+     * `airplay` sits between those two cases and gets its own line rather than
+     * being folded into either. It is HomeHub decoding, like `stream`, so it
+     * is worth saying — but its receivers are on one clock rather than each
+     * filling their own buffer, so wearing `stream`'s "buffered" wording would
+     * understate it as badly as saying "in sync" would overstate it.
      */
     import Icon from "../Icon.svelte";
-    import type { MediaRoute, MediaSync } from "../../lib/types";
+    import type { MediaChain, MediaRoute, MediaSync } from "../../lib/types";
 
     let {
         route = undefined,
@@ -28,6 +34,8 @@
         problem = "",
         /** A zone that a start here would stop, on the single Spotify session. */
         interrupts = "",
+        /** What this zone would actually sound like, source to speaker. */
+        quality = undefined,
         /** `full` carries the reason sentence; `compact` is the label alone. */
         variant = "full",
     }: {
@@ -36,10 +44,12 @@
         reason?: string;
         problem?: string;
         interrupts?: string;
+        quality?: MediaChain;
         variant?: "full" | "compact";
     } = $props();
 
     const streamed = $derived(route === "stream");
+    const cast = $derived(route === "airplay");
 </script>
 
 {#if problem}
@@ -57,9 +67,36 @@
             {#if variant === "full" && reason}<span class="z-why">{reason}</span>{/if}
         </span>
     </p>
+{:else if cast}
+    <p class="z-note cool">
+        <Icon name="radio" size={13} />
+        <span>
+            <!-- "clocked" rather than "in sync": receivers are held to
+                 HomeHub's clock, which is tighter than a shared buffer and
+                 still not a vendor's own multi-room bus. -->
+            <span class="z-tag mono">AirPlay · {sync ?? "clocked"}</span>
+            {#if variant === "full" && reason}<span class="z-why">{reason}</span>{/if}
+        </span>
+    </p>
 {:else if sync === "exact"}
     <p class="z-note quiet">
         <span class="z-tag mono">In sync{route === "group" ? " · grouped" : ""}</span>
+    </p>
+{/if}
+
+<!-- What it will sound like. One line, and only where there is room for the
+     sentence behind it: the compact variant is a card subtitle, and a second
+     claim there would crowd out the route it qualifies.
+
+     Never a bare "lossless"/"not lossless" badge. The interesting half is
+     *what* limits it, because that is the half a listener can act on — and
+     when nothing does, saying so is worth a line of its own. -->
+{#if quality && variant === "full" && !problem}
+    <p class="z-note quiet">
+        <span class="z-tag mono" class:lossless={quality.lossless}>
+            {quality.lossless ? "Lossless" : "Not lossless"}
+        </span>
+        <span class="z-why">{quality.summary}</span>
     </p>
 {/if}
 
@@ -86,6 +123,9 @@
     .z-tag {
         font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase;
     }
+    /* Lossless takes the sanctioned "ON" amber rather than a status colour of
+       its own: it is the same kind of fact as a lit lamp. */
+    .z-tag.lossless { color: var(--on); }
     /* The reason follows the tag on the same line where there is room, and
        wraps under it where there isn't. */
     .z-why { color: var(--text-mute); margin-left: 6px; }

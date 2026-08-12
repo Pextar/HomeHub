@@ -20,6 +20,7 @@ import (
 	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
 
+	"homehub/internal/airplay"
 	"homehub/internal/announce"
 	"homehub/internal/kef"
 	"homehub/internal/llm"
@@ -132,6 +133,16 @@ type Server struct {
 	streamMu  sync.Mutex
 	stream    *stream.Host
 	librespot *stream.Librespot
+	// librespotBitrate is what the running decoder was built for. Kept so a
+	// household changing its stream quality gets a decoder that honours the
+	// change rather than one built at the old bitrate — see decoder().
+	librespotBitrate int
+	// caster pushes audio to AirPlay receivers. Created lazily like the
+	// two above, and like them it holds a live session that has to be shut
+	// down: a cast that outlives its zone keeps sending to a receiver
+	// nobody is listening to. Its own mutex — see airplayCaster().
+	casterMu sync.Mutex
+	caster   *airplay.Caster
 
 	// announcer serves announcement clips to the speakers (see
 	// announce.go). Created lazily, and only ever holds the last few

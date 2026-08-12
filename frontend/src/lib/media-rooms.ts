@@ -19,7 +19,7 @@ import { api } from "./api";
 export interface MediaRoomOption {
   key: string;
   name: string;
-  kind: "sonos" | "kef" | "zone";
+  kind: "sonos" | "kef" | "airplay" | "zone";
   /** For a zone: how many speakers it holds, so two similar names differ. */
   members?: number;
 }
@@ -49,7 +49,10 @@ export async function loadMediaRooms(): Promise<MediaRoomOption[]> {
       ? epRes.value.map((e) => ({
           key: e.member,
           name: e.name,
-          kind: e.vendor === "kef" ? ("kef" as const) : ("sonos" as const),
+          // The endpoint's own vendor, not a guess from the id: filing an
+          // AirPlay receiver as Sonos would put the wrong word next to a
+          // room a user is about to write an instruction for.
+          kind: e.vendor,
         }))
       : [];
 

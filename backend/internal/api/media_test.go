@@ -359,8 +359,8 @@ func TestMediaProvidersReportsStreamingSeparately(t *testing.T) {
 	if len(out) != 1 || out[0].ID != "spotify" {
 		t.Fatalf("got %+v, want one spotify provider", out)
 	}
-	if len(out[0].Routes) != 4 {
-		t.Errorf("routes = %v, want all four", out[0].Routes)
+	if len(out[0].Routes) != 5 {
+		t.Errorf("routes = %v, want every route", out[0].Routes)
 	}
 	// Neither is available in a test server, and both must say why.
 	if out[0].Avail.Reason == "" {

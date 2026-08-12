@@ -222,7 +222,7 @@ func (s *Server) startForTimer(ctx, fadeCtx context.Context, t store.MusicTimer,
 		Kind:     media.ItemKind(t.Item.Kind),
 		URI:      t.Item.URI,
 		Title:    t.Item.Title,
-	}, media.Deps{Stream: s.streamHost(), Logf: s.mediaLogf})
+	}, s.mediaDeps())
 	if err != nil {
 		return err
 	}

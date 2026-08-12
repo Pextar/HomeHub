@@ -57,6 +57,53 @@ type KEFSpeaker struct {
 	SpotifyDeviceName string `json:"spotify_device_name,omitempty"`
 }
 
+// AirPlaySpeaker is a registered AirPlay (RAOP) receiver — a RoPieee, an
+// Apple TV, any shairport-sync box.
+//
+// It stores more than the other two speaker records, and the extra is not
+// convenience: a Sonos or a KEF can be asked what it is at any moment over its
+// own API, but an AirPlay receiver only describes itself in the mDNS
+// advertisement it makes while being discovered. Nothing about the RTSP
+// session recovers that afterwards. So what the receiver said it accepts is
+// written down at registration, because the alternative is a scan before every
+// play.
+//
+// The consequence, and it is the honest cost of the design: a receiver
+// reconfigured to want something different (encryption turned on in
+// shairport-sync's config, say) keeps its old description until it is scanned
+// again. The session then fails with the receiver's own refusal, which names
+// what changed — a worse first experience than re-probing every time, and a
+// far better one than a scan on every tap of play.
+type AirPlaySpeaker struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	IP   string `json:"ip"`
+	// Port is the RTSP port from the SRV record; 7000 for most receivers,
+	// but shairport-sync takes any port its config names.
+	Port int `json:"port"`
+	// DeviceID is the receiver's own identity — the MAC-shaped prefix of
+	// its RAOP service name, normalised. The stable id across DHCP leases,
+	// the same job KEFSpeaker.MAC does. Empty for a receiver that was typed
+	// in rather than discovered, where the address is all there is.
+	DeviceID string `json:"device_id,omitempty"`
+	Room     string `json:"room,omitempty"`
+	Model    string `json:"model,omitempty"`
+
+	// PCM and ALAC are the formats the receiver advertised. Both lossless;
+	// see internal/airplay on why either is bit-exact.
+	PCM  bool `json:"pcm"`
+	ALAC bool `json:"alac"`
+	// NeedsEncryption is a receiver that will not take cleartext audio.
+	NeedsEncryption bool `json:"needs_encryption,omitempty"`
+	// Metadata is whether it has a display worth sending track info to.
+	Metadata bool `json:"metadata,omitempty"`
+	// Volume is the level the household last set, 0-100. Stored because an
+	// AirPlay receiver's volume is only reachable inside a session: without
+	// a remembered level, every cast would open at whatever the last sender
+	// left, which for a shared box is somebody else's setting.
+	Volume int `json:"volume,omitempty"`
+}
+
 // Schedule represents a recurring timer for a socket, group, or scene.
 //
 // Targets:
@@ -307,6 +354,24 @@ type Settings struct {
 	// tag encodes an empty slice as absent, which would collapse exactly
 	// the two cases this has to keep apart.
 	AnnouncePresets []string `json:"announce_presets"`
+
+	// StreamQuality is how hard HomeHub's own decoder asks the music
+	// service to compress, for the two routes where that is HomeHub's
+	// decision rather than the speaker's: the HTTP stream and AirPlay.
+	// One of "best", "balanced", "saver" — see media.StreamQuality, which
+	// owns the meaning and the mapping to a bitrate.
+	//
+	// A household setting rather than a per-zone one on purpose. The
+	// decoder is a single process holding a single service session (see
+	// internal/stream), so two zones cannot be decoded at two bitrates at
+	// the same time, and a per-zone control would be a promise the
+	// architecture cannot keep.
+	//
+	// Empty means never chosen, which resolves to the default rather than
+	// to silence. No omitempty: an explicit value that happens to equal the
+	// default should still round-trip as one, so the UI can tell "chosen"
+	// from "never touched".
+	StreamQuality string `json:"stream_quality"`
 }
 
 // DefaultAnnouncePresets is what a household that has never touched them

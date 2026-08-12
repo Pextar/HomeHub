@@ -27,8 +27,15 @@ const (
 	// RouteGroup: group same-vendor speakers natively, then serve the
 	// coordinator by one of the routes above.
 	RouteGroup Route = "group"
+	// RouteAirPlay: HomeHub decodes once and pushes the samples to every
+	// receiver itself, keeping the clock. Ranked above RouteStream because
+	// it is the same decode with a real clock on the end of it — receivers
+	// are told which sample belongs at which moment instead of each filling
+	// a buffer and starting when it feels ready.
+	RouteAirPlay Route = "airplay"
 	// RouteStream: HomeHub decodes once and fans the audio out over HTTP.
-	// The only cross-vendor path, and the only lossy one. Always last.
+	// The cross-vendor path for speakers that fetch rather than receive,
+	// and the one with no clock. Always last.
 	RouteStream Route = "stream"
 )
 
@@ -37,7 +44,8 @@ var order = map[Route]int{
 	RouteNative:  0,
 	RouteGroup:   1,
 	RouteConnect: 2,
-	RouteStream:  3,
+	RouteAirPlay: 3,
+	RouteStream:  4,
 }
 
 // Rank returns the preference of a route, best first. Unknown routes sort
@@ -64,6 +72,12 @@ const (
 	// few hundred milliseconds and not correctable to better than that
 	// without a real clock protocol.
 	SyncBuffered Sync = "buffered"
+	// SyncClocked is the AirPlay route: one sender, one clock, and every
+	// receiver told which sample belongs at which moment on it. Much
+	// tighter than buffered — the offset is corrected rather than merely
+	// stable — and still not a vendor's own multi-room bus, because the
+	// clock is HomeHub's and it is disciplined over UDP on a home network.
+	SyncClocked Sync = "clocked"
 )
 
 // Sync reports the sync characteristic of a route for a zone of n endpoints.
@@ -71,8 +85,11 @@ func (r Route) Sync(n int) Sync {
 	if n <= 1 {
 		return SyncSingle
 	}
-	if r == RouteStream {
+	switch r {
+	case RouteStream:
 		return SyncBuffered
+	case RouteAirPlay:
+		return SyncClocked
 	}
 	return SyncExact
 }
@@ -104,8 +121,9 @@ type Plan struct {
 	// Followers are grouped onto the coordinator before playing
 	// (RouteGroup only).
 	Followers []Endpoint
-	// Targets is every endpoint that receives the stream URL
-	// (RouteStream only).
+	// Targets is every endpoint addressed directly rather than through a
+	// coordinator: the ones handed the stream URL (RouteStream) or pushed
+	// audio (RouteAirPlay).
 	Targets []Endpoint
 	// Wake are endpoints that must be woken before anything else. Populated
 	// for any route touching a CapWake endpoint, since a sleeping speaker
@@ -119,7 +137,9 @@ type Plan struct {
 
 // Endpoints returns every endpoint the plan touches, coordinator included.
 func (p *Plan) Endpoints() []Endpoint {
-	if p.Route == RouteStream {
+	// The two routes HomeHub decodes for itself address every speaker
+	// directly and have no coordinator to speak for them.
+	if p.Route == RouteStream || p.Route == RouteAirPlay {
 		return p.Targets
 	}
 	out := make([]Endpoint, 0, 1+len(p.Followers))
@@ -196,7 +216,7 @@ func Resolve(p Provider, endpoints []Endpoint) (*Plan, error) {
 
 // rankedRoutes lists every route in preference order.
 func rankedRoutes() []Route {
-	all := []Route{RouteNative, RouteConnect, RouteGroup, RouteStream}
+	all := []Route{RouteNative, RouteConnect, RouteGroup, RouteAirPlay, RouteStream}
 	sort.SliceStable(all, func(i, j int) bool { return all[i].Rank() < all[j].Rank() })
 	return all
 }
@@ -271,6 +291,29 @@ func tryRoute(r Route, p Provider, eps []Endpoint) (*Plan, string) {
 				eps[0].Descriptor().Name, p.Name()),
 		}, ""
 
+	case RouteAirPlay:
+		// Every endpoint must be a receiver: this route pushes, and a
+		// speaker that expects to fetch has nothing to receive on. A mixed
+		// zone of receivers and fetchers is the one arrangement no route
+		// serves, and the error says which speaker fell on which side.
+		for _, e := range eps {
+			if !e.Descriptor().Caps.Has(CapAirPlay) {
+				return nil, lacks(e, "be sent an AirPlay stream")
+			}
+		}
+		sp, ok := p.(StreamProvider)
+		if !ok {
+			return nil, fmt.Sprintf("%s can't be decoded by HomeHub", p.Name())
+		}
+		if av := sp.StreamAvailable(); !av.OK {
+			return nil, av.Reason
+		}
+		return &Plan{
+			Route:   RouteAirPlay,
+			Targets: eps,
+			Reason:  airPlayReason(p, eps),
+		}, ""
+
 	case RouteStream:
 		for _, e := range eps {
 			if !e.Descriptor().Caps.Has(CapPlayURI) {
@@ -311,6 +354,18 @@ func streamReason(p Provider, eps []Endpoint) string {
 	}
 	return fmt.Sprintf("%s can't stream %s itself, so HomeHub is decoding for all of them",
 		culprit, p.Name())
+}
+
+// airPlayReason says what the AirPlay route is doing, and is written to be
+// read next to the stream route's sentence: both are HomeHub decoding, and the
+// difference a listener will notice is the clock.
+func airPlayReason(p Provider, eps []Endpoint) string {
+	if len(eps) == 1 {
+		return fmt.Sprintf("HomeHub decodes %s and sends it to %s over AirPlay",
+			p.Name(), eps[0].Descriptor().Name)
+	}
+	return fmt.Sprintf("HomeHub decodes %s once and sends it to all %d receivers on one clock",
+		p.Name(), len(eps))
 }
 
 // lacks phrases a missing capability as something the speaker can't do,
