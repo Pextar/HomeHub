@@ -325,7 +325,9 @@
                         <button class="ap-open" onclick={() => onEditAirPlay(sp)}>
                             <span class="sp-name">{sp.name}</span>
                             <span class="sp-sub">
-                                {[sp.model, sp.room].filter(Boolean).join(" · ") || sp.ip}
+                                {[sp.airplay2 ? "AirPlay 2" : "", sp.model, sp.room]
+                                    .filter(Boolean)
+                                    .join(" · ") || sp.ip}
                             </span>
                         </button>
                         <!-- Sent when a cast is running, remembered when one

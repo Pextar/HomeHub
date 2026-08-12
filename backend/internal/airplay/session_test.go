@@ -32,6 +32,14 @@ type fakeReceiver struct {
 
 	// refuse, when set, is the status every request after OPTIONS gets.
 	refuse int
+	// refuseSDP refuses any ANNOUNCE whose body contains this string, which
+	// is how a receiver that advertised one thing and implements another is
+	// reproduced.
+	refuseSDP string
+	// hideAnnounce drops ANNOUNCE from the OPTIONS reply, the shape of an
+	// AirPlay 2 speaker that will only be paired with.
+	hideAnnounce bool
+	announces    int
 	// omitAudioPort drops server_port from the SETUP reply, which is how a
 	// receiver that accepted the session but cannot take audio behaves.
 	omitAudioPort bool
@@ -141,8 +149,17 @@ func (f *fakeReceiver) handle(c net.Conn) {
 		f.mu.Lock()
 		f.requests = append(f.requests, req)
 		refuse, omit := f.refuse, f.omitAudioPort
+		refuseSDP, hide := f.refuseSDP, f.hideAnnounce
+		if req.Method == "ANNOUNCE" {
+			f.announces++
+		}
 		f.mu.Unlock()
 
+		if req.Method == "ANNOUNCE" && refuseSDP != "" && strings.Contains(req.Body, refuseSDP) {
+			fmt.Fprintf(c, "RTSP/1.0 415 Unsupported Media Type\r\nCSeq: %s\r\n\r\n",
+				req.Headers["cseq"])
+			continue
+		}
 		if refuse != 0 && req.Method != "OPTIONS" {
 			fmt.Fprintf(c, "RTSP/1.0 %d Refused\r\nCSeq: %s\r\n\r\n",
 				refuse, req.Headers["cseq"])
@@ -153,6 +170,9 @@ func (f *fakeReceiver) handle(c net.Conn) {
 		switch req.Method {
 		case "OPTIONS":
 			extra = "Public: ANNOUNCE, SETUP, RECORD, FLUSH, TEARDOWN, SET_PARAMETER\r\n"
+			if hide {
+				extra = "Public: SETUP, GET_PARAMETER, POST, GET\r\n"
+			}
 		case "SETUP":
 			port := f.audio.LocalAddr().(*net.UDPAddr).Port
 			if omit {
@@ -555,5 +575,109 @@ func TestVolumeMapsOntoTheDecibelScale(t *testing.T) {
 		if !strings.HasPrefix(last.Body, tc.want) {
 			t.Errorf("level %d sent %q, want %q…", tc.level, last.Body, tc.want)
 		}
+	}
+}
+
+// ── Receivers whose advertisement doesn't match their firmware ───────────
+
+// The advertisement says PCM; the firmware only implements ALAC. Rather than
+// fail a play on a reading of a TXT record, the session offers the next shape
+// and the music starts.
+func TestAnnounceFallsBackToALAC(t *testing.T) {
+	f := newFakeReceiver(t)
+	f.mu.Lock()
+	f.refuseSDP = "L16/44100/2" // refuse PCM, accept anything else
+	f.mu.Unlock()
+
+	sess, err := Open(context.Background(), f.device(), Options{})
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer sess.Close()
+
+	if sess.codec != CodecALAC {
+		t.Errorf("codec = %v, want the fallback to ALAC", sess.codec)
+	}
+	f.mu.Lock()
+	tries := f.announces
+	f.mu.Unlock()
+	if tries < 2 {
+		t.Errorf("announces = %d, want a retry", tries)
+	}
+	// And the audio it sends is genuinely ALAC-framed now, not PCM under a
+	// different name.
+	if err := sess.Send(samples(FramesPerPacket)); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	if !eventually(func() bool { return len(f.received()) > 0 }) {
+		t.Fatal("no audio after the fallback")
+	}
+	want := 12 + len(alacPayload(samples(FramesPerPacket)))
+	if got := len(f.received()[0]); got != want {
+		t.Errorf("packet is %d bytes, want %d (an ALAC frame)", got, want)
+	}
+}
+
+// A receiver with no classic keys in its advertisement at all — the AirPlay 2
+// shape — is still offered a session, and takes one.
+func TestAirPlay2ShapedDeviceStillNegotiates(t *testing.T) {
+	f := newFakeReceiver(t)
+	dev := f.device()
+	// Everything a scan would have learned from _raop._tcp, absent.
+	dev.Codecs = nil
+	dev.Encryption = nil
+	dev.AirPlay2 = true
+	dev.Classic = ClassicUnknown
+
+	sess, err := Open(context.Background(), dev, Options{})
+	if err != nil {
+		t.Fatalf("an AirPlay 2 receiver that accepts classic must negotiate: %v", err)
+	}
+	defer sess.Close()
+	if sess.codec != CodecALAC {
+		t.Errorf("codec = %v, want ALAC", sess.codec)
+	}
+}
+
+// A receiver that is busy says so once. Retrying the other codec shapes would
+// only delay the one message the user needs.
+func TestBusyReceiverIsNotRetried(t *testing.T) {
+	f := newFakeReceiver(t)
+	f.mu.Lock()
+	f.refuse = 453
+	f.mu.Unlock()
+
+	if _, err := Open(context.Background(), f.device(), Options{}); err == nil {
+		t.Fatal("want an error")
+	}
+	f.mu.Lock()
+	tries := f.announces
+	f.mu.Unlock()
+	if tries != 1 {
+		t.Errorf("announces = %d, want exactly one", tries)
+	}
+}
+
+// probeClassic is what a scan uses to tell a reachable receiver from one that
+// will not take a classic session — the question an AirPlay 2 advertisement
+// cannot answer.
+func TestProbeClassicAsksTheReceiver(t *testing.T) {
+	yes := newFakeReceiver(t)
+	if got := probeClassic(context.Background(), yes.device().Addr()); got != ClassicYes {
+		t.Errorf("classic = %v, want yes", got)
+	}
+
+	no := newFakeReceiver(t)
+	no.mu.Lock()
+	no.hideAnnounce = true
+	no.mu.Unlock()
+	if got := probeClassic(context.Background(), no.device().Addr()); got != ClassicNo {
+		t.Errorf("classic = %v, want no", got)
+	}
+
+	// Nothing listening is not a refusal: the box may simply be off, and
+	// "it said no" is a different claim from "nothing answered".
+	if got := probeClassic(context.Background(), "127.0.0.1:9"); got != ClassicUnknown {
+		t.Errorf("classic = %v, want unknown", got)
 	}
 }

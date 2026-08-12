@@ -8,24 +8,41 @@
 // for the media protocol's stream route (see docs/MEDIA-PROTOCOL.md), so the
 // audio is already sitting here in exactly the form a receiver wants.
 //
-// # What this speaks
+// # What this speaks, and what that does and does not exclude
 //
-// AirPlay 1 (RAOP), not AirPlay 2. That is a deliberate floor, not an
-// aspiration deferred: RoPieee, and every other shairport-sync box, answers
-// RAOP without pairing, and RAOP carries CD-quality audio with a real clock.
-// AirPlay 2 adds pairing (HomeKit SRP + Curve25519), a PTP clock and buffered
-// mode; it would be a much larger piece of work for receivers that already
-// accept the simpler protocol. Apple's own AirPlay-2 speakers keep a RAOP
-// service running for exactly this reason.
+// This sender speaks classic AirPlay — AirPlay 1, RAOP. That is a statement
+// about the session HomeHub opens, and it is worth being careful about what it
+// implies for the receivers it can reach, because the obvious reading is
+// wrong.
+//
+// A receiver being "AirPlay 2" does not put it out of reach. shairport-sync in
+// AirPlay 2 mode — which is what a current RoPieee runs — keeps answering
+// classic senders on the same port. AirPlay 2 changes what an iPhone chooses
+// to speak to the box, not what the box will accept. So a receiver somebody
+// plays to from the Spotify app over AirPlay 2 is, in the ordinary case, a
+// receiver this package drives too.
+//
+// What genuinely is out of reach is a receiver that *requires* the AirPlay 2
+// handshake: Apple's own speakers, where a HomeKit pairing exchange comes
+// first. Implementing that means SRP pairing, a PTP clock and a plist-shaped
+// setup — a large piece of work that would buy nothing for a shairport-sync
+// box, since the classic path already carries bit-exact audio to it with a
+// clock of its own.
+//
+// The rule this package therefore holds to: **the advertisement is advice, the
+// receiver is the authority.** A scan asks each box whether it takes a classic
+// session (probeClassic) instead of inferring it from a TXT record, and a
+// session that is refused tries the other shapes it might take before giving
+// up. An earlier version of this trusted the advertisement and would have
+// turned away a working RoPieee for describing itself as AirPlay 2.
 //
 // # What reaches the speaker
 //
 // 16-bit 44.1 kHz stereo, sent as raw PCM when the receiver advertises it
-// (cn=0) and as uncompressed ALAC frames when it does not. Both are bit-exact:
+// (cn=0) and as uncompressed ALAC frames otherwise. Both are bit-exact:
 // nothing here re-encodes, and there is no encoder dependency, which is the
 // same trade internal/stream makes when it serves WAV rather than MP3. The
-// receiver's own advertisement decides which, because a capability that lies
-// is worse than one that is absent — the rule the media layer is built on.
+// advertisement picks the first attempt; the receiver's answer picks the rest.
 //
 // # Honesty about sync
 //
@@ -99,6 +116,44 @@ const (
 	EncryptionMFiSAP   Encryption = 4
 )
 
+// Classic is whether a receiver accepts the classic (AirPlay 1) session this
+// package sends.
+//
+// Tri-state on purpose. The mDNS advertisement describes what a receiver
+// *prefers*, which on an AirPlay 2 box is a different question from what it
+// will *accept* — so the advertisement is treated as advice and the receiver
+// is asked. Until it has been asked, the honest value is "unknown", and an
+// unknown is attempted rather than refused.
+type Classic int
+
+const (
+	// ClassicUnknown is a receiver nobody has asked yet.
+	ClassicUnknown Classic = iota
+	// ClassicYes is a receiver that listed ANNOUNCE in its own OPTIONS
+	// reply — it takes the classic session.
+	ClassicYes
+	// ClassicNo is a receiver that answered and refused: no ANNOUNCE in its
+	// methods, or it would not talk to us at all.
+	ClassicNo
+)
+
+func (c Classic) String() string {
+	switch c {
+	case ClassicYes:
+		return "yes"
+	case ClassicNo:
+		return "no"
+	}
+	return "unknown"
+}
+
+// MarshalJSON encodes the three states as words rather than as 0/1/2, so the
+// frontend cannot mistake the middle one for a boolean — which is the whole
+// point of there being three.
+func (c Classic) MarshalJSON() ([]byte, error) {
+	return []byte(`"` + c.String() + `"`), nil
+}
+
 // Audio is the format a receiver takes. AirPlay 1 is 44.1/16/2 in practice —
 // the fields exist because receivers advertise them and a value that disagrees
 // is worth showing the user rather than silently overriding.
@@ -142,6 +197,21 @@ type Device struct {
 	// Metadata is whether the receiver accepts track info (`md`), which is
 	// how RoPieee's display and Roon's "now playing" get filled in.
 	Metadata bool `json:"metadata"`
+	// AirPlay2 is whether the box also advertises the AirPlay 2 service.
+	//
+	// It does not mean HomeHub cannot drive it, and reading it that way is
+	// the mistake worth naming here: shairport-sync in AirPlay 2 mode — what
+	// a current RoPieee runs — keeps answering classic senders on the same
+	// port, which is the session this package opens. What AirPlay 2 changes
+	// is what an *iPhone* chooses to speak to it, not what the box will
+	// accept. So this is carried for display and for a better refusal
+	// message, and `Classic` is what actually decides.
+	AirPlay2 bool `json:"airplay2,omitempty"`
+	// Classic is whether the receiver takes the session this package sends,
+	// as answered by the receiver itself. Three states, because "nobody has
+	// asked" is not "no" — a scan asks, and a hand-typed address is asked at
+	// registration.
+	Classic Classic `json:"classic"`
 	// Registered is set by the API layer when this device is already one of
 	// the household's speakers, so a scan can show it as already added.
 	Registered bool `json:"registered"`
@@ -200,29 +270,116 @@ func (d Device) Cipher() (Encryption, bool) {
 	return EncryptionNone, false
 }
 
-// Supported reports whether this package can actually drive the receiver, and
-// when it cannot, why — in a sentence meant for a person, since it is shown
-// next to the device in the scan results.
+// Supported reports whether this package can drive the receiver, and when it
+// cannot, why — in a sentence meant for a person, since it is shown next to
+// the device in the scan results.
+//
+// The order of the checks is the argument. What the receiver *answered* comes
+// first, because that is evidence; what it *advertised* comes second, because
+// on an AirPlay 2 box the advertisement describes the protocol an iPhone would
+// pick and not the one this package sends. An earlier version of this had the
+// advertisement first, and it would have refused a perfectly usable RoPieee
+// for saying "I am AirPlay 2" — a box that plays Spotify from a phone all day
+// and would have played from HomeHub too.
 func (d Device) Supported() (bool, string) {
 	if d.NeedsPassword {
 		return false, "this receiver asks for a password, which HomeHub can't answer"
 	}
-	if _, ok := d.Codec(); !ok {
-		var names []string
-		for _, c := range d.Codecs {
-			names = append(names, c.String())
+	if d.Classic == ClassicNo {
+		if d.AirPlay2 {
+			return false, "this is an AirPlay 2 receiver that won't take a classic session — " +
+				"Apple's own speakers need a pairing exchange HomeHub can't perform"
 		}
-		return false, fmt.Sprintf("it only accepts %s, and HomeHub sends PCM or ALAC",
-			strings.Join(names, "/"))
+		return false, "it answered, but not to the AirPlay audio session HomeHub opens"
 	}
-	if _, ok := d.Cipher(); !ok {
-		return false, "it only accepts FairPlay-encrypted audio, which HomeHub can't produce"
-	}
+	// A rate mismatch is a hard no whatever the receiver says about codecs:
+	// resampling is the one lossy step this path must not take silently.
 	if d.Audio.SampleRate != 0 && d.Audio.SampleRate != SampleRate {
 		return false, fmt.Sprintf("it wants %d Hz audio and HomeHub sends %d Hz",
 			d.Audio.SampleRate, SampleRate)
 	}
+	// Codecs and ciphers are only refused when the receiver listed some and
+	// none of them is ours. An empty list is an AirPlay 2 advertisement that
+	// simply has no classic keys in it, not a refusal — and the ANNOUNCE is
+	// where a receiver that meant it says so.
+	if len(d.Codecs) > 0 {
+		if _, ok := d.Codec(); !ok {
+			var names []string
+			for _, c := range d.Codecs {
+				names = append(names, c.String())
+			}
+			return false, fmt.Sprintf("it only accepts %s, and HomeHub sends PCM or ALAC",
+				strings.Join(names, "/"))
+		}
+	}
+	if len(d.Encryption) > 0 {
+		if _, ok := d.Cipher(); !ok {
+			return false, "it only accepts FairPlay-encrypted audio, which HomeHub can't produce"
+		}
+	}
 	return true, ""
+}
+
+// attempt is one way of asking a receiver to take a session.
+type attempt struct {
+	codec  Codec
+	cipher Encryption
+}
+
+// attempts lists the sessions to try, best first.
+//
+// More than one, because the advertisement can be wrong or absent and the only
+// authority is the ANNOUNCE. A receiver that publishes no classic keys at all
+// — the AirPlay 2 case — would otherwise be refused on a guess; instead it is
+// offered ALAC in the clear, then ALAC with a key, which is what every RAOP
+// receiver ever built accepts.
+//
+// Capped at four: past that a "no" is a no, and each attempt is a round trip
+// standing between a tap and the music.
+func (d Device) attempts() []attempt {
+	codecs := []Codec{}
+	if c, ok := d.Codec(); ok {
+		codecs = append(codecs, c)
+	}
+	// ALAC last-resort, always. It is the one format the protocol has
+	// required since the first AirPort Express.
+	if !hasCodec(codecs, CodecALAC) {
+		codecs = append(codecs, CodecALAC)
+	}
+
+	ciphers := []Encryption{}
+	if c, ok := d.Cipher(); ok {
+		ciphers = append(ciphers, c)
+	}
+	if !hasCipher(ciphers, EncryptionRSA) {
+		ciphers = append(ciphers, EncryptionRSA)
+	}
+
+	out := make([]attempt, 0, len(codecs)*len(ciphers))
+	for _, c := range codecs {
+		for _, e := range ciphers {
+			out = append(out, attempt{codec: c, cipher: e})
+		}
+	}
+	return out
+}
+
+func hasCodec(list []Codec, want Codec) bool {
+	for _, c := range list {
+		if c == want {
+			return true
+		}
+	}
+	return false
+}
+
+func hasCipher(list []Encryption, want Encryption) bool {
+	for _, e := range list {
+		if e == want {
+			return true
+		}
+	}
+	return false
 }
 
 // fromTXT fills the advertised fields from a service's TXT record. Unknown and
@@ -301,6 +458,44 @@ func isTrue(v string) bool {
 		return true
 	}
 	return false
+}
+
+// fromAirPlayTXT reads the `_airplay._tcp` advertisement, which an AirPlay 2
+// receiver publishes alongside its classic one.
+//
+// Only the keys that mean something here are read. Notably absent is any
+// attempt to decode the `features`/`flags` bitfields into "needs pairing":
+// those bits are undocumented, their meanings differ between firmwares, and a
+// wrong guess would refuse a working receiver on the strength of a bit nobody
+// can check. Whether a receiver will take a classic session is a question with
+// an authoritative answer — ask it — and probeClassic does.
+func (d *Device) fromAirPlayTXT(txt map[string]string) {
+	for k, v := range txt {
+		switch strings.ToLower(k) {
+		case "features", "ft":
+			// Presence, not contents: a box publishing a feature bitfield on
+			// this service is an AirPlay 2 receiver.
+			if strings.TrimSpace(v) != "" {
+				d.AirPlay2 = true
+			}
+		case "srcvers":
+			d.AirPlay2 = true
+			if d.Version == "" {
+				d.Version = v
+			}
+		case "model":
+			if d.Model == "" {
+				d.Model = v
+			}
+		case "pw":
+			// Some firmwares carry the password flag here rather than on the
+			// audio service. Only ever set, never cleared: a receiver that
+			// says "password" anywhere means it.
+			if isTrue(v) {
+				d.NeedsPassword = true
+			}
+		}
+	}
 }
 
 // splitInstance separates a RAOP instance name into its MAC prefix and the

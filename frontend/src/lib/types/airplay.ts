@@ -28,6 +28,10 @@ export interface AirPlaySpeaker {
   alac: boolean;
   /** A receiver that will not accept cleartext audio. */
   needs_encryption?: boolean;
+  /** Whether the box also advertises AirPlay 2. Display only — HomeHub sends
+   *  a classic session either way, and shairport-sync receivers (so every
+   *  RoPieee) accept one whichever mode they are in. */
+  airplay2?: boolean;
   /** Whether it has a display worth sending track info to. */
   metadata?: boolean;
   /** The level the household last set, 0-100. Stored because a receiver only
@@ -46,6 +50,17 @@ export interface AirPlaySpeakerView extends AirPlaySpeaker {
   casting: boolean;
 }
 
+/**
+ * Whether a receiver takes the session HomeHub opens, as answered by the
+ * receiver during the scan.
+ *
+ * Three states rather than a boolean, and the middle one is the point: an
+ * AirPlay 2 advertisement does not say whether the box accepts a classic
+ * sender, so the scan asks. `unknown` means nothing answered — the receiver
+ * may simply be off — and is attempted rather than refused.
+ */
+export type AirPlayClassic = "yes" | "no" | "unknown";
+
 /** One receiver found by a scan. */
 export interface AirPlayCandidate {
   name: string;
@@ -58,6 +73,10 @@ export interface AirPlayCandidate {
   needs_password: boolean;
   metadata: boolean;
   registered: boolean;
+  /** Also speaks AirPlay 2. Not a blocker: see AirPlayClassic. */
+  airplay2?: boolean;
+  /** What the receiver itself said about the classic session. */
+  classic: AirPlayClassic;
   /** Whether HomeHub could actually drive it. A scan that lists a
    *  FairPlay-only Apple TV as addable sets up a failure two taps later. */
   supported: boolean;

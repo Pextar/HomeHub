@@ -95,6 +95,11 @@ type AirPlaySpeaker struct {
 	ALAC bool `json:"alac"`
 	// NeedsEncryption is a receiver that will not take cleartext audio.
 	NeedsEncryption bool `json:"needs_encryption,omitempty"`
+	// AirPlay2 is whether the box also advertises AirPlay 2. Carried for
+	// display only: HomeHub sends a classic session either way, and an
+	// AirPlay 2 receiver that accepts one — which is every shairport-sync
+	// build, and so every RoPieee — is driven exactly like any other.
+	AirPlay2 bool `json:"airplay2,omitempty"`
 	// Metadata is whether it has a display worth sending track info to.
 	Metadata bool `json:"metadata,omitempty"`
 	// Volume is the level the household last set, 0-100. Stored because an

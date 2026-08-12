@@ -68,6 +68,11 @@ func (s *Server) airplayStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 // airplayDiscover handles GET /api/airplay/discover.
+//
+// Each result carries the receiver's own answer to "will you take the session
+// HomeHub opens", asked during the scan rather than guessed from its
+// advertisement. That distinction is the difference between finding an
+// AirPlay 2 RoPieee and refusing one.
 func (s *Server) airplayDiscover(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
 	defer cancel()
@@ -138,8 +143,15 @@ func (s *Server) airplayCreateSpeaker(w http.ResponseWriter, r *http.Request) {
 	if strings.TrimSpace(sp.Name) == "" {
 		sp.Name = dev.Name
 	}
+	// A probe cannot see the mDNS advertisement, so it never learns that a
+	// box is AirPlay 2 — only a scan does, and it puts it in the body.
+	if dev.AirPlay2 {
+		sp.AirPlay2 = true
+	}
 	// A registration that carried no codec flags — the typed-in path — takes
-	// the conservative pair every RAOP receiver supports.
+	// the conservative pair every RAOP receiver supports. The session falls
+	// back through the alternatives anyway, so this is a starting point
+	// rather than a commitment.
 	if !sp.PCM && !sp.ALAC {
 		sp.PCM, sp.ALAC, sp.Metadata = true, true, true
 	}

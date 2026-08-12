@@ -122,3 +122,116 @@ func TestTrimServiceLeavesTheInstanceName(t *testing.T) {
 		t.Errorf("got %q", got)
 	}
 }
+
+// ── AirPlay 2 receivers ──────────────────────────────────────────────────
+// The case this package got wrong first time round. A box advertising
+// AirPlay 2 is not out of reach: shairport-sync in AirPlay 2 mode — a current
+// RoPieee — still answers classic senders, which is why somebody can play to
+// it from the Spotify app and from HomeHub both. What decides is the
+// receiver's answer, not its advertisement.
+
+func TestAirPlay2ReceiverIsNotRefusedForBeingAirPlay2(t *testing.T) {
+	var d Device
+	d.Name = "RoPieee"
+	// The AirPlay 2 service, with no classic audio keys in it at all.
+	d.fromTXT(nil)
+	d.fromAirPlayTXT(map[string]string{
+		"features": "0x405FCA00,0x1C340", "srcvers": "366.0", "model": "ShairportSync",
+		"deviceid": "B8:27:EB:12:34:AB", "pk": "3b6e…",
+	})
+	if !d.AirPlay2 {
+		t.Error("a features/srcvers advertisement is an AirPlay 2 receiver")
+	}
+
+	// Nobody has asked it anything yet: unknown, and unknown is attempted.
+	if d.Classic != ClassicUnknown {
+		t.Errorf("classic = %v before asking", d.Classic)
+	}
+	if ok, why := d.Supported(); !ok {
+		t.Fatalf("an unasked AirPlay 2 receiver must not be refused: %q", why)
+	}
+
+	// And it must be offered something a RAOP receiver actually takes.
+	got := d.attempts()
+	if len(got) == 0 {
+		t.Fatal("no attempts for a receiver with no advertised codecs")
+	}
+	if got[0].codec != CodecALAC {
+		t.Errorf("first attempt = %v, want ALAC — the universal format", got[0].codec)
+	}
+	var sawClear, sawRSA bool
+	for _, a := range got {
+		sawClear = sawClear || a.cipher == EncryptionNone
+		sawRSA = sawRSA || a.cipher == EncryptionRSA
+	}
+	if !sawClear || !sawRSA {
+		t.Errorf("both ciphers should be tried, got %+v", got)
+	}
+}
+
+// Once asked, a refusal is honoured — and named as the AirPlay 2 pairing it
+// almost certainly is, because that is what tells the user it is an Apple
+// speaker rather than a broken network.
+func TestReceiverThatRefusedTheClassicSessionIsRefused(t *testing.T) {
+	d := Device{Name: "Living Room", AirPlay2: true, Classic: ClassicNo}
+	ok, why := d.Supported()
+	if ok {
+		t.Fatal("a receiver that said no is a no")
+	}
+	if !strings.Contains(why, "pairing") {
+		t.Errorf("reason should name what it needs: %q", why)
+	}
+
+	// The same refusal from a box that never claimed AirPlay 2 gets a plainer
+	// sentence — guessing "pairing" there would send someone looking for a
+	// setting that doesn't exist.
+	_, why = Device{Name: "Mystery", Classic: ClassicNo}.Supported()
+	if strings.Contains(why, "pairing") {
+		t.Errorf("reason should not invent a cause: %q", why)
+	}
+}
+
+// A stock classic receiver still gets its advertised best first: PCM needs no
+// frame packing, so where it is genuinely offered it is genuinely preferred.
+func TestAttemptsLeadWithWhatTheReceiverAdvertised(t *testing.T) {
+	var d Device
+	d.fromTXT(ropieeeTXT)
+	got := d.attempts()
+	if got[0].codec != CodecPCM || got[0].cipher != EncryptionNone {
+		t.Errorf("first attempt = %+v, want PCM in the clear", got[0])
+	}
+	// ALAC is still in the list: an advertisement that says PCM and a
+	// firmware that only implements ALAC is a real combination.
+	var sawALAC bool
+	for _, a := range got {
+		sawALAC = sawALAC || a.codec == CodecALAC
+	}
+	if !sawALAC {
+		t.Error("ALAC should remain as the fallback")
+	}
+}
+
+// A receiver that lists only FairPlay is still refused: that is the
+// advertisement saying something specific about the classic session, not the
+// absence of an answer.
+func TestFairPlayOnlyIsStillRefused(t *testing.T) {
+	var d Device
+	d.Name = "Apple TV"
+	d.fromTXT(map[string]string{"cn": "1", "et": "3,5"})
+	if ok, why := d.Supported(); ok {
+		t.Error("FairPlay-only cannot be driven")
+	} else if !strings.Contains(why, "FairPlay") {
+		t.Errorf("reason = %q", why)
+	}
+}
+
+// A password is a refusal wherever it is advertised, including on the
+// AirPlay 2 service — a user who set one is asking for exactly this.
+func TestPasswordOnEitherServiceRefuses(t *testing.T) {
+	var d Device
+	d.fromTXT(map[string]string{"cn": "0,1", "et": "0,1"})
+	d.fromAirPlayTXT(map[string]string{"pw": "true", "features": "0x1"})
+	if ok, _ := d.Supported(); ok {
+		t.Error("a password on the AirPlay 2 service still means password")
+	}
+}

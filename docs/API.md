@@ -488,11 +488,20 @@ playing to it — so checking would interrupt the Mac using it. A receiver that
 has gone away is found at the moment something plays to it, with the connection
 error naming it.
 
-A scan result carries `supported: false` and a `problem` sentence for a
-receiver HomeHub cannot drive — a password set in shairport-sync's config, a
-FairPlay-only Apple TV, a box wanting a sample rate AirPlay 1 does not carry.
-Those are listed rather than hidden: a device visible on the network and absent
-from the list sends someone hunting.
+A scan browses both `_raop._tcp` and `_airplay._tcp`, and then **asks each
+receiver** whether it accepts the classic session HomeHub opens (`classic`:
+`yes` / `no` / `unknown`). That question is asked rather than inferred because
+an AirPlay 2 advertisement does not answer it: shairport-sync in AirPlay 2 mode
+still takes classic senders, so a RoPieee reports `airplay2: true` *and*
+`classic: "yes"`. `unknown` means nothing answered the check — the box may be
+asleep — and is attempted rather than refused.
+
+A result carries `supported: false` and a `problem` sentence only for a
+receiver that cannot be driven: a password set in shairport-sync's config, a
+FairPlay-only Apple TV, a box wanting a sample rate AirPlay 1 does not carry,
+or one that answered and refused the classic session. Those are listed rather
+than hidden: a device visible on the network and absent from the list sends
+someone hunting.
 
 Volume is stored as well as sent because a receiver only accepts a level inside
 a session. With nothing casting, the stored level is what the next cast opens

@@ -123,9 +123,6 @@ func Open(ctx context.Context, dev Device, opts Options) (*Session, error) {
 	if ok, why := dev.Supported(); !ok {
 		return nil, &UnsupportedError{Reason: fmt.Sprintf("%s: %s", dev.Name, why)}
 	}
-	codec, _ := dev.Codec()
-	cipherKind, _ := dev.Cipher()
-
 	rtsp, err := dial(ctx, dev.Addr())
 	if err != nil {
 		return nil, err
@@ -134,19 +131,12 @@ func Open(ctx context.Context, dev Device, opts Options) (*Session, error) {
 		dev:      dev,
 		opts:     opts,
 		rtsp:     rtsp,
-		codec:    codec,
 		ssrc:     randomUint32(),
 		rtpStart: randomUint32(),
 		backlog:  map[uint16][]byte{},
 		done:     make(chan struct{}),
 	}
 	s.seq.Store(uint32(uint16(rand.Intn(1 << 16)))) //nolint:gosec // a sequence start, not a secret
-	if cipherKind == EncryptionRSA {
-		if s.key, err = newCipherKey(); err != nil {
-			_ = rtsp.Close()
-			return nil, err
-		}
-	}
 
 	if err := s.negotiate(ctx); err != nil {
 		s.Close()
@@ -169,12 +159,7 @@ func (s *Session) negotiate(ctx context.Context) error {
 	}
 
 	uri := fmt.Sprintf("rtsp://%s/%d", s.rtsp.local, s.ssrc)
-	if _, err := s.rtsp.call(ctx, request{
-		Method:      "ANNOUNCE",
-		URI:         uri,
-		ContentType: "application/sdp",
-		Body:        []byte(s.sdp()),
-	}); err != nil {
+	if err := s.announce(ctx, uri); err != nil {
 		return err
 	}
 
@@ -224,6 +209,65 @@ func (s *Session) negotiate(ctx context.Context) error {
 	}
 	s.logf("airplay: %s ready (%s%s)", s.dev.Name, s.codec, encrypted)
 	return nil
+}
+
+// announce offers the receiver a session, trying each shape the device might
+// take until one is accepted.
+//
+// More than one attempt, because the mDNS advertisement is advice rather than
+// an answer. An AirPlay 2 receiver publishes what an iPhone should use and may
+// say nothing at all about the classic codecs — and a receiver that lists PCM
+// but only implements ALAC exists too. Rather than refuse on a reading of the
+// advertisement, each candidate is offered and the receiver's own refusal is
+// what closes the door.
+//
+// The first refusal is the error that gets reported, not the last: it is the
+// answer to the session the device asked for, so it is the one that explains
+// what happened. Later attempts are HomeHub guessing.
+func (s *Session) announce(ctx context.Context, uri string) error {
+	attempts := s.dev.attempts()
+	var first error
+
+	for i, a := range attempts {
+		s.codec = a.codec
+		s.key = nil
+		if a.cipher == EncryptionRSA {
+			key, err := newCipherKey()
+			if err != nil {
+				return err
+			}
+			s.key = key
+		}
+
+		_, err := s.rtsp.call(ctx, request{
+			Method:      "ANNOUNCE",
+			URI:         uri,
+			ContentType: "application/sdp",
+			Body:        []byte(s.sdp()),
+		})
+		if err == nil {
+			if i > 0 {
+				s.logf("airplay: %s took %s on attempt %d", s.dev.Name, a.codec, i+1)
+			}
+			return nil
+		}
+		if first == nil {
+			first = err
+		}
+		// A receiver that is busy, or wants a password, will say the same
+		// thing to every offer. Retrying it three more times only delays the
+		// error the user needs to read.
+		var se *StatusError
+		if errors.As(err, &se) && (se.Status == 401 || se.Status == 453) {
+			return err
+		}
+		// Anything that is not the receiver answering — a dropped connection,
+		// a timeout — means there is nothing left to negotiate with.
+		if se == nil {
+			return err
+		}
+	}
+	return first
 }
 
 // sdp builds the session description. The fmtp line is ALAC's parameter set —

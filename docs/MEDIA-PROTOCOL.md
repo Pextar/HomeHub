@@ -127,9 +127,8 @@ have taken play and pause with it.
 
 `CapAirPlay` is declared **only** for receivers registered through
 `internal/airplay`. Plenty of Sonos and KEF speakers also answer AirPlay, and
-this deliberately does not claim it for them: their AirPlay-2 implementations
-want a pairing exchange this codebase does not perform, and a capability that
-lies is worse than one that is absent.
+this deliberately does not claim it for them: they have better routes of their
+own, and a capability that lies is worse than one that is absent.
 
 ### Provider
 
@@ -240,11 +239,23 @@ librespot ──PCM──> internal/airplay ──RTP/UDP──┬──> RoPiee
 - **Applies when** every endpoint has `CapAirPlay` and the provider implements
   `StreamProvider`. Ranked above `stream` because it is the same decode with a
   real clock on the end of it.
-- **Speaks** AirPlay 1 (RAOP), not AirPlay 2. A deliberate floor: RoPieee and
-  every other shairport-sync box answers RAOP without pairing, and RAOP carries
-  CD-quality audio with a clock. AirPlay 2 adds HomeKit pairing, a PTP clock
-  and buffered mode — a much larger piece of work for receivers that already
-  accept the simpler protocol.
+- **Speaks** classic AirPlay (AirPlay 1, RAOP). That is a statement about the
+  session HomeHub *opens*, and it is worth separating from which receivers it
+  can reach, because the obvious reading is wrong. A receiver being "AirPlay 2"
+  does not put it out of reach: shairport-sync in AirPlay 2 mode — what a
+  current RoPieee runs — keeps answering classic senders on the same port.
+  AirPlay 2 changes what an iPhone chooses to speak to a box, not what the box
+  accepts. What is genuinely out of reach is a receiver that *requires* the
+  AirPlay 2 handshake, i.e. Apple's own speakers, where HomeKit pairing comes
+  first.
+- **Asks rather than assumes.** The mDNS advertisement describes what a
+  receiver prefers, which on an AirPlay 2 box is a different question from what
+  it will accept — so a scan asks each one (RTSP `OPTIONS`, which is stateless
+  and takes nothing away from whatever is playing) and records the answer. A
+  session then offers each shape the device might take — advertised codec in
+  the clear, then with a key, then ALAC either way — and only the receiver's
+  own refusal closes the door. This is the same shape as the KEF scan, where
+  SSDP narrows the subnet down and the API probe settles it.
 - **Quality**: bit-exact. Raw PCM when the receiver advertises it (`cn=0`),
   uncompressed ALAC frames when it does not — ALAC's verbatim escape hatch, so
   no encoder dependency, the same trade `stream` makes by serving WAV. Nothing
@@ -489,10 +500,12 @@ Stated plainly so the next reader does not have to discover it:
   Starting Spotify elsewhere still takes the session away.
 - **It does not re-implement the vendor apps.** Sonos-specific features stay on
   the Sonos endpoints.
-- **It is not AirPlay 2.** The `airplay` route speaks AirPlay 1 (RAOP), which
-  is what shairport-sync receivers answer without pairing. AirPlay 2's pairing,
-  PTP clock and buffered mode are not implemented, so Sonos and KEF speakers'
-  own AirPlay support is not used — they keep their native routes, which are
-  better for them anyway.
+- **It does not implement the AirPlay 2 handshake.** The `airplay` route opens
+  a classic session, which shairport-sync receivers accept whichever mode they
+  are running in. What is missing is HomeKit pairing, the PTP clock and
+  buffered mode — so a receiver that *insists* on AirPlay 2, meaning Apple's
+  own speakers, is refused with that named as the reason. Sonos and KEF
+  speakers' own AirPlay support is not used either; they keep their native
+  routes, which are better for them anyway.
 - **It cannot mix pushed and fetched speakers in one zone.** See the route
   table above.

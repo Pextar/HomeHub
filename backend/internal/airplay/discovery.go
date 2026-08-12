@@ -3,6 +3,7 @@ package airplay
 import (
 	"context"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -18,9 +19,10 @@ func Discover(ctx context.Context, wait time.Duration) ([]Device, error) {
 		return nil, err
 	}
 
-	// RAOP is the service that can actually take audio, so it is what a
-	// device is built from. The _airplay._tcp advertisement is only read for
-	// the friendly name and model, which are sometimes better there.
+	// RAOP is the service that carries the classic session, so it is what a
+	// device is built from first. The _airplay._tcp side is read after, and
+	// unlike an earlier version of this it can create a device of its own —
+	// see the loop below.
 	byKey := make(map[string]*Device)
 	for _, instance := range recs.instances[raopService] {
 		id, name := splitInstance(trimService(instance, raopService))
@@ -46,33 +48,134 @@ func Discover(ctx context.Context, wait time.Duration) ([]Device, error) {
 		byKey[key] = d
 	}
 
-	// Fill in from the _airplay._tcp side. It never creates a device — a box
-	// advertising AirPlay video with no RAOP service has no audio sink to
-	// send to — it only improves the name and model of one already found.
+	// Now the _airplay._tcp side, which is where an AirPlay 2 receiver
+	// describes itself. Two jobs: improve a device already found — the
+	// friendly name lives here and is often better — and create one for a box
+	// that advertises no classic audio service at all.
+	//
+	// That second job is the fix for the case this scan used to miss. A
+	// receiver in AirPlay 2 mode may publish only this service, and skipping
+	// it meant a box the user can see working from their phone simply never
+	// appeared. Whether it will take a classic session is then settled by
+	// asking it, below, rather than by its absence from a service list.
 	for _, instance := range recs.instances[airplayService] {
 		name := strings.TrimSpace(trimService(instance, airplayService))
 		txt := recs.txt[instance]
 		id := NormalizeID(txt["deviceid"])
 		ip := recs.address(instance)
+
+		matched := false
 		for key, d := range byKey {
 			if !sameDevice(d, key, id, ip) {
 				continue
 			}
+			matched = true
 			if name != "" {
 				d.Name = name
 			}
-			if d.Model == "" {
-				d.Model = txt["model"]
-			}
+			d.fromAirPlayTXT(txt)
 		}
+		if matched || ip == "" || ValidateHost(ip) != nil {
+			continue
+		}
+
+		d := &Device{Name: name, IP: ip, Port: DefaultPort, ID: id}
+		if s, ok := recs.srv[instance]; ok && s.port > 0 {
+			d.Port = s.port
+		}
+		// No classic keys to read: the audio parameters default to what
+		// AirPlay 1 carries, and the codec and cipher lists stay empty, which
+		// attempts() reads as "offer it the universal pair".
+		d.fromTXT(nil)
+		d.fromAirPlayTXT(txt)
+		d.AirPlay2 = true
+		if d.Name == "" {
+			d.Name = d.IP
+		}
+		key := d.ID
+		if key == "" {
+			key = d.Addr()
+		}
+		byKey[key] = d
 	}
 
 	out := make([]Device, 0, len(byKey))
 	for _, d := range byKey {
 		out = append(out, *d)
 	}
+	verifyClassic(ctx, out)
 	sortDevices(out)
 	return out, nil
+}
+
+// verifyProbes caps how many receivers are asked at once, and how long each
+// gets. Small and short: this runs inside a scan the user is watching, and an
+// OPTIONS exchange with a box on the same LAN is a couple of milliseconds.
+const (
+	verifyProbes  = 8
+	verifyTimeout = 2 * time.Second
+)
+
+// verifyClassic asks every discovered receiver whether it takes the session
+// this package sends, and records the answer on the device.
+//
+// This is the same shape as the KEF scan: SSDP narrows the subnet down and the
+// API probe settles it. Here the advertisement narrows it down and the
+// receiver's own OPTIONS reply settles it — which matters most for the AirPlay
+// 2 boxes, where the advertisement genuinely does not answer the question.
+//
+// Asking costs nothing the user would notice and takes nothing away from
+// anyone: OPTIONS is stateless, so unlike ANNOUNCE it does not claim the
+// receiver from whatever is currently playing to it.
+func verifyClassic(ctx context.Context, devices []Device) {
+	sem := make(chan struct{}, verifyProbes)
+	var wg sync.WaitGroup
+	for i := range devices {
+		wg.Add(1)
+		go func(d *Device) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			cctx, cancel := context.WithTimeout(ctx, verifyTimeout)
+			defer cancel()
+			d.Classic = probeClassic(cctx, d.Addr())
+		}(&devices[i])
+	}
+	wg.Wait()
+}
+
+// probeClassic asks one receiver whether it will take a classic session.
+//
+// The question is RTSP OPTIONS, and the answer is whether ANNOUNCE appears in
+// the methods it lists. A box that cannot be reached at all is left Unknown
+// rather than marked as refusing: it may simply be asleep, and "this receiver
+// said no" is a different claim from "nothing answered".
+func probeClassic(ctx context.Context, addr string) Classic {
+	c, err := dial(ctx, addr)
+	if err != nil {
+		return ClassicUnknown
+	}
+	defer c.Close()
+
+	resp, err := c.do(ctx, request{Method: "OPTIONS", URI: "*"})
+	if err != nil {
+		return ClassicUnknown
+	}
+	if resp.Status != 200 {
+		return ClassicNo
+	}
+	pub := strings.ToUpper(resp.Header("Public"))
+	if pub == "" {
+		// Answered 200 and listed nothing. Every receiver worth the name
+		// lists its methods, but a terse one is not a refusal — the ANNOUNCE
+		// will settle it.
+		return ClassicUnknown
+	}
+	if strings.Contains(pub, "ANNOUNCE") {
+		return ClassicYes
+	}
+	return ClassicNo
 }
 
 // sameDevice decides whether an _airplay._tcp advertisement describes a RAOP
@@ -131,10 +234,21 @@ func Probe(ctx context.Context, host string, port int) (*Device, error) {
 	if resp.Status != 200 {
 		return nil, &StatusError{Method: "OPTIONS", Status: resp.Status, Reason: resp.Reason}
 	}
-	// A receiver that lists no methods is answering something other than
-	// RAOP on this port — worth catching here rather than at ANNOUNCE.
-	if pub := resp.Header("Public"); pub != "" && !strings.Contains(strings.ToUpper(pub), "ANNOUNCE") {
-		return nil, &UnsupportedError{Reason: "this address answers RTSP but not AirPlay audio"}
+	// A receiver that answers RTSP and lists methods without ANNOUNCE among
+	// them is refusing the classic session — an AirPlay 2 speaker that wants
+	// pairing, or something else entirely on this port. Caught here rather
+	// than at the first play.
+	pub := strings.ToUpper(resp.Header("Public"))
+	switch {
+	case pub == "":
+		d.Classic = ClassicUnknown
+	case strings.Contains(pub, "ANNOUNCE"):
+		d.Classic = ClassicYes
+	default:
+		return nil, &UnsupportedError{
+			Reason: "this address answers RTSP but won't take the AirPlay audio session " +
+				"HomeHub opens — an AirPlay 2 speaker that needs pairing looks like this",
+		}
 	}
 	return d, nil
 }

@@ -77,6 +77,11 @@
          */
         supported?: boolean;
         problem?: string;
+        /** A short mono note under the address: what the receiver answered
+         *  when the scan asked whether it takes HomeHub's session. Shown
+         *  because "AirPlay 2" is exactly the label that makes someone doubt
+         *  a device will work, and the scan already knows better. */
+        note?: string;
         /** What the receiver said it accepts, carried through registration so
          *  the backend doesn't have to scan again to find out. */
         airplay?: AirPlayCandidate;
@@ -100,6 +105,7 @@
                     registered: c.registered,
                     supported: c.supported,
                     problem: c.problem,
+                    note: airplayNote(c),
                     airplay: c,
                 }));
             } else if (kind === "kef") {
@@ -128,6 +134,23 @@
         } finally {
             scanning = false;
         }
+    }
+
+    /**
+     * What the scan learned beyond the address, for an AirPlay row.
+     *
+     * The AirPlay 2 case is the one worth wording carefully. A receiver that
+     * says "AirPlay 2" reads like a device HomeHub can't use, and for a
+     * shairport-sync box — a RoPieee — that is simply untrue: it answers
+     * classic senders too, which the scan has just confirmed by asking. So
+     * the row says both halves, and says the confirmed one out loud.
+     */
+    function airplayNote(c: AirPlayCandidate): string {
+        const parts: string[] = [];
+        if (c.airplay2) parts.push("AirPlay 2");
+        if (c.classic === "yes") parts.push("takes HomeHub's stream");
+        else if (c.classic === "unknown") parts.push("didn't answer a check");
+        return parts.join(" · ");
     }
 
     function pickBrand(b: SpeakerBrand) {
@@ -287,6 +310,8 @@
                                          hunts for a device they can see. -->
                                     {#if blocked && c.problem}
                                         <span class="cand-why">{c.problem}</span>
+                                    {:else if c.note}
+                                        <span class="cand-note mono">{c.note}</span>
                                     {/if}
                                 </span>
                                 {#if c.registered}
@@ -391,6 +416,10 @@
     .cand.selected .cand-name { color: var(--on); }
     .cand-sub { font-size: 11px; color: var(--text-mute); }
     .cand-why { font-size: 11.5px; color: var(--text-dim); line-height: 1.35; }
+    .cand-note {
+        font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase;
+        color: var(--text-dim);
+    }
     .cand-tag {
         font-size: 10px;
         letter-spacing: 0.08em;
