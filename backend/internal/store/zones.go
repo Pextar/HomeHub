@@ -35,8 +35,8 @@ const (
 	AirPlayPrefix = "airplay:"
 )
 
-// QualifySonos, QualifyKEF and QualifyAirPlay build a member id for a stored
-// speaker.
+// QualifySonos and the two beside it build a member id for a stored speaker,
+// one per bridge.
 func QualifySonos(id string) string   { return SonosPrefix + id }
 func QualifyKEF(id string) string     { return KEFPrefix + id }
 func QualifyAirPlay(id string) string { return AirPlayPrefix + id }

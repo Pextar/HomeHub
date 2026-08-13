@@ -156,12 +156,12 @@ func (f *fakeReceiver) handle(c net.Conn) {
 		f.mu.Unlock()
 
 		if req.Method == "ANNOUNCE" && refuseSDP != "" && strings.Contains(req.Body, refuseSDP) {
-			fmt.Fprintf(c, "RTSP/1.0 415 Unsupported Media Type\r\nCSeq: %s\r\n\r\n",
+			_, _ = fmt.Fprintf(c, "RTSP/1.0 415 Unsupported Media Type\r\nCSeq: %s\r\n\r\n",
 				req.Headers["cseq"])
 			continue
 		}
 		if refuse != 0 && req.Method != "OPTIONS" {
-			fmt.Fprintf(c, "RTSP/1.0 %d Refused\r\nCSeq: %s\r\n\r\n",
+			_, _ = fmt.Fprintf(c, "RTSP/1.0 %d Refused\r\nCSeq: %s\r\n\r\n",
 				refuse, req.Headers["cseq"])
 			continue
 		}
@@ -185,7 +185,7 @@ func (f *fakeReceiver) handle(c net.Conn) {
 		case "RECORD":
 			extra = "Audio-Latency: 88200\r\n"
 		}
-		fmt.Fprintf(c, "RTSP/1.0 200 OK\r\nCSeq: %s\r\n%s\r\n", req.Headers["cseq"], extra)
+		_, _ = fmt.Fprintf(c, "RTSP/1.0 200 OK\r\nCSeq: %s\r\n%s\r\n", req.Headers["cseq"], extra)
 	}
 }
 

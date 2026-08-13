@@ -77,6 +77,17 @@
     let report = $state<MediaQualityReport | null>(null);
     let loaded = $state(false);
     let saving = $state<StreamQuality | null>(null);
+    /**
+     * When a change takes effect, in the backend's own words.
+     *
+     * Shown as a standing line under the picker rather than as a toast after
+     * the tap, for the reason stores.svelte.ts gives for having no
+     * `toasts.success` at all: a confirmation belongs in the UI that changed.
+     * The chosen row already says the setting landed. What the screen cannot
+     * show by itself is *when* it lands — and that is worth knowing before
+     * choosing, not after.
+     */
+    let applies = $state("from the next thing you play");
 
     async function refresh() {
         try {
@@ -95,10 +106,7 @@
         saving = value;
         try {
             const res = await api.setMediaQuality(value);
-            // Said out loud, because it is the surprising part: the bitrate is
-            // baked into the decoder's command line, so what is playing keeps
-            // playing at the old one rather than being cut off to improve it.
-            toasts.success("Quality changed", `Applies ${res.applies}.`);
+            if (res.applies) applies = res.applies;
             await refresh();
         } catch (e) {
             toasts.error("Couldn't change quality", (e as Error).message);
@@ -175,6 +183,11 @@
                 from its own account, the speaker negotiates its own quality and
                 this setting reaches nothing.
             </p>
+            <!-- The surprising part, said before the tap: the bitrate is baked
+                 into the decoder's command line, so what is playing keeps
+                 playing at the old one rather than being cut off to improve
+                 it. -->
+            <p class="q-note">Changes apply {applies}.</p>
             <div class="q-options" role="radiogroup" aria-label="Decode quality">
                 {#each report.options as o (o.value)}
                     {@const on = report.stream_quality === o.value}

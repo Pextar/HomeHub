@@ -196,9 +196,12 @@ func (a *Account) SetDeviceVolume(ctx context.Context, deviceID string, level in
 	return a.apiPut(ctx, "/me/player/volume", q, nil)
 }
 
-// Client-level wrappers for the default (household) account, matching the
-// shape of Devices and PlayOn above them.
+// Playback reads the default (household) account's session. One of the two
+// Client-level wrappers here, which mirror the shape Devices and PlayOn
+// already have: a household with one login never names it.
 func (c *Client) Playback(ctx context.Context) (*Playback, error) { return c.For("").Playback(ctx) }
+
+// Transfer moves the default (household) account's session to one device.
 func (c *Client) Transfer(ctx context.Context, deviceID string, play bool) error {
 	return c.For("").Transfer(ctx, deviceID, play)
 }

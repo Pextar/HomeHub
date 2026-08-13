@@ -156,7 +156,7 @@ func probeClassic(ctx context.Context, addr string) Classic {
 	if err != nil {
 		return ClassicUnknown
 	}
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	resp, err := c.do(ctx, request{Method: "OPTIONS", URI: "*"})
 	if err != nil {
@@ -225,7 +225,7 @@ func Probe(ctx context.Context, host string, port int) (*Device, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	resp, err := c.do(ctx, request{Method: "OPTIONS", URI: "*"})
 	if err != nil {
