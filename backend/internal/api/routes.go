@@ -310,6 +310,13 @@ func (s *Server) registerSpotifyRoutes(api *mux.Router) {
 	api.HandleFunc("/spotify/similar", s.requireAdminOrKid(s.spotifySimilar)).Methods("GET")
 	api.HandleFunc("/spotify/saved", s.requireAdminOrKid(s.spotifySaved)).Methods("GET")
 	api.HandleFunc("/spotify/saved", s.requireAdminOrKid(s.spotifySetSaved)).Methods("PUT")
+	// The Connect picker: where this account can play, where it is playing,
+	// and moving it. Admin-only, unlike search: moving the account's single
+	// session reaches every room at once, including rooms a kid profile has
+	// no business stopping.
+	api.HandleFunc("/spotify/connect", s.requireAdmin(s.spotifyConnect)).Methods("GET")
+	api.HandleFunc("/spotify/connect/transfer", s.requireAdmin(s.spotifyConnectTransfer)).Methods("PUT")
+	api.HandleFunc("/spotify/connect/volume", s.requireAdmin(s.spotifyConnectVolume)).Methods("PUT")
 }
 
 func (s *Server) registerMatterRoutes(api *mux.Router) {

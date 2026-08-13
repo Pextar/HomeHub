@@ -67,6 +67,55 @@ export interface SpotifyDevice {
   volume?: number;
 }
 
+/**
+ * One Connect endpoint as the picker shows it: Spotify's own description,
+ * plus what HomeHub knows about the box behind it.
+ */
+export interface SpotifyConnectDevice extends SpotifyDevice {
+  /** HomeHub's own decoder, which registers as a Connect device whenever it
+   *  is feeding a room. Marked so it doesn't read as a mystery speaker with
+   *  the household's name on it — and because transferring *to* it does
+   *  nothing useful: HomeHub starts that session itself when a zone plays. */
+  homehub: boolean;
+  /** The HomeHub speaker this device is, when one is pinned or the names
+   *  match. Lets a row say "this is the Study KEF" instead of listing the
+   *  same box twice under two names. */
+  speaker?: string;
+}
+
+/**
+ * Where the account's single playback session is, and what it is doing.
+ *
+ * Null is a real answer and the common one: an account playing nothing
+ * anywhere. Render it as "nothing is playing", never as a failed read.
+ */
+export interface SpotifyPlayback {
+  device_id?: string;
+  device_name?: string;
+  playing: boolean;
+  item?: SpotifyItem;
+  progress_ms?: number;
+  duration_ms?: number;
+  /** When the reading was taken — extrapolate progress from this, not now. */
+  at: string;
+  /** 0-100, or -1 for a device with no volume of its own. Not zero: a slider
+   *  drawn at silence for a device that simply has no volume would be a lie
+   *  about the audio. */
+  volume: number;
+}
+
+/** GET /api/spotify/connect — everywhere this account can play, and where it
+ *  is playing now. */
+export interface SpotifyConnectView {
+  devices: SpotifyConnectDevice[];
+  playing: SpotifyPlayback | null;
+  /** What a transfer would stop, named before the tap. Empty when HomeHub is
+   *  not feeding anything — a Sonos on its own account link keeps playing
+   *  whatever a phone does, and warning about that would be the same
+   *  dishonesty in the other direction. */
+  interrupts: string;
+}
+
 /** The Connect pairing for one KEF speaker, plus what else is on offer. */
 export interface KEFSpotifyView {
   pinned_id?: string;

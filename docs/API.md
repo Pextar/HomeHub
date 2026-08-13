@@ -465,6 +465,60 @@ on a room replaces it. The engine restores the volume it lowered, on the
 interrupted path too, and an interrupted sleep leaves the music playing:
 `POST /api/media/timers/fade/cancel` is "I'm still up".
 
+#### Spotify Connect
+
+A remote control for the account's **single playback session** — one per
+Spotify account, wherever in the world it is. Distinct from everything else on
+this surface: the devices here are Spotify's (a phone in a pocket is one), not
+the household's registered speakers, and HomeHub is only asking Spotify's cloud
+to move the session between them.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/spotify/connect` | Every Connect device, what's playing and where, and what a transfer would interrupt |
+| PUT | `/api/spotify/connect/transfer` | `{"device_id":"…","play":true}` — move the session |
+| PUT | `/api/spotify/connect/volume` | `{"device_id":"…","level":0-100}` |
+
+```json
+{
+  "devices": [
+    {"id":"abc","name":"Petter's iPhone","type":"Smartphone","active":true,
+     "restricted":false,"volume":63,"homehub":false},
+    {"id":"def","name":"LSX II","type":"Speaker","active":false,
+     "restricted":false,"homehub":false,"speaker":"Study"},
+    {"id":"ghi","name":"HomeHub Multiroom","type":"Speaker","active":false,
+     "restricted":false,"homehub":true}
+  ],
+  "playing": {
+    "device_id":"abc","device_name":"Petter's iPhone","playing":true,
+    "item":{"kind":"track","uri":"spotify:track:…","name":"Kaos","sub":"Familjen"},
+    "progress_ms":42000,"duration_ms":215000,"at":"…","volume":63
+  },
+  "interrupts": "Downstairs"
+}
+```
+
+`playing` is `null` when the account is playing nothing anywhere — an ordinary
+state, not a failure, and clients must render it as "nothing is playing".
+`volume` is `-1` for a device with no volume of its own, which is not the same
+as `0`.
+
+`homehub` marks HomeHub's own decoder, which registers as a Connect device
+whenever it is feeding a room; `speaker` names the registered speaker a device
+turned out to be, reusing the pinning the KEF bridge already does.
+
+`interrupts` is the honest half. Because there is one session per account,
+moving it stops whatever held it — and when that is a room HomeHub is decoding
+for (the `stream` or `airplay` routes), this names the room *before* the tap. A
+Sonos playing from its own account link is never named: it keeps playing
+whatever a phone does. After a successful transfer the server also releases the
+zone sessions it was feeding, so the Music view stops showing a stream nobody
+is receiving.
+
+Admin-only, unlike `/api/spotify/search`: moving the account's session reaches
+every room at once. A **409** means the login predates the player scopes and
+only a reconnect fixes it.
+
 #### AirPlay receivers
 
 RoPieee boxes, shairport-sync, Apple TVs — anything answering RAOP. Thinner

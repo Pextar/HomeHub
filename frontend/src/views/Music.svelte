@@ -43,6 +43,7 @@
     import SpeakerModal from "../modals/SpeakerModal.svelte";
     import SonosEventsModal from "../modals/SonosEventsModal.svelte";
     import MusicQualityModal from "../modals/MusicQualityModal.svelte";
+    import SpotifyConnectModal from "../modals/SpotifyConnectModal.svelte";
     import LiveStatusChip from "../components/LiveStatusChip.svelte";
     import { api } from "../lib/api";
     import { toasts, route, bottomBar } from "../lib/stores.svelte";
@@ -873,6 +874,14 @@
         void zones.refresh();
     }
 
+    /** The Connect picker. Reading the zones after it closes: a transfer made
+     *  in there can take the account's session away from a room HomeHub was
+     *  feeding, and the backend will have released that zone. */
+    async function openConnectModal() {
+        await openModal(SpotifyConnectModal, {});
+        void zones.refresh();
+    }
+
     /** The push-status sheet. Retrying inside it can turn subscriptions on, and
      *  that changes which poll interval this view should be using. */
     async function openEventsModal() {
@@ -972,6 +981,8 @@
             onEditAirPlay={(sp) => void openAirPlayModal(sp)}
             onOpenEvents={openEventsModal}
             onOpenQuality={openQualityModal}
+            onOpenConnect={openConnectModal}
+            spotifyPlayback={spotify.status?.playback ?? false}
             onKEFOpened={(sp) => {
                 const r = rooms.byKey("kef:" + sp.id);
                 if (r) destination.focus(r);

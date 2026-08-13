@@ -488,6 +488,24 @@ without hardware:
 
 ---
 
+## The Connect picker is not a route
+
+`/api/spotify/connect` (see API.md) sits beside this protocol rather than
+inside it, and the distinction is worth keeping sharp.
+
+Everything in this document is about **speakers as the subject**: a zone is a
+set of them, a route is how content reaches them, and HomeHub decides. The
+Connect picker's subject is **the account's single playback session** — where
+Spotify is playing right now, which may be a phone on a bus. It is a remote
+control for something HomeHub does not own.
+
+They meet at exactly one point, and it is the same single-session rule that
+shapes `stream` and `airplay`: while HomeHub decodes for a room, HomeHub *is*
+the account's active device. Moving the session from the picker therefore stops
+that room, which is why the read names it before the tap and why a successful
+transfer releases those zone sessions. No route was involved in either
+direction — the audio never passed through this layer.
+
 ## What this does not do
 
 Stated plainly so the next reader does not have to discover it:

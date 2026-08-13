@@ -49,6 +49,8 @@
         onEditAirPlay,
         onOpenEvents,
         onOpenQuality,
+        onOpenConnect,
+        spotifyPlayback = false,
         /** Opening a KEF speaker points the destination at it, when it can take one. */
         onKEFOpened,
         /** Bound so the KEF player's settings chip can push straight into a pane. */
@@ -66,6 +68,12 @@
         onEditKEF: (sp: KEFSpeakerView) => void;
         onEditAirPlay: (sp: AirPlaySpeakerView) => void;
         onOpenQuality: () => void;
+        onOpenConnect: () => void;
+        /** Whether this Spotify login can reach the player endpoints at all.
+         *  The row is absent rather than disabled when it can't: a control
+         *  that opens onto "reconnect your account" is a worse answer than
+         *  not offering it, and Settings is where a login gets fixed. */
+        spotifyPlayback?: boolean;
         onOpenEvents: () => void;
         onKEFOpened: (sp: KEFSpeakerView) => void;
         detailId?: string | null;
@@ -374,6 +382,21 @@
             {:else}
                 Speakers are being polled — changes take a few seconds to show
             {/if}
+        {/snippet}
+    </NavRow>
+    {/if}
+
+    <!-- ── Spotify Connect ─────────────────────────────────────────────
+         A remote control for the account's single playback session, which is
+         a different subject from everything above it: those rows are the
+         house's speakers, this is wherever Spotify happens to be playing —
+         including a phone that is nobody's speaker. Here anyway, because it
+         is the screen someone comes to when the music is coming out of the
+         wrong thing. -->
+    {#if spotifyPlayback}
+    <NavRow icon="devices" title="Spotify Connect" onClick={onOpenConnect}>
+        {#snippet sub()}
+            Where this Spotify account is playing, and moving it somewhere else
         {/snippet}
     </NavRow>
     {/if}
