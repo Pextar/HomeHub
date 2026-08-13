@@ -101,6 +101,7 @@ var collections = []collection{
 	mapCollection("rooms", "Rooms", roomsFile, func(s *Store) *map[string]*Room { return &s.Rooms }),
 	mapCollection("sonos speakers", "Sonos", sonosFile, func(s *Store) *map[string]*SonosSpeaker { return &s.Sonos }),
 	mapCollection("kef speakers", "KEF", kefFile, func(s *Store) *map[string]*KEFSpeaker { return &s.KEF }),
+	mapCollection("airplay receivers", "AirPlay", airplayFile, func(s *Store) *map[string]*AirPlaySpeaker { return &s.AirPlay }),
 	mapCollection("zones", "Zones", zonesFile, func(s *Store) *map[string]*Zone { return &s.Zones }),
 	// History is written by SaveHistory rather than by Save: a play is
 	// recorded on every tap of a shelf, and that is no reason to rewrite

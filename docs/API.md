@@ -282,6 +282,8 @@ zones — sets of speakers that play together regardless of make. See
 | DELETE | `/api/media/history?room=&uri=` | One room stops remembering one thing; without `uri`, the lot. Admin-only |
 | GET | `/api/media/history/top?room=&limit=&hour=` | What a room keeps coming back to — at a given local hour with `hour=` (`0`–`23` or `now`) |
 | GET | `/api/media/insights?limit=` | The household's listening summed over every room |
+| GET | `/api/media/quality` | What the audio actually is on every route, and the decode setting |
+| PUT | `/api/media/quality` | `{"stream_quality":"best"\|"balanced"\|"saver"}` |
 | GET | `/api/media/timers` | Every music timer, soonest first |
 | POST | `/api/media/timers` | Create one (a wake-up: a time of day, days, and something to play) |
 | PUT | `/api/media/timers/{id}` | Replace one wholesale |
@@ -289,7 +291,8 @@ zones — sets of speakers that play together regardless of make. See
 | POST | `/api/media/timers/sleep` | `{"room","minutes","fade_minutes","volume"}` — quiet this room in N minutes |
 | POST | `/api/media/timers/fade/cancel` | `{"room"}` — stop a ramp without deleting anything |
 
-Zone members are bridge-qualified speaker ids: `sonos:abc`, `kef:def`.
+Zone members are bridge-qualified speaker ids: `sonos:abc`, `kef:def`,
+`airplay:ghi`.
 
 `POST /play` answers with the route it chose, so a client can be honest about
 what is about to happen:
@@ -304,10 +307,16 @@ what is about to happen:
 }
 ```
 
-`route` is one of `native`, `connect`, `group`, `stream` — best first, with
-`stream` chosen only when nothing else can serve the whole zone. `sync` is
-`exact`, `single` or `buffered`; `buffered` is the honest label for the stream
+`route` is one of `native`, `connect`, `group`, `airplay`, `stream` — best
+first, with `stream` chosen only when nothing else can serve the whole zone.
+`sync` is `exact`, `single`, `clocked` or `buffered`. `clocked` is AirPlay:
+receivers held to HomeHub's own clock, tighter than a shared buffer and still
+not a vendor's multi-room bus. `buffered` is the honest label for the stream
 route and is never reported for a zone a native route can serve.
+
+`quality` rides along on both `/zones` and `/play`: the source stage, the
+transport stage, whether the result is lossless end to end, and what limits it
+when it isn't. See *Sound quality* below.
 
 A **409** means something the user can fix: connect an account, wake a speaker,
 install librespot, or pick different speakers. The body says which.
@@ -323,6 +332,48 @@ Environment: `HOMEHUB_STREAM_URL` overrides the address speakers fetch from,
 `HOMEHUB_LIBRESPOT_BIN` / `HOMEHUB_LIBRESPOT_NAME` configure the decoder, and
 `HOMEHUB_STREAM_DELAY_SONOS` / `HOMEHUB_STREAM_DELAY_KEF` (Go durations) space
 out the start commands to line up buffers. All optional.
+
+#### Sound quality
+
+`GET /api/media/quality` answers what audio actually reaches the speakers, per
+route, and offers the one setting that changes any of it.
+
+```json
+{
+  "stream_quality": "best",
+  "bitrate_kbps": 320,
+  "options": [{ "value": "best", "label": "Best available", "bitrate_kbps": 320, "detail": "…" }],
+  "providers": [{
+    "id": "spotify",
+    "routes": [{
+      "route": "airplay",
+      "label": "AirPlay",
+      "decoded": true,
+      "chain": {
+        "source":    { "name": "Spotify",  "quality": { "codec": "vorbis", "bitrate_kbps": 320, "lossless": false } },
+        "transport": { "name": "AirPlay",  "quality": { "codec": "pcm", "sample_rate": 44100, "bit_depth": 16, "lossless": true } },
+        "lossless": false,
+        "limited_by": "Spotify",
+        "summary": "Spotify at Ogg Vorbis 320 kbps — Spotify's catalogue is compressed at the source, so nothing after it is lossless"
+      }
+    }]
+  }]
+}
+```
+
+Two stages, because "is this lossless" has two answers that are fixed in
+different places: a lossless path carrying a lossy source is not lossless, and
+saying so is the point. `limited_by` names the stage that caps the result, and
+`fix` (when present) is the change that would actually improve it — absent is a
+real answer, and clients must render it as one rather than as a disabled
+control.
+
+`stream_quality` moves only the routes where HomeHub holds the audio
+(`decoded: true` — `airplay` and `stream`). On the others the speaker holds the
+account and negotiates its own bitrate, which it never reports, so those stages
+are marked `approximate` and shown as "up to". The change lands on the next
+thing played: the bitrate is baked into the decoder's command line, and
+applying it immediately would mean cutting off the music to improve it.
 
 #### Play history
 
@@ -413,6 +464,102 @@ the answer carries `quiet_at` — the moment worth reading back. Setting one twi
 on a room replaces it. The engine restores the volume it lowered, on the
 interrupted path too, and an interrupted sleep leaves the music playing:
 `POST /api/media/timers/fade/cancel` is "I'm still up".
+
+#### Spotify Connect
+
+A remote control for the account's **single playback session** — one per
+Spotify account, wherever in the world it is. Distinct from everything else on
+this surface: the devices here are Spotify's (a phone in a pocket is one), not
+the household's registered speakers, and HomeHub is only asking Spotify's cloud
+to move the session between them.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/spotify/connect` | Every Connect device, what's playing and where, and what a transfer would interrupt |
+| PUT | `/api/spotify/connect/transfer` | `{"device_id":"…","play":true}` — move the session |
+| PUT | `/api/spotify/connect/volume` | `{"device_id":"…","level":0-100}` |
+
+```json
+{
+  "devices": [
+    {"id":"abc","name":"Petter's iPhone","type":"Smartphone","active":true,
+     "restricted":false,"volume":63,"homehub":false},
+    {"id":"def","name":"LSX II","type":"Speaker","active":false,
+     "restricted":false,"homehub":false,"speaker":"Study"},
+    {"id":"ghi","name":"HomeHub Multiroom","type":"Speaker","active":false,
+     "restricted":false,"homehub":true}
+  ],
+  "playing": {
+    "device_id":"abc","device_name":"Petter's iPhone","playing":true,
+    "item":{"kind":"track","uri":"spotify:track:…","name":"Kaos","sub":"Familjen"},
+    "progress_ms":42000,"duration_ms":215000,"at":"…","volume":63
+  },
+  "interrupts": "Downstairs"
+}
+```
+
+`playing` is `null` when the account is playing nothing anywhere — an ordinary
+state, not a failure, and clients must render it as "nothing is playing".
+`volume` is `-1` for a device with no volume of its own, which is not the same
+as `0`.
+
+`homehub` marks HomeHub's own decoder, which registers as a Connect device
+whenever it is feeding a room; `speaker` names the registered speaker a device
+turned out to be, reusing the pinning the KEF bridge already does.
+
+`interrupts` is the honest half. Because there is one session per account,
+moving it stops whatever held it — and when that is a room HomeHub is decoding
+for (the `stream` or `airplay` routes), this names the room *before* the tap. A
+Sonos playing from its own account link is never named: it keeps playing
+whatever a phone does. After a successful transfer the server also releases the
+zone sessions it was feeding, so the Music view stops showing a stream nobody
+is receiving.
+
+Admin-only, unlike `/api/spotify/search`: moving the account's session reaches
+every room at once. A **409** means the login predates the player scopes and
+only a reconnect fixes it.
+
+#### AirPlay receivers
+
+RoPieee boxes, shairport-sync, Apple TVs — anything answering RAOP. Thinner
+than the other two bridges because a receiver is a *sink*: it holds nothing,
+so there is nothing per-speaker to read or configure, and playing to one is a
+zone operation above.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/airplay/status` | Registered receivers, with whether HomeHub is casting to each |
+| GET | `/api/airplay/discover` | mDNS scan; each result says whether HomeHub can drive it, and why not |
+| POST | `/api/airplay/speakers` | Register one. The scan's fields ride along; a bare `ip` is probed |
+| PUT | `/api/airplay/speakers/{id}` | Name, room, address, port |
+| DELETE | `/api/airplay/speakers/{id}` | Unregister, and drop it from every zone |
+| PUT | `/api/airplay/{id}/volume` | `{"level": 0-100}` — stored always, sent when a cast is running |
+
+`/status` performs no reachability probe, unlike `/api/sonos/status` and
+`/api/kef/status`. Asking a receiver whether it is there means opening an RTSP
+session, and that session is exactly what takes it away from whatever else is
+playing to it — so checking would interrupt the Mac using it. A receiver that
+has gone away is found at the moment something plays to it, with the connection
+error naming it.
+
+A scan browses both `_raop._tcp` and `_airplay._tcp`, and then **asks each
+receiver** whether it accepts the classic session HomeHub opens (`classic`:
+`yes` / `no` / `unknown`). That question is asked rather than inferred because
+an AirPlay 2 advertisement does not answer it: shairport-sync in AirPlay 2 mode
+still takes classic senders, so a RoPieee reports `airplay2: true` *and*
+`classic: "yes"`. `unknown` means nothing answered the check — the box may be
+asleep — and is attempted rather than refused.
+
+A result carries `supported: false` and a `problem` sentence only for a
+receiver that cannot be driven: a password set in shairport-sync's config, a
+FairPlay-only Apple TV, a box wanting a sample rate AirPlay 1 does not carry,
+or one that answered and refused the classic session. Those are listed rather
+than hidden: a device visible on the network and absent from the list sends
+someone hunting.
+
+Volume is stored as well as sent because a receiver only accepts a level inside
+a session. With nothing casting, the stored level is what the next cast opens
+with — otherwise every cast would start at whatever the last sender left.
 
 ### Announcements
 

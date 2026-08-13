@@ -180,9 +180,15 @@ func (l *Librespot) Open(ctx context.Context, uri string) (*media.Stream, error)
 	l.mu.Unlock()
 
 	l.logf("stream: librespot running as %q", l.cfg.DeviceName)
+	// The body is raw S16LE at CD rate — the WAV header is prepended per
+	// listener by the Host, not carried in the stream. Saying so lets the
+	// AirPlay route pack these samples into RTP packets without parsing a
+	// container that isn't there.
+	pcm := media.CDQuality
 	return &media.Stream{
 		Body:        s,
 		ContentType: ContentTypeWAV,
+		PCM:         &pcm,
 		Meta: media.Metadata{
 			Title:       "Spotify",
 			ContentType: ContentTypeWAV,

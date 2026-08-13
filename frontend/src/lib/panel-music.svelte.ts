@@ -60,8 +60,11 @@ import type {
     AnnounceStatus,
 } from "./types";
 
-/** Which bridge a member speaker's own volume/mute calls go to. */
-export type PanelVendor = "sonos" | "kef";
+/** Which bridge a member speaker's own volume/mute calls go to. Every vendor
+ *  the media layer knows, because a zone can hold any mix of them and each
+ *  takes its own call — an AirPlay receiver's volume travels over the RTSP
+ *  session HomeHub already holds open to it. */
+export type PanelVendor = "sonos" | "kef" | "airplay";
 
 /** One speaker inside a featured group or zone, coordinator/lead first. */
 export interface PanelMember {
@@ -566,7 +569,9 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
             muted: withState.length > 0 && withState.every((sp) => sp.state?.muted),
             // On the stream route HomeHub is the Spotify device and the
             // speakers pull a live stream: `next` is a call they refuse.
-            canSkip: z.route !== "stream",
+            // See rooms.svelte.ts: neither route HomeHub decodes for has a
+            // track the speakers can skip.
+            canSkip: z.route !== "stream" && z.route !== "airplay",
             trackTitle: zoneLines.title || undefined,
             trackSub: zoneLines.sub,
             trackArtist: lead?.state?.track?.artist,
@@ -913,9 +918,14 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
         return featured?.members?.find((m) => m.id === id)?.vendor ?? "sonos";
     }
     function sendMemberVolume(id: string, level: number): Promise<void> {
-        return memberVendor(id) === "kef"
-            ? api.kefSetVolume(id, level)
-            : api.sonosSetVolume(id, level);
+        switch (memberVendor(id)) {
+            case "kef":
+                return api.kefSetVolume(id, level);
+            case "airplay":
+                return api.airplaySetVolume(id, level);
+            default:
+                return api.sonosSetVolume(id, level);
+        }
     }
     const memThrottle = createVolumeThrottle((id, level) => {
         void sendMemberVolume(id, level).catch(() => { });

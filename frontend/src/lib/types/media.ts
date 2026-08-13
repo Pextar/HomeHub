@@ -4,8 +4,10 @@
 // in sonos.ts and kef.ts stay: the per-speaker detail views need vendor
 // specifics that don't generalise. See docs/MEDIA-PROTOCOL.md.
 
-/** Which bridge is behind an endpoint. */
-export type MediaVendor = "sonos" | "kef";
+/** Which bridge is behind an endpoint. `airplay` is a protocol rather than a
+ *  make — a RoPieee, an Apple TV and any shairport-sync box are all driven
+ *  identically, which is exactly what a vendor means to the route engine. */
+export type MediaVendor = "sonos" | "kef" | "airplay";
 
 /**
  * One thing a speaker can do. These are the strings the backend emits, and
@@ -21,7 +23,11 @@ export type MediaCapability =
   | "play_uri"
   | "native_service"
   | "connect"
-  | "wake";
+  | "wake"
+  /** Can be *pushed* audio rather than handed something to fetch. The
+   *  inverse of play_uri in who holds the audio: HomeHub does the sending
+   *  and keeps the clock. */
+  | "airplay";
 
 /** A speaker's identity and what it can do, without touching the device. */
 export interface MediaEndpoint {
@@ -65,14 +71,18 @@ export interface MediaNowPlaying {
  * ordering is a guarantee: `stream` is only ever chosen when nothing else
  * can serve the whole zone, so a Sonos-only zone never lands on it.
  */
-export type MediaRoute = "native" | "connect" | "group" | "stream";
+export type MediaRoute = "native" | "connect" | "group" | "airplay" | "stream";
 
 /**
- * How well a route keeps speakers together. `buffered` is the honest label
- * for the stream route — a few hundred milliseconds apart, stable once
- * running, and not the sample-locked sync a native group gets.
+ * How well a route keeps speakers together.
+ *
+ * Three honest labels rather than a good/bad flag. `buffered` is the stream
+ * route: a few hundred milliseconds apart, stable once running, and not the
+ * sample-locked sync a native group gets. `clocked` is AirPlay: one sender,
+ * one clock, every receiver told which sample belongs at which moment —
+ * materially tighter than buffered, still not a vendor's own multi-room bus.
  */
-export type MediaSync = "exact" | "single" | "buffered";
+export type MediaSync = "exact" | "single" | "buffered" | "clocked";
 
 /** Whether something is usable right now, and if not what to do about it. */
 export interface MediaAvailability {
@@ -115,6 +125,95 @@ export interface MediaZone {
   reason?: string;
   /** Why nothing can serve this zone. Set instead of route/reason. */
   problem?: string;
+  /** What a play here would actually sound like, source to speaker. */
+  quality?: MediaChain;
+}
+
+// ── Quality ──────────────────────────────────────────────────────────────
+// "Am I hearing lossless?" has no single answer: the audio passes through two
+// hands — the service that encoded it and the path it took to the speaker —
+// and a lossless path carrying a lossy source is not lossless. So the backend
+// reports a chain with the weakest link named, and the UI shows that rather
+// than a badge, because a badge would have to pick a lie.
+
+export type MediaCodec = "pcm" | "alac" | "flac" | "vorbis" | "aac" | "mp3" | "";
+
+export interface MediaQuality {
+  codec?: MediaCodec;
+  sample_rate?: number;
+  bit_depth?: number;
+  channels?: number;
+  /** Absent for lossless and for unknown, which `lossless` tells apart. */
+  bitrate_kbps?: number;
+  lossless: boolean;
+  /** Something HomeHub could not measure — a speaker's own session, whose
+   *  parameters it never sees. Show as "up to", never as a measurement. */
+  approximate?: boolean;
+}
+
+/** One link in the chain, with whatever is responsible for it named. */
+export interface MediaQualityStage {
+  name: string;
+  quality: MediaQuality;
+  detail?: string;
+}
+
+/** An improvement that is actually available. Absent is a real answer and
+ *  must render as one rather than as a disabled button. */
+export interface MediaQualityFix {
+  /** The lever: "stream_quality" is the only one today. */
+  setting: string;
+  label: string;
+  detail?: string;
+}
+
+export interface MediaChain {
+  source: MediaQualityStage;
+  transport: MediaQualityStage;
+  /** End to end: both stages, or neither. */
+  lossless: boolean;
+  /** The stage that caps the result. What the UI leads with when not
+   *  lossless — "not lossless" alone is not actionable. */
+  limited_by?: string;
+  summary: string;
+  fix?: MediaQualityFix;
+}
+
+/** How hard HomeHub's own decoder asks the service to compress. Household-wide
+ *  because the decoder is one process holding one service session. */
+export type StreamQuality = "best" | "balanced" | "saver";
+
+export interface StreamQualityOption {
+  value: StreamQuality;
+  label: string;
+  bitrate_kbps: number;
+  /** What this choice costs and gains, in the terms the choice is made in. */
+  detail: string;
+}
+
+/** One route and what it would sound like. */
+export interface MediaRouteQuality {
+  route: MediaRoute;
+  label: string;
+  /** True on the routes HomeHub decodes for — the only ones the setting
+   *  reaches. Elsewhere the speaker holds the account and picks for itself. */
+  decoded: boolean;
+  chain: MediaChain;
+}
+
+export interface MediaProviderQuality {
+  id: string;
+  name: string;
+  routes: MediaRouteQuality[];
+}
+
+/** GET /api/media/quality — the setting, the choices, and what every path
+ *  through the house currently sounds like. */
+export interface MediaQualityReport {
+  stream_quality: StreamQuality;
+  bitrate_kbps: number;
+  options: StreamQualityOption[];
+  providers: MediaProviderQuality[];
 }
 
 export type MediaItemKind = "track" | "album" | "playlist" | "artist" | "station";
@@ -143,6 +242,8 @@ export interface MediaPlayResult {
   /** Present only on the stream route. */
   stream_url?: string;
   speakers: string[];
+  /** What it will sound like, source to speaker. */
+  quality?: MediaChain;
 }
 
 /** One route that couldn't serve a zone, and the reason naming the speaker. */

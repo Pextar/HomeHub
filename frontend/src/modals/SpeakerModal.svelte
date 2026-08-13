@@ -1,9 +1,16 @@
 <script lang="ts">
-    // Registering a speaker — Sonos or KEF. One sheet for both, because the
-    // flow is identical (scan the LAN, or type the address; name and room are
-    // optional and default to what the device calls itself) and a separate
-    // "Add speaker" button per brand would put the least interesting decision
-    // in the user's way before they have said anything else.
+    // Registering a speaker — Sonos, KEF or AirPlay. One sheet for all three,
+    // because the flow is identical (scan the LAN, or type the address; name
+    // and room are optional and default to what the device calls itself) and a
+    // separate "Add speaker" button per brand would put the least interesting
+    // decision in the user's way before they have said anything else.
+    //
+    // AirPlay is a protocol rather than a make, and it sits in the same picker
+    // for the same reason: what the user is doing is adding a speaker, and
+    // "which kind" is a detail of that, not a different task. It does bring one
+    // thing the other two don't — a scan can find a receiver HomeHub genuinely
+    // cannot drive (a FairPlay-only Apple TV, a box with a password) — so those
+    // rows say why instead of being quietly missing or quietly broken.
     //
     // The brand picker is chip filters, per DESIGN.md §2 — the Music subnav is
     // the one sanctioned segmented control and this isn't it. It only appears
@@ -16,12 +23,19 @@
     import { api } from "../lib/api";
     import { toasts } from "../lib/stores.svelte";
     import { untrack } from "svelte";
-    import type { SonosSpeaker, SonosCandidate, KEFSpeaker, KEFCandidate } from "../lib/types";
+    import type {
+        SonosSpeaker,
+        SonosCandidate,
+        KEFSpeaker,
+        KEFCandidate,
+        AirPlaySpeaker,
+        AirPlayCandidate,
+    } from "../lib/types";
 
-    export type SpeakerBrand = "sonos" | "kef";
+    export type SpeakerBrand = "sonos" | "kef" | "airplay";
 
     interface Props {
-        existing?: SonosSpeaker | KEFSpeaker | null;
+        existing?: SonosSpeaker | KEFSpeaker | AirPlaySpeaker | null;
         /** Which bridge owns this speaker. Locked in edit mode. */
         brand?: SpeakerBrand;
     }
@@ -38,6 +52,7 @@
     const BRANDS: { value: SpeakerBrand; label: string }[] = [
         { value: "sonos", label: "Sonos" },
         { value: "kef", label: "KEF" },
+        { value: "airplay", label: "AirPlay" },
     ];
 
     // ── LAN discovery (add mode only) ────────────────────────────────────
@@ -52,6 +67,24 @@
         registered: boolean;
         /** Sonos knows a room for the speaker; KEF has no equivalent. */
         room?: string;
+        /**
+         * False for a receiver HomeHub can't drive, with `problem` saying
+         * why. Only AirPlay produces these: a scan there can turn up a box
+         * that answers the protocol and still refuses everything HomeHub can
+         * send. Listing it as addable would set up a failure two taps later;
+         * hiding it would leave someone hunting for a device they can see is
+         * on the network.
+         */
+        supported?: boolean;
+        problem?: string;
+        /** A short mono note under the address: what the receiver answered
+         *  when the scan asked whether it takes HomeHub's session. Shown
+         *  because "AirPlay 2" is exactly the label that makes someone doubt
+         *  a device will work, and the scan already knows better. */
+        note?: string;
+        /** What the receiver said it accepts, carried through registration so
+         *  the backend doesn't have to scan again to find out. */
+        airplay?: AirPlayCandidate;
     };
     let scanning = $state(false);
     let scanned = $state(false);
@@ -62,7 +95,20 @@
         scanning = true;
         candidates = [];
         try {
-            if (kind === "kef") {
+            if (kind === "airplay") {
+                const found: AirPlayCandidate[] = await api.airplayDiscover();
+                candidates = found.map((c) => ({
+                    key: c.id || `${c.ip}:${c.port}`,
+                    ip: c.ip,
+                    title: c.name || c.ip,
+                    model: c.model ?? "",
+                    registered: c.registered,
+                    supported: c.supported,
+                    problem: c.problem,
+                    note: airplayNote(c),
+                    airplay: c,
+                }));
+            } else if (kind === "kef") {
                 const found: KEFCandidate[] = await api.kefDiscover();
                 candidates = found.map((c) => ({
                     key: c.mac || c.ip,
@@ -90,12 +136,30 @@
         }
     }
 
+    /**
+     * What the scan learned beyond the address, for an AirPlay row.
+     *
+     * The AirPlay 2 case is the one worth wording carefully. A receiver that
+     * says "AirPlay 2" reads like a device HomeHub can't use, and for a
+     * shairport-sync box — a RoPieee — that is simply untrue: it answers
+     * classic senders too, which the scan has just confirmed by asking. So
+     * the row says both halves, and says the confirmed one out loud.
+     */
+    function airplayNote(c: AirPlayCandidate): string {
+        const parts: string[] = [];
+        if (c.airplay2) parts.push("AirPlay 2");
+        if (c.classic === "yes") parts.push("takes HomeHub's stream");
+        else if (c.classic === "unknown") parts.push("didn't answer a check");
+        return parts.join(" · ");
+    }
+
     function pickBrand(b: SpeakerBrand) {
         if (kind === b) return;
         kind = b;
         // The other bridge's results say nothing about this one.
         candidates = [];
         scanned = false;
+        chosen = null;
         errors = {};
     }
 
@@ -103,8 +167,15 @@
         ip = c.ip;
         if (!name.trim()) name = c.title;
         if (!room.trim() && c.room) room = c.room;
+        // Remembered whole: what the receiver advertised is only visible
+        // during a scan, and re-deriving it from the address later is
+        // impossible — see internal/store's AirPlaySpeaker.
+        chosen = c.airplay ?? null;
         errors = {};
     }
+
+    /** The scanned receiver behind the picked row, when there is one. */
+    let chosen = $state<AirPlayCandidate | null>(null);
 
     async function save() {
         if (saving) return;
@@ -115,11 +186,28 @@
         saving = true;
         try {
             if (existing) {
-                if (kind === "kef") {
+                if (kind === "airplay") {
+                    await api.airplayUpdateSpeaker(existing.id, { name, ip, room });
+                } else if (kind === "kef") {
                     await api.kefUpdateSpeaker(existing.id, { name, ip, room });
                 } else {
                     await api.sonosUpdateSpeaker(existing.id, { name, ip, room });
                 }
+            } else if (kind === "airplay") {
+                // Everything the scan learned rides along. A typed-in address
+                // carries none of it, and the backend probes instead — which
+                // proves something answers AirPlay there and no more.
+                await api.airplayCreateSpeaker({
+                    ip,
+                    name,
+                    room,
+                    port: chosen?.ip === ip ? chosen.port : undefined,
+                    device_id: chosen?.ip === ip ? chosen.id : undefined,
+                    model: chosen?.ip === ip ? chosen.model : undefined,
+                    pcm: chosen?.ip === ip ? true : undefined,
+                    alac: chosen?.ip === ip ? true : undefined,
+                    metadata: chosen?.ip === ip ? chosen.metadata : undefined,
+                });
             } else {
                 // Name/room may be blank — the backend fills them from what
                 // the speaker calls itself.
@@ -147,7 +235,9 @@
         });
         if (!ok) return;
         try {
-            if (kind === "kef") {
+            if (kind === "airplay") {
+                await api.airplayDeleteSpeaker(existing.id);
+            } else if (kind === "kef") {
                 await api.kefDeleteSpeaker(existing.id);
             } else {
                 await api.sonosDeleteSpeaker(existing.id);
@@ -158,7 +248,9 @@
         }
     }
 
-    const brandName = $derived(kind === "kef" ? "KEF" : "Sonos");
+    const brandName = $derived(
+        kind === "kef" ? "KEF" : kind === "airplay" ? "AirPlay" : "Sonos",
+    );
 </script>
 
 <Modal
@@ -200,20 +292,32 @@
                 {:else if candidates.length > 0}
                     <div class="cands" role="listbox" aria-label="Discovered speakers">
                         {#each candidates as c (c.key)}
+                            {@const blocked = c.supported === false}
                             <button
                                 type="button"
                                 class="cand"
                                 class:selected={ip === c.ip}
-                                disabled={c.registered}
+                                disabled={c.registered || blocked}
                                 onclick={() => pick(c)}
                             >
                                 <Icon name="speaker" size={18} />
                                 <span class="cand-info">
                                     <span class="cand-name">{c.title}</span>
                                     <span class="cand-sub mono">{c.model}{c.model ? " · " : ""}{c.ip}</span>
+                                    <!-- Shown rather than hidden: a receiver
+                                         on the network that HomeHub can't
+                                         drive is worth naming, or the user
+                                         hunts for a device they can see. -->
+                                    {#if blocked && c.problem}
+                                        <span class="cand-why">{c.problem}</span>
+                                    {:else if c.note}
+                                        <span class="cand-note mono">{c.note}</span>
+                                    {/if}
                                 </span>
                                 {#if c.registered}
                                     <span class="cand-tag mono">ADDED</span>
+                                {:else if blocked}
+                                    <span class="cand-tag mono">CAN'T USE</span>
                                 {:else if ip === c.ip}
                                     <Icon name="check" size={16} />
                                 {/if}
@@ -311,6 +415,11 @@
     }
     .cand.selected .cand-name { color: var(--on); }
     .cand-sub { font-size: 11px; color: var(--text-mute); }
+    .cand-why { font-size: 11.5px; color: var(--text-dim); line-height: 1.35; }
+    .cand-note {
+        font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase;
+        color: var(--text-dim);
+    }
     .cand-tag {
         font-size: 10px;
         letter-spacing: 0.08em;

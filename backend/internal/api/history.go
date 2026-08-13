@@ -208,12 +208,16 @@ func (s *Server) mediaInsights(w http.ResponseWriter, r *http.Request) {
 func (s *Server) pruneDeadRooms() {
 	var droppedHistory, droppedTimers bool
 	s.Store.Mutate(func() {
-		live := make(map[string]bool, len(s.Store.Sonos)+len(s.Store.KEF)+len(s.Store.Zones))
+		live := make(map[string]bool,
+			len(s.Store.Sonos)+len(s.Store.KEF)+len(s.Store.AirPlay)+len(s.Store.Zones))
 		for id := range s.Store.Sonos {
-			live["sonos:"+id] = true
+			live[store.QualifySonos(id)] = true
 		}
 		for id := range s.Store.KEF {
-			live["kef:"+id] = true
+			live[store.QualifyKEF(id)] = true
+		}
+		for id := range s.Store.AirPlay {
+			live[store.QualifyAirPlay(id)] = true
 		}
 		for id := range s.Store.Zones {
 			live["zone:"+id] = true

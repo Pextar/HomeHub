@@ -26,20 +26,31 @@
     import KEFSpeakerDetail from "../../views/KEFSpeakerDetail.svelte";
     import { api } from "../../lib/api";
     import { kefSourceLabel } from "../../lib/kef";
+    import Slider from "./Slider.svelte";
     import type { SonosBridge } from "../../lib/music/sonos.svelte";
     import type { KEFBridge } from "../../lib/music/kef.svelte";
-    import type { SonosSpeakerView, KEFSpeakerView } from "../../lib/types";
+    import type { AirPlayBridge } from "../../lib/music/airplay.svelte";
+    import type {
+        SonosSpeakerView,
+        KEFSpeakerView,
+        AirPlaySpeakerView,
+    } from "../../lib/types";
 
     let {
         sonos,
         kef,
+        airplay,
         totalSpeakers,
         readyCount,
         onBack,
         onAdd,
         onEditSonos,
         onEditKEF,
+        onEditAirPlay,
         onOpenEvents,
+        onOpenQuality,
+        onOpenConnect,
+        spotifyPlayback = false,
         /** Opening a KEF speaker points the destination at it, when it can take one. */
         onKEFOpened,
         /** Bound so the KEF player's settings chip can push straight into a pane. */
@@ -48,12 +59,21 @@
     }: {
         sonos: SonosBridge;
         kef: KEFBridge;
+        airplay: AirPlayBridge;
         totalSpeakers: number;
         readyCount: number;
         onBack: () => void;
         onAdd: () => void;
         onEditSonos: (sp: SonosSpeakerView) => void;
         onEditKEF: (sp: KEFSpeakerView) => void;
+        onEditAirPlay: (sp: AirPlaySpeakerView) => void;
+        onOpenQuality: () => void;
+        onOpenConnect: () => void;
+        /** Whether this Spotify login can reach the player endpoints at all.
+         *  The row is absent rather than disabled when it can't: a control
+         *  that opens onto "reconnect your account" is a worse answer than
+         *  not offering it, and Settings is where a login gets fixed. */
+        spotifyPlayback?: boolean;
         onOpenEvents: () => void;
         onKEFOpened: (sp: KEFSpeakerView) => void;
         detailId?: string | null;
@@ -290,6 +310,60 @@
     </section>
     {/if}
 
+    <!-- ── AirPlay ─────────────────────────────────────────────────────
+         A list and nothing more, because a receiver is a sink: it has no
+         settings screen to open, no input to pick and no now-playing to read
+         — what it is playing is whatever HomeHub is sending it, which the
+         room's own player already says. The row carries the one control that
+         is genuinely the receiver's own, and the row itself opens the
+         registration form, since that is the only thing left to change. -->
+    {#if airplay.receivers.length > 0}
+    <section class="block">
+        <div class="block-head">
+            <div class="eyrow">AirPlay</div>
+            <span class="hint">
+                <span class="mono">{airplay.receivers.length}</span> registered
+            </span>
+        </div>
+        <div class="sp-list">
+            {#each airplay.receivers as sp (sp.id)}
+                <div class="sp-row ap-row" class:on={sp.casting}>
+                    <span class="shot placeholder" aria-hidden="true"></span>
+                    <span class="sp-meta">
+                        <button class="ap-open" onclick={() => onEditAirPlay(sp)}>
+                            <span class="sp-name">{sp.name}</span>
+                            <span class="sp-sub">
+                                {[sp.airplay2 ? "AirPlay 2" : "", sp.model, sp.room]
+                                    .filter(Boolean)
+                                    .join(" · ") || sp.ip}
+                            </span>
+                        </button>
+                        <!-- Sent when a cast is running, remembered when one
+                             isn't: a receiver only takes a level inside a
+                             session, so this is what the next cast opens
+                             with rather than a control that does nothing. -->
+                        <Slider
+                            value={airplay.shownVolume(sp)}
+                            label={`${sp.name} volume`}
+                            valueText={`${airplay.shownVolume(sp)}%`}
+                            onInput={(v) => airplay.dragVolume(sp, v)}
+                            onChange={(v) => airplay.setVolume(sp, v)}
+                        />
+                    </span>
+                    {#if sp.casting}
+                        <Waveform />
+                    {/if}
+                </div>
+            {/each}
+        </div>
+        <p class="hint">
+            AirPlay receivers are sent audio by HomeHub rather than playing for
+            themselves, so they have no settings of their own here. Add one to a
+            room to play to it.
+        </p>
+    </section>
+    {/if}
+
     <!-- ── Live updates ────────────────────────────────────────────────
          Speakers is where the devices are managed, so it is where the
          plumbing behind them belongs. The topbar chip says which state we're
@@ -311,6 +385,31 @@
         {/snippet}
     </NavRow>
     {/if}
+
+    <!-- ── Spotify Connect ─────────────────────────────────────────────
+         A remote control for the account's single playback session, which is
+         a different subject from everything above it: those rows are the
+         house's speakers, this is wherever Spotify happens to be playing —
+         including a phone that is nobody's speaker. Here anyway, because it
+         is the screen someone comes to when the music is coming out of the
+         wrong thing. -->
+    {#if spotifyPlayback}
+    <NavRow icon="devices" title="Spotify Connect" onClick={onOpenConnect}>
+        {#snippet sub()}
+            Where this Spotify account is playing, and moving it somewhere else
+        {/snippet}
+    </NavRow>
+    {/if}
+
+    <!-- ── Sound quality ───────────────────────────────────────────────
+         Here rather than in Settings because it is a fact about these
+         devices: what reaches a speaker depends on which of them are in the
+         room, and this is the screen where that is being arranged. -->
+    <NavRow icon="radio" title="Sound quality" onClick={onOpenQuality}>
+        {#snippet sub()}
+            What actually reaches each speaker, and the one part of it you can change
+        {/snippet}
+    </NavRow>
     </div><!-- /.sp-col -->
 
     {#if detailSpeaker}
@@ -340,6 +439,20 @@
     {/if}
     </div><!-- /.sp-split -->
 <style>
+    /* An AirPlay row is a container rather than a button: the name opens the
+       registration form and the slider is its own control, and nesting a
+       slider inside a button would make the whole row swallow the drag. */
+    .ap-row { cursor: default; }
+    .ap-row .sp-meta { gap: 6px; }
+    .ap-open {
+        display: flex; flex-direction: column; gap: 1px;
+        background: none; border: 0; padding: 0; margin: 0;
+        font: inherit; color: inherit; text-align: left; cursor: pointer;
+        min-height: 32px;
+    }
+    @media (pointer: coarse) {
+        .ap-open { min-height: 44px; justify-content: center; }
+    }
     /* ── Screen head (Speakers) ──
        The §11 detail shape — back chip, centered title, action chip — because
        Speakers is a screen pushed from Home, not a sheet lifted over it. */

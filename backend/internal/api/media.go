@@ -49,13 +49,17 @@ const mediaTimeout = 45 * time.Second
 // the same event-driven and polled caches the vendor views do rather than
 // adding a second round of traffic to every speaker.
 func (s *Server) endpoints() map[string]media.Endpoint {
-	out := make(map[string]media.Endpoint, len(s.Store.Sonos)+len(s.Store.KEF))
+	out := make(map[string]media.Endpoint,
+		len(s.Store.Sonos)+len(s.Store.KEF)+len(s.Store.AirPlay))
 	for id, sp := range s.Store.Sonos {
 		out[store.QualifySonos(id)] = mediabridge.NewSonosEndpoint(*sp, "", s.sonosState)
 	}
 	for id, sp := range s.Store.KEF {
 		out[store.QualifyKEF(id)] = mediabridge.NewKEFEndpoint(*sp, s.kefState)
 	}
+	// AirPlay receivers have no monitor to read from — there is nothing on
+	// the device to poll — so their state comes from the live cast instead.
+	s.airplayEndpoints(out)
 	return out
 }
 
@@ -82,14 +86,16 @@ func (s *Server) kefState(ctx context.Context, sp store.KEFSpeaker) (*kef.State,
 // than a new branch at every call site.
 func (s *Server) provider(id string) (media.Provider, error) {
 	if id == "" || strings.EqualFold(id, "spotify") {
-		return mediabridge.NewSpotifyProvider(s.Spotify, s.decoder()), nil
+		return mediabridge.NewSpotifyProvider(s.Spotify, s.decoder(), s.streamQuality()), nil
 	}
 	return nil, fmt.Errorf("%w: %q", media.ErrUnknownProvider, id)
 }
 
 // providers is every provider the server knows about.
 func (s *Server) providers() []media.Provider {
-	return []media.Provider{mediabridge.NewSpotifyProvider(s.Spotify, s.decoder())}
+	return []media.Provider{
+		mediabridge.NewSpotifyProvider(s.Spotify, s.decoder(), s.streamQuality()),
+	}
 }
 
 // mediaEndpoints handles GET /api/media/endpoints — every speaker in one
@@ -148,6 +154,10 @@ type zoneView struct {
 	Sync    media.Sync  `json:"sync,omitempty"`
 	Reason  string      `json:"reason,omitempty"`
 	Problem string      `json:"problem,omitempty"`
+	// Quality is what a play here would actually sound like, source to
+	// speaker. Absent when no route can serve the zone, because there is
+	// then no path to describe.
+	Quality *media.Chain `json:"quality,omitempty"`
 }
 
 type zoneSpeaker struct {
@@ -218,6 +228,8 @@ func (s *Server) buildZoneView(ctx context.Context, z *store.Zone, eps map[strin
 	if len(members) > 0 && p != nil {
 		if plan, err := media.Resolve(p, members); err == nil {
 			v.Route, v.Sync, v.Reason = plan.Route, plan.Sync, plan.Reason
+			chain := media.DescribeQuality(p, plan.Route, s.streamQuality())
+			v.Quality = &chain
 		} else {
 			v.Problem = err.Error()
 		}
@@ -227,8 +239,11 @@ func (s *Server) buildZoneView(ctx context.Context, z *store.Zone, eps map[strin
 
 // memberOf rebuilds a qualified id from a descriptor.
 func memberOf(d media.Descriptor) string {
-	if d.Vendor == media.VendorKEF {
+	switch d.Vendor {
+	case media.VendorKEF:
 		return store.QualifyKEF(d.ID)
+	case media.VendorAirPlay:
+		return store.QualifyAirPlay(d.ID)
 	}
 	return store.QualifySonos(d.ID)
 }
@@ -368,14 +383,19 @@ func (s *Server) mediaRoom(key string) ([]media.Endpoint, string, error) {
 		if !ok {
 			return
 		}
-		if bridge == "kef" {
+		switch bridge {
+		case "kef":
 			if sp, exists := s.Store.KEF[id]; exists {
 				name, members = sp.Name, []string{key}
 			}
-			return
-		}
-		if sp, exists := s.Store.Sonos[id]; exists {
-			name, members = sp.Name, []string{key}
+		case "airplay":
+			if sp, exists := s.Store.AirPlay[id]; exists {
+				name, members = sp.Name, []string{key}
+			}
+		default:
+			if sp, exists := s.Store.Sonos[id]; exists {
+				name, members = sp.Name, []string{key}
+			}
 		}
 	})
 
@@ -453,10 +473,7 @@ func (s *Server) mediaZonePlay(w http.ResponseWriter, r *http.Request) {
 		URI:      body.URI,
 		Title:    body.Title,
 	}
-	sess, err := media.Play(ctx, plan, p, item, media.Deps{
-		Stream: s.streamHost(),
-		Logf:   s.mediaLogf,
-	})
+	sess, err := media.Play(ctx, plan, p, item, s.mediaDeps())
 	if err != nil {
 		writeError(w, mediaErrStatus(err), err.Error())
 		return
@@ -476,12 +493,14 @@ func (s *Server) mediaZonePlay(w http.ResponseWriter, r *http.Request) {
 		ArtURI:   body.ArtURI,
 	})
 
+	chain := media.DescribeQuality(p, plan.Route, s.streamQuality())
 	writeJSON(w, http.StatusOK, map[string]any{
 		"route":      plan.Route,
 		"sync":       plan.Sync,
 		"reason":     plan.Reason,
 		"stream_url": sess.URL,
 		"speakers":   names(plan.Endpoints()),
+		"quality":    chain,
 	})
 }
 
@@ -568,8 +587,43 @@ func (s *Server) mediaZoneVolume(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mediaErrStatus(err), err.Error())
 		return
 	}
+	s.rememberAirPlayVolume(members, *body.Level)
 	s.touchZone(members)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// rememberAirPlayVolume writes a zone's new level onto any AirPlay receiver in
+// it.
+//
+// A receiver only accepts a volume inside a session, so with nothing being
+// cast the change had nowhere to travel. Storing it is what makes the slider
+// mean something anyway: it is the level the next cast opens with, instead of
+// whatever the last sender — possibly somebody else's laptop — left behind.
+//
+// Runs after the fan-out, off the device path entirely, and a failure to save
+// is logged rather than returned: the speakers that could take the change have
+// already taken it, and answering with an error would be reporting a
+// successful volume change as a failed one.
+func (s *Server) rememberAirPlayVolume(members []media.Endpoint, level int) {
+	var ids []string
+	for _, e := range members {
+		if d := e.Descriptor(); d.Vendor == media.VendorAirPlay {
+			ids = append(ids, d.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return
+	}
+	if err := s.Store.Update(func() error {
+		for _, id := range ids {
+			if sp, ok := s.Store.AirPlay[id]; ok {
+				sp.Volume = level
+			}
+		}
+		return nil
+	}); err != nil {
+		log.Printf("media: remembering the AirPlay volume: %v", err)
+	}
 }
 
 // mediaZoneMute handles PUT /api/media/zones/{id}/mute with {"muted":bool}.

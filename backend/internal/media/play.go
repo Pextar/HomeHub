@@ -31,6 +31,9 @@ type Deps struct {
 	// provider's StreamAvailable, so reaching Execute with a stream plan
 	// and no host is a wiring bug and is reported as one.
 	Stream StreamHost
+	// AirPlay sends audio for RouteAirPlay. Same contract as Stream: nil is
+	// a wiring bug by the time a plan names the route.
+	AirPlay AirPlayHost
 	// Logf is optional.
 	Logf func(format string, args ...any)
 }
@@ -100,6 +103,9 @@ func Play(ctx context.Context, plan *Plan, p Provider, item Item, deps Deps) (*S
 		}
 		return &Session{Route: plan.Route, Sync: plan.Sync},
 			playNative(ctx, plan.Coordinator, p, item)
+
+	case RouteAirPlay:
+		return playAirPlay(ctx, plan, p, item, deps)
 
 	case RouteStream:
 		return playStream(ctx, plan, p, item, deps)
@@ -307,6 +313,46 @@ func playStream(ctx context.Context, plan *Plan, p Provider, item Item, deps Dep
 	}
 	deps.logf("media: streaming to %d speaker(s) at %s", len(plan.Targets), url)
 	return sess, nil
+}
+
+// playAirPlay decodes the content once and pushes it to every receiver.
+//
+// The shape mirrors playStream — one decode, many sinks — and differs in who
+// initiates: there, speakers are told a URL and fetch it; here, HomeHub holds
+// the samples and sends them, which is what lets one clock cover all of them.
+func playAirPlay(ctx context.Context, plan *Plan, p Provider, item Item, deps Deps) (*Session, error) {
+	sp, ok := p.(StreamProvider)
+	if !ok {
+		return nil, fmt.Errorf("media: %s can't be decoded by HomeHub", p.Name())
+	}
+	if deps.AirPlay == nil {
+		return nil, fmt.Errorf("media: no AirPlay sender is configured on this server")
+	}
+
+	dests := make([]AirPlayDest, 0, len(plan.Targets))
+	for _, e := range plan.Targets {
+		t, ok := e.(AirPlayTarget)
+		if !ok {
+			// Declared CapAirPlay without implementing AirPlayTarget. The
+			// adapter test catches this; reaching it at runtime should name
+			// the speaker rather than send audio nowhere.
+			return nil, fmt.Errorf("media: %s claims AirPlay but has no address for it",
+				e.Descriptor().Name)
+		}
+		dests = append(dests, t.AirPlayDest())
+	}
+
+	stream, err := sp.OpenStream(ctx, item)
+	if err != nil {
+		return nil, err
+	}
+	stop, err := deps.AirPlay.Cast(ctx, stream, dests)
+	if err != nil {
+		_ = stream.Body.Close()
+		return nil, err
+	}
+	deps.logf("media: casting to %d AirPlay receiver(s)", len(dests))
+	return &Session{Route: RouteAirPlay, Sync: plan.Sync, stop: stop}, nil
 }
 
 // Transport is a play/pause/next/previous verb applied to a whole zone.

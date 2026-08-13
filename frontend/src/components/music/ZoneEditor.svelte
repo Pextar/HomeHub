@@ -49,6 +49,7 @@
     const VENDORS: { id: MediaVendor; label: string }[] = [
         { id: "sonos", label: "Sonos" },
         { id: "kef", label: "KEF" },
+        { id: "airplay", label: "AirPlay" },
     ];
 
     let name = $state(untrack(() => zone?.name ?? ""));
@@ -154,7 +155,7 @@
                         title="No speakers to add"
                         action={{ label: "Speakers", onClick: onOpenSpeakers }}
                     >
-                        Register a Sonos or KEF speaker and it can join a room.
+                        Register a Sonos, KEF or AirPlay speaker and it can join a room.
                     </QuietCard>
                 {/if}
             {:else}

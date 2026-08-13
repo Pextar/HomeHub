@@ -15,6 +15,7 @@ HomeHub grew two speaker bridges independently, and it shows:
 ```
 internal/sonos/   UPnP/SOAP over the LAN     ~4600 lines   queue, favorites, topology, GENA events
 internal/kef/     HTTP JSON over the LAN     ~2600 lines   transport, source, volume — no content
+internal/airplay/ RAOP (RTSP + RTP) sender   ~2400 lines   mDNS discovery, and pushing audio at receivers
 internal/spotify/ Spotify Web API (PKCE)     ~800 lines    search + Connect playback
 ```
 
@@ -80,6 +81,7 @@ Optional behaviour is an optional interface, never a method that returns
 
 ```go
 type Seeker      interface { Seek(ctx, pos time.Duration) error }
+type AirPlayTarget interface { AirPlayDest() AirPlayDest }   // where to push, and what it takes
 type Queuer      interface { Queue(ctx) ([]QueueItem, error); Enqueue(...) error }
 type Grouper     interface { Join(ctx, coordinator Endpoint) error; Leave(ctx) error }
 type URIPlayer   interface { PlayURI(ctx, uri string, meta Metadata) error }
@@ -94,23 +96,39 @@ and both vendors have it (Sonos `SetAVTransportURI`, KEF over UPnP AVTransport).
 A bitset on `Descriptor`, so the route engine and the UI can both reason about a
 speaker without knowing its vendor.
 
-| Capability | Sonos | KEF | Meaning |
-|---|:---:|:---:|---|
-| `CapTransport` | ● | ● | play / pause / next / previous |
-| `CapVolume` | ● | ● | 0-100 volume, mute |
-| `CapSeek` | ● | ○ | seek within a track |
-| `CapQueue` | ● | ○ | inspect and mutate a queue |
-| `CapGroup` | ● | ○ | native multi-speaker grouping |
-| `CapPlayURI` | ● | ● | be handed an arbitrary stream URL |
-| `CapNativeService` | ● | ○ | stream a service itself, from its own account link |
-| `CapConnect` | ○ | ● | be targeted by Spotify Connect |
-| `CapWake` | ○ | ● | be woken from standby / switched to network input |
+| Capability | Sonos | KEF | AirPlay | Meaning |
+|---|:---:|:---:|:---:|---|
+| `CapTransport` | ● | ● | ◐ | play / pause / next / previous |
+| `CapVolume` | ● | ● | ● | 0-100 volume, mute |
+| `CapSeek` | ● | ○ | ○ | seek within a track |
+| `CapQueue` | ● | ○ | ○ | inspect and mutate a queue |
+| `CapGroup` | ● | ○ | ○ | native multi-speaker grouping |
+| `CapPlayURI` | ● | ● | ○ | be handed an arbitrary stream URL |
+| `CapNativeService` | ● | ○ | ○ | stream a service itself, from its own account link |
+| `CapConnect` | ○ | ● | ○ | be targeted by Spotify Connect |
+| `CapWake` | ○ | ● | ○ | be woken from standby / switched to network input |
+| `CapAirPlay` | ○ | ○ | ● | be *pushed* audio, with HomeHub keeping the clock |
 
-● supported ○ not supported
+● supported ○ not supported ◐ play and pause only
 
-Two asymmetries drive most of the design. Sonos can stream a service from its
-own linked account and group natively; KEF cannot do either, and has to be
-woken before it exists on the network at all.
+Three asymmetries drive the design. Sonos can stream a service from its own
+linked account and group natively; KEF cannot do either, and has to be woken
+before it exists on the network at all. An AirPlay receiver can do none of it:
+it is a **sink**. It holds no content, no queue and no account, cannot be
+handed a URL to fetch, and has no state of its own to report — what it is
+playing is whatever HomeHub is sending it. That inversion is why it needs a
+route of its own rather than a variation on the stream route.
+
+`CapTransport` is half-claimed for AirPlay, and the half is documented rather
+than papered over: play and pause genuinely work (pause means stop sending and
+flush what is buffered), while next and previous return an error saying that
+skipping is the music service's job. Dropping the capability outright would
+have taken play and pause with it.
+
+`CapAirPlay` is declared **only** for receivers registered through
+`internal/airplay`. Plenty of Sonos and KEF speakers also answer AirPlay, and
+this deliberately does not claim it for them: they have better routes of their
+own, and a capability that lies is worse than one that is absent.
 
 ### Provider
 
@@ -203,6 +221,64 @@ Endpoints that can group natively are grouped, and the coordinator takes a
 - **Today**: Sonos-to-Sonos. `sonos.Join` / `sonos.Leave` already exist; the
   route engine just drives them.
 
+### `airplay` — HomeHub is the decoder, and the clock
+
+The same decode as `stream`, pushed instead of fetched. HomeHub opens a RAOP
+session with each receiver, sends 44.1 kHz 16-bit samples as RTP packets, and
+answers the timing questions every receiver asks — so all of them are placing
+the same sample at the same moment on one clock.
+
+```
+Spotify cloud
+     │ Connect session ("HomeHub Multiroom")
+     ▼
+librespot ──PCM──> internal/airplay ──RTP/UDP──┬──> RoPieee  (shairport-sync)
+                    one clock, one decode      └──> RoPieee  (shairport-sync)
+```
+
+- **Applies when** every endpoint has `CapAirPlay` and the provider implements
+  `StreamProvider`. Ranked above `stream` because it is the same decode with a
+  real clock on the end of it.
+- **Speaks** classic AirPlay (AirPlay 1, RAOP). That is a statement about the
+  session HomeHub *opens*, and it is worth separating from which receivers it
+  can reach, because the obvious reading is wrong. A receiver being "AirPlay 2"
+  does not put it out of reach: shairport-sync in AirPlay 2 mode — what a
+  current RoPieee runs — keeps answering classic senders on the same port.
+  AirPlay 2 changes what an iPhone chooses to speak to a box, not what the box
+  accepts. What is genuinely out of reach is a receiver that *requires* the
+  AirPlay 2 handshake, i.e. Apple's own speakers, where HomeKit pairing comes
+  first.
+- **Asks rather than assumes.** The mDNS advertisement describes what a
+  receiver prefers, which on an AirPlay 2 box is a different question from what
+  it will accept — so a scan asks each one (RTSP `OPTIONS`, which is stateless
+  and takes nothing away from whatever is playing) and records the answer. A
+  session then offers each shape the device might take — advertised codec in
+  the clear, then with a key, then ALAC either way — and only the receiver's
+  own refusal closes the door. This is the same shape as the KEF scan, where
+  SSDP narrows the subnet down and the API probe settles it.
+- **Quality**: bit-exact. Raw PCM when the receiver advertises it (`cn=0`),
+  uncompressed ALAC frames when it does not — ALAC's verbatim escape hatch, so
+  no encoder dependency, the same trade `stream` makes by serving WAV. Nothing
+  re-encodes and nothing resamples; a receiver wanting a rate AirPlay 1 does
+  not carry is refused rather than resampled for.
+- **Encryption**: cleartext when the receiver allows it (`et=0`), AES-128-CBC
+  under Apple's published RSA key when it doesn't. Preferring cleartext is a
+  considered choice: the key is in every open-source sender, it protects
+  nothing, and skipping it removes a per-packet AES pass on the user's own LAN.
+- **Sync**: `clocked`. Each receiver measures its offset against HomeHub's
+  clock and is told which RTP timestamp belongs at which moment, so they start
+  together and are corrected rather than merely stable. **This is better than
+  `buffered` and it is not a vendor's own multi-room bus** — the clock is
+  HomeHub's, disciplined over UDP on a home network. The doc must not imply
+  more.
+- **Latency**: two seconds, which is what AirPlay has always used and what
+  receivers size their buffers for. It is what absorbs a Wi-Fi hiccup without a
+  dropout, and it is why play takes a moment to be heard.
+- **Loss**: receivers ask for missed packets by sequence number and the sender
+  answers from a backlog of the last ~1024 packets (about eight seconds).
+- **Metadata**: track title, artist and album as DAAP, so a RoPieee's display
+  fills in. Artwork is not sent — see `internal/airplay/daap.go` on why.
+
 ### `stream` — HomeHub is the decoder
 
 The cross-vendor path, and the only one that answers the original question.
@@ -258,7 +334,7 @@ The rule, in one line: **the best route that can serve the entire zone wins,
 and `stream` is always last.**
 
 ```
-for route in [native, connect, group, stream]:
+for route in [native, connect, group, airplay, stream]:
     if route.supports(provider) and route.canServe(zone):
         return route
 return error explaining which endpoint disqualified which route
@@ -267,12 +343,22 @@ return error explaining which endpoint disqualified which route
 This ordering is the guarantee that adding cross-vendor playback does not
 regress anything:
 
-| Zone | Route chosen | Change vs. today |
+| Zone | Route chosen | Change vs. before |
 |---|---|---|
 | One Sonos | `native` | none — same SOAP calls |
 | Several Sonos | `group` → `native` | none — grouping already existed |
 | One KEF | `connect` | none — same Web API calls |
-| KEF + Sonos | `stream` | **new**; impossible before |
+| KEF + Sonos | `stream` | the cross-vendor case |
+| One RoPieee | `airplay` | **new** |
+| Several RoPieees | `airplay` | **new**, on one clock |
+| RoPieee + Sonos | *nothing* | see below |
+
+The last row is the honest gap. A Sonos fetches and a receiver is pushed to;
+no route does both, so a zone mixing them fails with both halves named — "the
+Sonos can't be sent an AirPlay stream, the RoPieee can't play a stream URL".
+Serving it would mean teeing one decode into both an HTTP host and a cast,
+which is buildable and is not built: the two halves would be a clock apart
+anyway, which is most of the reason to use AirPlay in the first place.
 
 A Sonos-only listener never reaches the stream route, so librespot is never
 started, no transcode happens, and the Sonos app behaves exactly as it does
@@ -282,6 +368,54 @@ previously returned an error.
 Failure is explained per endpoint rather than as one flat "unsupported" — "the
 KEF can't stream Tidal natively, and Tidal has no Connect" is actionable;
 "unsupported" is not.
+
+---
+
+## Sound quality
+
+"Am I hearing lossless?" has no single answer, because the audio passes through
+two hands: the service that encoded it, and the path it took to the speaker.
+A lossless path carrying a lossy source is not lossless. So quality is reported
+as a **chain with the weakest link named**, never as one badge — a badge would
+have to pick something to lie about.
+
+```go
+type Chain struct {
+    Source    Stage   // what the service hands over
+    Transport Stage   // what the route does to it
+    Lossless  bool    // both, or neither
+    LimitedBy string  // the stage that caps it
+    Summary   string  // the whole thing in a sentence
+    Fix       *Fix    // the change that would improve it, or nil
+}
+```
+
+**Transport, per route.** None of the five re-encodes. `native`, `group` and
+`connect` add nothing because the speaker fetches the service's own stream;
+`stream` serves the decoded PCM with a 44-byte header on it; `airplay` packs
+the same samples into RTP. Every route in this system is a lossless carrier,
+which is exactly why the source is where the answer usually comes from.
+
+**Source, per provider.** Spotify's catalogue is Ogg Vorbis — lossy at the
+source, on every route, forever. What differs is how well HomeHub knows the
+number: on `stream` and `airplay` the bitrate is HomeHub's own decoder setting
+and is known exactly, while on the routes the speaker serves for itself the
+speaker negotiates with the service and never says what it settled on. Those
+are marked `approximate` and shown as "up to" rather than printed as a
+measurement.
+
+**The one lever.** `Settings.StreamQuality` — `best` (320 kbps), `balanced`
+(160), `saver` (96) — is how hard HomeHub's own decoder asks the service to
+compress. It is household-wide because the decoder is a single process holding
+a single service session, so two zones cannot be decoded at two bitrates at
+once and a per-zone control would promise what the architecture cannot keep.
+It moves `stream` and `airplay` and nothing else, and `Fix` is offered only on
+those routes and only when the setting is below `best`.
+
+What this must never do is offer to make Spotify lossless. It cannot be done,
+and a control implying otherwise is worse than no control — so where the source
+is the limit and the setting is already at its top, the answer is a sentence
+explaining why, and no button.
 
 ---
 
@@ -308,6 +442,8 @@ PUT    /api/media/zones/{id}/volume    {level} relative or absolute across membe
 GET    /api/media/zones/{id}/routes    which routes this zone can serve, and why not
 
 GET    /api/media/search?q=&provider=  federated across available providers
+GET    /api/media/quality              what the audio is, per route, + the decode setting
+PUT    /api/media/quality              {stream_quality} — best | balanced | saver
 ```
 
 `POST /zones/{id}/play` answers with the route it chose and the reason, so the
@@ -352,6 +488,24 @@ without hardware:
 
 ---
 
+## The Connect picker is not a route
+
+`/api/spotify/connect` (see API.md) sits beside this protocol rather than
+inside it, and the distinction is worth keeping sharp.
+
+Everything in this document is about **speakers as the subject**: a zone is a
+set of them, a route is how content reaches them, and HomeHub decides. The
+Connect picker's subject is **the account's single playback session** — where
+Spotify is playing right now, which may be a phone on a bus. It is a remote
+control for something HomeHub does not own.
+
+They meet at exactly one point, and it is the same single-session rule that
+shapes `stream` and `airplay`: while HomeHub decodes for a room, HomeHub *is*
+the account's active device. Moving the session from the picker therefore stops
+that room, which is why the read names it before the tap and why a successful
+transfer releases those zone sessions. No route was involved in either
+direction — the audio never passed through this layer.
+
 ## What this does not do
 
 Stated plainly so the next reader does not have to discover it:
@@ -364,7 +518,12 @@ Stated plainly so the next reader does not have to discover it:
   Starting Spotify elsewhere still takes the session away.
 - **It does not re-implement the vendor apps.** Sonos-specific features stay on
   the Sonos endpoints.
-- **AirPlay 2** would give better sync than the stream route and both vendors
-  support it, but implementing a sender (pairing, PTP clock sync, encrypted
-  ALAC) is a large piece of work. The `Route` abstraction is shaped so it can be
-  added as a fifth route, ranked above `stream`, without touching callers.
+- **It does not implement the AirPlay 2 handshake.** The `airplay` route opens
+  a classic session, which shairport-sync receivers accept whichever mode they
+  are running in. What is missing is HomeKit pairing, the PTP clock and
+  buffered mode — so a receiver that *insists* on AirPlay 2, meaning Apple's
+  own speakers, is refused with that named as the reason. Sonos and KEF
+  speakers' own AirPlay support is not used either; they keep their native
+  routes, which are better for them anyway.
+- **It cannot mix pushed and fetched speakers in one zone.** See the route
+  table above.

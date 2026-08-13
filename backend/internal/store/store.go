@@ -58,6 +58,10 @@ type Store struct {
 	Rooms       map[string]*Room
 	Sonos       map[string]*SonosSpeaker
 	KEF         map[string]*KEFSpeaker
+	// AirPlay are RAOP receivers — RoPieee boxes, Apple TVs, anything
+	// running shairport-sync. Unlike the other two they are sinks rather
+	// than players: HomeHub sends to them. See internal/airplay.
+	AirPlay map[string]*AirPlaySpeaker
 	// Zones are user-arranged sets of speakers that play together, of
 	// any mix of makes. See docs/MEDIA-PROTOCOL.md.
 	Zones map[string]*Zone
@@ -159,6 +163,7 @@ const (
 	roomsFile       = "rooms.json"
 	sonosFile       = "sonos.json"
 	kefFile         = "kef.json"
+	airplayFile     = "airplay.json"
 	zonesFile       = "zones.json"
 	historyFile     = "media_history.json"
 	musicTimersFile = "music_timers.json"
@@ -183,6 +188,7 @@ func New(dataDir string, rf RFSender) *Store {
 		Rooms:        make(map[string]*Room),
 		Sonos:        make(map[string]*SonosSpeaker),
 		KEF:          make(map[string]*KEFSpeaker),
+		AirPlay:      make(map[string]*AirPlaySpeaker),
 		Zones:        make(map[string]*Zone),
 		Readings:     make(map[string][]SensorReading),
 		MediaHistory: make(map[string][]MediaPlay),

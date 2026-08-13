@@ -7,7 +7,9 @@ import (
 	"strings"
 	"time"
 
+	"homehub/internal/airplay"
 	"homehub/internal/kef"
+	"homehub/internal/media"
 	"homehub/internal/sonos"
 	"homehub/internal/tasmota"
 )
@@ -272,6 +274,15 @@ func (s *Store) ValidateSettings(set *Settings) error {
 	}
 	if err := validateAnnouncePresets(set); err != nil {
 		return err
+	}
+	// Refused rather than silently defaulted: this one is a radio group in
+	// the UI, so an unrecognised value is a client sending something it
+	// invented, not a household leaving a field blank. Blank is still fine
+	// and means "never chosen".
+	set.StreamQuality = strings.TrimSpace(strings.ToLower(set.StreamQuality))
+	if set.StreamQuality != "" && !media.StreamQuality(set.StreamQuality).Valid() {
+		return fmt.Errorf("stream quality must be %q, %q or %q",
+			media.QualityBest, media.QualityBalanced, media.QualitySaver)
 	}
 	return nil
 }
@@ -580,6 +591,46 @@ func (s *Store) ValidateKEFSpeaker(sp *KEFSpeaker) error {
 		speakerIdentity{ID: sp.ID, Name: sp.Name, IP: sp.IP, DeviceID: sp.MAC},
 		func(o *KEFSpeaker) speakerIdentity {
 			return speakerIdentity{ID: o.ID, Name: o.Name, IP: o.IP, DeviceID: o.MAC}
+		})
+}
+
+// ValidateAirPlaySpeaker normalizes and validates an AirPlay receiver. Caller
+// must hold Mu so address/device-id uniqueness can be checked.
+//
+// The codec flags are defaulted rather than rejected when a record arrives
+// with neither set: every RAOP receiver in existence takes ALAC, so a
+// registration that says "neither" is a client that didn't fill the field in,
+// and refusing it would block the typed-in path for no gain. The session's own
+// ANNOUNCE is where a receiver that meant it says so.
+func (s *Store) ValidateAirPlaySpeaker(sp *AirPlaySpeaker) error {
+	sp.Name = strings.TrimSpace(sp.Name)
+	sp.IP = strings.TrimSpace(sp.IP)
+	sp.Room = strings.TrimSpace(sp.Room)
+	sp.Model = strings.TrimSpace(sp.Model)
+	sp.DeviceID = airplay.NormalizeID(sp.DeviceID)
+
+	if sp.Name == "" {
+		return errors.New("name is required")
+	}
+	if err := airplay.ValidateHost(sp.IP); err != nil {
+		return err
+	}
+	if sp.Port == 0 {
+		sp.Port = airplay.DefaultPort
+	}
+	if sp.Port < 1 || sp.Port > 65535 {
+		return errors.New("port must be between 1 and 65535")
+	}
+	if !sp.PCM && !sp.ALAC {
+		sp.ALAC = true
+	}
+	if sp.Volume < 0 || sp.Volume > 100 {
+		return errors.New("volume must be between 0 and 100")
+	}
+	return uniqueSpeaker(s.AirPlay,
+		speakerIdentity{ID: sp.ID, Name: sp.Name, IP: sp.IP, DeviceID: sp.DeviceID},
+		func(o *AirPlaySpeaker) speakerIdentity {
+			return speakerIdentity{ID: o.ID, Name: o.Name, IP: o.IP, DeviceID: o.DeviceID}
 		})
 }
 

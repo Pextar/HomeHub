@@ -26,10 +26,14 @@ var (
 	_ media.ConnectTarget = (*KEFEndpoint)(nil)
 	_ media.Waker         = (*KEFEndpoint)(nil)
 
+	_ media.Endpoint      = (*AirPlayEndpoint)(nil)
+	_ media.AirPlayTarget = (*AirPlayEndpoint)(nil)
+
 	_ media.Provider        = (*SpotifyProvider)(nil)
 	_ media.NativeProvider  = (*SpotifyProvider)(nil)
 	_ media.ConnectProvider = (*SpotifyProvider)(nil)
 	_ media.StreamProvider  = (*SpotifyProvider)(nil)
+	_ media.QualityReporter = (*SpotifyProvider)(nil)
 )
 
 // TestCapabilitiesMatchInterfaces is the invariant the route engine depends
@@ -43,6 +47,7 @@ func TestCapabilitiesMatchInterfaces(t *testing.T) {
 	endpoints := []media.Endpoint{
 		NewSonosEndpoint(store.SonosSpeaker{ID: "s1", Name: "Living Room", UUID: "RINCON_1"}, "", nil),
 		NewKEFEndpoint(store.KEFSpeaker{ID: "k1", Name: "Study"}, nil),
+		NewAirPlayEndpoint(store.AirPlaySpeaker{ID: "a1", Name: "Kitchen Pi"}, nil),
 	}
 
 	// Each capability and the interface it promises. Capabilities with no
@@ -79,6 +84,10 @@ func TestCapabilitiesMatchInterfaces(t *testing.T) {
 		}},
 		{media.CapWake, "media.Waker", func(e media.Endpoint) bool {
 			_, ok := e.(media.Waker)
+			return ok
+		}},
+		{media.CapAirPlay, "media.AirPlayTarget", func(e media.Endpoint) bool {
+			_, ok := e.(media.AirPlayTarget)
 			return ok
 		}},
 	}
@@ -272,7 +281,7 @@ func TestStreamDIDL(t *testing.T) {
 // TestSpotifyProviderNilClient covers the unwired integration: every method
 // must report rather than panic, which is what the API layer relies on.
 func TestSpotifyProviderNilClient(t *testing.T) {
-	p := NewSpotifyProvider(nil, nil)
+	p := NewSpotifyProvider(nil, nil, media.QualityBest)
 	av := p.Available()
 	if av.OK {
 		t.Error("a provider with no client must not report itself available")
@@ -295,7 +304,7 @@ func TestSpotifyProviderNilClient(t *testing.T) {
 // native Spotify integration, and the provider must say so rather than hand
 // back a URI the speaker would ignore.
 func TestSpotifyNativeItemRejectsNonSonos(t *testing.T) {
-	p := NewSpotifyProvider(nil, nil)
+	p := NewSpotifyProvider(nil, nil, media.QualityBest)
 	_, _, err := p.NativeItem(media.VendorKEF,
 		media.Item{URI: "spotify:track:x", Title: "T"}, media.Account{SID: 1})
 	if err == nil {
@@ -306,13 +315,14 @@ func TestSpotifyNativeItemRejectsNonSonos(t *testing.T) {
 	}
 }
 
-// TestSpotifyRoutesCoverEveryPath asserts the provider advertises all four
-// routes. Dropping one here would silently remove a capability from every
-// zone, and the route engine would report it as a speaker limitation.
+// TestSpotifyRoutesCoverEveryPath asserts the provider advertises every route.
+// Dropping one here would silently remove a capability from every zone, and
+// the route engine would report it as a speaker limitation.
 func TestSpotifyRoutesCoverEveryPath(t *testing.T) {
-	routes := NewSpotifyProvider(nil, nil).Routes()
+	routes := NewSpotifyProvider(nil, nil, media.QualityBest).Routes()
 	for _, want := range []media.Route{
-		media.RouteNative, media.RouteGroup, media.RouteConnect, media.RouteStream,
+		media.RouteNative, media.RouteGroup, media.RouteConnect,
+		media.RouteAirPlay, media.RouteStream,
 	} {
 		if !routes.Has(want) {
 			t.Errorf("Spotify should advertise the %q route", want)

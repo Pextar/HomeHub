@@ -22,6 +22,7 @@ import (
 	"strings"
 	"time"
 
+	"homehub/internal/airplay"
 	"homehub/internal/media"
 	"homehub/internal/mediabridge"
 	"homehub/internal/store"
@@ -57,10 +58,13 @@ func (s *Server) endZoneSession(zoneID string) {
 // zonePlan returns the plan a zone's transport commands should follow.
 //
 // A live session knows which route it started on, and transport has to match:
-// a natively grouped zone is addressed through its coordinator, while a
-// streamed one has no coordinator and every speaker is addressed. With no
-// session — after a restart, or for speakers someone started from a vendor app
-// — every speaker is addressed, which is correct if noisier than necessary.
+// a natively grouped zone is addressed through its coordinator, while a zone
+// HomeHub is feeding — streamed or cast over AirPlay — has no coordinator and
+// every speaker is addressed. Those two are one case here because they are
+// one case for transport: `Plan.Endpoints()` returns the targets for both.
+// With no session — after a restart, or for speakers someone started from a
+// vendor app — every speaker is addressed, which is correct if noisier than
+// necessary.
 func (s *Server) zonePlan(zoneID string, members []media.Endpoint) *media.Plan {
 	s.zoneMu.Lock()
 	sess := s.zoneSessions[zoneID]
@@ -92,6 +96,16 @@ func (s *Server) CloseMedia() {
 		if err := decoder.Close(); err != nil {
 			log.Printf("media: stopping the decoder: %v", err)
 		}
+	}
+
+	// A cast is the one session that keeps *sending* after HomeHub stops
+	// serving: a receiver holds no state to notice the silence, so it would
+	// sit on an open RTSP session that nothing will ever feed.
+	s.casterMu.Lock()
+	caster := s.caster
+	s.casterMu.Unlock()
+	if caster != nil {
+		caster.Close()
 	}
 }
 
@@ -191,6 +205,11 @@ func (s *Server) anySpeakerIP() string {
 				return sp.IP
 			}
 		}
+		for _, sp := range s.Store.AirPlay {
+			if sp.IP != "" {
+				return sp.IP
+			}
+		}
 		return ""
 	})
 }
@@ -226,19 +245,73 @@ func streamStartDelays() map[media.Vendor]time.Duration {
 
 // decoder returns the Spotify decoder, creating it on first use. Nil-safe
 // everywhere downstream: with librespot absent it reports why, and only the
-// stream route is affected.
+// routes HomeHub decodes for are affected.
+//
+// The bitrate is baked into the process's command line, so a household that
+// changes its stream quality needs a new one. Rebuilding here rather than at
+// the moment the setting changes keeps that decision in one place, and means
+// the running decode is not cut off mid-song by a settings save: the change
+// lands on the next thing started.
 func (s *Server) decoder() mediabridge.Decoder {
+	bitrate := s.streamQuality().Bitrate()
+
 	s.streamMu.Lock()
 	defer s.streamMu.Unlock()
-	if s.librespot == nil {
-		s.librespot = stream.NewLibrespot(stream.LibrespotConfig{
-			Binary:     strings.TrimSpace(os.Getenv("HOMEHUB_LIBRESPOT_BIN")),
-			DeviceName: strings.TrimSpace(os.Getenv("HOMEHUB_LIBRESPOT_NAME")),
-			CacheDir:   librespotCache(s.Store.DataDir),
-			Logf:       log.Printf,
-		})
+	if s.librespot != nil && s.librespotBitrate == bitrate {
+		return s.librespot
 	}
+	if s.librespot != nil {
+		if err := s.librespot.Close(); err != nil {
+			log.Printf("media: stopping the old decoder: %v", err)
+		}
+	}
+	s.librespot = stream.NewLibrespot(stream.LibrespotConfig{
+		Binary:     strings.TrimSpace(os.Getenv("HOMEHUB_LIBRESPOT_BIN")),
+		DeviceName: strings.TrimSpace(os.Getenv("HOMEHUB_LIBRESPOT_NAME")),
+		CacheDir:   librespotCache(s.Store.DataDir),
+		Bitrate:    bitrate,
+		Logf:       log.Printf,
+	})
+	s.librespotBitrate = bitrate
 	return s.librespot
+}
+
+// streamQuality is the household's chosen decode quality, defaulted.
+func (s *Server) streamQuality() media.StreamQuality {
+	var q media.StreamQuality
+	s.Store.View(func() {
+		if s.Store.Settings != nil {
+			q = media.StreamQuality(s.Store.Settings.StreamQuality)
+		}
+	})
+	return q.Normalize()
+}
+
+// airplayCaster returns the AirPlay sender, creating it on first use.
+//
+// Its own mutex rather than streamMu: this is reached from inside
+// s.endpoints(), which runs under the store lock, and sharing a mutex with the
+// decoder — which reads settings under that same lock — would put two locks in
+// two orders. The caster's construction touches nothing but itself.
+func (s *Server) airplayCaster() *airplay.Caster {
+	s.casterMu.Lock()
+	defer s.casterMu.Unlock()
+	if s.caster == nil {
+		s.caster = airplay.NewCaster(log.Printf)
+	}
+	return s.caster
+}
+
+// mediaDeps is everything executing a plan needs from the server. One place,
+// so a route added to the media layer cannot be half-wired: a call site that
+// forgets the AirPlay host would fail at the moment someone plays to a
+// receiver, which is the worst time to find out.
+func (s *Server) mediaDeps() media.Deps {
+	return media.Deps{
+		Stream:  s.streamHost(),
+		AirPlay: s.airplayCaster(),
+		Logf:    s.mediaLogf,
+	}
 }
 
 // librespotCache is where librespot keeps its credentials and audio cache,

@@ -211,8 +211,12 @@ func (s *Store) mediaRoomExists(key string) bool {
 	if !ok {
 		return false
 	}
-	if bridge == "kef" {
+	switch bridge {
+	case "kef":
 		_, exists := s.KEF[id]
+		return exists
+	case "airplay":
+		_, exists := s.AirPlay[id]
 		return exists
 	}
 	_, exists := s.Sonos[id]

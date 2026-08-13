@@ -16,6 +16,7 @@ export * from "./system";
 export * from "./sensors";
 export * from "./sonos";
 export * from "./kef";
+export * from "./airplay";
 export * from "./spotify";
 export * from "./assistant";
 export * from "./media";

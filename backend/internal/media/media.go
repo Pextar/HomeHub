@@ -36,6 +36,12 @@ type Vendor string
 const (
 	VendorSonos Vendor = "sonos"
 	VendorKEF   Vendor = "kef"
+	// VendorAirPlay is any RAOP receiver — a RoPieee, an Apple TV, a
+	// shairport-sync box. Coarser than the other two because AirPlay is a
+	// protocol rather than a make: what matters about these endpoints is
+	// that they are all driven identically, which is exactly what a vendor
+	// means to the route engine.
+	VendorAirPlay Vendor = "airplay"
 )
 
 // Capability is one thing an endpoint can do. Endpoints declare a set of
@@ -75,6 +81,18 @@ const (
 	// without it are always reachable; endpoints with it must be woken
 	// before any route that needs them to exist on the network.
 	CapWake
+	// CapAirPlay is being *pushed* audio over AirPlay, rather than being
+	// handed something to fetch. It is the inverse of CapPlayURI in who
+	// holds the audio: an AirPlay receiver is a sink with no source of its
+	// own, and HomeHub does the sending and keeps the clock.
+	//
+	// Declared only for receivers HomeHub discovered and registered as
+	// AirPlay endpoints. Plenty of Sonos and KEF speakers also answer
+	// AirPlay, and this capability deliberately does not claim it for them:
+	// their AirPlay-2 implementations want a pairing exchange this codebase
+	// does not perform, and a capability that lies is worse than one that
+	// is absent.
+	CapAirPlay
 )
 
 // capNames drives Has, String and the JSON encoding. Kept in declaration
@@ -92,6 +110,7 @@ var capNames = []struct {
 	{CapNativeService, "native_service"},
 	{CapConnect, "connect"},
 	{CapWake, "wake"},
+	{CapAirPlay, "airplay"},
 }
 
 // Has reports whether every capability in want is present. Passing a

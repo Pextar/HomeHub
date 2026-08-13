@@ -150,7 +150,7 @@ export interface RoomsModel {
 }
 
 /** `"sonos:RINCON_x"` — the id shape the zone API stores members under. */
-function qualify(vendor: "sonos" | "kef", id: string): string {
+function qualify(vendor: "sonos" | "kef" | "airplay", id: string): string {
   return `${vendor}:${id}`;
 }
 
@@ -173,14 +173,23 @@ export function createRooms(
     const k = new Set<string>();
     /* eslint-enable svelte/prefer-svelte-reactivity */
     for (const z of zones.zones) {
-      for (const sp of zones.speakersOf(z)) (sp.vendor === "kef" ? k : s).add(sp.id);
+      for (const sp of zones.speakersOf(z)) {
+        // AirPlay receivers are not in either set: they have no standalone
+        // room of their own to be hidden from, since a receiver is only ever
+        // reached through a zone.
+        if (sp.vendor === "kef") k.add(sp.id);
+        else if (sp.vendor === "sonos") s.add(sp.id);
+      }
     }
     return { sonos: s, kef: k };
   });
 
   function zoneRoom(z: MediaZone): Room {
     const members = zones.speakersOf(z);
-    const sonosIds = members.filter((m) => m.vendor !== "kef").map((m) => m.id);
+    // Matched on the vendor itself rather than "not KEF": an AirPlay
+    // receiver filed under sonosIds would be sent Sonos calls with an id that
+    // bridge has never heard of.
+    const sonosIds = members.filter((m) => m.vendor === "sonos").map((m) => m.id);
     const kefIds = members.filter((m) => m.vendor === "kef").map((m) => m.id);
     return {
       key: "zone:" + z.id,
@@ -193,9 +202,10 @@ export function createRooms(
       memberIds: members.map((m) => m.member),
       grouped: members.length > 1,
       reachable: members.length > 0,
-      // On the stream route HomeHub is the Spotify device and the speakers are
-      // pulling a live stream: `next` sent to one is a call it refuses.
-      canSkip: z.route !== "stream",
+      // On the two routes HomeHub decodes for, it is the Spotify device and
+      // the speakers are being fed a live stream: `next` sent to one is a
+      // call it refuses, because the track is the service's to change.
+      canSkip: z.route !== "stream" && z.route !== "airplay",
       canSeek: false, // there is no zone seek — a fan-out of a stream can't be scrubbed
       canQueue: false,
       canPlayMode: false,

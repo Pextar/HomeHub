@@ -689,6 +689,15 @@ func (a *Account) apiGet(ctx context.Context, path string, q url.Values, out int
 	if resp.StatusCode >= 400 {
 		return apiError(resp.StatusCode, raw)
 	}
+	// A 204 with an empty body is Spotify saying "nothing here" — the player
+	// endpoints answer that way when the account is playing nothing at all.
+	// Left as a zero-valued target rather than reported as a parse error:
+	// "nothing is playing" is an ordinary state, not a failure, and every
+	// caller that meets it should read its own emptiness rather than an
+	// error string about JSON.
+	if resp.StatusCode == http.StatusNoContent || len(bytes.TrimSpace(raw)) == 0 {
+		return nil
+	}
 	return json.Unmarshal(raw, out)
 }
 

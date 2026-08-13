@@ -42,6 +42,8 @@
     import ConfirmModal from "../components/ConfirmModal.svelte";
     import SpeakerModal from "../modals/SpeakerModal.svelte";
     import SonosEventsModal from "../modals/SonosEventsModal.svelte";
+    import MusicQualityModal from "../modals/MusicQualityModal.svelte";
+    import SpotifyConnectModal from "../modals/SpotifyConnectModal.svelte";
     import LiveStatusChip from "../components/LiveStatusChip.svelte";
     import { api } from "../lib/api";
     import { toasts, route, bottomBar } from "../lib/stores.svelte";
@@ -56,6 +58,7 @@
     import { createBusy } from "../lib/music/busy.svelte";
     import { createSonosBridge } from "../lib/music/sonos.svelte";
     import { createKEFBridge } from "../lib/music/kef.svelte";
+    import { createAirPlayBridge } from "../lib/music/airplay.svelte";
     import { createZonesBridge } from "../lib/music/zones.svelte";
     import { createRooms } from "../lib/music/rooms.svelte";
     import type { Room } from "../lib/music/rooms.svelte";
@@ -67,6 +70,7 @@
         SonosSpeakerView,
         SonosFavorite,
         KEFSpeakerView,
+        AirPlaySpeakerView,
         SpotifyItem,
         SpotifyArtistDetail,
         SpotifyContextDetail,
@@ -79,12 +83,25 @@
     const busy = createBusy();
     const sonos = createSonosBridge(busy);
     const kef = createKEFBridge(busy);
+    // No busy handle: an AirPlay receiver has no transport of its own to be
+    // busy with — see lib/music/airplay.svelte.ts.
+    const airplay = createAirPlayBridge();
     const zones = createZonesBridge(busy);
     const rooms = createRooms(sonos, kef, zones, busy);
 
-    /** Every registered speaker across both bridges — what "is this empty" means. */
-    const totalSpeakers = $derived((sonos.status?.speakers.length ?? 0) + kef.speakers.length);
-    /** Speakers that answered — the Home head's "ready". */
+    /** Every registered speaker across the bridges — what "is this empty" means. */
+    const totalSpeakers = $derived(
+        (sonos.status?.speakers.length ?? 0) + kef.speakers.length + airplay.receivers.length,
+    );
+    /**
+     * Speakers that answered — the Home head's "ready".
+     *
+     * AirPlay receivers are counted as registered but never as reachable, and
+     * that is the honest reading rather than an oversight: finding out whether
+     * a receiver is there means opening a session, which would take it away
+     * from whatever else is playing to it. Counting them as ready would be a
+     * claim nothing checked.
+     */
     const readyCount = $derived(sonos.reachable.length + kef.reachable.length);
 
     // One focused room for the whole module: the hero shows it, the player
@@ -95,6 +112,7 @@
     onMount(() => {
         void sonos.refresh();
         void kef.refresh();
+        void airplay.refresh();
         void zones.refresh();
         // The endpoint list is what the room editor picks from; it changes only
         // when a speaker is registered or removed, so it is read here and after
@@ -106,6 +124,9 @@
             void sonos.refresh();
             void kef.refresh();
             void zones.refresh();
+            // Not on the live signal: nothing about a receiver changes
+            // without HomeHub doing it, so this list only moves when a
+            // registration or a cast does — both of which refresh it there.
         });
     });
     onDestroy(() => {
@@ -808,9 +829,24 @@
         if (changed) {
             void sonos.refresh();
             void kef.refresh();
+            // The add sheet carries a brand picker, so a registration made
+            // from it could have been any of the three.
+            void airplay.refresh();
             // A new or removed speaker changes both what rooms hold (the
             // backend cascades a delete out of them) and what the picker can
             // offer, so both reads are due.
+            void zones.refresh();
+            void zones.loadEndpoints();
+        }
+    }
+
+    async function openAirPlayModal(sp: AirPlaySpeakerView) {
+        const changed = await openModal<boolean>(SpeakerModal, {
+            existing: sp,
+            brand: "airplay" as const,
+        });
+        if (changed) {
+            void airplay.refresh();
             void zones.refresh();
             void zones.loadEndpoints();
         }
@@ -827,6 +863,23 @@
             void zones.refresh();
             void zones.loadEndpoints();
         }
+    }
+
+    /** What the audio actually is on each path, and the decode setting. Read
+     *  fresh by the sheet itself: the answer depends on the route a zone would
+     *  take, which changes with what is registered. */
+    async function openQualityModal() {
+        await openModal(MusicQualityModal, {});
+        // A changed decode quality changes what every zone read reports.
+        void zones.refresh();
+    }
+
+    /** The Connect picker. Reading the zones after it closes: a transfer made
+     *  in there can take the account's session away from a room HomeHub was
+     *  feeding, and the backend will have released that zone. */
+    async function openConnectModal() {
+        await openModal(SpotifyConnectModal, {});
+        void zones.refresh();
     }
 
     /** The push-status sheet. Retrying inside it can turn subscriptions on, and
@@ -918,13 +971,18 @@
         <SpeakersScreen
             {sonos}
             {kef}
+            {airplay}
             {totalSpeakers}
             {readyCount}
             onBack={leaveScreen}
             onAdd={() => openSpeakerModal()}
             onEditSonos={(sp) => void openSpeakerModal(sp)}
             onEditKEF={(sp) => void openKEFModal(sp)}
+            onEditAirPlay={(sp) => void openAirPlayModal(sp)}
             onOpenEvents={openEventsModal}
+            onOpenQuality={openQualityModal}
+            onOpenConnect={openConnectModal}
+            spotifyPlayback={spotify.status?.playback ?? false}
             onKEFOpened={(sp) => {
                 const r = rooms.byKey("kef:" + sp.id);
                 if (r) destination.focus(r);
