@@ -7,12 +7,16 @@
      * **It opens on the track playing, not on track one.** A room forty
      * tracks into a playlist used to answer "up next" with a list of what
      * already went by, and the answer to the question asked was somewhere
-     * below the fold. So the pane is cut at the current track: what came
-     * before it is folded behind one row that says how many, the playing
-     * track leads, and everything under it is genuinely what is next. The
-     * fold is a disclosure, not a truncation — the queue is still all there,
-     * one tap away, and expanding it holds the playing row where the eye
-     * already is rather than letting the list jump under the finger.
+     * below the fold. So the pane is cut at the current track — and cut, not
+     * trimmed: the last couple of played tracks stay in view above it,
+     * because "what was that one I liked?" is asked of this list as often as
+     * "what's coming", and it is asked about the song that just ended. Deeper
+     * history folds behind one row that says how many.
+     *
+     * The fold is a disclosure, not a truncation — the queue is still all
+     * there, one tap away, played rows dimmed rather than hidden — and
+     * expanding it holds the playing row where the eye already is rather
+     * than letting the list jump under the finger.
      *
      * Rows show a mono track number, replaced by the §6.8 waveform on the one
      * playing, and that row takes the `.tile.on` surface. Tapping a row jumps
@@ -23,7 +27,7 @@
     import Icon from "../Icon.svelte";
     import Waveform from "./Waveform.svelte";
     import { trimClock } from "../../lib/music/time";
-    import { splitQueue } from "../../lib/music/queue";
+    import { splitQueue, foldEarlier } from "../../lib/music/queue";
     import type { SonosQueueItem } from "../../lib/types";
 
     let {
@@ -77,8 +81,11 @@
     // ── Where the list is cut ────────────────────────────────────────────
     // The playing track, and everything after it, is what the pane is for;
     // `splitQueue` owns the arithmetic and the cases where there is no cut
-    // to make (radio, line-in, a position past the fetched window).
+    // to make (radio, line-in, a position past the fetched window). The last
+    // couple of played tracks stay above it — `foldEarlier` decides how many
+    // — because the song you want back is usually the one that just ended.
     const split = $derived(splitQueue(items, currentTrack));
+    const fold = $derived(foldEarlier(split.earlier));
 
     let showEarlier = $state(false);
     // A different room's queue is a different list, and whatever was unfolded
@@ -157,33 +164,36 @@
     </p>
 {:else}
     <div class="q-list" bind:this={listEl}>
-        <!-- What already went by, folded into one row. Chevron up to reach
-             back for it, chevron down to put it away again: the direction
-             the list moves, not an abstract disclosure triangle. -->
-        {#if split.earlier.length > 0}
-            <button
-                class="q-earlier"
-                aria-expanded={showEarlier}
-                onclick={toggleEarlier}
-            >
+        <!-- The deep history, folded into one row. Chevron up to reach back
+             for it, chevron down to put it away again: the direction the
+             list moves, not an abstract disclosure triangle. -->
+        {#if fold.hidden.length > 0}
+            <button class="q-earlier" aria-expanded={showEarlier} onclick={toggleEarlier}>
                 <span class="q-earlier-icon">
                     <Icon name={showEarlier ? "chevronDown" : "chevronUp"} size={14} />
                 </span>
                 <span class="q-earlier-label">
                     {#if showEarlier}
-                        Hide what's already played
+                        Fold the rest back up
                     {:else}
-                        <span class="mono">{split.earlier.length}</span>
-                        earlier {split.earlier.length === 1 ? "track" : "tracks"}
+                        <span class="mono">{fold.hidden.length}</span>
+                        {fold.hidden.length === 1 ? "track" : "tracks"} before that
                     {/if}
                 </span>
             </button>
             {#if showEarlier}
-                {#each split.earlier as item (item.track)}
+                {#each fold.hidden as item (item.track)}
                     {@render row(item)}
                 {/each}
             {/if}
         {/if}
+
+        <!-- What just played, kept in view: the song worth asking about is
+             usually the one that just ended, and it is a row you can tap to
+             hear again rather than a name you have to go looking for. -->
+        {#each fold.shown as item (item.track)}
+            {@render row(item)}
+        {/each}
 
         {#each split.ahead as item (item.track)}
             {@render row(item)}

@@ -2,10 +2,16 @@
  * Where the queue is cut.
  *
  * A queue pane opened on track one is an answer to a question nobody asked:
- * a room forty tracks into a playlist wants to know what is *next*, and the
- * thirty-nine that already went by are history it can ask for. So every
- * surface that shows a queue splits it at the track playing — history folded
- * above, the playing track leading, what's next under it.
+ * a room forty tracks into a playlist wants to know what is *next*. So every
+ * surface that shows a queue splits it at the track playing — what just
+ * played kept in view above it, the rest of the history folded, and what's
+ * next under it.
+ *
+ * The history is a first-class part of the pane, not a leftover: "what was
+ * that song?" is asked of the queue as often as "what's coming", and it is
+ * asked about the last few tracks. So the last couple stay on screen and the
+ * fold names how many more there are, rather than the pane starting flatly at
+ * the track playing.
  *
  * Pure on purpose, and here rather than inlined in the pane: three surfaces
  * render the same list (the player's second pane, the panel's full player,
@@ -43,6 +49,30 @@ export function splitQueue(items: SonosQueueItem[], currentTrack?: number): Queu
     ahead: items.slice(currentIdx),
     upNext: items.length - currentIdx - 1,
   };
+}
+
+/**
+ * How many played tracks stay on screen above the playing one.
+ *
+ * Not zero: "what was that one I liked?" is asked about the song that just
+ * finished more often than about anything else in the queue, and an answer
+ * that needs a tap to reach is an answer you have to know is there. Two rows
+ * carry the last few minutes of listening without pushing the playing track
+ * out of the first screenful.
+ */
+export const QUEUE_PEEK = 2;
+
+/**
+ * Split the history into the part that stays visible and the part behind the
+ * fold. A fold that hides one or two rows costs a row to save a row, so it
+ * doesn't happen: a short history is simply all there.
+ */
+export function foldEarlier(
+  earlier: SonosQueueItem[],
+  peek: number = QUEUE_PEEK,
+): { hidden: SonosQueueItem[]; shown: SonosQueueItem[] } {
+  if (earlier.length <= peek + 1) return { hidden: [], shown: earlier };
+  return { hidden: earlier.slice(0, earlier.length - peek), shown: earlier.slice(-peek) };
 }
 
 /**

@@ -916,12 +916,18 @@ large, so the module never swallows keys the rest of the app might want.
   control; §2 has no exception left to lean on. The header's left button
   becomes a back chevron and Escape still leaves the player outright.
 - **The queue pane opens on the track playing, not on track one.** The pane
-  is cut at the current track (`splitQueue`): what already went by is folded
-  behind a single row that says how many, the playing track leads the list on
-  its `.tile.on` surface, and an **Up next** eyebrow with a mono count draws
-  the line between "this" and "what's after this". Before the cut, a room
-  deep into a playlist answered "up next" with a screenful of history and put
-  the answer below the fold.
+  is cut at the current track (`splitQueue`), the playing track leads the
+  list on its `.tile.on` surface, and an **Up next** eyebrow with a mono
+  count draws the line between "this" and "what's after this". Before the
+  cut, a room deep into a playlist answered "up next" with a screenful of
+  history and put the answer below the fold.
+- **Cut, not trimmed: the last two played tracks stay in view** above the
+  playing one, dimmed (`foldEarlier`, `QUEUE_PEEK`). "What was that one I
+  liked?" is asked of this list as often as "what's coming", and it is asked
+  about the song that just ended — so it is a row you can tap to hear again,
+  not a name you have to go looking for. Deeper history folds behind one row
+  that says how many, and a history short enough that the fold would hide
+  about as much as the fold row costs isn't folded at all.
   The fold is a **disclosure, not a truncation** — one tap has the whole
   queue back, played rows dimmed rather than hidden, and unfolding
   **compensates the scroll** so the playing row does not move under the
@@ -1413,8 +1419,9 @@ These rules keep the screen honest about the room it is showing:
   pinned while it scrolls. "The queue, with the row playing at the top of
   it" is what this screen is for beyond size, and a room forty tracks into
   a playlist opened at track one with the mark below the fold. The pane
-  itself now leads with that row (§15.8) — history folded behind one row,
-  the whole list one tap away — and the scroll nudge stays as the backstop
+  itself now leads with that row (§15.8) — the last two played above it,
+  deeper history folded, the whole list one tap away — and the scroll
+  nudge stays as the backstop
   for the case the fold can't cover: a column already scrolled somewhere
   else when the track changes under it. The nudge happens only when that
   row is actually out of view — this runs beside a five-second poll on an

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { splitQueue, tracksAhead } from "./queue";
+import { splitQueue, foldEarlier, tracksAhead, QUEUE_PEEK } from "./queue";
 import type { SonosQueueItem } from "../types";
 
 /** A queue of `n` tracks, numbered the way Sonos numbers them (1-based). */
@@ -58,6 +58,36 @@ describe("splitQueue", () => {
   it("survives an empty queue", () => {
     const s = splitQueue([], 2);
     expect(s).toEqual({ currentIdx: -1, earlier: [], ahead: [], upNext: 0 });
+  });
+});
+
+describe("foldEarlier", () => {
+  it("keeps the last few played tracks in view and folds the rest", () => {
+    const f = foldEarlier(splitQueue(q(40), 38).earlier);
+    expect(f.shown.map((i) => i.track)).toEqual([36, 37]);
+    expect(f.hidden).toHaveLength(35);
+    expect(f.hidden.at(-1)?.track).toBe(35);
+    expect(f.hidden.length + f.shown.length).toBe(37);
+  });
+
+  it("folds nothing when the fold would hide about as much as it costs", () => {
+    for (let n = 0; n <= QUEUE_PEEK + 1; n++) {
+      const f = foldEarlier(q(n));
+      expect(f.hidden).toEqual([]);
+      expect(f.shown).toHaveLength(n);
+    }
+  });
+
+  it("folds as soon as there is more than a row's worth to hide", () => {
+    const f = foldEarlier(q(QUEUE_PEEK + 2));
+    expect(f.hidden).toHaveLength(2);
+    expect(f.shown).toHaveLength(QUEUE_PEEK);
+  });
+
+  it("takes the peek count as an argument", () => {
+    const f = foldEarlier(q(10), 4);
+    expect(f.shown.map((i) => i.track)).toEqual([7, 8, 9, 10]);
+    expect(f.hidden).toHaveLength(6);
   });
 });
 
