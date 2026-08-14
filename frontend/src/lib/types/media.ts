@@ -500,3 +500,22 @@ export interface AnnounceResult {
   spoken: boolean;
   duration_ms: number;
 }
+
+// ── Qobuz ────────────────────────────────────────────────────────────────
+// The one provider HomeHub streams losslessly. Two setup steps rather than
+// one, because the credentials come from two different parties: the app id
+// and secret are issued to the *application* (Qobuz issues them on request),
+// while the login is the listener's own. `configured` and `connected` are
+// therefore separate, and the UI must be able to say which is missing.
+
+export interface QobuzStatus {
+  configured: boolean;
+  connected: boolean;
+  display_name?: string;
+  /** The subscription's name, e.g. "Studio Premier". */
+  plan?: string;
+  /** Qobuz's format id: 5=MP3, 6=FLAC CD, 7=FLAC 24/96, 27=FLAC 24/192. */
+  max_format?: number;
+  /** The same, spelled out — use this rather than mapping the number again. */
+  max_format_label?: string;
+}

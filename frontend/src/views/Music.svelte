@@ -44,6 +44,7 @@
     import SonosEventsModal from "../modals/SonosEventsModal.svelte";
     import MusicQualityModal from "../modals/MusicQualityModal.svelte";
     import SpotifyConnectModal from "../modals/SpotifyConnectModal.svelte";
+    import QobuzConnectModal from "../modals/QobuzConnectModal.svelte";
     import LiveStatusChip from "../components/LiveStatusChip.svelte";
     import { api } from "../lib/api";
     import { toasts, route, bottomBar } from "../lib/stores.svelte";
@@ -917,6 +918,14 @@
         void zones.refresh();
     }
 
+    /** Qobuz setup. Signing in changes what every zone read reports about
+     *  quality — it is the one provider that can answer "lossless" — so the
+     *  zones are re-read the same way the quality sheet re-reads them. */
+    async function openQobuzModal() {
+        await openModal(QobuzConnectModal, {});
+        void zones.refresh();
+    }
+
     /** The push-status sheet. Retrying inside it can turn subscriptions on, and
      *  that changes which poll interval this view should be using. */
     async function openEventsModal() {
@@ -1017,6 +1026,7 @@
             onOpenEvents={openEventsModal}
             onOpenQuality={openQualityModal}
             onOpenConnect={openConnectModal}
+            onOpenQobuz={openQobuzModal}
             spotifyPlayback={spotify.status?.playback ?? false}
             onKEFOpened={(sp) => {
                 const r = rooms.byKey("kef:" + sp.id);

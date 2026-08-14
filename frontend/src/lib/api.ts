@@ -57,6 +57,7 @@ import type {
   SpotifyContextDetail,
   MediaEndpoint,
   MediaProvider,
+  QobuzStatus,
   MediaResults,
   MediaZone,
   MediaZoneRoutes,
@@ -686,6 +687,21 @@ export const api = {
   // they carry vendor specifics the detail views need.
   // See docs/MEDIA-PROTOCOL.md.
   mediaEndpoints() { return req<MediaEndpoint[]>("/media/endpoints"); },
+  // Qobuz. Setup is two calls because the credentials come from two parties;
+  // see QobuzStatus. The password is sent once and never stored — what
+  // persists server-side is the token Qobuz returns for it.
+  qobuzStatus() { return req<QobuzStatus>("/qobuz/status"); },
+  qobuzSetConfig(appId: string, appSecret: string) {
+    return req<QobuzStatus>("/qobuz/config", {
+      method: "PUT",
+      body: json({ app_id: appId, app_secret: appSecret }),
+    });
+  },
+  qobuzLogin(email: string, password: string) {
+    return req<QobuzStatus>("/qobuz/login", { method: "POST", body: json({ email, password }) });
+  },
+  qobuzDisconnect() { return req<QobuzStatus>("/qobuz/disconnect", { method: "POST" }); },
+
   mediaProviders() { return req<MediaProvider[]>("/media/providers"); },
   mediaSearch(q: string, opts?: { provider?: string; limit?: number }) {
     const p = new URLSearchParams({ q });

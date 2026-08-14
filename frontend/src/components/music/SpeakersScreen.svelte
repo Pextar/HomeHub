@@ -50,6 +50,7 @@
         onOpenEvents,
         onOpenQuality,
         onOpenConnect,
+        onOpenQobuz,
         spotifyPlayback = false,
         /** Opening a KEF speaker points the destination at it, when it can take one. */
         onKEFOpened,
@@ -69,6 +70,7 @@
         onEditAirPlay: (sp: AirPlaySpeakerView) => void;
         onOpenQuality: () => void;
         onOpenConnect: () => void;
+        onOpenQobuz: () => void;
         /** Whether this Spotify login can reach the player endpoints at all.
          *  The row is absent rather than disabled when it can't: a control
          *  that opens onto "reconnect your account" is a worse answer than
@@ -400,6 +402,16 @@
         {/snippet}
     </NavRow>
     {/if}
+
+    <!-- ── Qobuz ───────────────────────────────────────────────────────
+         Beside Sound quality rather than in Settings, and for the same
+         reason: it is the one service that changes the answer that sheet
+         gives. Everything else here caps at a compressed source. -->
+    <NavRow icon="radio" title="Qobuz" onClick={onOpenQobuz}>
+        {#snippet sub()}
+            The one service HomeHub plays bit-exact, end to end
+        {/snippet}
+    </NavRow>
 
     <!-- ── Sound quality ───────────────────────────────────────────────
          Here rather than in Settings because it is a fact about these
