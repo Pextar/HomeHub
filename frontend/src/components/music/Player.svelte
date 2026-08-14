@@ -29,14 +29,18 @@
     import PlayerTransport from "./PlayerTransport.svelte";
     import TrackRail from "./TrackRail.svelte";
     import QueuePane from "./QueuePane.svelte";
+    import HeardPane from "./HeardPane.svelte";
     import VolumeRow from "./VolumeRow.svelte";
     import ZoneRoute from "./ZoneRoute.svelte";
     import { kefSourceLabel, KEF_SOURCES } from "../../lib/kef";
     import { NEXT_REPEAT, repeatLabel } from "../../lib/music/sonos.svelte";
+    import { tracksAhead } from "../../lib/music/queue";
     import type { Room, RoomsModel } from "../../lib/music/rooms.svelte";
     import type { SonosBridge } from "../../lib/music/sonos.svelte";
     import type { KEFBridge } from "../../lib/music/kef.svelte";
     import type { Busy } from "../../lib/music/busy.svelte";
+    import type { HeardLog } from "../../lib/music/heard.svelte";
+    import type { HeardTrack } from "../../lib/types";
     import type { Origin } from "../../lib/motion";
     import type { Snippet } from "svelte";
 
@@ -46,6 +50,11 @@
         sonos,
         kef,
         busy,
+        /** What this room has been heard playing, across queues. */
+        heard,
+        /** Play something out of the log again, where it came with a URI. */
+        onPlayHeard,
+        onClearHeard,
         onClose,
         /** What this room is made of — the zone editor, or a speaker's settings. */
         onConfigure,
@@ -68,6 +77,9 @@
         sonos: SonosBridge;
         kef: KEFBridge;
         busy: Busy;
+        heard: HeardLog;
+        onPlayHeard: (t: HeardTrack) => void;
+        onClearHeard: () => void;
         onClose: () => void;
         onConfigure: () => void;
         onUngroup?: () => void;
@@ -106,9 +118,34 @@
         return () => mq.removeEventListener("change", update);
     });
 
-    let queuePane = $state(false);
+    /**
+     * Which of the sheet's three faces is up. Panes, not tabs (§2): the
+     * header's left button walks back down the ladder — the log to the
+     * queue, the queue to the player, the player closed — and each swap is
+     * the same surface showing a different thing rather than a new one
+     * arriving over it.
+     */
+    let pane = $state<"player" | "queue" | "heard">("player");
+    const queuePane = $derived(pane === "queue");
+    /** Which face the log was opened from, so back goes where it came from:
+     *  a room with a queue reaches it through the queue, a room without one
+     *  straight from the player. */
+    let heardFrom = $state<"player" | "queue">("player");
+    function openHeard(from: "player" | "queue") {
+        heardFrom = from;
+        pane = "heard";
+    }
     /** The queue belongs to a Sonos group; nothing else has one to show. */
     const queueLength = $derived(r.canQueue ? (gs?.queue_length ?? 0) : 0);
+
+    /** The track after the one playing, named the way the queue names it —
+     *  with its artist, because "Intro" alone tells nobody what is coming. */
+    function upNextLine(track: number | undefined): string {
+        const next = sonos.nextInQueue(track);
+        if (!next) return "End of the queue";
+        const title = next.title || "Unknown track";
+        return next.artist ? `${title} — ${next.artist}` : title;
+    }
 
     /** What the room is called in the sheet's own words, in every state. */
     const meta = $derived.by(() => {
@@ -131,16 +168,30 @@
     /** The name of the thing the header's action opens. */
     const configureLabel = $derived(r.kind === "zone" ? `Edit ${r.name}` : `${r.name} settings`);
 
-    // The two panes share one scroll container, so switching has to rewind it
-    // — otherwise the queue opens halfway down at the player's offset.
+    // The panes share one scroll container, so switching has to rewind it —
+    // otherwise the queue opens halfway down at the player's offset.
     $effect(() => {
-        void queuePane;
+        void pane;
         if (scrollEl) scrollEl.scrollTop = 0;
     });
     // A room whose queue disappears (regrouped, or swapped for a KEF) must not
     // leave the sheet stuck on a pane that no longer has anything in it.
     $effect(() => {
-        if (queuePane && !r.canQueue) queuePane = false;
+        if (queuePane && !r.canQueue) pane = "player";
+    });
+
+    // The log is asked for when it is looked at, and again the next time it
+    // is opened — tracks have played since. Not on every poll: the room
+    // object is rebuilt every five seconds and its key is what identifies it.
+    let heardFor = "";
+    $effect(() => {
+        if (pane !== "heard") {
+            heardFor = "";
+            return;
+        }
+        if (r.key === heardFor) return;
+        heardFor = r.key;
+        void heard.load(r.key);
     });
 
     /** The transport keys this room can actually answer, and no others. */
@@ -201,7 +252,8 @@
                 if (r.group && gs) sonos.setPlayMode(r.group, { repeat: NEXT_REPEAT[gs.repeat] });
                 break;
             case "q":
-                if (queuePane || queueLength > 0) queuePane = !queuePane;
+                if (queuePane) pane = "player";
+                else if (queueLength > 0) pane = "queue";
                 break;
         }
     }
@@ -224,12 +276,22 @@
 
 <MusicSheet
     label="Now playing"
-    eyebrow={queuePane ? "Queue" : "Playing on"}
+    eyebrow={pane === "queue" ? "Queue" : pane === "heard" ? "Played" : "Playing on"}
     title={r.name}
     sub={r.grouped ? rooms.memberLine(r) : undefined}
-    backIcon={queuePane ? "chevronLeft" : "chevronDown"}
-    backLabel={queuePane ? "Back to now playing" : "Collapse player"}
-    onBack={() => (queuePane ? (queuePane = false) : onClose())}
+    backIcon={pane === "player" ? "chevronDown" : "chevronLeft"}
+    backLabel={pane === "player"
+        ? "Collapse player"
+        : pane === "queue"
+          ? "Back to now playing"
+          : heardFrom === "queue"
+            ? "Back to the queue"
+            : "Back to now playing"}
+    onBack={() => {
+        if (pane === "heard") pane = heardFrom;
+        else if (pane === "queue") pane = "player";
+        else onClose();
+    }}
     onDismiss={onClose}
     action={{ icon: "sliders", label: configureLabel, onClick: onConfigure }}
     wide
@@ -239,22 +301,10 @@
     bind:sheetEl
     bind:dismissing
 >
-    {#if queuePane && r.group && !wide}
-        <!-- On a phone the queue is the sheet's second pane: it swaps the
-             whole surface and puts it back on the way out. -->
-        {@const c = sonos.coordinatorOf(r.group)}
-        <QueuePane
-            items={sonos.queue}
-            loading={sonos.queueLoading}
-            total={queueLength || sonos.queue.length}
-            currentTrack={c?.state?.queue_track}
-            {playing}
-            clearBusy={!c || busy.is("qclear:" + c?.id)}
-            isBusy={(k) => busy.is(k)}
-            onJump={(track) => r.group && sonos.jumpTo(r.group, track)}
-            onRemove={(track) => r.group && sonos.removeQueued(r.group, track)}
-            onClear={onClearQueue}
-        />
+    {#if pane !== "player" && !wide}
+        <!-- On a phone a second pane swaps the whole surface and puts it back
+             on the way out. -->
+        {@render face()}
     {:else}
         <div class="st">
             <div class="st-left">
@@ -267,22 +317,11 @@
             </div>
 
             <div class="st-right">
-                {#if queuePane && r.group}
-                    <!-- On the stage the queue is the right column — the art stays,
-                 because what's playing is still the point of the window. -->
-                    {@const c = sonos.coordinatorOf(r.group)}
-                    <QueuePane
-                        items={sonos.queue}
-                        loading={sonos.queueLoading}
-                        total={queueLength || sonos.queue.length}
-                        currentTrack={c?.state?.queue_track}
-                        {playing}
-                        clearBusy={!c || busy.is("qclear:" + c?.id)}
-                        isBusy={(k) => busy.is(k)}
-                        onJump={(track) => r.group && sonos.jumpTo(r.group, track)}
-                        onRemove={(track) => r.group && sonos.removeQueued(r.group, track)}
-                        onClear={onClearQueue}
-                    />
+                {#if pane !== "player"}
+                    <!-- On the stage a second pane is the right column — the art
+                 stays, because what's playing is still the point of the
+                 window. -->
+                    {@render face()}
                 {:else}
                     <PlayerMeta title={meta.title} sub={meta.sub} idle={meta.idle} large={wide} />
 
@@ -388,22 +427,49 @@
                                 </button>
                             </div>
                             {#if queueLength > 0}
-                                <button class="p-upnext" onclick={() => (queuePane = true)}>
+                                <!-- The count is what is still to come, not how
+                                     long the queue is: the row says "up next",
+                                     and a room thirty-eight tracks into forty
+                                     has two left, not forty. -->
+                                {@const ahead = tracksAhead(queueLength, c?.state?.queue_track)}
+                                <button class="p-upnext" onclick={() => (pane = "queue")}>
                                     <Icon name="queue" size={17} />
                                     <span class="up-body">
                                         <span class="up-label">Up next</span>
                                         <span class="up-track">
-                                            {sonos.nextInQueue(c?.state?.queue_track)?.title ??
-                                                "End of the queue"}
+                                            {upNextLine(c?.state?.queue_track)}
                                         </span>
                                     </span>
-                                    <span class="up-count mono">{queueLength}</span>
+                                    <!-- No "0" beside "End of the queue": the
+                                         sentence already said it. -->
+                                    {#if ahead > 0}
+                                        <span class="up-count mono">{ahead}</span>
+                                    {/if}
                                     <span class="up-go" aria-hidden="true"
                                         ><Icon name="chevronLeft" size={16} /></span
                                     >
                                 </button>
                             {/if}
                         </div>
+                    {/if}
+
+                    {#if queueLength === 0}
+                        <!-- No queue means no queue pane, and the log's door
+                             lives in the queue pane — so for a KEF, a zone or
+                             a room on radio it comes here instead. One door
+                             either way: a room with a queue reaches the log
+                             through it, and a second door beside the first
+                             would be a door twice (§15.8). -->
+                        <button class="p-upnext" onclick={() => openHeard("player")}>
+                            <Icon name="clock" size={17} />
+                            <span class="up-body">
+                                <span class="up-label">Played here</span>
+                                <span class="up-track">What this room has been playing</span>
+                            </span>
+                            <span class="up-go" aria-hidden="true"
+                                ><Icon name="chevronLeft" size={16} /></span
+                            >
+                        </button>
                     {/if}
 
                     <!-- Somewhere to go, playing or not: swapping a song out is as ordinary
@@ -495,6 +561,43 @@
         </div>
     {/if}
 </MusicSheet>
+
+<!--
+    The two faces that aren't the player, written once and rendered in two
+    places: on a phone a pane swaps the whole sheet, and from the desktop
+    breakpoint up it becomes the right column beside the art. They used to be
+    two copies of the same QueuePane invocation, which is two chances to
+    disagree about what the queue does.
+-->
+{#snippet face()}
+    {#if pane === "queue" && r.group}
+        {@const c = sonos.coordinatorOf(r.group)}
+        <QueuePane
+            items={sonos.queue}
+            loading={sonos.queueLoading}
+            total={queueLength || sonos.queue.length}
+            currentTrack={c?.state?.queue_track}
+            {playing}
+            clearBusy={!c || busy.is("qclear:" + c?.id)}
+            isBusy={(k) => busy.is(k)}
+            onJump={(track) => r.group && sonos.jumpTo(r.group, track)}
+            onRemove={(track) => r.group && sonos.removeQueued(r.group, track)}
+            onClear={onClearQueue}
+            onPlayed={() => openHeard("queue")}
+        />
+    {:else if pane === "heard"}
+        <HeardPane
+            tracks={heard.list}
+            loading={heard.loading}
+            household={heard.household}
+            roomName={r.name}
+            isBusy={(k) => busy.is(k)}
+            onPlay={onPlayHeard}
+            onClear={onClearHeard}
+            clearBusy={busy.is("heardclear:" + r.id)}
+        />
+    {/if}
+{/snippet}
 
 <style>
     /* Below the desktop shell's breakpoint the stage wrappers vanish, and the

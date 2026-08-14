@@ -157,6 +157,9 @@ func (s *Server) autoplayTick(ctx context.Context) {
 	snapCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	snap := s.sonosEvents().Snapshot(snapCtx)
 	cancel()
+	// This tick reads the household anyway, so it is also the listening
+	// log's fallback for a house whose speakers refuse GENA subscriptions.
+	s.noteHeardSonos(snap)
 
 	for _, sp := range speakers {
 		if !s.autoplayEnabled(sp.ID) {

@@ -54,6 +54,7 @@ func (s *Server) kefStatus(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 	snap := s.kefEvents().Snapshot(ctx)
+	s.noteHeardKEF(snap) // before the art rewrite below, as in sonosStatus
 
 	views := make([]kefSpeakerView, len(speakers))
 	for i, sp := range speakers {

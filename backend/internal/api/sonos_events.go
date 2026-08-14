@@ -58,10 +58,14 @@ func (s *Server) RunSonosEvents(ctx context.Context) {
 // on a speaker doesn't make every open tab refetch every socket, scene and
 // sensor in the house.
 func (s *Server) broadcastMusic() {
-	if s.events == nil {
-		return
+	if s.events != nil {
+		s.events.broadcastTopic(topicMusic)
 	}
-	s.events.broadcastTopic(topicMusic)
+	// A cache change is also the moment the song may have changed, and this
+	// is the only hook that fires without anyone watching — a house whose
+	// speakers are subscribed keeps its listening log whether or not a phone
+	// is open. Reads the caches, never a speaker. See heard.go.
+	s.noteHeardCached()
 }
 
 // sonosSpeakerList adapts the store's speakers to what the monitor needs.

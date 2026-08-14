@@ -71,6 +71,12 @@ type Store struct {
 	// MediaHistory is what each room has been asked to play, newest first,
 	// keyed by the media layer's destination key. See history.go.
 	MediaHistory map[string][]MediaPlay
+	// Heard is what each room was actually heard playing, newest first and
+	// keyed the same way. The other half of MediaHistory: that one records
+	// what someone chose, this one what came out of the speaker — which is
+	// the only one of the two that can answer "what was that song?" after
+	// the queue it was in has been replaced. See heard.go.
+	Heard map[string][]HeardTrack
 	// MusicTimers start and stop music on their own — the waking and
 	// sleeping half of Schedule/Timer, which can only reach sockets.
 	// See musictimer.go, and internal/api/musictimer.go for the engine.
@@ -166,6 +172,7 @@ const (
 	airplayFile     = "airplay.json"
 	zonesFile       = "zones.json"
 	historyFile     = "media_history.json"
+	heardFile       = "media_heard.json"
 	musicTimersFile = "music_timers.json"
 
 	// ReadingsHistorySize caps how many readings are kept per sensor.

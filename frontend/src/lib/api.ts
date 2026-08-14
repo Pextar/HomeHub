@@ -61,6 +61,7 @@ import type {
   MediaZone,
   MediaZoneRoutes,
   MediaPlayResult,
+  MediaHeard,
   MediaHistory,
   MediaQualityReport,
   StreamQuality,
@@ -753,6 +754,18 @@ export const api = {
     const p = new URLSearchParams({ room });
     if (uri) p.set("uri", uri);
     return req<void>(`/media/history?${p}`, { method: "DELETE" });
+  },
+  // What a room was *heard* playing, newest first — written from what the
+  // speakers report rather than from what anyone asked for, which is what
+  // makes it survive a queue being replaced. A room with nothing of its own
+  // answers with the household's, flagged, exactly as the shelf above does.
+  mediaHeard(room: string, limit = 40) {
+    return req<MediaHeard>(`/media/heard?room=${encodeURIComponent(room)}&limit=${limit}`);
+  },
+  // One room stops keeping a log. Whole-room only: nothing ranks this list or
+  // offers it back, so there is no single row worth surgery.
+  mediaForgetHeard(room: string) {
+    return req<void>(`/media/heard?room=${encodeURIComponent(room)}`, { method: "DELETE" });
   },
   // What a room keeps coming back to, rather than what it happened to play
   // last. `hour` takes a local hour or "now", and ranks by what this room

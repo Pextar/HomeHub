@@ -261,6 +261,11 @@ func (s *Server) registerMediaRoutes(api *mux.Router) {
 	// decision like every other write on this surface.
 	api.HandleFunc("/media/history", s.requireAdmin(s.mediaForget)).Methods("DELETE")
 	api.HandleFunc("/media/history/top", s.requireAdminOrKid(s.mediaTopPlays)).Methods("GET")
+	// What a room was heard playing, as opposed to what it was asked to
+	// play. Readable by the kid surface for the same reason the shelves are;
+	// clearing it is an admin's call. See heard.go.
+	api.HandleFunc("/media/heard", s.requireAdminOrKid(s.mediaHeard)).Methods("GET")
+	api.HandleFunc("/media/heard", s.requireAdmin(s.mediaForgetHeard)).Methods("DELETE")
 	api.HandleFunc("/media/insights", s.requireAdmin(s.mediaInsights)).Methods("GET")
 	// What the audio actually is, and the one setting that changes it.
 	api.HandleFunc("/media/quality", s.requireAdmin(s.mediaQuality)).Methods("GET")

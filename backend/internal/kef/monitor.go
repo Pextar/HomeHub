@@ -322,6 +322,15 @@ func (m *Monitor) Snapshot(ctx context.Context) Snapshot {
 	return snap
 }
 
+// Cached returns what the cache holds right now and never reads a speaker.
+// Unlike Snapshot it does not fall back to a synchronous sweep, so a caller
+// that runs often — the listening log, on every cache change — can read the
+// monitor without ever becoming the reason it polls.
+func (m *Monitor) Cached() Snapshot {
+	snap, _ := m.cached(m.cfg.Speakers())
+	return snap
+}
+
 // cached builds a snapshot from the cache, reporting false when any
 // registered speaker is missing from it or has gone stale.
 func (m *Monitor) cached(want []Speaker) (Snapshot, bool) {

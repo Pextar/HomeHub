@@ -109,6 +109,12 @@ var collections = []collection{
 	with(mapCollection("media history", "MediaHistory", historyFile,
 		func(s *Store) *map[string][]MediaPlay { return &s.MediaHistory }),
 		func(c *collection) { c.inFullSave = false }),
+	// Heard tracks are written by SaveHeard for the same reason history is
+	// written by SaveHistory, only more so: this file changes every time a
+	// song does, in any room, whether or not anyone asked HomeHub for it.
+	with(mapCollection("heard tracks", "Heard", heardFile,
+		func(s *Store) *map[string][]HeardTrack { return &s.Heard }),
+		func(c *collection) { c.inFullSave = false }),
 	mapCollection("music timers", "MusicTimers", musicTimersFile,
 		func(s *Store) *map[string]*MusicTimer { return &s.MusicTimers }),
 }
