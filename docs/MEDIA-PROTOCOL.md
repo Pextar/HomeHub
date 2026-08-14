@@ -450,13 +450,24 @@ The split is not Spotify's doing. HomeHub decodes those two routes with
 Spotify decoder it can run, and librespot fetches the Ogg Vorbis stream —
 Spotify's lossless tier is not available to it. That is
 [librespot-org/librespot#1583](https://github.com/librespot-org/librespot/issues/1583),
-open and unimplemented: the maintainers laid FLAC groundwork in the decoder
-years ago and think it could be quick work *if* Spotify serves the FLACs and
-their decryption keys the same way as the Ogg files, but nobody has taken it
-and nobody has confirmed that "if". Until someone does, `stream` and `airplay`
-cap at 320 kbps whatever the household's Spotify plan is. **Nothing in this
-repository can lift that cap** — when librespot ships FLAC, the change here is
-`SpotifyProvider.SourceQuality` and the decoder's arguments, and nothing else.
+and the "if" in it has since been answered the wrong way. The maintainers laid
+FLAC groundwork in the decoder years ago and hoped it would be quick work *if*
+Spotify served the FLACs and their decryption keys over the same channel as the
+Ogg files. It does not. Spotify's Connect backend delivers only the legacy Ogg
+Vorbis stream to third-party endpoints; the lossless tier lives in Spotify's own
+apps, on a proprietary playback pipeline that fetches and decrypts FLAC
+directly. On [discussion #1685](https://github.com/librespot-org/librespot/discussions/1685)
+the maintainer's position is "not aware of anything we can do at our end", with
+the suggestion that anyone who needs it should "consider partnering with Spotify
+properly ($$$)".
+
+So this is not a missing feature anyone here or upstream can add. `stream` and
+`airplay` cap at 320 kbps whatever the household's Spotify plan is, until
+Spotify chooses to serve lossless over Connect. **Nothing in this repository can
+lift that cap.** If that day comes, the change here is
+`SpotifyProvider.SourceQuality`, `DecodedFormat` and the decoder's arguments —
+and the pipeline is already format-transparent, so nothing downstream needs
+touching.
 
 So the limit on those two routes is attributed to **HomeHub's decoder**, not to
 Spotify. `DescribeQuality` works this out by asking the provider what it hands
