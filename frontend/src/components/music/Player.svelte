@@ -33,6 +33,7 @@
     import ZoneRoute from "./ZoneRoute.svelte";
     import { kefSourceLabel, KEF_SOURCES } from "../../lib/kef";
     import { NEXT_REPEAT, repeatLabel } from "../../lib/music/sonos.svelte";
+    import { tracksAhead } from "../../lib/music/queue";
     import type { Room, RoomsModel } from "../../lib/music/rooms.svelte";
     import type { SonosBridge } from "../../lib/music/sonos.svelte";
     import type { KEFBridge } from "../../lib/music/kef.svelte";
@@ -109,6 +110,15 @@
     let queuePane = $state(false);
     /** The queue belongs to a Sonos group; nothing else has one to show. */
     const queueLength = $derived(r.canQueue ? (gs?.queue_length ?? 0) : 0);
+
+    /** The track after the one playing, named the way the queue names it —
+     *  with its artist, because "Intro" alone tells nobody what is coming. */
+    function upNextLine(track: number | undefined): string {
+        const next = sonos.nextInQueue(track);
+        if (!next) return "End of the queue";
+        const title = next.title || "Unknown track";
+        return next.artist ? `${title} — ${next.artist}` : title;
+    }
 
     /** What the room is called in the sheet's own words, in every state. */
     const meta = $derived.by(() => {
@@ -388,16 +398,24 @@
                                 </button>
                             </div>
                             {#if queueLength > 0}
+                                <!-- The count is what is still to come, not how
+                                     long the queue is: the row says "up next",
+                                     and a room thirty-eight tracks into forty
+                                     has two left, not forty. -->
+                                {@const ahead = tracksAhead(queueLength, c?.state?.queue_track)}
                                 <button class="p-upnext" onclick={() => (queuePane = true)}>
                                     <Icon name="queue" size={17} />
                                     <span class="up-body">
                                         <span class="up-label">Up next</span>
                                         <span class="up-track">
-                                            {sonos.nextInQueue(c?.state?.queue_track)?.title ??
-                                                "End of the queue"}
+                                            {upNextLine(c?.state?.queue_track)}
                                         </span>
                                     </span>
-                                    <span class="up-count mono">{queueLength}</span>
+                                    <!-- No "0" beside "End of the queue": the
+                                         sentence already said it. -->
+                                    {#if ahead > 0}
+                                        <span class="up-count mono">{ahead}</span>
+                                    {/if}
                                     <span class="up-go" aria-hidden="true"
                                         ><Icon name="chevronLeft" size={16} /></span
                                     >

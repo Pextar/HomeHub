@@ -910,9 +910,23 @@ large, so the module never swallows keys the rest of the app might want.
 - **The art answers a swipe on touch** where the room can skip — half-speed
   follow, firing past ~60px, and vertical always loses to the sheet drag.
 - **The queue is a second pane inside the same sheet**, reached from an "Up
-  next" row that names the actual next track. Not a segmented control; §2 has
-  no exception left to lean on. The header's left button becomes a back
-  chevron and Escape still leaves the player outright.
+  next" row that names the actual next track — with its artist, and with the
+  count of what is *still to come* rather than how long the queue is: a room
+  thirty-eight tracks into forty has two left, not forty. Not a segmented
+  control; §2 has no exception left to lean on. The header's left button
+  becomes a back chevron and Escape still leaves the player outright.
+- **The queue pane opens on the track playing, not on track one.** The pane
+  is cut at the current track (`splitQueue`): what already went by is folded
+  behind a single row that says how many, the playing track leads the list on
+  its `.tile.on` surface, and an **Up next** eyebrow with a mono count draws
+  the line between "this" and "what's after this". Before the cut, a room
+  deep into a playlist answered "up next" with a screenful of history and put
+  the answer below the fold.
+  The fold is a **disclosure, not a truncation** — one tap has the whole
+  queue back, played rows dimmed rather than hidden, and unfolding
+  **compensates the scroll** so the playing row does not move under the
+  finger by however many tracks were inserted above it. Anything else that
+  reveals content *above* the reading position owes the same compensation.
 - **Queueing never interrupts.** Tapping a result plays it now; "Play next"
   and "Add to queue" live behind the row's overflow, and only for a Sonos
   room, since the queue is a Sonos group's.
@@ -1396,11 +1410,15 @@ These rules keep the screen honest about the room it is showing:
   rectangle those four rows read as something that failed to load rather
   than as a speaker with nothing more to show.
 - **The queue opens at the track playing**, and its count and Clear stay
-  pinned while it scrolls. "The queue, in full, with the row playing
-  marked" is what this screen is for beyond size, and a room forty tracks
-  into a playlist opened at track one with the mark below the fold. The
-  nudge happens only when that row is actually out of view — this runs
-  beside a five-second poll on an A8X. **The rows carry cover art here and
+  pinned while it scrolls. "The queue, with the row playing at the top of
+  it" is what this screen is for beyond size, and a room forty tracks into
+  a playlist opened at track one with the mark below the fold. The pane
+  itself now leads with that row (§15.8) — history folded behind one row,
+  the whole list one tap away — and the scroll nudge stays as the backstop
+  for the case the fold can't cover: a column already scrolled somewhere
+  else when the track changes under it. The nudge happens only when that
+  row is actually out of view — this runs beside a five-second poll on an
+  A8X. **The rows carry cover art here and
   nowhere else**: the queue is what this screen is for and has the width
   for a 36px thumbnail, where in a phone-width sheet the same thumbnail is
   bought from the title.

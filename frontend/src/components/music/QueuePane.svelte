@@ -4,14 +4,26 @@
      * that names the actual next track, not as a segmented control: §2 has no
      * exception left to lean on.
      *
+     * **It opens on the track playing, not on track one.** A room forty
+     * tracks into a playlist used to answer "up next" with a list of what
+     * already went by, and the answer to the question asked was somewhere
+     * below the fold. So the pane is cut at the current track: what came
+     * before it is folded behind one row that says how many, the playing
+     * track leads, and everything under it is genuinely what is next. The
+     * fold is a disclosure, not a truncation — the queue is still all there,
+     * one tap away, and expanding it holds the playing row where the eye
+     * already is rather than letting the list jump under the finger.
+     *
      * Rows show a mono track number, replaced by the §6.8 waveform on the one
      * playing, and that row takes the `.tile.on` surface. Tapping a row jumps
      * to it, the trailing X removes it, and "Clear" is destructive enough that
      * the confirm lives with the caller.
      */
+    import { tick } from "svelte";
     import Icon from "../Icon.svelte";
     import Waveform from "./Waveform.svelte";
     import { trimClock } from "../../lib/music/time";
+    import { splitQueue } from "../../lib/music/queue";
     import type { SonosQueueItem } from "../../lib/types";
 
     let {
@@ -62,6 +74,56 @@
         onClear: () => void;
     } = $props();
 
+    // ── Where the list is cut ────────────────────────────────────────────
+    // The playing track, and everything after it, is what the pane is for;
+    // `splitQueue` owns the arithmetic and the cases where there is no cut
+    // to make (radio, line-in, a position past the fetched window).
+    const split = $derived(splitQueue(items, currentTrack));
+
+    let showEarlier = $state(false);
+    // A different room's queue is a different list, and whatever was unfolded
+    // for the last one shouldn't decide how this one opens. The head of the
+    // queue is what says "different list": a track advancing, or one removed
+    // from the middle, leaves it alone — and neither should fold the list shut
+    // under someone who is reading it.
+    let foldedFor = "";
+    $effect(() => {
+        const head = `${items[0]?.track ?? 0}:${items[0]?.title ?? ""}:${items.length === 0}`;
+        if (head === foldedFor) return;
+        foldedFor = head;
+        showEarlier = false;
+    });
+
+    /**
+     * Unfolding inserts rows *above* the one being read, which on its own
+     * throws the playing track down the screen by however many tracks went
+     * before it. Measure that row, let the DOM settle, and give the scroll
+     * container back the difference so the row doesn't move at all.
+     */
+    let listEl = $state<HTMLElement | undefined>();
+    function scrollParent(el: HTMLElement | null): HTMLElement | null {
+        for (let p = el?.parentElement ?? null; p; p = p.parentElement) {
+            const oy = getComputedStyle(p).overflowY;
+            if ((oy === "auto" || oy === "scroll") && p.scrollHeight > p.clientHeight) return p;
+        }
+        return null;
+    }
+    function currentTop(): number | undefined {
+        return listEl?.querySelector<HTMLElement>(".q-row.current")?.getBoundingClientRect().top;
+    }
+    async function toggleEarlier() {
+        const before = currentTop();
+        showEarlier = !showEarlier;
+        await tick();
+        const after = currentTop();
+        if (before === undefined || after === undefined) return;
+        const delta = after - before;
+        if (!delta) return;
+        const sp = scrollParent(listEl ?? null);
+        if (sp) sp.scrollTop += delta;
+        else window.scrollBy(0, delta);
+    }
+
     // Two-tap clear for surfaces without a confirm modal: armed, it says
     // so and resets on its own after a few seconds.
     let armed = $state(false);
@@ -94,74 +156,114 @@
         line-in play straight through without a queue.
     </p>
 {:else}
-    <div class="q-list">
-        {#each items as item (item.track)}
-            {@const current = item.track === currentTrack}
-            <div class="q-row" class:current>
-                <button
-                    class="q-open"
-                    disabled={isBusy("jump:" + item.track)}
-                    onclick={() => onJump(item.track)}
-                >
-                    <span class="q-num mono">
-                        {#if current && playing}
-                            <Waveform />
-                        {:else}
-                            {item.track}
-                        {/if}
-                    </span>
-                    {#if art}
-                        {#if item.art_uri}
-                            <img class="q-art" src={item.art_uri} alt="" loading="lazy" />
-                        {:else}
-                            <span class="q-art placeholder"></span>
-                        {/if}
+    <div class="q-list" bind:this={listEl}>
+        <!-- What already went by, folded into one row. Chevron up to reach
+             back for it, chevron down to put it away again: the direction
+             the list moves, not an abstract disclosure triangle. -->
+        {#if split.earlier.length > 0}
+            <button
+                class="q-earlier"
+                aria-expanded={showEarlier}
+                onclick={toggleEarlier}
+            >
+                <span class="q-earlier-icon">
+                    <Icon name={showEarlier ? "chevronDown" : "chevronUp"} size={14} />
+                </span>
+                <span class="q-earlier-label">
+                    {#if showEarlier}
+                        Hide what's already played
+                    {:else}
+                        <span class="mono">{split.earlier.length}</span>
+                        earlier {split.earlier.length === 1 ? "track" : "tracks"}
                     {/if}
-                    <span class="q-meta">
-                        <span class="q-title">{item.title || "Unknown track"}</span>
-                        {#if item.artist}<span class="q-sub">{item.artist}</span>{/if}
-                    </span>
-                    {#if item.duration}
-                        <span class="q-dur mono">{trimClock(item.duration)}</span>
-                    {/if}
-                </button>
-                {#if reorder && onMove}
-                    <!-- Disabled at the ends rather than hidden: a control
-                         that appears and disappears as rows move is a moving
-                         target, and the row above is where the finger is
-                         already aimed. -->
-                    <button
-                        class="icon-btn q-mv"
-                        aria-label="Move {item.title || 'track ' + item.track} up"
-                        disabled={item.track <= 1 || isBusy("qmv:" + item.track)}
-                        onclick={() => onMove(item.track, -1)}
-                    >
-                        <Icon name="chevronUp" size={14} />
-                    </button>
-                    <button
-                        class="icon-btn q-mv"
-                        aria-label="Move {item.title || 'track ' + item.track} down"
-                        disabled={item.track >= items.length || isBusy("qmv:" + item.track)}
-                        onclick={() => onMove(item.track, 1)}
-                    >
-                        <Icon name="chevronDown" size={14} />
-                    </button>
-                {/if}
-                <button
-                    class="icon-btn q-rm"
-                    aria-label="Remove {item.title || 'track ' + item.track} from the queue"
-                    disabled={isBusy("qrm:" + item.track)}
-                    onclick={() => onRemove(item.track)}
-                >
-                    <Icon name="close" size={14} />
-                </button>
-            </div>
+                </span>
+            </button>
+            {#if showEarlier}
+                {#each split.earlier as item (item.track)}
+                    {@render row(item)}
+                {/each}
+            {/if}
+        {/if}
+
+        {#each split.ahead as item (item.track)}
+            {@render row(item)}
+            <!-- The line between "this" and "what's after this", drawn once
+                 and only where there is something after it to name. -->
+            {#if item.track === currentTrack && split.upNext > 0}
+                <div class="q-split">
+                    <span class="eyrow">Up next</span>
+                    <span class="q-split-n mono">{split.upNext}</span>
+                </div>
+            {/if}
         {/each}
+
+        {#if split.currentIdx >= 0 && split.upNext === 0 && total <= items.length}
+            <p class="q-end">Last track in the queue.</p>
+        {/if}
     </div>
     {#if total > items.length}
         <div class="q-more mono">showing the first {items.length} of {total}</div>
     {/if}
 {/if}
+
+{#snippet row(item: SonosQueueItem)}
+    {@const current = item.track === currentTrack}
+    <div class="q-row" class:current class:past={currentTrack !== undefined && item.track < currentTrack}>
+        <button class="q-open" disabled={isBusy("jump:" + item.track)} onclick={() => onJump(item.track)}>
+            <span class="q-num mono">
+                {#if current && playing}
+                    <Waveform />
+                {:else}
+                    {item.track}
+                {/if}
+            </span>
+            {#if art}
+                {#if item.art_uri}
+                    <img class="q-art" src={item.art_uri} alt="" loading="lazy" />
+                {:else}
+                    <span class="q-art placeholder"></span>
+                {/if}
+            {/if}
+            <span class="q-meta">
+                <span class="q-title">{item.title || "Unknown track"}</span>
+                {#if item.artist}<span class="q-sub">{item.artist}</span>{/if}
+            </span>
+            {#if item.duration}
+                <span class="q-dur mono">{trimClock(item.duration)}</span>
+            {/if}
+        </button>
+        {#if reorder && onMove}
+            <!-- Disabled at the ends rather than hidden: a control
+                 that appears and disappears as rows move is a moving
+                 target, and the row above is where the finger is
+                 already aimed. -->
+            <button
+                class="icon-btn q-mv"
+                aria-label="Move {item.title || 'track ' + item.track} up"
+                disabled={item.track <= 1 || isBusy("qmv:" + item.track)}
+                onclick={() => onMove(item.track, -1)}
+            >
+                <Icon name="chevronUp" size={14} />
+            </button>
+            <button
+                class="icon-btn q-mv"
+                aria-label="Move {item.title || 'track ' + item.track} down"
+                disabled={item.track >= items.length || isBusy("qmv:" + item.track)}
+                onclick={() => onMove(item.track, 1)}
+            >
+                <Icon name="chevronDown" size={14} />
+            </button>
+        {/if}
+        <button
+            class="icon-btn q-rm"
+            aria-label="Remove {item.title || 'track ' + item.track} from the queue"
+            disabled={isBusy("qrm:" + item.track)}
+            onclick={() => onRemove(item.track)}
+        >
+            <Icon name="close" size={14} />
+        </button>
+    </div>
+{/snippet}
 
 <style>
     .q-bar { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
@@ -208,6 +310,39 @@
         overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
     .q-dur { font-size: 11px; color: var(--text-dim); flex-shrink: 0; }
+
+    /* The fold. A row, not a chip: it sits in the list's column and stands in
+       for the rows it holds, so it takes their width and their shape. */
+    .q-earlier {
+        display: flex; align-items: center; gap: var(--space-2);
+        width: 100%; min-height: 40px; padding: 6px var(--space-2);
+        background: transparent; border: 0; border-radius: var(--r-md);
+        color: var(--text-mute); cursor: pointer; text-align: left; font: inherit;
+        font-size: 12px;
+        transition: background 150ms ease, color 150ms ease;
+    }
+    @media (hover: hover) { .q-earlier:hover { background: var(--card-2); color: var(--text); } }
+    .q-earlier-icon {
+        width: 26px; flex-shrink: 0;
+        display: flex; align-items: center; justify-content: center;
+        color: var(--text-dim);
+    }
+    .q-earlier-label .mono { font-size: 11.5px; color: var(--text); }
+    /* Played, and dimmer for it — still a target, just not the subject. */
+    .q-row.past .q-title { color: var(--text-mute); }
+    .q-row.past .q-num, .q-row.past .q-sub { color: var(--text-dim); }
+    .q-row.past .q-art { opacity: 0.65; }
+
+    /* Where "playing" stops and "next" starts. */
+    .q-split {
+        display: flex; align-items: baseline; gap: var(--space-2);
+        padding: var(--space-3) var(--space-2) var(--space-1);
+    }
+    .q-split-n { font-size: 11px; color: var(--text-dim); }
+    .q-end {
+        font-size: 11.5px; color: var(--text-dim);
+        padding: var(--space-2) var(--space-2) 0; margin: 0;
+    }
     .q-rm { width: 36px; height: 36px; flex-shrink: 0; margin-right: 4px; color: var(--text-mute); }
     .q-rm:disabled { opacity: 0.4; }
     .q-mv { width: 32px; height: 36px; flex-shrink: 0; color: var(--text-dim); }
@@ -215,6 +350,7 @@
     .q-more { font-size: 10.5px; color: var(--text-dim); text-align: center; }
 
     @media (pointer: coarse) {
+        .q-earlier { min-height: 44px; }
         .q-rm { width: 44px; height: 44px; }
         /* Narrower than the 44 floor on purpose: the row itself is 48 tall,
            so the hit area clears it vertically, and three full-width targets
@@ -223,6 +359,6 @@
         .q-mv { width: 38px; height: 44px; }
     }
     @media (prefers-reduced-motion: reduce) {
-        .q-row { transition-duration: 0.001ms; }
+        .q-row, .q-earlier { transition-duration: 0.001ms; }
     }
 </style>
