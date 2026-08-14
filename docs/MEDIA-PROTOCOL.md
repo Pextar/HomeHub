@@ -383,12 +383,22 @@ have to pick something to lie about.
 type Chain struct {
     Source    Stage   // what the service hands over
     Transport Stage   // what the route does to it
-    Lossless  bool    // both, or neither
-    LimitedBy string  // the stage that caps it
+    Verdict   Verdict // lossless | up_to | capped | unknown
+    Lossless  bool    // bit-exact *and* measured — only Verdict "lossless"
+    LimitedBy string  // the stage that caps it; empty when nothing does
     Summary   string  // the whole thing in a sentence
     Fix       *Fix    // the change that would improve it, or nil
 }
 ```
+
+**Four verdicts, not a boolean.** `lossless` is bit-exact with both stages
+known. `capped` is something in the chain throwing audio away, with
+`LimitedBy` naming it. `unknown` is a source that says nothing about itself.
+`up_to` is the one a boolean could not hold: nothing in the chain is lossy,
+but the far end was never measured — the speaker holds the service account and
+does not report what it negotiated. Calling that `lossless` invents a reading;
+calling it `capped` tells a listener on a lossless plan that their system is
+worse than it is. `Lossless` stays `false` for it, and the UI says "up to".
 
 **Transport, per route.** None of the five re-encodes. `native`, `group` and
 `connect` add nothing because the speaker fetches the service's own stream;
@@ -396,26 +406,60 @@ type Chain struct {
 the same samples into RTP. Every route in this system is a lossless carrier,
 which is exactly why the source is where the answer usually comes from.
 
-**Source, per provider.** Spotify's catalogue is Ogg Vorbis — lossy at the
-source, on every route, forever. What differs is how well HomeHub knows the
-number: on `stream` and `airplay` the bitrate is HomeHub's own decoder setting
-and is known exactly, while on the routes the speaker serves for itself the
-speaker negotiates with the service and never says what it settled on. Those
-are marked `approximate` and shown as "up to" rather than printed as a
-measurement.
+**Source, per provider — and per route, which is the part that bites.** Since
+September 2025, Spotify Premium streams up to 24-bit/44.1 kHz FLAC. That
+changed the answer on some routes and not others, so the source is no longer
+one fact about a service:
+
+| Route | What Spotify hands over | Known how |
+| --- | --- | --- |
+| `native`, `group`, `connect` | up to FLAC 44.1 kHz · 24-bit | ceiling — the speaker holds the account and never says what it negotiated, so `approximate` and shown as "up to" |
+| `stream`, `airplay` | Ogg Vorbis at the configured bitrate | exactly — it is HomeHub's own decoder setting |
+
+The split is not Spotify's doing. HomeHub decodes those two routes with
+[librespot](https://github.com/librespot-org/librespot), the only licensed
+Spotify decoder it can run, and librespot fetches the Ogg Vorbis stream —
+Spotify's lossless tier is not available to it. That is
+[librespot-org/librespot#1583](https://github.com/librespot-org/librespot/issues/1583),
+open and unimplemented: the maintainers laid FLAC groundwork in the decoder
+years ago and think it could be quick work *if* Spotify serves the FLACs and
+their decryption keys the same way as the Ogg files, but nobody has taken it
+and nobody has confirmed that "if". Until someone does, `stream` and `airplay`
+cap at 320 kbps whatever the household's Spotify plan is. **Nothing in this
+repository can lift that cap** — when librespot ships FLAC, the change here is
+`SpotifyProvider.SourceQuality` and the decoder's arguments, and nothing else.
+
+So the limit on those two routes is attributed to **HomeHub's decoder**, not to
+Spotify. `DescribeQuality` works this out by asking the provider what it hands
+over on the speaker-served routes: a service that is lossy at its best
+everywhere is still reported as the limit itself (`lossyBecause`), while a
+service with a lossless tier HomeHub cannot reach is not. Blaming the
+catalogue in the second case would tell a listener nothing can be done when in
+fact one of their speakers can do better.
+
+`QualityExplainer` is how the caveat travels with the number — the provider
+supplies one clause per route (what librespot can reach; what lossless
+additionally requires of a speaker), because only the provider knows it.
 
 **The one lever.** `Settings.StreamQuality` — `best` (320 kbps), `balanced`
 (160), `saver` (96) — is how hard HomeHub's own decoder asks the service to
 compress. It is household-wide because the decoder is a single process holding
 a single service session, so two zones cannot be decoded at two bitrates at
 once and a per-zone control would promise what the architecture cannot keep.
-It moves `stream` and `airplay` and nothing else, and `Fix` is offered only on
-those routes and only when the setting is below `best`.
+It moves `stream` and `airplay` and nothing else, so `Fix` is offered only on
+those routes.
 
-What this must never do is offer to make Spotify lossless. It cannot be done,
-and a control implying otherwise is worse than no control — so where the source
-is the limit and the setting is already at its top, the answer is a sentence
-explaining why, and no button.
+**The second fix, which is not a control.** On a decoded route already at
+`best`, there is still one real improvement when the service has a lossless
+tier HomeHub cannot fetch: play to a single speaker that streams the service
+itself, and leave the decoded route entirely. That is offered with an empty
+`Fix.Setting` — the improvement is real, but it is something the listener does
+to their zone, not a switch this app owns, so the UI renders it as a sentence
+and never as a button.
+
+What this must never do is offer a control that would make a service lossless.
+Where the setting is at its top and there is nowhere better to send the audio,
+the answer is a sentence explaining why, and no button.
 
 ---
 

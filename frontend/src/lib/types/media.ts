@@ -161,19 +161,33 @@ export interface MediaQualityStage {
 /** An improvement that is actually available. Absent is a real answer and
  *  must render as one rather than as a disabled button. */
 export interface MediaQualityFix {
-  /** The lever: "stream_quality" is the only one today. */
+  /** The lever. "stream_quality" is the only value that maps to a control;
+   *  empty means the improvement is something the listener does to their
+   *  zone, so render it as a sentence and never as a button. */
   setting: string;
   label: string;
   detail?: string;
 }
 
+/** The end-to-end answer, in the states it actually has.
+ *
+ *  `up_to` is the one a boolean couldn't hold: on a route where the speaker
+ *  holds the service account, nothing in the chain is lossy but nobody
+ *  measured the far end either. Rendering it as "lossless" invents a reading;
+ *  rendering it as "not lossless" tells someone with a lossless plan their
+ *  system is worse than it is. It gets its own badge. */
+export type MediaVerdict = "lossless" | "up_to" | "capped" | "unknown";
+
 export interface MediaChain {
   source: MediaQualityStage;
   transport: MediaQualityStage;
-  /** End to end: both stages, or neither. */
+  verdict: MediaVerdict;
+  /** Bit-exact *and* known to be — true only for verdict `lossless`.
+   *  Deliberately false for `up_to`; switch on `verdict` for the badge. */
   lossless: boolean;
-  /** The stage that caps the result. What the UI leads with when not
-   *  lossless — "not lossless" alone is not actionable. */
+  /** The stage that caps the result. What the UI leads with on `capped` —
+   *  "not lossless" alone is not actionable. Empty on `up_to`: nothing is
+   *  capping it, HomeHub just can't see the far end. */
   limited_by?: string;
   summary: string;
   fix?: MediaQualityFix;

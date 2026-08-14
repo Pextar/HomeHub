@@ -63,26 +63,52 @@ func TestQualityReportsEveryRouteAndItsLimit(t *testing.T) {
 	}
 	var sawDecoded, sawSpeakerServed bool
 	for _, r := range out.Providers[0].Routes {
-		// Spotify is lossy at source on every route, and every route must
-		// say so rather than reporting the transport's honesty as the
-		// whole answer.
+		// No route ever reports a flat "lossless": the two HomeHub decodes
+		// for are capped by librespot, and the ones a speaker serves are a
+		// ceiling HomeHub cannot see past. Reporting the transport's honesty
+		// as the whole answer on either would be the original sin here.
 		if r.Chain.Lossless {
-			t.Errorf("%s: Spotify is not lossless anywhere", r.Route)
+			t.Errorf("%s: nothing here is measured lossless end to end", r.Route)
 		}
-		if r.Chain.LimitedBy != "Spotify" {
-			t.Errorf("%s: limited by %q", r.Route, r.Chain.LimitedBy)
+		if r.Chain.Source.Detail == "" {
+			t.Errorf("%s: the source stage should carry its caveat", r.Route)
 		}
 		if r.Decoded {
 			sawDecoded = true
 			if r.Chain.Source.Quality.Approximate {
 				t.Errorf("%s: HomeHub knows its own decoder's bitrate exactly", r.Route)
 			}
+			// The limit on these routes is HomeHub's decoder, not Spotify's
+			// catalogue — Spotify has a lossless tier, librespot just can't
+			// fetch it. Blaming the service here would tell a listener their
+			// speakers can't do better when one of them can.
+			if r.Chain.Verdict != media.VerdictCapped {
+				t.Errorf("%s: verdict = %q, want capped", r.Route, r.Chain.Verdict)
+			}
+			if r.Chain.LimitedBy != "HomeHub's decoder" {
+				t.Errorf("%s: limited by %q, want HomeHub's decoder", r.Route, r.Chain.LimitedBy)
+			}
+			// And at best quality the only honest improvement left is to
+			// leave the decoded route, so it is offered — with no setting,
+			// because it is not a switch HomeHub owns.
+			if r.Chain.Fix == nil {
+				t.Errorf("%s: should offer the way off the decoded route", r.Route)
+			} else if r.Chain.Fix.Setting != "" {
+				t.Errorf("%s: fix setting = %q, want none to press", r.Route, r.Chain.Fix.Setting)
+			}
 		} else {
 			sawSpeakerServed = true
-			// The speaker negotiates its own bitrate and never tells us,
-			// so it is shown as "up to" rather than as a measurement.
+			// The speaker holds the account, fetches Spotify's lossless
+			// stream itself and never tells HomeHub what it settled on — so
+			// it is a ceiling shown as "up to", and nothing caps it.
 			if !r.Chain.Source.Quality.Approximate {
 				t.Errorf("%s: a speaker-served route can only be approximate", r.Route)
+			}
+			if r.Chain.Verdict != media.VerdictUpTo {
+				t.Errorf("%s: verdict = %q, want up_to", r.Route, r.Chain.Verdict)
+			}
+			if r.Chain.LimitedBy != "" {
+				t.Errorf("%s: nothing caps this, but it blames %q", r.Route, r.Chain.LimitedBy)
 			}
 		}
 	}

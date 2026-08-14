@@ -1,4 +1,4 @@
-import type { Group, Scene, Schedule, Socket, Timer, SocketAction, Automation } from "./types";
+import type { Group, Scene, Schedule, Socket, Timer, SocketAction, Automation, MediaVerdict } from "./types";
 import { api } from "./api";
 import { data, toasts } from "./stores.svelte";
 
@@ -267,3 +267,23 @@ export function groupSocketsByRoom(sockets: Socket[]): Map<string, Socket[]> {
 }
 
 export type Entity = Socket | Group | Scene | Schedule | Timer;
+
+// The sound-quality badge, in the four states the backend actually reports.
+// Shared rather than written twice, because the whole point of the verdict is
+// that "up to" and "lossless" are different claims — and two components
+// mapping them independently is how one of them quietly starts overclaiming.
+// `on` marks the states that earn the sanctioned amber; the rest stay dim.
+export function verdictLabel(v: MediaVerdict | undefined): { text: string; on: boolean } {
+  switch (v) {
+    case "lossless":
+      return { text: "Lossless", on: true };
+    case "up_to":
+      // Not "lossless": nobody measured the far end. Not "not lossless"
+      // either — nothing in the chain is throwing anything away.
+      return { text: "Up to lossless", on: false };
+    case "capped":
+      return { text: "Not lossless", on: false };
+    default:
+      return { text: "Quality unknown", on: false };
+  }
+}

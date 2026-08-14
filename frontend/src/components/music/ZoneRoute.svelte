@@ -24,6 +24,7 @@
      * understate it as badly as saying "in sync" would overstate it.
      */
     import Icon from "../Icon.svelte";
+    import { verdictLabel } from "../../lib/utils";
     import type { MediaChain, MediaRoute, MediaSync } from "../../lib/types";
 
     let {
@@ -50,6 +51,7 @@
 
     const streamed = $derived(route === "stream");
     const cast = $derived(route === "airplay");
+    const verdict = $derived(verdictLabel(quality?.verdict));
 </script>
 
 {#if problem}
@@ -90,12 +92,15 @@
 
      Never a bare "lossless"/"not lossless" badge. The interesting half is
      *what* limits it, because that is the half a listener can act on — and
-     when nothing does, saying so is worth a line of its own. -->
+     when nothing does, saying so is worth a line of its own.
+
+     The tag reads `verdict`, not `lossless`, so the third answer survives the
+     trip to the screen: a zone whose speaker fetches the service itself is
+     "up to lossless", and flattening that to either neighbour is a lie in one
+     direction or the other. -->
 {#if quality && variant === "full" && !problem}
     <p class="z-note quiet">
-        <span class="z-tag mono" class:lossless={quality.lossless}>
-            {quality.lossless ? "Lossless" : "Not lossless"}
-        </span>
+        <span class="z-tag mono" class:lossless={verdict.on}>{verdict.text}</span>
         <span class="z-why">{quality.summary}</span>
     </p>
 {/if}
