@@ -105,6 +105,14 @@ type Server struct {
 	autoplayRecent  map[string][]string
 	autoplayHeard   map[string]time.Time
 
+	// heardWatches is the listening log's memory between readings: what
+	// each room is playing, since when, and whether the log already has it.
+	// It exists so that recording what a house is hearing costs a mutex and
+	// a string compare on the readings that change nothing — which is
+	// almost all of them. See heard.go.
+	heardMu      sync.Mutex
+	heardWatches map[string]heardWatch
+
 	// kefMon polls the KEF speakers once for the whole process and caches
 	// what they report (see internal/kef/monitor.go). KEF's local API has no
 	// change notifications to subscribe to, so this is the closest thing to

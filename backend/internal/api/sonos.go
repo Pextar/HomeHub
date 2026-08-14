@@ -81,6 +81,9 @@ func (s *Server) sonosStatus(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 	snap := s.sonosEvents().Snapshot(ctx)
+	// Before the loop below, which rewrites art paths into proxied URLs on
+	// this very snapshot: the log wants the reading as the speaker gave it.
+	s.noteHeardSonos(snap)
 
 	views := make([]sonosSpeakerView, len(speakers))
 	for i, sp := range speakers {

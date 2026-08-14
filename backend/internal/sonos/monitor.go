@@ -708,6 +708,17 @@ func (m *Monitor) Snapshot(ctx context.Context) Snapshot {
 	return m.read()
 }
 
+// Cached returns what the cache holds right now and never touches a speaker.
+//
+// Snapshot is for answering a question — it will go and read the household if
+// the cache can't be trusted. This is for a caller that only wants to know
+// what the monitor already learned, and must not turn a cold cache into a
+// fan-out of SOAP calls: the listening log reads it on every cache change,
+// which is several times a minute on a house that is playing something.
+func (m *Monitor) Cached() Snapshot {
+	return m.read()
+}
+
 // freshFor reports whether every registered speaker has a recently-read
 // cache entry and at least one speaker is actually subscribed. Both halves
 // matter: subscriptions alone don't prove the reads are current, and recent

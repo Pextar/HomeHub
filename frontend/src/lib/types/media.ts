@@ -304,6 +304,36 @@ export interface MediaHistory {
 }
 
 /**
+ * One track a room was heard playing — the other half of MediaPlay.
+ *
+ * A play is what someone *chose*: an album, a playlist, a station. This is
+ * what came out of the speaker, written from what the speakers report rather
+ * than from what HomeHub was asked to do. It is the only one of the two that
+ * survives a queue being replaced, and the only one that knows about track
+ * nine of something nobody picked by name.
+ */
+export interface HeardTrack {
+  title: string;
+  artist?: string;
+  album?: string;
+  art_uri?: string;
+  /** The service URI where the source had one. Its absence is what makes a
+   *  row a name rather than something to play again — radio, line-in and a
+   *  KEF's own reporting all land here. */
+  uri?: string;
+  provider?: string;
+  /** What the room was called when this played. */
+  room_name?: string;
+  at: string;
+}
+
+export interface MediaHeard {
+  tracks: HeardTrack[];
+  /** True when these are the household's tracks rather than this room's. */
+  household: boolean;
+}
+
+/**
  * What a room keeps coming back to, rather than what it happened to play
  * last — and, when it has a habit at the hour it currently is, what it plays
  * *then*. The difference between offering the kitchen its breakfast radio at

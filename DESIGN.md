@@ -909,6 +909,10 @@ large, so the module never swallows keys the rest of the app might want.
   gets one honest line instead of a fabricated position.
 - **The art answers a swipe on touch** where the room can skip — half-speed
   follow, firing past ~60px, and vertical always loses to the sheet drag.
+- **The sheet has three faces and one ladder**: the player, the queue, and
+  what was played (§15.8b). The header's left button walks back down it — the
+  log to whichever face opened it, the queue to the player, the player closed
+  — and Escape still leaves the player outright.
 - **The queue is a second pane inside the same sheet**, reached from an "Up
   next" row that names the actual next track — with its artist, and with the
   count of what is *still to come* rather than how long the queue is: a room
@@ -941,6 +945,57 @@ large, so the module never swallows keys the rest of the app might want.
   ArrowDown hands the caret to the first result, and arriving puts the caret
   in the box on `(pointer: fine)` only — auto-focus on a phone throws the
   software keyboard over the results.
+
+### 15.8b What was played — the listening log
+
+The queue answers _what's next_, and since it keeps what it has passed it
+answers a little of _what was that?_ too. Only a little: put a different
+record on and the old queue is gone, and with it the name of the song
+somebody liked twenty minutes ago. **So the hub keeps a log of what each
+room was heard playing** (`store/heard.go`, `api/heard.go`), and the player
+grows a third pane to read it (`HeardPane`).
+
+- **Heard, not chosen.** The play history (§16's shelves) records _intent_ —
+  what someone started, de-duplicated by URI and ranked, so a wall can offer
+  a room what it keeps coming back to. It cannot answer "what was that
+  song?", because almost nothing worth asking that about was ever chosen by
+  name: it was track nine, or what autoplay found, or what the station played
+  next. The log is written from **what the speakers report**, so it survives
+  a queue being replaced, the app being closed, and music started from the
+  Sonos app or the radio's own scheduler. The two files are halves of one
+  memory and are pruned by the same rule when a speaker is deleted.
+- **It costs no polling.** Every path that already holds a fresh reading
+  hands it to the recorder: the monitors' change hook (GENA-driven on Sonos),
+  the autoplay tick, and the status handlers the app's own poll calls. A
+  house nobody is watching and whose speakers refuse subscriptions records
+  nothing — which is honest, because nothing observed it. **Do not add a
+  ticker for this.**
+- **A track counts as heard once it has been playing ~20s**, measured from
+  the reading's own position where there is one. Otherwise skipping through
+  eight tracks to reach the ninth would log all nine, and the noise would
+  bury the song someone actually wants back.
+- **A row you can play again, or a row that says it can't.** Entries keep the
+  service URI where the source had one, and tapping such a row plays it in
+  that room by the same road a search result takes. Radio, line-in and a KEF's
+  own reporting carry no URI: those rows keep their shape, lose the play mark,
+  and the pane says why. A row that failed on tap would be worse than a row
+  that never offered.
+- **Grouped by day, timed by the clock.** The question is asked in days
+  ("that thing from last night"), and within a day the anchor is the hour it
+  played at — so each row carries both the clock time and how long ago, in
+  mono.
+- **One door, wherever the room keeps it.** A room with a queue reaches the
+  log from the queue pane, above the fold: going back through a queue is
+  going up it, and the log is what lies past the top. A room with no queue —
+  a KEF, a zone, a room on radio — gets the same row on the player face
+  instead, where "Up next" would have been. Never both: a second door beside
+  the first is a door twice (§15.8).
+- **Zones are absent from the log on purpose.** A room HomeHub streams to is
+  playing an HTTP stream whose title is the stream, not the song; naming it
+  would put the plumbing in the list.
+- **Clearing is per room and it asks.** Nothing ranks this list or offers it
+  back, so there is no single row worth surgery — and the household fallback
+  can't be cleared from a room that owns none of it.
 
 ### 15.9 The catalog: search, artist, album, playlist
 

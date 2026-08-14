@@ -206,9 +206,10 @@ func (s *Server) mediaInsights(w http.ResponseWriter, r *http.Request) {
 //
 // Caller must not hold Mu.
 func (s *Server) pruneDeadRooms() {
-	var droppedHistory, droppedTimers bool
+	var droppedHistory, droppedHeard, droppedTimers bool
+	var live map[string]bool
 	s.Store.Mutate(func() {
-		live := make(map[string]bool,
+		live = make(map[string]bool,
 			len(s.Store.Sonos)+len(s.Store.KEF)+len(s.Store.AirPlay)+len(s.Store.Zones))
 		for id := range s.Store.Sonos {
 			live[store.QualifySonos(id)] = true
@@ -223,6 +224,7 @@ func (s *Server) pruneDeadRooms() {
 			live["zone:"+id] = true
 		}
 		droppedHistory = s.Store.PruneHistory(func(key string) bool { return live[key] })
+		droppedHeard = s.Store.PruneHeard(func(key string) bool { return live[key] })
 		// Both live in the main save, so one flag covers them: a timer that
 		// fires into nothing and a scene step that quiets a speaker nobody
 		// owns any more are the same kind of leftover.
@@ -234,6 +236,15 @@ func (s *Server) pruneDeadRooms() {
 			s.mediaLogf("history: %v", err)
 		}
 	}
+	if droppedHeard {
+		if err := s.Store.SaveHeard(); err != nil {
+			s.mediaLogf("heard: %v", err)
+		}
+	}
+	// The recorder's own memory of those rooms goes too, so a key that is
+	// deleted and later reused doesn't inherit a watch saying its current
+	// song has already been filed.
+	s.forgetHeardWatches(func(key string) bool { return live[key] })
 	if droppedTimers {
 		// Timers live in the main save, so this is the whole store — which
 		// is right: a deletion has already rewritten it once.

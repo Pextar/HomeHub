@@ -56,6 +56,9 @@
          *  over a five-second poll is the least reliable gesture a wall
          *  could pick (the same argument that made grouping tap-based). */
         reorder = false,
+        /** The way further back than this queue goes — the room's listening
+         *  log. Absent on surfaces that have nowhere to send it. */
+        onPlayed,
         isBusy,
         onJump,
         onRemove,
@@ -71,6 +74,7 @@
         confirmClear?: boolean;
         art?: boolean;
         reorder?: boolean;
+        onPlayed?: () => void;
         isBusy: (key: string) => boolean;
         onJump: (track: number) => void;
         onRemove: (track: number) => void;
@@ -154,6 +158,19 @@
         {armed ? "Clear?" : "Clear"}
     </button>
 </div>
+
+<!-- Where the queue's own memory ends. Going back through a queue is going up
+     it, so the way past its beginning is a row above the top of it: this
+     queue, then everything before this queue. It stays for an empty queue as
+     well — a queue that was just replaced is exactly when the log is the only
+     thing left that knows what played. -->
+{#if onPlayed}
+    <button class="q-earlier q-before" onclick={onPlayed}>
+        <span class="q-earlier-icon"><Icon name="clock" size={14} /></span>
+        <span class="q-earlier-label">Played before this</span>
+        <span class="q-before-go" aria-hidden="true"><Icon name="chevronLeft" size={14} /></span>
+    </button>
+{/if}
 
 {#if loading}
     <div class="skeleton q-skeleton"></div>
@@ -338,6 +355,11 @@
         color: var(--text-dim);
     }
     .q-earlier-label .mono { font-size: 11.5px; color: var(--text); }
+    /* The door out of the queue and into the log. Same row shape as the
+       fold above it — they are the same gesture, one queue apart. */
+    .q-before { color: var(--text-mute); }
+    .q-before .q-earlier-label { flex: 1; }
+    .q-before-go { display: flex; transform: rotate(180deg); color: var(--text-dim); }
     /* Played, and dimmer for it — still a target, just not the subject. */
     .q-row.past .q-title { color: var(--text-mute); }
     .q-row.past .q-num, .q-row.past .q-sub { color: var(--text-dim); }

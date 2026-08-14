@@ -65,9 +65,11 @@
     import { createRoomDrag } from "../lib/music/room-drag.svelte";
     import { createDestination } from "../lib/music/destination.svelte";
     import { createSearchHistory } from "../lib/music/history.svelte";
+    import { createHeardLog } from "../lib/music/heard.svelte";
     import { createSpotify } from "../lib/music/spotify.svelte";
     import type {
         SonosSpeakerView,
+        HeardTrack,
         SonosFavorite,
         KEFSpeakerView,
         AirPlaySpeakerView,
@@ -232,6 +234,35 @@
             () => (r.kind === "kef" ? api.kefPlayItem(r.id, body) : api.sonosPlayItem(r.id, body)),
             r.kind,
         );
+    }
+
+    /**
+     * Something out of the listening log, played again in the room it was
+     * heard in. It is a track and it carries the service URI the speaker was
+     * given, so this is the same road a search result takes — the row was
+     * only ever a remembered version of one.
+     */
+    function playHeard(t: HeardTrack) {
+        if (!t.uri) return; // radio and line-in leave nothing to hand back
+        playItem({
+            kind: "track",
+            uri: t.uri,
+            name: t.title,
+            sub: t.artist,
+            art_url: t.art_uri,
+        });
+    }
+
+    /** A room stops keeping a log. Destructive and unrecoverable, so it asks. */
+    async function clearHeard(r: Room) {
+        const ok = await openModal<boolean>(ConfirmModal, {
+            title: "Clear what was played?",
+            message: `${r.name} will forget the tracks it has been heard playing. What is playing now is unaffected, and the list starts again from the next song.`,
+            confirmLabel: "Clear",
+            danger: true,
+        });
+        if (!ok) return;
+        await busy.run("heardclear:" + r.id, () => heard.clear(r.key), "Couldn't clear it");
     }
 
     /** Favorites are a Sonos household list, so only a Sonos room can take one. */
@@ -801,6 +832,10 @@
     // Recent searches are keyed by the focused room, so the kitchen's aren't
     // the bedroom's. A single-room home only ever has one key.
     const recents = createSearchHistory(() => destination.key);
+    // What the rooms have actually been heard playing. Unlike the searches
+    // above it lives on the hub, not in this browser: it is written from what
+    // the speakers report, so it knows about music nobody started from here.
+    const heard = createHeardLog();
     const spotify = createSpotify((q, art) => recents.add(q, art));
 
     onMount(() => {
@@ -1176,6 +1211,9 @@
         {sonos}
         {kef}
         {busy}
+        {heard}
+        onPlayHeard={playHeard}
+        onClearHeard={() => void clearHeard(r)}
         onClose={closePlayer}
         onConfigure={() => configureRoom(r)}
         onUngroup={r.group && r.grouped ? () => void ungroupRoom(r) : undefined}
