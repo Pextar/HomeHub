@@ -94,6 +94,62 @@ func (r Route) Sync(n int) Sync {
 	return SyncExact
 }
 
+// RouteLimit is the PCM format a route can carry without touching a sample,
+// for the routes where HomeHub puts samples on a wire itself. The bool is
+// false for routes that impose no limit at all.
+//
+// AirPlay 1 (RAOP) is 44.1 kHz 16-bit stereo and nothing else. That is fixed
+// by the protocol, not chosen here. The stream route has no ceiling: it serves
+// whatever it is handed under a header describing exactly that, so any format
+// given to it goes out intact.
+//
+// The speaker-served routes are absent because HomeHub never holds their
+// samples — the speaker fetches from the service and this process never sees a
+// byte of the audio, so it is in no position to limit or preserve anything.
+func RouteLimit(r Route) (PCMFormat, bool) {
+	if r == RouteAirPlay {
+		return CDQuality, true
+	}
+	return PCMFormat{}, false
+}
+
+// PCMReporter is a stream provider that can say what its decoder produces
+// before anything has been decoded. Optional, and asked rather than assumed:
+// the decoded format is a property of the decoder the provider owns, not of
+// the codec the service sends, and the two differ — a Vorbis stream has no bit
+// depth at all until something decodes it.
+//
+// It exists so the router can tell, without opening a stream, whether a route
+// would have to reduce this provider's audio to carry it.
+type PCMReporter interface {
+	DecodedFormat() PCMFormat
+}
+
+// routeReduces reports whether route r would have to alter p's decoded samples
+// to carry them, and what the two formats are.
+//
+// This is the router's half of "never downsample". Where it says yes, the
+// answer is to route elsewhere — never to resample, requantise, or hand the
+// receiver something it will misread. A provider that cannot say what it
+// decodes to is taken at no worse than its word: every decoder in this repo
+// produces CD quality, so silence here means "nothing to worry about" rather
+// than "assume the worst and refuse to play".
+func routeReduces(p Provider, r Route) (limit, decoded PCMFormat, yes bool) {
+	limit, capped := RouteLimit(r)
+	if !capped {
+		return limit, decoded, false
+	}
+	pr, ok := p.(PCMReporter)
+	if !ok {
+		return limit, decoded, false
+	}
+	decoded = pr.DecodedFormat()
+	if !decoded.Valid() {
+		return limit, decoded, false
+	}
+	return limit, decoded, !limit.Carries(decoded)
+}
+
 // RouteSet is the set of routes a provider can serve.
 type RouteSet []Route
 
@@ -307,6 +363,17 @@ func tryRoute(r Route, p Provider, eps []Endpoint) (*Plan, string) {
 		}
 		if av := sp.StreamAvailable(); !av.OK {
 			return nil, av.Reason
+		}
+		// AirPlay 1 carries CD quality and nothing else, so a source that
+		// decodes above it can only travel this way by being reduced first.
+		// HomeHub does not reduce. Rejecting here rather than at cast time is
+		// what turns that into a better route instead of an error: the stream
+		// route ranks next and carries any format intact, so the zone plays —
+		// at full resolution — instead of failing after the tap.
+		if limit, decoded, yes := routeReduces(p, RouteAirPlay); yes {
+			return nil, fmt.Sprintf(
+				"AirPlay carries %s and %s decodes to %s — HomeHub won't reduce it to fit",
+				limit.Label(), p.Name(), decoded.Label())
 		}
 		return &Plan{
 			Route:   RouteAirPlay,

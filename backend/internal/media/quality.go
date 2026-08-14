@@ -340,10 +340,25 @@ func DescribeQuality(p Provider, r Route, pref StreamQuality) Chain {
 		source = qr.SourceQuality(r)
 	}
 	transport := TransportQuality(r)
+	transDetail := transportDetail(r)
+	// A route that would have to reduce this source does not get to report
+	// itself as a lossless carrier. It is lossless for audio it can carry,
+	// and this is audio it cannot — so the honest transport stage is the
+	// ceiling, named, with the note that HomeHub routes around it rather than
+	// reducing to fit.
+	if limit, decoded, yes := routeReduces(p, r); yes {
+		transport = Quality{
+			Codec: CodecPCM, SampleRate: limit.SampleRate, BitDepth: limit.BitDepth,
+			Channels: limit.Channels,
+		}
+		transDetail = fmt.Sprintf(
+			"carries %s only; this decodes to %s, and HomeHub won't reduce it — a zone like this plays over HomeHub's stream instead",
+			limit.Label(), decoded.Label())
+	}
 
 	c := Chain{
 		Source:    Stage{Name: p.Name(), Quality: source},
-		Transport: Stage{Name: routeLabel(r), Quality: transport, Detail: transportDetail(r)},
+		Transport: Stage{Name: routeLabel(r), Quality: transport, Detail: transDetail},
 	}
 	if qe, ok := p.(QualityExplainer); ok {
 		c.Source.Detail = qe.SourceDetail(r)
@@ -363,7 +378,7 @@ func DescribeQuality(p Provider, r Route, pref StreamQuality) Chain {
 	case !transport.Lossless:
 		c.Verdict = VerdictCapped
 		c.LimitedBy = routeLabel(r)
-		c.Summary = fmt.Sprintf("%s is lossless, but %s", p.Name(), transportDetail(r))
+		c.Summary = fmt.Sprintf("%s is lossless, but %s", p.Name(), transDetail)
 	case source.Approximate || transport.Approximate:
 		// Nothing caps this — LimitedBy stays empty — but the far end is a
 		// ceiling rather than a reading, so the sentence says so plainly

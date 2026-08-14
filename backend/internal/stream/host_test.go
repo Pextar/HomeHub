@@ -383,7 +383,7 @@ func TestStartDelay(t *testing.T) {
 }
 
 func TestWAVHeader(t *testing.T) {
-	h := WAVHeader()
+	h := WAVHeader(DefaultFormat)
 	if len(h) != 44 {
 		t.Fatalf("header is %d bytes, want 44", len(h))
 	}

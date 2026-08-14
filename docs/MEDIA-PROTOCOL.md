@@ -406,6 +406,35 @@ worse than it is. `Lossless` stays `false` for it, and the UI says "up to".
 the same samples into RTP. Every route in this system is a lossless carrier,
 which is exactly why the source is where the answer usually comes from.
 
+### Never downsample
+
+HomeHub does not resample, does not requantise, and does not mix down. Where a
+route cannot carry a source intact, the answer is to route elsewhere or to
+refuse — never to convert quietly. Three things enforce that:
+
+- **The header describes the samples.** `stream.WAVHeader` takes the stream's
+  `media.PCMFormat` rather than reading constants. This matters more than
+  downsampling would: a 24-bit/96 kHz source announced as 16-bit/44.1 is not
+  played slightly worse, it is read at the wrong word length and rate — noise,
+  at whatever volume the room was left on. `stream` therefore carries any
+  format intact and is the fallback for anything the other routes can't.
+- **`RouteLimit` states what a route can carry.** AirPlay 1 (RAOP) is 44.1 kHz
+  16-bit stereo and nothing else, fixed by the protocol. `stream` has no
+  ceiling. The speaker-served routes have none either, because HomeHub never
+  holds their samples.
+- **`Resolve` routes around a reducing transport.** `PCMReporter` lets a
+  provider declare what its decoder produces before anything is opened, and
+  `tryRoute` rejects `airplay` for a source above `RouteLimit`. A hi-res zone
+  of AirPlay receivers therefore lands on `stream` and plays at full
+  resolution, instead of failing at cast time. `airplay.Cast` keeps the same
+  check as a backstop.
+
+`PCMFormat.Carries` is the predicate, and it is deliberately one-directional:
+16-bit over a 24-bit link is wasteful and lossless; 24-bit over a 16-bit link
+is not. A provider that does not implement `PCMReporter` is assumed to be CD
+quality rather than assumed to be hi-res — guessing the other way would strip
+AirPlay from every zone the moment someone forgot an optional interface.
+
 **Source, per provider — and per route, which is the part that bites.** Since
 September 2025, Spotify Premium streams up to 24-bit/44.1 kHz FLAC. That
 changed the answer on some routes and not others, so the source is no longer

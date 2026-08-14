@@ -130,6 +130,14 @@ func (p *SpotifyProvider) SourceQuality(r media.Route) media.Quality {
 	}
 }
 
+// DecodedFormat implements media.PCMReporter: what HomeHub's decode of Spotify
+// actually produces. librespot's pipe backend writes raw S16LE at CD rate, and
+// Vorbis is a 44.1 kHz format, so this is CD quality exactly — not a ceiling
+// and not a preference. It is stated rather than assumed so the router can see
+// that every route carries it intact, and so the day a decoder here produces
+// something larger, the router notices instead of the receiver doing so.
+func (p *SpotifyProvider) DecodedFormat() media.PCMFormat { return media.CDQuality }
+
 // SourceDetail implements media.QualityExplainer: the caveat that belongs with
 // each of those two answers, and that only this file knows.
 func (p *SpotifyProvider) SourceDetail(r media.Route) string {

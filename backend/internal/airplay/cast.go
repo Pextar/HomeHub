@@ -85,9 +85,16 @@ func (c *Caster) Cast(ctx context.Context, s *media.Stream, dests []media.AirPla
 		// would need a decoder or a resampler this package does not have,
 		// and guessing would put noise through someone's speakers at
 		// whatever volume they left them on.
+		//
+		// Reaching here at all means the router let something through it
+		// should have caught: media.Resolve rejects this route for a source
+		// it would have to reduce, precisely so a hi-res zone plays over the
+		// stream route instead of arriving here to fail. This stays as the
+		// backstop, because the alternative to failing is resampling, and
+		// this system does not resample.
 		return nil, fmt.Errorf(
-			"airplay: this source isn't the 44.1 kHz 16-bit PCM AirPlay carries (%s)",
-			s.ContentType)
+			"airplay: carries %s only, and this source is %s (%s) — HomeHub won't reduce it to fit",
+			media.CDQuality.Label(), s.PCM.Label(), s.ContentType)
 	}
 
 	// The running cast is torn down *before* the new sessions are opened,
