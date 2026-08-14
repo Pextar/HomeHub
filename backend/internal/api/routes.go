@@ -299,6 +299,13 @@ func (s *Server) registerMediaRoutes(api *mux.Router) {
 // the play-item route above, while KEF's goes back out through Connect.
 // The developer app's client ID stays admin-only, like every setup surface.
 func (s *Server) registerSpotifyRoutes(api *mux.Router) {
+	// Qobuz: app credentials, then an account. Two steps because they are
+	// issued to two different parties — see internal/api/qobuz.go.
+	api.HandleFunc("/qobuz/status", s.requireAdminOrKid(s.qobuzStatus)).Methods("GET")
+	api.HandleFunc("/qobuz/config", s.requireAdmin(s.qobuzSetConfig)).Methods("PUT")
+	api.HandleFunc("/qobuz/login", s.requireAdmin(s.qobuzLogin)).Methods("POST")
+	api.HandleFunc("/qobuz/disconnect", s.requireAdmin(s.qobuzDisconnect)).Methods("POST")
+
 	api.HandleFunc("/spotify/status", s.requireAdminOrKid(s.spotifyStatus)).Methods("GET")
 	api.HandleFunc("/spotify/config", s.requireAdmin(s.spotifySetConfig)).Methods("PUT")
 	api.HandleFunc("/spotify/login", s.requireAdminOrKid(s.spotifyLogin)).Methods("GET")

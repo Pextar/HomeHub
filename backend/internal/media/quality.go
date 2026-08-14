@@ -346,7 +346,7 @@ func DescribeQuality(p Provider, r Route, pref StreamQuality) Chain {
 	// and this is audio it cannot — so the honest transport stage is the
 	// ceiling, named, with the note that HomeHub routes around it rather than
 	// reducing to fit.
-	if limit, decoded, yes := routeReduces(p, r); yes {
+	if limit, decoded, yes := RouteReduces(p, r); yes {
 		transport = Quality{
 			Codec: CodecPCM, SampleRate: limit.SampleRate, BitDepth: limit.BitDepth,
 			Channels: limit.Channels,

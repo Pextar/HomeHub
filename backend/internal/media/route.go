@@ -125,7 +125,7 @@ type PCMReporter interface {
 	DecodedFormat() PCMFormat
 }
 
-// routeReduces reports whether route r would have to alter p's decoded samples
+// RouteReduces reports whether route r would have to alter p's decoded samples
 // to carry them, and what the two formats are.
 //
 // This is the router's half of "never downsample". Where it says yes, the
@@ -134,7 +134,7 @@ type PCMReporter interface {
 // decodes to is taken at no worse than its word: every decoder in this repo
 // produces CD quality, so silence here means "nothing to worry about" rather
 // than "assume the worst and refuse to play".
-func routeReduces(p Provider, r Route) (limit, decoded PCMFormat, yes bool) {
+func RouteReduces(p Provider, r Route) (limit, decoded PCMFormat, yes bool) {
 	limit, capped := RouteLimit(r)
 	if !capped {
 		return limit, decoded, false
@@ -370,7 +370,7 @@ func tryRoute(r Route, p Provider, eps []Endpoint) (*Plan, string) {
 		// what turns that into a better route instead of an error: the stream
 		// route ranks next and carries any format intact, so the zone plays —
 		// at full resolution — instead of failing after the tap.
-		if limit, decoded, yes := routeReduces(p, RouteAirPlay); yes {
+		if limit, decoded, yes := RouteReduces(p, RouteAirPlay); yes {
 			return nil, fmt.Sprintf(
 				"AirPlay carries %s and %s decodes to %s — HomeHub won't reduce it to fit",
 				limit.Label(), p.Name(), decoded.Label())

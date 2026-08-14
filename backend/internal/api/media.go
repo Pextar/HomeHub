@@ -81,12 +81,19 @@ func (s *Server) kefState(ctx context.Context, sp store.KEFSpeaker) (*kef.State,
 	return kef.GetState(ctx, sp.IP)
 }
 
-// provider returns the media provider for an id. Only Spotify exists today;
-// the lookup is by name anyway so that adding one is a registration rather
-// than a new branch at every call site.
+// provider returns the media provider for an id. The lookup is by name so
+// that adding one is a registration rather than a new branch at every call
+// site.
+//
+// The empty id still means Spotify. It is the default because it is the
+// provider every household has wired up, not because it is the better one —
+// a caller that wants lossless asks for it.
 func (s *Server) provider(id string) (media.Provider, error) {
-	if id == "" || strings.EqualFold(id, "spotify") {
+	switch {
+	case id == "" || strings.EqualFold(id, "spotify"):
 		return mediabridge.NewSpotifyProvider(s.Spotify, s.decoder(), s.streamQuality()), nil
+	case strings.EqualFold(id, "qobuz"):
+		return mediabridge.NewQobuzProvider(s.qobuzAccount(), s.qobuzDecode()), nil
 	}
 	return nil, fmt.Errorf("%w: %q", media.ErrUnknownProvider, id)
 }
@@ -95,6 +102,7 @@ func (s *Server) provider(id string) (media.Provider, error) {
 func (s *Server) providers() []media.Provider {
 	return []media.Provider{
 		mediabridge.NewSpotifyProvider(s.Spotify, s.decoder(), s.streamQuality()),
+		mediabridge.NewQobuzProvider(s.qobuzAccount(), s.qobuzDecode()),
 	}
 }
 

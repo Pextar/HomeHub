@@ -276,6 +276,41 @@ func (s *Server) decoder() mediabridge.Decoder {
 	return s.librespot
 }
 
+// qobuzAccount adapts the optional Qobuz client to the provider's interface.
+//
+// The nil check is load-bearing rather than defensive: assigning a nil
+// *qobuz.Client straight into the interface would produce a non-nil interface
+// holding a nil pointer, and the provider's "is it configured" check would pass
+// on its way to a panic.
+func (s *Server) qobuzAccount() mediabridge.QobuzAccount {
+	if s.Qobuz == nil {
+		return nil
+	}
+	return s.Qobuz
+}
+
+// qobuzDecode returns the Qobuz decoder, building it on first use.
+//
+// Simpler than decoder() by exactly the thing that makes librespot awkward:
+// there is no subprocess and no bitrate baked into a command line, so the
+// household's stream-quality setting does not reach it and nothing ever needs
+// rebuilding. A nil Qobuz client yields a nil decoder, which the provider
+// reports as unconfigured rather than failing at the tap.
+func (s *Server) qobuzDecode() mediabridge.Decoder {
+	if s.Qobuz == nil {
+		return nil
+	}
+	s.streamMu.Lock()
+	defer s.streamMu.Unlock()
+	if s.qobuzDecoder == nil {
+		s.qobuzDecoder = stream.NewQobuz(stream.QobuzConfig{
+			Catalog: s.Qobuz,
+			Logf:    log.Printf,
+		})
+	}
+	return s.qobuzDecoder
+}
+
 // streamQuality is the household's chosen decode quality, defaulted.
 func (s *Server) streamQuality() media.StreamQuality {
 	var q media.StreamQuality

@@ -282,6 +282,10 @@ zones — sets of speakers that play together regardless of make. See
 | DELETE | `/api/media/history?room=&uri=` | One room stops remembering one thing; without `uri`, the lot. Admin-only |
 | GET | `/api/media/history/top?room=&limit=&hour=` | What a room keeps coming back to — at a given local hour with `hour=` (`0`–`23` or `now`) |
 | GET | `/api/media/insights?limit=` | The household's listening summed over every room |
+| GET | `/api/qobuz/status` | App credentials + account state, and the best format the plan allows |
+| PUT | `/api/qobuz/config` | `{"app_id","app_secret"}` — issued to the application, not the listener |
+| POST | `/api/qobuz/login` | `{"email","password"}` — the password is forwarded and dropped, never stored |
+| POST | `/api/qobuz/disconnect` | Forgets the account, keeps the app credentials |
 | GET | `/api/media/quality` | What the audio actually is on every route, and the decode setting |
 | PUT | `/api/media/quality` | `{"stream_quality":"best"\|"balanced"\|"saver"}` |
 | GET | `/api/media/timers` | Every music timer, soonest first |

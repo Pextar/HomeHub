@@ -429,6 +429,60 @@ refuse — never to convert quietly. Three things enforce that:
   resolution, instead of failing at cast time. `airplay.Cast` keeps the same
   check as a backstop.
 
+### Qobuz: the lossless source
+
+Spotify cannot be decoded losslessly by anyone outside Spotify, so lossless has
+to come from a service that hands over the file. Qobuz does — `track/getFileUrl`
+returns a signed, time-limited URL to the FLAC itself.
+
+| | Spotify | Qobuz |
+| --- | --- | --- |
+| Routes | native, group, connect, airplay, stream | airplay, stream |
+| Decoded by | librespot, out of process | `internal/stream.Qobuz`, in process |
+| Source | Ogg Vorbis, lossy | FLAC, 16/44.1 up to 24/192 |
+| Sequencing | librespot plays a Connect queue | HomeHub walks the track list itself |
+
+The contrast in the route column is the point. Spotify is served four ways and
+is lossy on the only two HomeHub controls; Qobuz is served one way and is
+lossless on it. That single route is not a limitation to apologise for — it is
+the route where HomeHub holds the audio, which is exactly why it can promise
+anything about it. No speaker here has a Qobuz account link HomeHub knows how to
+drive and there is no Connect equivalent, so those routes are not advertised;
+advertising a route a provider cannot serve would have the router pick it and
+fail at the tap.
+
+**Bit-exactness.** FLAC decoding is exact, so the samples re-served are the
+master. Packing them to interleaved little-endian is a truncation to the file's
+own word length, which changes no sample's value. Both depths are tested through
+a real encode/decode round trip, negatives and range limits included — if that
+test ever fails, "lossless" is a marketing word in this repo rather than a
+property of it.
+
+**The file is believed over everything else.** Catalogue metadata is a listing
+and the requested `format_id` is an intention; `StreamInfo` is the audio. The
+stream declares what the file turned out to be.
+
+**Format changes end a stream.** A WAV stream carries one format to its end, so
+an album whose next track is a different rate cannot continue without being
+converted. It stops instead, and the next play starts a fresh stream at the new
+format. Stopping early is explicable; silent resampling is not.
+
+**Entitlement is a ceiling, not a measurement.** A Studio plan streams hi-res
+and an older one caps at CD; both are lossless. `SourceQuality` reports the
+entitlement's maximum marked `approximate`, because a 16-bit album on a hi-res
+plan arrives at 16-bit. `DecodedFormat` reports the same ceiling, which
+deliberately errs toward the stream route: losing AirPlay's clock on a track
+that did not need to lose it beats planning a cast that must be refused once the
+file turns out to be 24-bit.
+
+**Credentials are two separate things.** The `app_id`/`app_secret` are issued to
+the *application* (Qobuz issues them on request to api@qobuz.com); the account
+login is the listener's. HomeHub ships no app credentials — embedding someone
+else's would be a licence breach and a secret in a public repo — so the two are
+separate setup steps with separate error messages. `track/getFileUrl` is the one
+signed call: MD5 over the path, its parameters in alphabetical order, the
+timestamp and the secret, excluding the parameters signing itself adds.
+
 `PCMFormat.Carries` is the predicate, and it is deliberately one-directional:
 16-bit over a 24-bit link is wasteful and lossless; 24-bit over a 16-bit link
 is not. A provider that does not implement `PCMReporter` is assumed to be CD

@@ -58,11 +58,27 @@ func TestQualityReportsEveryRouteAndItsLimit(t *testing.T) {
 		}
 	}
 
-	if len(out.Providers) != 1 {
-		t.Fatalf("providers = %d", len(out.Providers))
+	// The report covers every provider. Spotify is the one with the
+	// interesting attribution problem, so it is what the rest of this test
+	// walks; Qobuz has its own test below.
+	var spotify *struct {
+		ID     string `json:"id"`
+		Routes []struct {
+			Route   media.Route `json:"route"`
+			Decoded bool        `json:"decoded"`
+			Chain   media.Chain `json:"chain"`
+		} `json:"routes"`
+	}
+	for i := range out.Providers {
+		if out.Providers[i].ID == "spotify" {
+			spotify = &out.Providers[i]
+		}
+	}
+	if spotify == nil {
+		t.Fatalf("no spotify provider in %+v", out.Providers)
 	}
 	var sawDecoded, sawSpeakerServed bool
-	for _, r := range out.Providers[0].Routes {
+	for _, r := range spotify.Routes {
 		// No route ever reports a flat "lossless": the two HomeHub decodes
 		// for are capped by librespot, and the ones a speaker serves are a
 		// ceiling HomeHub cannot see past. Reporting the transport's honesty
