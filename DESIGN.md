@@ -1174,6 +1174,37 @@ _up one_.
   already spoken for is absent from the next row's picker rather than
   offered and refused on save, and a room that is deleted takes its rows
   with it, the same promise `CascadeDeleteSocket` makes for sockets.
+- **An automation can also _watch_ a room, which is the other direction and
+  a different claim.** The rows above are what a rule does to the music;
+  a **music trigger** ("when the living room stops playing") and a **music
+  condition** ("only if the living room is quiet") are what the music does
+  to a rule — so "when the film ends, take the bedroom lamp to 2%" is
+  something the house does rather than something you remember to press.
+  Four things keep it honest, and all four are §15.1 applied to a rule
+  instead of a control:
+  - **A room is playing or it isn't — never on or off.** A room is not
+    switched, and "the living room is off" would read as the speaker
+    having been unplugged. `stopped` covers paused, stopped and standby
+    alike: that distinction matters inside the player, where a paused room
+    is one tap from playing again, and not at all to a rule about a room
+    going quiet. It is the same word for music and for TV, because a KEF
+    on its optical input answers the question the same way a Sonos
+    streaming does.
+  - **"We don't know" is a third answer, and it fires nothing.** A speaker
+    that has dropped off the network is not a quiet one. The trigger needs
+    a reading on both sides of the change, and the condition fails closed
+    — a gate that opens because we couldn't read the speaker is not a
+    gate. A rule that dimmed the bedroom every time the Wi-Fi hiccuped is
+    the failure this prevents.
+  - **Watching a room costs the house no traffic.** The rule engine reads
+    the monitors' caches (GENA-fed for Sonos, the poller that runs anyway
+    for KEF) and never a speaker, on a five-second tick that runs whether
+    or not anyone has the app open. **Do not make this read a speaker** —
+    the same rule the listening log is built on (§15.8b).
+  - **The editor names rooms the way everything else does.** The same key
+    (`sonos:` / `kef:` / `zone:`), the same picker rows as the music
+    actions under Then, and the trigger chip row says `Music`, not
+    `Media` — one word across surfaces.
 - **KEF is a second bridge, not a second Sonos.** `internal/kef` speaks the
   local HTTP API on KEF's wireless speakers (LS50 Wireless II, LSX II, LS60).
   It sits _beside_ the Sonos bridge, and the shared layer above them

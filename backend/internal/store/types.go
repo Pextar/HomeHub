@@ -146,8 +146,9 @@ type Schedule struct {
 //   - "time":   wall-clock / solar time, like a Schedule (Time/TimeMode/Days).
 //   - "sensor": a sensor reading crosses a threshold (SensorID Op Value).
 //   - "device": a socket changes to a given state (SocketID -> ToState).
+//   - "music":  a media room starts or stops making a sound (Room -> ToState).
 type AutomationTrigger struct {
-	Type string `json:"type"` // "time" | "sensor" | "device"
+	Type string `json:"type"` // "time" | "sensor" | "device" | "music"
 
 	// time
 	TimeMode           string `json:"time_mode,omitempty"` // "fixed" | "sunrise" | "sunset" (empty == "fixed")
@@ -162,21 +163,39 @@ type AutomationTrigger struct {
 
 	// device
 	SocketID string `json:"socket_id,omitempty"`
-	ToState  string `json:"to_state,omitempty"` // "on" | "off"
+
+	// music. Room is the media layer's own key — "sonos:<id>", "kef:<id>",
+	// "zone:<id>" — the same vocabulary MusicAction, the music timers and the
+	// play shelves use, so a room named here is the room named everywhere
+	// else.
+	Room string `json:"room,omitempty"`
+
+	// ToState is what the subject changed *to*: "on" | "off" for a device,
+	// MusicPlaying | MusicStopped for a music room. Shared because both
+	// triggers ask the same question of different subjects, and a second
+	// field would be the one that gets set on the wrong kind of trigger.
+	ToState string `json:"to_state,omitempty"`
 }
 
 // AutomationCondition optionally gates a trigger. All conditions on an
 // automation must hold (logical AND) for its actions to run.
 //   - "device":      a socket must currently be on/off.
+//   - "music":       a media room must currently be playing / stopped.
 //   - "time_range":  local time must fall within [After, Before] (may wrap midnight).
 //   - "time_before": local time must be strictly before Before ("HH:MM").
 //   - "time_after":  local time must be at or after After ("HH:MM").
 type AutomationCondition struct {
-	Type string `json:"type"` // "device" | "time_range" | "time_before" | "time_after"
+	Type string `json:"type"` // "device" | "music" | "time_range" | "time_before" | "time_after"
 
 	// device
 	SocketID string `json:"socket_id,omitempty"`
-	State    string `json:"state,omitempty"` // "on" | "off"
+
+	// music — a media room key, exactly as AutomationTrigger.Room.
+	Room string `json:"room,omitempty"`
+
+	// State is "on" | "off" for a device, MusicPlaying | MusicStopped for a
+	// music room. Shared for the same reason AutomationTrigger.ToState is.
+	State string `json:"state,omitempty"`
 
 	// time_range / time_before / time_after
 	After  string `json:"after,omitempty"`  // "HH:MM"
@@ -460,6 +479,20 @@ const (
 	// MusicVolume sets a room's level without touching what it is doing —
 	// "Film" turning the kitchen down rather than off.
 	MusicVolume = "volume"
+)
+
+// What a music trigger or condition can say about a room. Two words rather
+// than the sockets' on/off, because a room is not switched: it is making a
+// sound or it isn't, and "the living room is off" would read as the speaker
+// having been unplugged.
+//
+// MusicStopped covers paused, stopped and standby alike. The distinction
+// matters inside the player, where a paused room is one tap from playing
+// again; it does not matter to a rule about the room going quiet, which is the
+// only question asked here.
+const (
+	MusicPlaying = "playing"
+	MusicStopped = "stopped"
 )
 
 // MusicAction drives a room's audio when a scene or an automation fires.

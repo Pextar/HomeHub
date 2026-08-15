@@ -7,6 +7,7 @@
     import { api } from "../lib/api";
     import { data, toasts } from "../lib/stores.svelte";
     import { formatDays } from "../lib/utils";
+    import { loadMediaRooms, type MediaRoomOption } from "../lib/media-rooms";
     import { openModal } from "../lib/modal.svelte";
     import AutomationModal from "../modals/AutomationModal.svelte";
     import ConfirmModal from "../components/ConfirmModal.svelte";
@@ -19,13 +20,14 @@
     const v = $derived(data.value);
 
     // ── Filter ──────────────────────────────────────────────────────────
-    type Filter = "all" | "time" | "sensor" | "device";
+    type Filter = "all" | "time" | "sensor" | "device" | "music";
     let filter = $state<Filter>("all");
     const FILTERS: { id: Filter; label: string }[] = [
         { id: "all",    label: "All" },
         { id: "time",   label: "Time" },
         { id: "sensor", label: "Sensor" },
         { id: "device", label: "Device" },
+        { id: "music",  label: "Music" },
     ];
 
     // Schedules are time-only, so show them under "all" and "time" filters.
@@ -106,7 +108,24 @@
     const nextEvent = $derived(upcoming[0] ?? null);
 
     // ── Automation display helpers ───────────────────────────────────────
+
+    // A music rule names a room by the media layer's key, and the name behind
+    // it lives with the speakers rather than in the shared store — so it takes
+    // a read. Only a house that actually has a music rule pays for it: reading
+    // the zones asks every speaker in it what it is doing, which is a lot to
+    // spend on a list that would say "Time" for every row.
+    let mediaRooms = $state<MediaRoomOption[]>([]);
+    let roomsAsked = false;
+    const usesMusic = $derived(v.automations.some(a => a.rules.some(r =>
+        r.trigger.type === "music" || (r.conditions ?? []).some(c => c.type === "music"))));
+    $effect(() => {
+        if (!usesMusic || roomsAsked) return;
+        roomsAsked = true;
+        void loadMediaRooms().then(r => (mediaRooms = r)).catch(() => {});
+    });
+
     function socketName(id?: string) { return v.sockets.find(s => s.id === id)?.name ?? "device"; }
+    function roomName(key?: string) { return mediaRooms.find(r => r.key === key)?.name ?? "room"; }
     function sensorById(id?: string) { return v.sensors.find(s => s.id === id); }
     function targetName(type: string, id: string) {
         if (type === "group") return v.groups.find(g => g.id === id)?.name ?? "group";
@@ -129,6 +148,9 @@
         if (t.type === "sensor") {
             const s = sensorById(t.sensor_id);
             return `${s?.name ?? "sensor"} ${t.op} ${t.value}${s?.unit ?? ""}`;
+        }
+        if (t.type === "music") {
+            return `${roomName(t.room)} ${t.to_state === "playing" ? "starts" : "stops"} playing`;
         }
         return `${socketName(t.socket_id)} turns ${t.to_state}`;
     }

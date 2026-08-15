@@ -92,7 +92,17 @@ export interface Timer {
   note?: string;
 }
 
-export type AutomationTriggerType = "time" | "sensor" | "device";
+export type AutomationTriggerType = "time" | "sensor" | "device" | "music";
+
+/**
+ * What a music trigger or condition can say about a room.
+ *
+ * Two words rather than the sockets' on/off, because a room is not switched:
+ * it is making a sound or it isn't. "Stopped" covers paused, stopped and a
+ * speaker in standby alike — the distinction matters inside the player, not
+ * to a rule about the room going quiet.
+ */
+export type MusicState = "playing" | "stopped";
 
 export interface AutomationTrigger {
   type: AutomationTriggerType;
@@ -107,14 +117,22 @@ export interface AutomationTrigger {
   value?: number;
   // device
   socket_id?: string;
-  to_state?: "on" | "off";
+  /** music — a media room key ("sonos:<id>" / "kef:<id>" / "zone:<id>"), the
+   *  same vocabulary MusicAction uses. */
+  room?: string;
+  /** What the subject changed *to*: on/off for a device, playing/stopped for
+   *  a music room. */
+  to_state?: "on" | "off" | MusicState;
 }
 
 export interface AutomationCondition {
-  type: "device" | "time_range" | "time_before" | "time_after";
+  type: "device" | "music" | "time_range" | "time_before" | "time_after";
   // device
   socket_id?: string;
-  state?: "on" | "off";
+  /** music — a media room key, exactly as AutomationTrigger.room. */
+  room?: string;
+  /** on/off for a device, playing/stopped for a music room. */
+  state?: "on" | "off" | MusicState;
   // time_range / time_before / time_after
   after?: string;
   before?: string;
@@ -157,6 +175,11 @@ export interface RuleDraft {
   trigValue: number;
   trigSocketId: string;
   trigToState: "on" | "off";
+  /** The media room a music trigger watches, and what it watches for. Held
+   *  apart from trigSocketId/trigToState so switching the trigger type back
+   *  and forth doesn't lose either half. */
+  trigRoom: string;
+  trigMusicState: MusicState;
   conditions: AutomationCondition[];
   actions: RuleActionDraft[];
   /** The rule's music rows, edited in place. Same shape as what is saved —
