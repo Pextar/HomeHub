@@ -238,15 +238,18 @@ func (s *Store) PruneMusicTimers() bool {
 	return dropped
 }
 
-// PruneMusicRooms drops music actions aimed at a room that no longer exists,
-// out of every scene step and every automation rule, and then drops anything
-// those emptied. Same promise as PruneMusicTimers and CascadeDeleteSocket: a
-// deleted speaker leaves nothing behind that fires into nothing.
+// PruneMusicRooms drops every reference to a media room that no longer exists
+// — the music actions out of each scene step and automation rule, and the
+// music triggers and conditions that watch one — then drops anything those
+// emptied. Same promise as PruneMusicTimers and CascadeDeleteSocket: a deleted
+// speaker leaves nothing behind that fires into nothing.
 //
 // A step or rule that had *only* music goes with it, because what is left is
 // an instruction to do nothing. One that still has sockets to switch keeps
-// them — the scene has lost a part, not its purpose. Reports whether
-// anything changed. Caller must hold Mu.
+// them — the scene has lost a part, not its purpose. A rule *triggered* by a
+// deleted room goes whatever else it holds, for the reason
+// pruneAutomationsForSocket drops one triggered by a deleted socket: it can
+// never fire again. Reports whether anything changed. Caller must hold Mu.
 func (s *Store) PruneMusicRooms() bool {
 	changed := false
 
@@ -282,6 +285,22 @@ func (s *Store) PruneMusicRooms() bool {
 	for _, a := range s.Automations {
 		rules := a.Rules[:0]
 		for _, r := range a.Rules {
+			if r.Trigger.Type == "music" && !s.mediaRoomExists(r.Trigger.Room) {
+				changed = true
+				continue
+			}
+			// A condition is a gate rather than a purpose, so a dead one is
+			// dropped and the rule keeps running — the same treatment a
+			// device condition gets when its socket goes.
+			conds := r.Conditions[:0]
+			for _, c := range r.Conditions {
+				if c.Type == "music" && !s.mediaRoomExists(c.Room) {
+					changed = true
+					continue
+				}
+				conds = append(conds, c)
+			}
+			r.Conditions = conds
 			r.Music = keep(r.Music)
 			if len(r.Actions) > 0 || len(r.Music) > 0 {
 				rules = append(rules, r)

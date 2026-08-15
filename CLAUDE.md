@@ -97,6 +97,14 @@ is already up-to-date it's skipped.
   calls `Store.OnMusic`, installed by the API as `runSceneMusic`, which
   drives the vendor-neutral media layer. **Call `FlushMusic()` beside every
   `FlushLights()`.**
+- **An automation rule may also be triggered or gated by what a room is
+  playing** (trigger/condition type `music`, same media room key). The read
+  half of the hook above: `Store.MusicPlaying`, installed by the API as
+  `roomPlaying` (`api/automation_music.go`). It returns a third answer —
+  `known=false` — for a room nothing can report on, and both the trigger and
+  the condition treat that as "don't fire" rather than as "quiet". It runs on
+  the 5 s tick, so it reads the bridges' **caches** (`Monitor.Cached`) and
+  must never touch a speaker.
 
 ---
 

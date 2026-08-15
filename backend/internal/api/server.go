@@ -199,6 +199,10 @@ func (s *Server) Handler() http.Handler {
 	// half that does (scene_music.go).
 	s.Store.OnMusic = s.runSceneMusic
 
+	// And the other direction: let an automation *watch* a room, so a rule
+	// can fire when the living room goes quiet (automation_music.go).
+	s.Store.MusicPlaying = s.roomPlaying
+
 	// Wire push notification callbacks when the push service is available.
 	if s.Push != nil {
 		s.Store.OnStateChange = func(socket store.Socket, newState bool) {

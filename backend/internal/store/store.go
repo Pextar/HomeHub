@@ -112,6 +112,22 @@ type Store struct {
 	// is waiting for (the same rule FlushLights follows for smart lights).
 	OnMusic func(actions []MusicAction)
 
+	// MusicPlaying, if set, reports whether a media room is making a sound
+	// right now. The read half of OnMusic, installed at the same place and
+	// for the same reason: this package must not know how a room is reached.
+	//
+	// known is false when nothing in the house can answer for that room —
+	// an unregistered key, or a speaker no monitor has a reading for. It is
+	// deliberately a third answer rather than a false: "the living room is
+	// quiet" and "we have no idea what the living room is doing" must not
+	// fire the same rule.
+	//
+	// Called *off* Mu, and must not touch a speaker: it runs on the
+	// scheduler tick, so its cost is paid every five seconds whether or not
+	// anything is listening. The API implementation reads the bridges'
+	// caches and nothing else.
+	MusicPlaying func(room string) (playing, known bool)
+
 	// OnSensorAlert, if set, is called when a sensor reading crosses a
 	// threshold for the first time (rising edge only — not on every reading
 	// while already alerting). direction is "above" or "below".

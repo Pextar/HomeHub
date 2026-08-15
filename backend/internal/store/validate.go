@@ -174,8 +174,21 @@ func (s *Store) validateRule(a *AutomationRule) error {
 		if t.ToState != "on" && t.ToState != "off" {
 			return errors.New("device trigger to_state must be on or off")
 		}
+	case "music":
+		// Checked against the house at write time for the reason
+		// ValidateMusicTimer checks its own room: a rule watching a speaker
+		// somebody has since removed should be refused when it is written,
+		// not discovered silently unfired.
+		t.Room = strings.TrimSpace(t.Room)
+		t.ToState = strings.ToLower(strings.TrimSpace(t.ToState))
+		if !s.mediaRoomExists(t.Room) {
+			return fmt.Errorf("%q is not a speaker or zone in this house", t.Room)
+		}
+		if t.ToState != MusicPlaying && t.ToState != MusicStopped {
+			return fmt.Errorf("music trigger to_state must be %q or %q", MusicPlaying, MusicStopped)
+		}
 	default:
-		return errors.New("trigger type must be time, sensor, or device")
+		return errors.New("trigger type must be time, sensor, device, or music")
 	}
 
 	// ── Conditions (optional, AND) ───────────────────────────
@@ -191,6 +204,15 @@ func (s *Store) validateRule(a *AutomationRule) error {
 			}
 			if c.State != "on" && c.State != "off" {
 				return errors.New("device condition state must be on or off")
+			}
+		case "music":
+			c.Room = strings.TrimSpace(c.Room)
+			c.State = strings.ToLower(strings.TrimSpace(c.State))
+			if !s.mediaRoomExists(c.Room) {
+				return fmt.Errorf("%q is not a speaker or zone in this house", c.Room)
+			}
+			if c.State != MusicPlaying && c.State != MusicStopped {
+				return fmt.Errorf("music condition state must be %q or %q", MusicPlaying, MusicStopped)
 			}
 		case "time_range":
 			if _, err := time.Parse("15:04", strings.TrimSpace(c.After)); err != nil {
@@ -212,7 +234,7 @@ func (s *Store) validateRule(a *AutomationRule) error {
 			}
 			c.After = strings.TrimSpace(c.After)
 		default:
-			return errors.New("condition type must be device, time_range, time_before, or time_after")
+			return errors.New("condition type must be device, music, time_range, time_before, or time_after")
 		}
 	}
 

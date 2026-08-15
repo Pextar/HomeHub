@@ -1,7 +1,10 @@
 <script lang="ts" module>
     import { data } from "../lib/stores.svelte";
     import { isSmartProtocol } from "../lib/utils";
-    import type { RuleActionDraft, RuleDraft, TargetType, AutomationAction, Socket } from "../lib/types";
+    import type {
+        RuleActionDraft, RuleDraft, TargetType, AutomationAction,
+        AutomationCondition, Socket,
+    } from "../lib/types";
 
     /** Member sockets of a group/room action target. Rooms are matched by the
      *  socket's room name (sockets reference rooms by name, targets by id). */
@@ -124,7 +127,14 @@
     let roomsFailed = $state(false);
     onMount(() => {
         void loadMediaRooms()
-            .then((r) => (rooms = r))
+            .then((r) => {
+                rooms = r;
+                // A draft built before the list arrived has no room to point
+                // at. Seeded here, once, rather than from an effect: a rule
+                // being edited must not have its room rewritten under the
+                // cursor if the list is re-read (same rule as retarget()).
+                if (!draft.trigRoom) draft.trigRoom = r[0]?.key ?? "";
+            })
             .catch(() => (roomsFailed = true))
             .finally(() => (roomsLoading = false));
     });
@@ -246,6 +256,17 @@
         draft.conditions = [...draft.conditions,
             { type: "device", socket_id: v.sockets[0]?.id ?? "", state: "on" }];
     }
+    // Switching a condition's kind re-seeds the half that kind reads, so a
+    // row never carries a room from the picker it was last on.
+    function retype(c: AutomationCondition) {
+        if (c.type === "device") {
+            c.socket_id ||= v.sockets[0]?.id ?? "";
+            if (c.state !== "on" && c.state !== "off") c.state = "on";
+        } else if (c.type === "music") {
+            c.room ||= rooms[0]?.key ?? "";
+            if (c.state !== "playing" && c.state !== "stopped") c.state = "stopped";
+        }
+    }
     function removeCondition(i: number) {
         draft.conditions = draft.conditions.filter((_, idx) => idx !== i);
     }
@@ -280,11 +301,16 @@
 <!-- WHEN -->
 <div class="block when">
     <div class="block-head"><span class="tag cool">When</span></div>
-    <Segmented name="{idPrefix}-trigtype" bind:value={draft.trigType}
+    <!-- full: with a fourth option this control is ~330px of inline pill,
+         which is wider than a sheet on a 360px phone. Sharing the width is
+         what the variant is for (see Segmented's own note on Music's
+         four-way subnav) and it costs the three-option case nothing. -->
+    <Segmented name="{idPrefix}-trigtype" full bind:value={draft.trigType}
         options={[
             { value: "time",   label: "Time" },
             { value: "sensor", label: "Sensor", disabled: v.sensors.length === 0 },
             { value: "device", label: "Device", disabled: v.sockets.length === 0 },
+            { value: "music",  label: "Music",  disabled: rooms.length === 0 },
         ]} />
 
     {#if draft.trigType === "time"}
@@ -339,6 +365,43 @@
             <input id="{idPrefix}-val" type="number" step="0.1" bind:value={draft.trigValue} />
         </div>
 
+    {:else if draft.trigType === "music"}
+        <!-- The other half of what a room can be asked. A rule already drives
+             the music (Then, below); this is where it can watch it, so "when
+             the film ends in the living room" is a trigger rather than
+             something you have to remember to press. -->
+        {#if roomsLoading}
+            <div class="field mt"><span class="skeleton room-sk"></span></div>
+        {:else if roomsFailed}
+            <div class="field-help mt">Couldn't read the speakers in this house.</div>
+        {:else if rooms.length === 0}
+            <div class="field-help mt">No speakers or zones in this house yet.</div>
+        {:else}
+            <div class="field-row mt">
+                <div class="field">
+                    <label for="{idPrefix}-room">Room</label>
+                    <select id="{idPrefix}-room" bind:value={draft.trigRoom}>
+                        {#if draft.trigRoom && !rooms.some(r => r.key === draft.trigRoom)}
+                            <option value={draft.trigRoom} disabled>(removed)</option>
+                        {/if}
+                        {#each rooms as r (r.key)}
+                            <option value={r.key}>{r.name}{r.kind === "zone" ? " (zone)" : ""}</option>
+                        {/each}
+                    </select>
+                </div>
+                <div class="field">
+                    <label for="{idPrefix}-musicstate">Starts / stops</label>
+                    <select id="{idPrefix}-musicstate" bind:value={draft.trigMusicState}>
+                        <option value="stopped">Stops playing</option>
+                        <option value="playing">Starts playing</option>
+                    </select>
+                </div>
+            </div>
+            <div class="field-help">
+                Music or TV — whatever the room is making a sound with.
+            </div>
+        {/if}
+
     {:else}
         <div class="field-row mt">
             <div class="field">
@@ -373,8 +436,9 @@
         <div class="rowcard">
             <div class="field-row">
                 <div class="field">
-                    <select bind:value={c.type}>
+                    <select bind:value={c.type} onchange={() => retype(c)}>
                         <option value="device">Device is</option>
+                        <option value="music" disabled={rooms.length === 0}>Music is</option>
                         <option value="time_before">Time is before</option>
                         <option value="time_after">Time is after</option>
                         <option value="time_range">Time between</option>
@@ -384,6 +448,17 @@
                     <div class="field">
                         <select bind:value={c.socket_id}>
                             {#each v.sockets as s (s.id)}<option value={s.id}>{s.name}</option>{/each}
+                        </select>
+                    </div>
+                {:else if c.type === "music"}
+                    <div class="field">
+                        <select bind:value={c.room} aria-label="Room">
+                            {#if c.room && !rooms.some(r => r.key === c.room)}
+                                <option value={c.room} disabled>(removed)</option>
+                            {/if}
+                            {#each rooms as r (r.key)}
+                                <option value={r.key}>{r.name}{r.kind === "zone" ? " (zone)" : ""}</option>
+                            {/each}
                         </select>
                     </div>
                 {:else if c.type === "time_before"}
@@ -401,6 +476,13 @@
                     <select bind:value={c.state}>
                         <option value="on">On</option>
                         <option value="off">Off</option>
+                    </select>
+                </div>
+            {:else if c.type === "music"}
+                <div class="field mt-sm">
+                    <select bind:value={c.state} aria-label="What the room is doing">
+                        <option value="stopped">Not playing</option>
+                        <option value="playing">Playing</option>
                     </select>
                 </div>
             {:else if c.type === "time_range"}
@@ -636,6 +718,15 @@
         padding-top: 10px;
         border-top: 1px solid var(--hairline);
     }
+    /* The speaker list is a network read, so the room picker gets the
+       skeleton primitive rather than an empty select somebody taps at. */
+    .room-sk {
+        display: block;
+        height: 14px;
+        max-width: 180px;
+        border-radius: var(--r-sm);
+    }
+
     .music-lbl {
         font-family: var(--font-mono);
         font-size: 11px;

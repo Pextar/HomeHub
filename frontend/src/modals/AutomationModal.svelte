@@ -9,7 +9,7 @@
     import { untrack } from "svelte";
     import type {
         Automation, AutomationRule, AutomationTrigger, AutomationCondition,
-        AutomationAction, AutomationTriggerType, RuleDraft,
+        AutomationAction, AutomationTriggerType, MusicState, RuleDraft,
     } from "../lib/types";
 
     interface Props { existing?: Automation | null; }
@@ -36,6 +36,13 @@
             trigValue: 20,
             trigSocketId: v.sockets[0]?.id ?? "",
             trigToState: "on",
+            // The room list is a network read the editor does itself, so a
+            // blank draft can't name one yet; RuleEditor seeds it when the
+            // list lands. "Stops playing" is the default because it is the
+            // half of the pair a rule is normally written for — the film
+            // ending, not starting.
+            trigRoom: "",
+            trigMusicState: "stopped",
             conditions: [],
             actions: [blankRuleAction()],
             music: [],
@@ -62,7 +69,10 @@
             trigOp: (t.op ?? "below") as "above" | "below",
             trigValue: t.value ?? 20,
             trigSocketId: t.socket_id ?? v.sockets[0]?.id ?? "",
-            trigToState: (t.to_state ?? "on") as "on" | "off",
+            trigToState: (t.type === "device" ? (t.to_state ?? "on") : "on") as "on" | "off",
+            trigRoom: t.room ?? "",
+            trigMusicState: (t.type === "music" && t.to_state === "playing"
+                ? "playing" : "stopped") as MusicState,
             conditions: (r.conditions ?? []).map(c => ({ ...c })),
             actions: actions.length ? actions : [blankRuleAction()],
             // Copied, not shared: the rows are edited in place and the saved
@@ -100,12 +110,16 @@
         if (d.trigType === "sensor") {
             return { type: "sensor", sensor_id: d.trigSensorId, op: d.trigOp, value: Number(d.trigValue) };
         }
+        if (d.trigType === "music") {
+            return { type: "music", room: d.trigRoom, to_state: d.trigMusicState };
+        }
         return { type: "device", socket_id: d.trigSocketId, to_state: d.trigToState };
     }
 
     function buildRule(d: RuleDraft): AutomationRule {
         const conditions: AutomationCondition[] = d.conditions.map(c => {
             if (c.type === "device")      return { type: "device",      socket_id: c.socket_id, state: c.state };
+            if (c.type === "music")       return { type: "music",       room: c.room, state: c.state };
             if (c.type === "time_before") return { type: "time_before", before: c.before };
             if (c.type === "time_after")  return { type: "time_after",  after: c.after };
             return { type: "time_range", after: c.after, before: c.before };

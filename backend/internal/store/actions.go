@@ -243,6 +243,17 @@ func (s *Store) RunMusic(actions []MusicAction) {
 	s.OnMusic(actions)
 }
 
+// RoomPlaying asks whoever installed MusicPlaying what a media room is doing.
+// The read half of RunMusic, and a no-op — known=false — when nothing
+// installed the hook, which is every test that builds a bare Store.
+// Caller must NOT hold Mu.
+func (s *Store) RoomPlaying(room string) (playing, known bool) {
+	if room == "" || s.MusicPlaying == nil {
+		return false, false
+	}
+	return s.MusicPlaying(room)
+}
+
 // CascadeDeleteTarget removes everything that pointed at a deleted
 // schedulable target: the schedules and timers aimed at it, and the
 // automation actions that drive it (dropping rules, then automations, left
@@ -352,7 +363,7 @@ func (s *Store) pruneAutomationsForSocket(socketID string) {
 			}
 			r.Conditions = conds
 			r.Actions = filterActions(r.Actions, "socket", socketID)
-			if len(r.Actions) == 0 {
+			if len(r.Actions) == 0 && len(r.Music) == 0 {
 				continue
 			}
 			kept = append(kept, r)
@@ -391,7 +402,10 @@ func (s *Store) PruneAutomationsForTarget(targetType, targetID string) {
 		kept := a.Rules[:0]
 		for _, r := range a.Rules {
 			r.Actions = filterActions(r.Actions, targetType, targetID)
-			if len(r.Actions) == 0 {
+			// A rule left with no sockets to switch but with music to drive
+			// still does something — quieting the house is an instruction.
+			// Same rule PruneMusicRooms applies from the other direction.
+			if len(r.Actions) == 0 && len(r.Music) == 0 {
 				continue
 			}
 			kept = append(kept, r)
