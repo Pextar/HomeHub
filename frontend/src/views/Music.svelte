@@ -119,6 +119,7 @@
         void kef.refresh();
         void airplay.refresh();
         void upnp.refresh();
+        void spotify.loadProviders();
         void zones.refresh();
         // The endpoint list is what the room editor picks from; it changes only
         // when a speaker is registered or removed, so it is read here and after
@@ -223,16 +224,29 @@
     function playItem(item: SpotifyItem) {
         const r = destination.room;
         if (!r) return;
-        const body = { service: "Spotify", uri: item.uri, title: item.name };
+        const provider = item.provider ?? "spotify";
         if (r.zone) {
             const z = r.zone;
             void startPlayback(
                 "item:" + item.uri,
-                () => zones.play(z, { uri: item.uri, title: item.name }),
+                () => zones.play(z, { uri: item.uri, title: item.name, kind: item.kind, provider }),
                 "zone",
             );
             return;
         }
+        // A bare speaker is played through its own bridge, and those two doors
+        // take a *native service* the speaker streams from its own account
+        // link. Only Spotify has one here. Anything else has to go through the
+        // media layer, which addresses zones — so the honest answer is to say
+        // that rather than send a URI the speaker will ignore.
+        if (provider !== "spotify") {
+            toasts.error(
+                `${item.name} can't play here`,
+                "This service is decoded by HomeHub rather than by the speaker, so it plays to a zone. Put this speaker in a zone and pick that instead.",
+            );
+            return;
+        }
+        const body = { service: "Spotify", uri: item.uri, title: item.name };
         void startPlayback(
             "item:" + item.uri,
             () => (r.kind === "kef" ? api.kefPlayItem(r.id, body) : api.sonosPlayItem(r.id, body)),

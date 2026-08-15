@@ -1,11 +1,19 @@
 import { api } from "../api";
 import { toasts } from "../stores.svelte";
 import { copyText } from "../clipboard";
-import type { SpotifyStatus, SpotifyItem, SpotifyResults } from "../types";
+import type { SpotifyStatus, SpotifyItem, SpotifyResults, MediaItem } from "../types";
 
 /**
  * Spotify: the one-time account setup, and the search that feeds every
  * speaker in the module.
+ *
+ * It also carries the search for every *other* service, which is why the name
+ * on the file has stopped being the whole truth. Spotify's own endpoint knows
+ * about artists, saved albums, listening history and the rest of what this
+ * store surfaces; a second provider has only the neutral media search, and
+ * mapping its results into the shape already held here was far less invasive
+ * than threading a second shape through every row, card and screen below.
+ * Worth renaming to `catalogue` when something else moves in this file.
  *
  * Two things it deliberately does not own. The **confirm** before
  * disconnecting is the caller's, because raising a dialog is a surface's job.
@@ -73,6 +81,16 @@ export interface SpotifyStore {
   loadBrowse(): Promise<void>;
   query: string;
   kindFilter: SpotifyKind;
+  /** Which service the next search asks. "spotify" goes through Spotify's own
+   *  endpoint, which knows about artists, saved albums and everything else
+   *  this store surfaces; anything else goes through the neutral media search,
+   *  which is the only door a second provider has. */
+  provider: string;
+  /** Providers that can actually be searched right now, for the chip row.
+   *  Read once — a service is configured or it isn't, and re-asking on every
+   *  keystroke would be a round trip per character. */
+  readonly providers: { id: string; name: string }[];
+  loadProviders(): Promise<void>;
 
   // The client-ID form, expanded either on first run or on request.
   setupOpen: boolean;
@@ -182,6 +200,8 @@ export function createSpotify(
     ended: {} as Record<string, boolean>,
     loadingMore: false,
     kindFilter: "all" as SpotifyKind,
+    provider: "spotify",
+    providers: [] as { id: string; name: string }[],
     myPlaylists: [] as SpotifyItem[],
     recentTracks: [] as SpotifyItem[],
     topTracks: [] as SpotifyItem[],
@@ -290,7 +310,10 @@ export function createSpotify(
     try {
       // 10 is Spotify's own cap for /search now — asking for more is a 400;
       // `loadMore` pages past it with an offset.
-      const r = await api.spotifySearch(q, PAGE, { signal });
+      const r =
+        s.provider === "spotify"
+          ? await api.spotifySearch(q, PAGE, { signal })
+          : await searchProvider(s.provider, q);
       if (mine !== seq) return;
       s.results = r;
       s.resultsQuery = q;
@@ -305,13 +328,79 @@ export function createSpotify(
       if (mine !== seq || (e as Error).name === "AbortError") return;
       s.results = null;
       s.resultsQuery = "";
-      s.error = (e as Error).message || "Spotify didn't answer.";
+      s.error = (e as Error).message || `${providerName(s.provider)} didn't answer.`;
     } finally {
       if (mine === seq) s.searching = false;
     }
   }
 
+  /** A provider's display name, for messages. Falls back to the id, which is
+   *  at least true, rather than to "Spotify", which would not be. */
+  function providerName(id: string): string {
+    return s.providers.find((p) => p.id === id)?.name ?? id;
+  }
+
+  /**
+   * A non-Spotify search, through the neutral media endpoint.
+   *
+   * The results are mapped into the shape this store already holds rather than
+   * a second shape being threaded through every row, card and screen below it.
+   * The mapping is lossy in one direction only — the media layer carries less
+   * per item than Spotify's own endpoint does (no duration, no album art
+   * variants) — and the fields simply stay absent, which is what every consumer
+   * here already handles.
+   *
+   * `provider` rides on each item, because a URI is only playable by the
+   * service that issued it and the play path has to know which.
+   */
+  async function searchProvider(provider: string, q: string): Promise<SpotifyResults> {
+    const r = await api.mediaSearch(q, { provider, limit: PAGE });
+    const map = (items: MediaItem[] | undefined, kind: SpotifyItem["kind"]): SpotifyItem[] =>
+      (items ?? []).map((it) => ({
+        kind,
+        uri: it.uri,
+        name: it.title,
+        sub: it.subtitle,
+        art_url: it.art_uri,
+        provider: it.provider || provider,
+      }));
+    return {
+      tracks: map(r.tracks, "track"),
+      albums: map(r.albums, "album"),
+      playlists: map(r.playlists, "playlist"),
+      artists: map(r.artists, "artist"),
+    };
+  }
+
   return {
+    get providers() {
+      return s.providers;
+    },
+    get provider() {
+      return s.provider;
+    },
+    set provider(v: string) {
+      if (s.provider === v) return;
+      s.provider = v;
+      // The other service's results say nothing about this one, and leaving
+      // them on screen under a new chip would be a list that lies about where
+      // it came from.
+      s.results = null;
+      s.resultsQuery = "";
+      void search();
+    },
+    async loadProviders() {
+      try {
+        const list = await api.mediaProviders();
+        s.providers = list
+          .filter((p) => p.availability.ok)
+          .map((p) => ({ id: p.id, name: p.name }));
+      } catch {
+        // The chip row simply doesn't appear. Search still works against
+        // Spotify, which is where it was before any of this.
+        s.providers = [];
+      }
+    },
     get status() {
       return s.status;
     },
