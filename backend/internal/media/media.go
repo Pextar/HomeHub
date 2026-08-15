@@ -42,6 +42,12 @@ const (
 	// that they are all driven identically, which is exactly what a vendor
 	// means to the route engine.
 	VendorAirPlay Vendor = "airplay"
+	// VendorUPnP is any DLNA MediaRenderer. Like AirPlay it is a protocol
+	// rather than a make — a RoPieeeXL, a Bluesound, an AV receiver are all
+	// driven identically — and unlike AirPlay the device fetches rather
+	// than receives, which is what lets it carry any format. See
+	// internal/upnp.
+	VendorUPnP Vendor = "upnp"
 )
 
 // Capability is one thing an endpoint can do. Endpoints declare a set of
@@ -376,4 +382,8 @@ var (
 	// ErrEmptyZone is a zone with no members, which is valid to store
 	// (a user emptying a zone in the UI) but not to play to.
 	ErrEmptyZone = errors.New("media: zone has no speakers")
+	// ErrUnsupported is a command this endpoint has no equivalent for —
+	// skipping on a renderer HomeHub is feeding one URL, say. Distinct from
+	// a failure: nothing went wrong, there was simply nothing to ask.
+	ErrUnsupported = errors.New("media: this speaker has no equivalent for that")
 )

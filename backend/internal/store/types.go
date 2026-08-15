@@ -57,6 +57,49 @@ type KEFSpeaker struct {
 	SpotifyDeviceName string `json:"spotify_device_name,omitempty"`
 }
 
+// UPnPRenderer is a generic UPnP/DLNA MediaRenderer.
+//
+// The bridge of last resort, and the only one that can carry hi-res. Sonos and
+// KEF are driven through their own vendor APIs; an AirPlay receiver is pushed
+// samples at 44.1 kHz/16-bit because that is all RAOP carries. A renderer is
+// neither: it is handed a URL and fetches the audio itself, so whatever the
+// stream route's WAV header declares is what it plays — 24-bit/192 kHz
+// included. That is what makes it the path to a RoPieeeXL's real capability
+// rather than the fraction AirPlay exposes.
+//
+// The control URLs are stored rather than derived. A renderer publishes them
+// inside its device description at whatever paths and ports it likes, and
+// re-fetching that document before every command would put an HTTP round trip
+// in front of every volume nudge.
+type UPnPRenderer struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	IP   string `json:"ip"`
+	Port int    `json:"port"`
+	// Location is the device description URL, kept so a renderer whose
+	// control URLs go stale — a reboot onto a different port — can be
+	// re-described without the user finding it again.
+	Location string `json:"location"`
+	// UDN is the device's own unique name, stable across DHCP leases. The
+	// same job DeviceID does for AirPlay and MAC does for KEF.
+	UDN   string `json:"udn,omitempty"`
+	Room  string `json:"room,omitempty"`
+	Model string `json:"model,omitempty"`
+
+	// Control URLs, absolute. AVTransport is required; without
+	// RenderingControl the renderer simply has no volume HomeHub can set,
+	// which is a real configuration and not an error.
+	AVTransportURL      string `json:"avtransport_url"`
+	RenderingControlURL string `json:"rendering_control_url,omitempty"`
+	ConnectionMgrURL    string `json:"connection_manager_url,omitempty"`
+
+	// PlaysPCM is what the renderer said about linear PCM and WAV when it
+	// was added. Advisory: some renderers under-report badly, so this is
+	// shown at setup rather than used to block a play — refusing working
+	// hardware on its own bad paperwork would be the worse failure.
+	PlaysPCM bool `json:"plays_pcm"`
+}
+
 // AirPlaySpeaker is a registered AirPlay (RAOP) receiver — a RoPieee, an
 // Apple TV, any shairport-sync box.
 //

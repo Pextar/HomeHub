@@ -282,6 +282,12 @@ zones — sets of speakers that play together regardless of make. See
 | DELETE | `/api/media/history?room=&uri=` | One room stops remembering one thing; without `uri`, the lot. Admin-only |
 | GET | `/api/media/history/top?room=&limit=&hour=` | What a room keeps coming back to — at a given local hour with `hour=` (`0`–`23` or `now`) |
 | GET | `/api/media/insights?limit=` | The household's listening summed over every room |
+| GET | `/api/upnp/renderers` | Registered DLNA renderers — the only endpoints that can be handed hi-res |
+| POST | `/api/upnp/describe` | `{"location"}` — read a device description without registering it |
+| POST | `/api/upnp/renderers` | `{"location","name","room"}` — describe and register |
+| PUT | `/api/upnp/renderers/{id}` | Rename / re-room |
+| POST | `/api/upnp/renderers/{id}/refresh` | Re-read the description after the device moved ports |
+| DELETE | `/api/upnp/renderers/{id}` | Remove, dropping it from any zone |
 | GET | `/api/qobuz/status` | App credentials + account state, and the best format the plan allows |
 | PUT | `/api/qobuz/config` | `{"app_id","app_secret"}` — issued to the application, not the listener |
 | POST | `/api/qobuz/login` | `{"email","password"}` — the password is forwarded and dropped, never stored |
@@ -296,7 +302,7 @@ zones — sets of speakers that play together regardless of make. See
 | POST | `/api/media/timers/fade/cancel` | `{"room"}` — stop a ramp without deleting anything |
 
 Zone members are bridge-qualified speaker ids: `sonos:abc`, `kef:def`,
-`airplay:ghi`.
+`airplay:ghi`, `upnp:jkl`.
 
 `POST /play` answers with the route it chose, so a client can be honest about
 what is about to happen:

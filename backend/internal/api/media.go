@@ -50,12 +50,17 @@ const mediaTimeout = 45 * time.Second
 // adding a second round of traffic to every speaker.
 func (s *Server) endpoints() map[string]media.Endpoint {
 	out := make(map[string]media.Endpoint,
-		len(s.Store.Sonos)+len(s.Store.KEF)+len(s.Store.AirPlay))
+		len(s.Store.Sonos)+len(s.Store.KEF)+len(s.Store.AirPlay)+len(s.Store.UPnP))
 	for id, sp := range s.Store.Sonos {
 		out[store.QualifySonos(id)] = mediabridge.NewSonosEndpoint(*sp, "", s.sonosState)
 	}
 	for id, sp := range s.Store.KEF {
 		out[store.QualifyKEF(id)] = mediabridge.NewKEFEndpoint(*sp, s.kefState)
+	}
+	// A UPnP renderer holds its own transport state, so unlike an AirPlay
+	// receiver it is asked rather than inferred — see mediabridge/upnp.go.
+	for id, rn := range s.Store.UPnP {
+		out[store.QualifyUPnP(id)] = mediabridge.NewUPnPEndpoint(*rn)
 	}
 	// AirPlay receivers have no monitor to read from — there is nothing on
 	// the device to poll — so their state comes from the live cast instead.

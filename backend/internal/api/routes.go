@@ -299,6 +299,16 @@ func (s *Server) registerMediaRoutes(api *mux.Router) {
 // the play-item route above, while KEF's goes back out through Connect.
 // The developer app's client ID stays admin-only, like every setup surface.
 func (s *Server) registerSpotifyRoutes(api *mux.Router) {
+	// UPnP/DLNA renderers. The only endpoint that fetches rather than
+	// receives, and so the only one that can be handed hi-res — see
+	// internal/api/upnp.go.
+	api.HandleFunc("/upnp/renderers", s.requireAdminOrKid(s.upnpRenderers)).Methods("GET")
+	api.HandleFunc("/upnp/describe", s.requireAdmin(s.upnpDescribe)).Methods("POST")
+	api.HandleFunc("/upnp/renderers", s.requireAdmin(s.upnpCreateRenderer)).Methods("POST")
+	api.HandleFunc("/upnp/renderers/{id}", s.requireAdmin(s.upnpUpdateRenderer)).Methods("PUT")
+	api.HandleFunc("/upnp/renderers/{id}/refresh", s.requireAdmin(s.upnpRefreshRenderer)).Methods("POST")
+	api.HandleFunc("/upnp/renderers/{id}", s.requireAdmin(s.upnpDeleteRenderer)).Methods("DELETE")
+
 	// Qobuz: app credentials, then an account. Two steps because they are
 	// issued to two different parties — see internal/api/qobuz.go.
 	api.HandleFunc("/qobuz/status", s.requireAdminOrKid(s.qobuzStatus)).Methods("GET")

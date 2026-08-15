@@ -483,6 +483,52 @@ separate setup steps with separate error messages. `track/getFileUrl` is the one
 signed call: MD5 over the path, its parameters in alphabetical order, the
 timestamp and the secret, excluding the parameters signing itself adds.
 
+### The renderer route, and why AirPlay is not the ceiling
+
+AirPlay 1 carries 44.1 kHz/16-bit and nothing else. That is RAOP, not a HomeHub
+choice, and AirPlay 2 does not change it. So a receiver reached over AirPlay can
+never be sent hi-res however good the box is — and plenty of them are much
+better than that. A Raspberry Pi running RoPieeeXL plays 24-bit/192 kHz happily,
+over Roon's RAAT (closed, and not something HomeHub can speak) or over UPnP,
+which is open.
+
+`internal/upnp` is the way in. The trick is to stop pushing:
+
+| | AirPlay receiver | UPnP renderer |
+| --- | --- | --- |
+| Who holds the audio | HomeHub pushes RTP | the device fetches HTTP |
+| Format ceiling | 44.1 kHz/16-bit, by protocol | none — it reads the WAV header |
+| Capability | `CapAirPlay` | `CapPlayURI` |
+| Sync | clocked | buffered |
+
+The same physical box is CD-quality on one row and unlimited on the other, and
+nothing about the hardware changed. `SetAVTransportURI` hands it HomeHub's
+stream URL, it fetches, and the header written by `stream.WAVHeader` tells it
+exactly what the samples are — which is why the never-downsample work had to
+land first for any of this to be worth doing.
+
+Notes on the bridge:
+
+- **Control URLs are stored, not derived.** Sonos is always `:1400` with fixed
+  paths; a generic renderer publishes its services at whatever URLs it likes
+  inside a device description. So registration is a *describe* — fetch the
+  document, resolve the relative control URLs against it, remember them — and
+  `POST /api/upnp/renderers/{id}/refresh` re-reads it when a reboot moves them.
+- **The device's own claims are still validated.** The description is fetched
+  from the device, but its contents are the device's assertion about where to
+  send commands; each URL goes through the LAN policy, or a renderer naming an
+  off-LAN host would make HomeHub a proxy for it.
+- **Protocol info is advisory.** A renderer that lists neither WAV nor linear
+  PCM probably cannot be served losslessly, and that is worth showing at setup —
+  but it never blocks a play, because renderers under-report badly and refusing
+  working hardware on its own bad paperwork is the worse failure. Note that
+  linear PCM is published with parameters attached
+  (`audio/L16;rate=44100;channels=2`), so the type is compared without them.
+- **No grouping, no native service.** UPnP has no multi-room bus, so two
+  renderers playing together is HomeHub feeding both — the stream route,
+  buffered — and never a group with one leading. A renderer holds no service
+  account of its own either.
+
 `PCMFormat.Carries` is the predicate, and it is deliberately one-directional:
 16-bit over a 24-bit link is wasteful and lossless; 24-bit over a 16-bit link
 is not. A provider that does not implement `PCMReporter` is assumed to be CD
