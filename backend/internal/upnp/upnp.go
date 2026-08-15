@@ -403,12 +403,12 @@ func Protocols(ctx context.Context, d *Device) (ProtocolInfo, error) {
 		if i := strings.IndexByte(mime, ';'); i >= 0 {
 			mime = strings.TrimSpace(mime[:i])
 		}
-		switch {
-		case mime == "audio/l16" || mime == "audio/l24":
+		switch mime {
+		case "audio/l16", "audio/l24":
 			out.LinearPCM = true
-		case mime == "audio/wav" || mime == "audio/x-wav" || mime == "audio/vnd.wave":
+		case "audio/wav", "audio/x-wav", "audio/vnd.wave":
 			out.WAV = true
-		case mime == "audio/flac" || mime == "audio/x-flac":
+		case "audio/flac", "audio/x-flac":
 			out.FLAC = true
 		}
 	}

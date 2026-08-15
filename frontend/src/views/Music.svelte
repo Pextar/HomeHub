@@ -79,6 +79,7 @@
         SpotifyArtistDetail,
         SpotifyContextDetail,
         MediaZone,
+        UPnPRenderer,
     } from "../lib/types";
 
     // The three bridges, and the model that turns them into rooms. The busy
