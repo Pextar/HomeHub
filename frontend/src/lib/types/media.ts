@@ -4,10 +4,13 @@
 // in sonos.ts and kef.ts stay: the per-speaker detail views need vendor
 // specifics that don't generalise. See docs/MEDIA-PROTOCOL.md.
 
-/** Which bridge is behind an endpoint. `airplay` is a protocol rather than a
- *  make — a RoPieee, an Apple TV and any shairport-sync box are all driven
- *  identically, which is exactly what a vendor means to the route engine. */
-export type MediaVendor = "sonos" | "kef" | "airplay";
+/** Which bridge is behind an endpoint. `airplay` and `upnp` are protocols
+ *  rather than makes — a RoPieee, an Apple TV and any shairport-sync box are
+ *  driven identically, which is exactly what a vendor means to the route
+ *  engine. The two are opposites in who holds the audio: an AirPlay receiver
+ *  is pushed samples and is stuck with 44.1 kHz/16-bit, while a UPnP renderer
+ *  fetches and can take any format. */
+export type MediaVendor = "sonos" | "kef" | "airplay" | "upnp";
 
 /**
  * One thing a speaker can do. These are the strings the backend emits, and
@@ -161,19 +164,33 @@ export interface MediaQualityStage {
 /** An improvement that is actually available. Absent is a real answer and
  *  must render as one rather than as a disabled button. */
 export interface MediaQualityFix {
-  /** The lever: "stream_quality" is the only one today. */
+  /** The lever. "stream_quality" is the only value that maps to a control;
+   *  empty means the improvement is something the listener does to their
+   *  zone, so render it as a sentence and never as a button. */
   setting: string;
   label: string;
   detail?: string;
 }
 
+/** The end-to-end answer, in the states it actually has.
+ *
+ *  `up_to` is the one a boolean couldn't hold: on a route where the speaker
+ *  holds the service account, nothing in the chain is lossy but nobody
+ *  measured the far end either. Rendering it as "lossless" invents a reading;
+ *  rendering it as "not lossless" tells someone with a lossless plan their
+ *  system is worse than it is. It gets its own badge. */
+export type MediaVerdict = "lossless" | "up_to" | "capped" | "unknown";
+
 export interface MediaChain {
   source: MediaQualityStage;
   transport: MediaQualityStage;
-  /** End to end: both stages, or neither. */
+  verdict: MediaVerdict;
+  /** Bit-exact *and* known to be — true only for verdict `lossless`.
+   *  Deliberately false for `up_to`; switch on `verdict` for the badge. */
   lossless: boolean;
-  /** The stage that caps the result. What the UI leads with when not
-   *  lossless — "not lossless" alone is not actionable. */
+  /** The stage that caps the result. What the UI leads with on `capped` —
+   *  "not lossless" alone is not actionable. Empty on `up_to`: nothing is
+   *  capping it, HomeHub just can't see the far end. */
   limited_by?: string;
   summary: string;
   fix?: MediaQualityFix;
@@ -485,4 +502,58 @@ export interface AnnounceResult {
   /** False when the words were dropped and only the chime played. */
   spoken: boolean;
   duration_ms: number;
+}
+
+// ── Qobuz ────────────────────────────────────────────────────────────────
+// The one provider HomeHub streams losslessly. Two setup steps rather than
+// one, because the credentials come from two different parties: the app id
+// and secret are issued to the *application* (Qobuz issues them on request),
+// while the login is the listener's own. `configured` and `connected` are
+// therefore separate, and the UI must be able to say which is missing.
+
+export interface QobuzStatus {
+  configured: boolean;
+  connected: boolean;
+  display_name?: string;
+  /** The subscription's name, e.g. "Studio Premier". */
+  plan?: string;
+  /** Qobuz's format id: 5=MP3, 6=FLAC CD, 7=FLAC 24/96, 27=FLAC 24/192. */
+  max_format?: number;
+  /** The same, spelled out — use this rather than mapping the number again. */
+  max_format_label?: string;
+}
+
+// ── UPnP / DLNA renderers ────────────────────────────────────────────────
+// The only endpoint in the house that fetches rather than receives, and so the
+// only one that can be handed hi-res: it reads the WAV header instead of being
+// bound to AirPlay's 44.1 kHz/16-bit. See docs/MEDIA-PROTOCOL.md.
+
+export interface UPnPRenderer {
+  id: string;
+  name: string;
+  ip: string;
+  port: number;
+  /** The device description URL, kept so control URLs can be re-read. */
+  location: string;
+  udn?: string;
+  room?: string;
+  model?: string;
+  avtransport_url: string;
+  rendering_control_url?: string;
+  connection_manager_url?: string;
+  /** What the renderer said about WAV and linear PCM when it was added.
+   *  Advisory — renderers under-report, so this never blocks a play. */
+  plays_pcm: boolean;
+}
+
+/** What `POST /api/upnp/describe` answers: a look before committing. */
+export interface UPnPDescription {
+  name: string;
+  manufacturer?: string;
+  model?: string;
+  udn?: string;
+  plays_pcm: boolean;
+  /** Every sink MIME type the renderer listed, for showing when it says it
+   *  can't play what HomeHub serves. */
+  formats?: string[];
 }

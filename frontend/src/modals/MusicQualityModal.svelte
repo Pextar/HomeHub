@@ -10,7 +10,11 @@
     export function formatQuality(q: MediaQuality): string {
         const codec = codecName(q.codec);
         if (q.lossless && q.sample_rate && q.bit_depth) {
-            return `${codec} ${khz(q.sample_rate)} · ${q.bit_depth}-bit`;
+            // "up to" belongs on a lossless ceiling for the same reason it
+            // belongs on a bitrate: it is the most the route can carry, not
+            // something anyone read off the far end.
+            const hedge = q.approximate ? "up to " : "";
+            return `${codec} ${hedge}${khz(q.sample_rate)} · ${q.bit_depth}-bit`;
         }
         if (q.bitrate_kbps) {
             return `${codec} ${q.approximate ? "up to " : ""}${q.bitrate_kbps} kbps`;
@@ -62,15 +66,18 @@
      * picker sits under a heading that says what it reaches, and the routes it
      * doesn't reach say so in their own rows rather than being quietly absent.
      *
-     * What this sheet must never do is offer to make Spotify lossless. It
-     * cannot be done, the backend says so, and a control that implies
-     * otherwise is worse than no control.
+     * What this sheet must never do is offer a control that would make a
+     * service lossless. Where the ceiling really is HomeHub's own decoder
+     * rather than the service, the backend says so and offers the move the
+     * listener can make themselves — a sentence, not a button, because it is
+     * their zone to change and not a switch this app owns.
      */
     import { onMount } from "svelte";
     import Modal from "../components/Modal.svelte";
     import Icon from "../components/Icon.svelte";
     import { closeModal } from "../lib/modal.svelte";
     import { api } from "../lib/api";
+    import { verdictLabel } from "../lib/utils";
     import { toasts } from "../lib/stores.svelte";
     import type { MediaQualityReport, StreamQuality } from "../lib/types";
 
@@ -141,11 +148,16 @@
             <div class="q-chains">
                 {#each [...decoded, ...speakerServed] as r (r.route)}
                     {@const chain = r.chain}
+                    {@const verdict = verdictLabel(chain.verdict)}
                     <div class="q-chain">
                         <div class="q-chain-head">
                             <span class="q-route">{r.label}</span>
-                            <span class="q-tag mono" class:lossless={chain.lossless}>
-                                {chain.lossless ? "LOSSLESS" : "NOT LOSSLESS"}
+                            <!-- Reads `verdict`, not `lossless`: a route the
+                                 speaker serves for itself is "up to
+                                 lossless", and neither neighbouring badge is
+                                 true of it. -->
+                            <span class="q-tag mono" class:lossless={verdict.on}>
+                                {verdict.text.toUpperCase()}
                             </span>
                         </div>
                         <!-- Two stages, always both. Showing only the weak one
@@ -156,6 +168,15 @@
                             <span class="q-stage-name">{chain.source.name}</span>
                             <span class="q-stage-val mono">{formatQuality(chain.source.quality)}</span>
                         </div>
+                        <!-- The service's own caveat about that number: which
+                             tier this route can actually reach, and what
+                             lossless would additionally require. It is the
+                             only place the ceiling is explained rather than
+                             merely stated, so it sits with the number it
+                             qualifies rather than in the summary. -->
+                        {#if chain.source.detail}
+                            <p class="q-stage-note">{chain.source.detail}</p>
+                        {/if}
                         <div class="q-stage">
                             <span class="q-stage-name">{chain.transport.name}</span>
                             <span class="q-stage-val mono"
@@ -271,6 +292,14 @@
     }
     .q-stage-name {
         color: var(--text-mute);
+    }
+    /* Indented under the stage it qualifies, and dimmer than it, so the
+       numbers stay the thing being scanned. */
+    .q-stage-note {
+        margin: 0 0 2px;
+        font-size: 11px;
+        line-height: 1.4;
+        color: var(--text-dim);
     }
     .q-stage-val {
         color: var(--text);

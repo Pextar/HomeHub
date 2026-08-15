@@ -30,16 +30,19 @@
     import type { SonosBridge } from "../../lib/music/sonos.svelte";
     import type { KEFBridge } from "../../lib/music/kef.svelte";
     import type { AirPlayBridge } from "../../lib/music/airplay.svelte";
+    import type { UPnPBridge } from "../../lib/music/upnp.svelte";
     import type {
         SonosSpeakerView,
         KEFSpeakerView,
         AirPlaySpeakerView,
+        UPnPRenderer,
     } from "../../lib/types";
 
     let {
         sonos,
         kef,
         airplay,
+        upnp,
         totalSpeakers,
         readyCount,
         onBack,
@@ -47,9 +50,11 @@
         onEditSonos,
         onEditKEF,
         onEditAirPlay,
+        onEditUPnP,
         onOpenEvents,
         onOpenQuality,
         onOpenConnect,
+        onOpenQobuz,
         spotifyPlayback = false,
         /** Opening a KEF speaker points the destination at it, when it can take one. */
         onKEFOpened,
@@ -60,6 +65,7 @@
         sonos: SonosBridge;
         kef: KEFBridge;
         airplay: AirPlayBridge;
+        upnp: UPnPBridge;
         totalSpeakers: number;
         readyCount: number;
         onBack: () => void;
@@ -67,8 +73,10 @@
         onEditSonos: (sp: SonosSpeakerView) => void;
         onEditKEF: (sp: KEFSpeakerView) => void;
         onEditAirPlay: (sp: AirPlaySpeakerView) => void;
+        onEditUPnP: (rn: UPnPRenderer) => void;
         onOpenQuality: () => void;
         onOpenConnect: () => void;
+        onOpenQobuz: () => void;
         /** Whether this Spotify login can reach the player endpoints at all.
          *  The row is absent rather than disabled when it can't: a control
          *  that opens onto "reconnect your account" is a worse answer than
@@ -364,6 +372,56 @@
     </section>
     {/if}
 
+    <!-- ── UPnP renderers ──────────────────────────────────────────────
+         Listed beside AirPlay because they are the same kind of thing — a
+         protocol rather than a make — and worth telling apart because they
+         are opposites in the one way that decides sound quality. An AirPlay
+         receiver is *pushed* samples and is stuck at 44.1 kHz/16-bit by RAOP;
+         a renderer *fetches*, reads the header, and plays whatever arrives.
+         The same box can be both, and this is the row that gets it hi-res.
+
+         Like AirPlay, no settings screen: what a renderer is playing is
+         whatever HomeHub pointed it at, which the room's player already
+         shows. The row opens the registration form, which is all there is to
+         change. -->
+    {#if upnp.renderers.length > 0}
+    <section class="block">
+        <div class="block-head">
+            <div class="eyrow">UPnP renderers</div>
+            <span class="hint">
+                <span class="mono">{upnp.renderers.length}</span> registered
+            </span>
+        </div>
+        <div class="sp-list">
+            {#each upnp.renderers as rn (rn.id)}
+                <div class="sp-row ap-row">
+                    <span class="shot placeholder" aria-hidden="true"></span>
+                    <span class="sp-meta">
+                        <button class="ap-open" onclick={() => onEditUPnP(rn)}>
+                            <span class="sp-name">{rn.name}</span>
+                            <span class="sp-sub">
+                                {[rn.model, rn.room].filter(Boolean).join(" · ") || rn.ip}
+                            </span>
+                        </button>
+                    </span>
+                    <!-- The one fact worth carrying on the row: this endpoint
+                         has no format ceiling, which no other one here can
+                         say. Dimmed when the renderer didn't list PCM, since
+                         that is a maybe rather than a no. -->
+                    <span class="z-tag mono" class:hires={rn.plays_pcm}>
+                        {rn.plays_pcm ? "Hi-res capable" : "PCM unconfirmed"}
+                    </span>
+                </div>
+            {/each}
+        </div>
+        <p class="hint">
+            A renderer fetches the stream itself, so it plays whatever HomeHub
+            sends it — including 24-bit, which AirPlay cannot carry. Add one to
+            a room to play to it.
+        </p>
+    </section>
+    {/if}
+
     <!-- ── Live updates ────────────────────────────────────────────────
          Speakers is where the devices are managed, so it is where the
          plumbing behind them belongs. The topbar chip says which state we're
@@ -400,6 +458,16 @@
         {/snippet}
     </NavRow>
     {/if}
+
+    <!-- ── Qobuz ───────────────────────────────────────────────────────
+         Beside Sound quality rather than in Settings, and for the same
+         reason: it is the one service that changes the answer that sheet
+         gives. Everything else here caps at a compressed source. -->
+    <NavRow icon="radio" title="Qobuz" onClick={onOpenQobuz}>
+        {#snippet sub()}
+            The one service HomeHub plays bit-exact, end to end
+        {/snippet}
+    </NavRow>
 
     <!-- ── Sound quality ───────────────────────────────────────────────
          Here rather than in Settings because it is a fact about these
@@ -439,6 +507,13 @@
     {/if}
     </div><!-- /.sp-split -->
 <style>
+    /* Hi-res takes the sanctioned amber, the same token a lossless chain
+       gets: it is the same claim about the path. */
+    .z-tag {
+        font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase;
+        color: var(--text-dim); flex-shrink: 0;
+    }
+    .z-tag.hires { color: var(--on); }
     /* An AirPlay row is a container rather than a button: the name opens the
        registration form and the slider is its own control, and nesting a
        slider inside a button would make the whole row swallow the drag. */

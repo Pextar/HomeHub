@@ -221,7 +221,7 @@ func (s *Server) kefDeleteSpeaker(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.kefEvents().Nudge() // stop polling it
-	s.pruneDeadRooms()      // and drop its shelf with it
+	s.pruneDeadRooms()    // and drop its shelf with it
 	w.WriteHeader(http.StatusNoContent)
 }
 

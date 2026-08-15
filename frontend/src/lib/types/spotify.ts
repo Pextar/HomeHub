@@ -129,6 +129,11 @@ export interface KEFSpotifyView {
 
 export interface SpotifyItem {
   kind: "track" | "album" | "playlist" | "artist";
+  /** Which service this came from. Absent means Spotify, which is what every
+   *  row was before a second provider existed — so old callers keep working
+   *  and the play path defaults the same way the backend does. Carried
+   *  because a result is only playable by the service that issued its URI. */
+  provider?: string;
   /** Canonical Spotify URI (spotify:track:…) — what the play endpoint takes. */
   uri: string;
   name: string;

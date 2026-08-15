@@ -28,6 +28,7 @@ import (
 	"homehub/internal/media"
 	"homehub/internal/mqtt"
 	"homehub/internal/push"
+	"homehub/internal/qobuz"
 	"homehub/internal/sonos"
 	"homehub/internal/spotify"
 	"homehub/internal/store"
@@ -40,12 +41,16 @@ const maxRequestBody = 1 << 20 // 1 MiB
 
 // Server wires HTTP handlers to a Store.
 type Server struct {
-	Store         *store.Store
-	Matter        *matter.Client  // optional; nil-safe via Matter.Enabled()
-	MQTT          *mqtt.Client    // optional; nil-safe via MQTT.Enabled()
-	LLM           *llm.Client     // optional; nil-safe via LLM.Enabled(). Powers the assistant.
-	Push          *push.Service   // optional; nil means push notifications are disabled
-	Spotify       *spotify.Client // optional; nil disables Spotify search in the Music view
+	Store   *store.Store
+	Matter  *matter.Client  // optional; nil-safe via Matter.Enabled()
+	MQTT    *mqtt.Client    // optional; nil-safe via MQTT.Enabled()
+	LLM     *llm.Client     // optional; nil-safe via LLM.Enabled(). Powers the assistant.
+	Push    *push.Service   // optional; nil means push notifications are disabled
+	Spotify *spotify.Client // optional; nil disables Spotify search in the Music view
+	// Qobuz is optional; nil disables the one provider that streams
+	// losslessly. Kept beside Spotify rather than under it because the two
+	// are peers — the Music view searches both.
+	Qobuz         *qobuz.Client
 	AuthUser      string
 	AuthPass      string
 	SessionSecret []byte // HMAC key for cookie sessions; see LoadOrCreateSessionSecret
@@ -145,6 +150,10 @@ type Server struct {
 	// household changing its stream quality gets a decoder that honours the
 	// change rather than one built at the old bitrate — see decoder().
 	librespotBitrate int
+	// qobuzDecoder is built once and reused: unlike librespot it holds no
+	// subprocess and no bitrate, so nothing about a settings change requires
+	// rebuilding it.
+	qobuzDecoder *stream.Qobuz
 	// caster pushes audio to AirPlay receivers. Created lazily like the
 	// two above, and like them it holds a live session that has to be shut
 	// down: a cast that outlives its zone keeps sending to a receiver

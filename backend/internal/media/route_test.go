@@ -390,3 +390,166 @@ func TestRouteSyncSingle(t *testing.T) {
 		t.Errorf("two endpoints on stream = %q, want %q", got, SyncBuffered)
 	}
 }
+
+// hiResProv decodes above what AirPlay can carry — the case the whole
+// never-downsample rule exists for, and the one no provider in this repo hits
+// yet. It is written as a test fixture rather than waited for, because the
+// router's behaviour on the day it appears should be settled now.
+type hiResProv struct {
+	*fakeProvider
+	streamImpl
+	format PCMFormat
+}
+
+func (p hiResProv) DecodedFormat() PCMFormat { return p.format }
+
+func hiRes(f PCMFormat) Provider {
+	return hiResProv{
+		fakeProvider: &fakeProvider{routes: RouteSet{RouteAirPlay, RouteStream}},
+		streamImpl:   streamImpl{Availability{OK: true, Configured: true}},
+		format:       f,
+	}
+}
+
+// The payoff: a track AirPlay cannot carry does not fail, and is not reduced.
+// It takes the next route down, which serves any format intact.
+func TestHiResRoutesAroundAirPlayRatherThanBeingReduced(t *testing.T) {
+	eps := []Endpoint{
+		ep("Study", VendorKEF, CapAirPlay|CapPlayURI, ""),
+		ep("Hall", VendorKEF, CapAirPlay|CapPlayURI, ""),
+	}
+	hi := PCMFormat{SampleRate: 96000, BitDepth: 24, Channels: 2, LittleEndian: true}
+	p := hiRes(hi)
+
+	plan, err := ResolveFor(p, eps, &hi)
+	if err != nil {
+		t.Fatalf("a hi-res track must still play: %v", err)
+	}
+	if plan.Route != RouteStream {
+		t.Errorf("route = %s, want stream — AirPlay would have had to reduce it", plan.Route)
+	}
+}
+
+// And the same provider playing a CD-quality track keeps AirPlay. This is the
+// case an entitlement-based decision got wrong: a hi-res *subscription* mostly
+// plays albums that are not hi-res, and blocking those would strip the clocked
+// route from most of a library — or, on AirPlay-only receivers, refuse to play
+// them at all.
+func TestCDTrackKeepsAirPlayOnAHiResCapableProvider(t *testing.T) {
+	eps := []Endpoint{
+		ep("Study", VendorKEF, CapAirPlay|CapPlayURI, ""),
+		ep("Hall", VendorKEF, CapAirPlay|CapPlayURI, ""),
+	}
+	// The provider could go to 24/192; this particular track is CD quality.
+	p := hiRes(PCMFormat{SampleRate: 192000, BitDepth: 24, Channels: 2, LittleEndian: true})
+	cd := CDQuality
+
+	plan, err := ResolveFor(p, eps, &cd)
+	if err != nil {
+		t.Fatalf("a CD track must play: %v", err)
+	}
+	if plan.Route != RouteAirPlay {
+		t.Errorf("route = %s, want airplay — nothing is being reduced", plan.Route)
+	}
+}
+
+// With no track chosen, nothing is blocked. The zone reads ask "what would a
+// tap here do", and the answer genuinely depends on which track — refusing on
+// a guess is the same mistake as reducing on one.
+func TestAnUnknownFormatBlocksNothing(t *testing.T) {
+	eps := []Endpoint{ep("Study", VendorKEF, CapAirPlay, "")}
+	p := hiRes(PCMFormat{SampleRate: 192000, BitDepth: 24, Channels: 2, LittleEndian: true})
+
+	plan, err := Resolve(p, eps)
+	if err != nil {
+		t.Fatalf("resolve with no track: %v", err)
+	}
+	if plan.Route != RouteAirPlay {
+		t.Errorf("route = %s, want airplay", plan.Route)
+	}
+}
+
+// And the rejection says which two formats disagree. "AirPlay unavailable"
+// would leave someone unable to tell a network fault from a format they chose.
+func TestAirPlayRejectionNamesBothFormats(t *testing.T) {
+	eps := []Endpoint{ep("Study", VendorKEF, CapAirPlay, "")}
+	deep := PCMFormat{SampleRate: 44100, BitDepth: 24, Channels: 2, LittleEndian: true}
+	p := hiRes(deep)
+
+	_, err := ResolveFor(p, eps, &deep)
+	if err == nil {
+		t.Fatal("an AirPlay-only zone can't carry 24-bit, so nothing should serve it")
+	}
+	var rerr *RouteError
+	if !errors.As(err, &rerr) {
+		t.Fatalf("error = %v, want a RouteError naming each rejection", err)
+	}
+	var reason string
+	for _, b := range rerr.Blocked {
+		if b.Route == RouteAirPlay {
+			reason = b.Reason
+		}
+	}
+	for _, want := range []string{"44.1 kHz · 16-bit", "44.1 kHz · 24-bit", "won't reduce"} {
+		if !strings.Contains(reason, want) {
+			t.Errorf("reason %q should mention %q", reason, want)
+		}
+	}
+}
+
+// CD-quality sources are untouched by any of this: AirPlay carries them
+// exactly, and it must stay ranked above the clockless stream route for them.
+func TestCDQualityStillPrefersAirPlay(t *testing.T) {
+	eps := []Endpoint{
+		ep("Study", VendorKEF, CapAirPlay|CapPlayURI, ""),
+		ep("Hall", VendorKEF, CapAirPlay|CapPlayURI, ""),
+	}
+	cd := CDQuality
+	plan, err := ResolveFor(hiRes(cd), eps, &cd)
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if plan.Route != RouteAirPlay {
+		t.Errorf("route = %s, want airplay — nothing is being reduced here", plan.Route)
+	}
+}
+
+// A carrier holds anything at or below itself, and nothing above it in any
+// single dimension. The asymmetry is the point: 16-bit audio over a 24-bit
+// link is wasteful and lossless, 24-bit over a 16-bit link is not.
+func TestCarriesIsOneDirectional(t *testing.T) {
+	cases := []struct {
+		name  string
+		limit PCMFormat
+		src   PCMFormat
+		want  bool
+	}{
+		{"same", CDQuality, CDQuality, true},
+		{"deeper words", CDQuality, PCMFormat{44100, 24, 2, true}, false},
+		{"faster rate", CDQuality, PCMFormat{96000, 16, 2, true}, false},
+		{"more channels", CDQuality, PCMFormat{44100, 16, 6, true}, false},
+		{"below the carrier is fine", PCMFormat{96000, 24, 2, true}, CDQuality, true},
+	}
+	for _, tc := range cases {
+		if got := tc.limit.Carries(tc.src); got != tc.want {
+			t.Errorf("%s: Carries = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+// A provider that cannot say what it decodes to is not assumed to be hi-res.
+// Guessing the other way would silently strip AirPlay from every zone the
+// moment a provider forgot to implement one optional interface.
+func TestASilentProviderIsNotAssumedHiRes(t *testing.T) {
+	eps := []Endpoint{ep("Study", VendorKEF, CapAirPlay, "")}
+	p := &fakeProvider{routes: RouteSet{RouteAirPlay}, stream: true,
+		streamAvail: Availability{OK: true, Configured: true}}
+	cd := CDQuality
+	plan, err := ResolveFor(p.build(), eps, &cd)
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if plan.Route != RouteAirPlay {
+		t.Errorf("route = %s, want airplay", plan.Route)
+	}
+}

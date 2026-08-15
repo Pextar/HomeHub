@@ -94,6 +94,60 @@ func (r Route) Sync(n int) Sync {
 	return SyncExact
 }
 
+// RouteLimit is the PCM format a route can carry without touching a sample,
+// for the routes where HomeHub puts samples on a wire itself. The bool is
+// false for routes that impose no limit at all.
+//
+// AirPlay 1 (RAOP) is 44.1 kHz 16-bit stereo and nothing else. That is fixed
+// by the protocol, not chosen here. The stream route has no ceiling: it serves
+// whatever it is handed under a header describing exactly that, so any format
+// given to it goes out intact.
+//
+// The speaker-served routes are absent because HomeHub never holds their
+// samples — the speaker fetches from the service and this process never sees a
+// byte of the audio, so it is in no position to limit or preserve anything.
+func RouteLimit(r Route) (PCMFormat, bool) {
+	if r == RouteAirPlay {
+		return CDQuality, true
+	}
+	return PCMFormat{}, false
+}
+
+// PCMReporter is a stream provider that can say what its decoder produces
+// before anything has been decoded. Optional, and asked rather than assumed:
+// the decoded format is a property of the decoder the provider owns, not of
+// the codec the service sends, and the two differ — a Vorbis stream has no bit
+// depth at all until something decodes it.
+//
+// It exists so the router can tell, without opening a stream, whether a route
+// would have to reduce this provider's audio to carry it.
+type PCMReporter interface {
+	DecodedFormat() PCMFormat
+}
+
+// RouteReduces reports whether route r would have to alter samples in format
+// decoded to carry them, and what the route's own limit is.
+//
+// This is the router's half of "never downsample". Where it says yes, the
+// answer is to route elsewhere — never to resample, requantise, or hand the
+// receiver something it will misread.
+//
+// It takes the format of the *specific thing about to play*, not a provider's
+// ceiling, and the difference is not academic. A Qobuz subscription entitled to
+// 24-bit/192 kHz mostly plays albums that are nothing of the sort; routing on
+// the entitlement would strip AirPlay from every one of them, and on a zone of
+// AirPlay-only receivers that means a CD-quality album cannot play at all. What
+// matters is what this track is, and a nil format means nobody knows yet — in
+// which case nothing is blocked, because refusing on a guess is the same
+// mistake in the other direction.
+func RouteReduces(r Route, decoded *PCMFormat) (limit PCMFormat, yes bool) {
+	limit, capped := RouteLimit(r)
+	if !capped || !decoded.Valid() {
+		return limit, false
+	}
+	return limit, !limit.Carries(*decoded)
+}
+
 // RouteSet is the set of routes a provider can serve.
 type RouteSet []Route
 
@@ -191,6 +245,17 @@ func (e *RouteError) Unwrap() error { return ErrNoRoute }
 // Routes are tried best-first and the first that fits wins. Every rejection
 // is recorded, so a total failure can explain itself.
 func Resolve(p Provider, endpoints []Endpoint) (*Plan, error) {
+	return ResolveFor(p, endpoints, nil)
+}
+
+// ResolveFor is Resolve told what the audio about to play actually is.
+//
+// Pass a format whenever one is known — at play time it always is, because the
+// item has been picked. Pass nil for the "what would a tap here do" reads,
+// where no track has been chosen and the answer genuinely depends on which one
+// is: a nil format blocks nothing, and a track that turns out not to fit is
+// caught by the resolve that happens when it is actually played.
+func ResolveFor(p Provider, endpoints []Endpoint, decoded *PCMFormat) (*Plan, error) {
 	if len(endpoints) == 0 {
 		return nil, ErrEmptyZone
 	}
@@ -203,7 +268,7 @@ func Resolve(p Provider, endpoints []Endpoint) (*Plan, error) {
 				fmt.Sprintf("%s can't be played this way", p.Name())})
 			continue
 		}
-		plan, why := tryRoute(r, p, endpoints)
+		plan, why := tryRoute(r, p, endpoints, decoded)
 		if plan != nil {
 			plan.Wake = wakeable(plan.Endpoints())
 			plan.Sync = r.Sync(len(plan.Endpoints()))
@@ -225,7 +290,7 @@ func rankedRoutes() []Route {
 // fit. Each branch states its own precondition rather than sharing a helper,
 // because the preconditions genuinely differ and folding them together is how
 // this kind of engine grows bugs that play music in the wrong room.
-func tryRoute(r Route, p Provider, eps []Endpoint) (*Plan, string) {
+func tryRoute(r Route, p Provider, eps []Endpoint, decoded *PCMFormat) (*Plan, string) {
 	switch r {
 	case RouteNative:
 		// A single speaker that streams the service itself. Multi-speaker
@@ -307,6 +372,17 @@ func tryRoute(r Route, p Provider, eps []Endpoint) (*Plan, string) {
 		}
 		if av := sp.StreamAvailable(); !av.OK {
 			return nil, av.Reason
+		}
+		// AirPlay 1 carries CD quality and nothing else, so a track that
+		// decodes above it can only travel this way by being reduced first.
+		// HomeHub does not reduce. Rejecting here rather than at cast time is
+		// what turns that into a better route instead of an error: the stream
+		// route ranks next and carries any format intact, so the zone plays —
+		// at full resolution — instead of failing after the tap.
+		if limit, yes := RouteReduces(RouteAirPlay, decoded); yes {
+			return nil, fmt.Sprintf(
+				"AirPlay carries %s and this is %s — HomeHub won't reduce it to fit",
+				limit.Label(), decoded.Label())
 		}
 		return &Plan{
 			Route:   RouteAirPlay,

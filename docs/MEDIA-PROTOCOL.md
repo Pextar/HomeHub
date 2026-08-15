@@ -96,20 +96,31 @@ and both vendors have it (Sonos `SetAVTransportURI`, KEF over UPnP AVTransport).
 A bitset on `Descriptor`, so the route engine and the UI can both reason about a
 speaker without knowing its vendor.
 
-| Capability | Sonos | KEF | AirPlay | Meaning |
-|---|:---:|:---:|:---:|---|
-| `CapTransport` | ● | ● | ◐ | play / pause / next / previous |
-| `CapVolume` | ● | ● | ● | 0-100 volume, mute |
-| `CapSeek` | ● | ○ | ○ | seek within a track |
-| `CapQueue` | ● | ○ | ○ | inspect and mutate a queue |
-| `CapGroup` | ● | ○ | ○ | native multi-speaker grouping |
-| `CapPlayURI` | ● | ● | ○ | be handed an arbitrary stream URL |
-| `CapNativeService` | ● | ○ | ○ | stream a service itself, from its own account link |
-| `CapConnect` | ○ | ● | ○ | be targeted by Spotify Connect |
-| `CapWake` | ○ | ● | ○ | be woken from standby / switched to network input |
-| `CapAirPlay` | ○ | ○ | ● | be *pushed* audio, with HomeHub keeping the clock |
+| Capability | Sonos | KEF | AirPlay | UPnP | Meaning |
+|---|:---:|:---:|:---:|:---:|---|
+| `CapTransport` | ● | ● | ◐ | ◐ | play / pause / next / previous |
+| `CapVolume` | ● | ● | ● | ◐ | 0-100 volume, mute |
+| `CapSeek` | ● | ○ | ○ | ○ | seek within a track |
+| `CapQueue` | ● | ○ | ○ | ○ | inspect and mutate a queue |
+| `CapGroup` | ● | ○ | ○ | ○ | native multi-speaker grouping |
+| `CapPlayURI` | ● | ● | ○ | ● | be handed an arbitrary stream URL |
+| `CapNativeService` | ● | ○ | ○ | ○ | stream a service itself, from its own account link |
+| `CapConnect` | ○ | ● | ○ | ○ | be targeted by Spotify Connect |
+| `CapWake` | ○ | ● | ○ | ○ | be woken from standby / switched to network input |
+| `CapAirPlay` | ○ | ○ | ● | ○ | be *pushed* audio, with HomeHub keeping the clock |
 
-● supported ○ not supported ◐ play and pause only
+● supported ○ not supported ◐ partial — see below
+
+A **UPnP renderer** is the mirror image of an AirPlay receiver, and the pair is
+worth reading together. Both are protocol rather than make; both hold no account
+and no queue. But an AirPlay receiver is *pushed* samples and is therefore stuck
+with RAOP's 44.1 kHz/16-bit, while a renderer is handed a URL and *fetches* —
+which is why it is the only endpoint in the house that can be given hi-res. Its
+`CapTransport` is partial for the same reason AirPlay's is (the queue lives on
+HomeHub's side, so next and previous have nothing to ask the device), and its
+`CapVolume` is conditional: a renderer that publishes no RenderingControl
+service has no volume to set, and the capability is dropped rather than
+advertised and left to fail.
 
 Three asymmetries drive the design. Sonos can stream a service from its own
 linked account and group natively; KEF cannot do either, and has to be woken
@@ -383,12 +394,22 @@ have to pick something to lie about.
 type Chain struct {
     Source    Stage   // what the service hands over
     Transport Stage   // what the route does to it
-    Lossless  bool    // both, or neither
-    LimitedBy string  // the stage that caps it
+    Verdict   Verdict // lossless | up_to | capped | unknown
+    Lossless  bool    // bit-exact *and* measured — only Verdict "lossless"
+    LimitedBy string  // the stage that caps it; empty when nothing does
     Summary   string  // the whole thing in a sentence
     Fix       *Fix    // the change that would improve it, or nil
 }
 ```
+
+**Four verdicts, not a boolean.** `lossless` is bit-exact with both stages
+known. `capped` is something in the chain throwing audio away, with
+`LimitedBy` naming it. `unknown` is a source that says nothing about itself.
+`up_to` is the one a boolean could not hold: nothing in the chain is lossy,
+but the far end was never measured — the speaker holds the service account and
+does not report what it negotiated. Calling that `lossless` invents a reading;
+calling it `capped` tells a listener on a lossless plan that their system is
+worse than it is. `Lossless` stays `false` for it, and the UI says "up to".
 
 **Transport, per route.** None of the five re-encodes. `native`, `group` and
 `connect` add nothing because the speaker fetches the service's own stream;
@@ -396,26 +417,200 @@ type Chain struct {
 the same samples into RTP. Every route in this system is a lossless carrier,
 which is exactly why the source is where the answer usually comes from.
 
-**Source, per provider.** Spotify's catalogue is Ogg Vorbis — lossy at the
-source, on every route, forever. What differs is how well HomeHub knows the
-number: on `stream` and `airplay` the bitrate is HomeHub's own decoder setting
-and is known exactly, while on the routes the speaker serves for itself the
-speaker negotiates with the service and never says what it settled on. Those
-are marked `approximate` and shown as "up to" rather than printed as a
-measurement.
+### Never downsample
+
+HomeHub does not resample, does not requantise, and does not mix down. Where a
+route cannot carry a source intact, the answer is to route elsewhere or to
+refuse — never to convert quietly. Three things enforce that:
+
+- **The header describes the samples.** `stream.WAVHeader` takes the stream's
+  `media.PCMFormat` rather than reading constants. This matters more than
+  downsampling would: a 24-bit/96 kHz source announced as 16-bit/44.1 is not
+  played slightly worse, it is read at the wrong word length and rate — noise,
+  at whatever volume the room was left on. `stream` therefore carries any
+  format intact and is the fallback for anything the other routes can't.
+- **`RouteLimit` states what a route can carry.** AirPlay 1 (RAOP) is 44.1 kHz
+  16-bit stereo and nothing else, fixed by the protocol. `stream` has no
+  ceiling. The speaker-served routes have none either, because HomeHub never
+  holds their samples.
+- **`Resolve` routes around a reducing transport.** `PCMReporter` lets a
+  provider declare what its decoder produces before anything is opened, and
+  `tryRoute` rejects `airplay` for a source above `RouteLimit`. A hi-res zone
+  of AirPlay receivers therefore lands on `stream` and plays at full
+  resolution, instead of failing at cast time. `airplay.Cast` keeps the same
+  check as a backstop.
+
+### Qobuz: the lossless source
+
+Spotify cannot be decoded losslessly by anyone outside Spotify, so lossless has
+to come from a service that hands over the file. Qobuz does — `track/getFileUrl`
+returns a signed, time-limited URL to the FLAC itself.
+
+| | Spotify | Qobuz |
+| --- | --- | --- |
+| Routes | native, group, connect, airplay, stream | airplay, stream |
+| Decoded by | librespot, out of process | `internal/stream.Qobuz`, in process |
+| Source | Ogg Vorbis, lossy | FLAC, 16/44.1 up to 24/192 |
+| Sequencing | librespot plays a Connect queue | HomeHub walks the track list itself |
+
+The contrast in the route column is the point. Spotify is served four ways and
+is lossy on the only two HomeHub controls; Qobuz is served one way and is
+lossless on it. That single route is not a limitation to apologise for — it is
+the route where HomeHub holds the audio, which is exactly why it can promise
+anything about it. No speaker here has a Qobuz account link HomeHub knows how to
+drive and there is no Connect equivalent, so those routes are not advertised;
+advertising a route a provider cannot serve would have the router pick it and
+fail at the tap.
+
+**Bit-exactness.** FLAC decoding is exact, so the samples re-served are the
+master. Packing them to interleaved little-endian is a truncation to the file's
+own word length, which changes no sample's value. Both depths are tested through
+a real encode/decode round trip, negatives and range limits included — if that
+test ever fails, "lossless" is a marketing word in this repo rather than a
+property of it.
+
+**The file is believed over everything else.** Catalogue metadata is a listing
+and the requested `format_id` is an intention; `StreamInfo` is the audio. The
+stream declares what the file turned out to be.
+
+**Format changes end a stream.** A WAV stream carries one format to its end, so
+an album whose next track is a different rate cannot continue without being
+converted. It stops instead, and the next play starts a fresh stream at the new
+format. Stopping early is explicable; silent resampling is not.
+
+**Entitlement is a ceiling, not a measurement.** A Studio plan streams hi-res
+and an older one caps at CD; both are lossless. `SourceQuality` reports the
+entitlement's maximum marked `approximate`, because a 16-bit album on a hi-res
+plan arrives at 16-bit. `DecodedFormat` reports the same ceiling, which
+deliberately errs toward the stream route: losing AirPlay's clock on a track
+that did not need to lose it beats planning a cast that must be refused once the
+file turns out to be 24-bit.
+
+**Credentials are two separate things.** The `app_id`/`app_secret` are issued to
+the *application* (Qobuz issues them on request to api@qobuz.com); the account
+login is the listener's. HomeHub ships no app credentials — embedding someone
+else's would be a licence breach and a secret in a public repo — so the two are
+separate setup steps with separate error messages. `track/getFileUrl` is the one
+signed call: MD5 over the path, its parameters in alphabetical order, the
+timestamp and the secret, excluding the parameters signing itself adds.
+
+### The renderer route, and why AirPlay is not the ceiling
+
+AirPlay 1 carries 44.1 kHz/16-bit and nothing else. That is RAOP, not a HomeHub
+choice, and AirPlay 2 does not change it. So a receiver reached over AirPlay can
+never be sent hi-res however good the box is — and plenty of them are much
+better than that. A Raspberry Pi running RoPieeeXL plays 24-bit/192 kHz happily,
+over Roon's RAAT (closed, and not something HomeHub can speak) or over UPnP,
+which is open.
+
+`internal/upnp` is the way in. The trick is to stop pushing:
+
+| | AirPlay receiver | UPnP renderer |
+| --- | --- | --- |
+| Who holds the audio | HomeHub pushes RTP | the device fetches HTTP |
+| Format ceiling | 44.1 kHz/16-bit, by protocol | none — it reads the WAV header |
+| Capability | `CapAirPlay` | `CapPlayURI` |
+| Sync | clocked | buffered |
+
+The same physical box is CD-quality on one row and unlimited on the other, and
+nothing about the hardware changed. `SetAVTransportURI` hands it HomeHub's
+stream URL, it fetches, and the header written by `stream.WAVHeader` tells it
+exactly what the samples are — which is why the never-downsample work had to
+land first for any of this to be worth doing.
+
+Notes on the bridge:
+
+- **Control URLs are stored, not derived.** Sonos is always `:1400` with fixed
+  paths; a generic renderer publishes its services at whatever URLs it likes
+  inside a device description. So registration is a *describe* — fetch the
+  document, resolve the relative control URLs against it, remember them — and
+  `POST /api/upnp/renderers/{id}/refresh` re-reads it when a reboot moves them.
+- **The device's own claims are still validated.** The description is fetched
+  from the device, but its contents are the device's assertion about where to
+  send commands; each URL goes through the LAN policy, or a renderer naming an
+  off-LAN host would make HomeHub a proxy for it.
+- **Protocol info is advisory.** A renderer that lists neither WAV nor linear
+  PCM probably cannot be served losslessly, and that is worth showing at setup —
+  but it never blocks a play, because renderers under-report badly and refusing
+  working hardware on its own bad paperwork is the worse failure. Note that
+  linear PCM is published with parameters attached
+  (`audio/L16;rate=44100;channels=2`), so the type is compared without them.
+- **No grouping, no native service.** UPnP has no multi-room bus, so two
+  renderers playing together is HomeHub feeding both — the stream route,
+  buffered — and never a group with one leading. A renderer holds no service
+  account of its own either.
+
+`PCMFormat.Carries` is the predicate, and it is deliberately one-directional:
+16-bit over a 24-bit link is wasteful and lossless; 24-bit over a 16-bit link
+is not. A provider that does not implement `PCMReporter` is assumed to be CD
+quality rather than assumed to be hi-res — guessing the other way would strip
+AirPlay from every zone the moment someone forgot an optional interface.
+
+**Source, per provider — and per route, which is the part that bites.** Since
+September 2025, Spotify Premium streams up to 24-bit/44.1 kHz FLAC. That
+changed the answer on some routes and not others, so the source is no longer
+one fact about a service:
+
+| Route | What Spotify hands over | Known how |
+| --- | --- | --- |
+| `native`, `group`, `connect` | up to FLAC 44.1 kHz · 24-bit | ceiling — the speaker holds the account and never says what it negotiated, so `approximate` and shown as "up to" |
+| `stream`, `airplay` | Ogg Vorbis at the configured bitrate | exactly — it is HomeHub's own decoder setting |
+
+The split is not Spotify's doing. HomeHub decodes those two routes with
+[librespot](https://github.com/librespot-org/librespot), the only licensed
+Spotify decoder it can run, and librespot fetches the Ogg Vorbis stream —
+Spotify's lossless tier is not available to it. That is
+[librespot-org/librespot#1583](https://github.com/librespot-org/librespot/issues/1583),
+and the "if" in it has since been answered the wrong way. The maintainers laid
+FLAC groundwork in the decoder years ago and hoped it would be quick work *if*
+Spotify served the FLACs and their decryption keys over the same channel as the
+Ogg files. It does not. Spotify's Connect backend delivers only the legacy Ogg
+Vorbis stream to third-party endpoints; the lossless tier lives in Spotify's own
+apps, on a proprietary playback pipeline that fetches and decrypts FLAC
+directly. On [discussion #1685](https://github.com/librespot-org/librespot/discussions/1685)
+the maintainer's position is "not aware of anything we can do at our end", with
+the suggestion that anyone who needs it should "consider partnering with Spotify
+properly ($$$)".
+
+So this is not a missing feature anyone here or upstream can add. `stream` and
+`airplay` cap at 320 kbps whatever the household's Spotify plan is, until
+Spotify chooses to serve lossless over Connect. **Nothing in this repository can
+lift that cap.** If that day comes, the change here is
+`SpotifyProvider.SourceQuality`, `DecodedFormat` and the decoder's arguments —
+and the pipeline is already format-transparent, so nothing downstream needs
+touching.
+
+So the limit on those two routes is attributed to **HomeHub's decoder**, not to
+Spotify. `DescribeQuality` works this out by asking the provider what it hands
+over on the speaker-served routes: a service that is lossy at its best
+everywhere is still reported as the limit itself (`lossyBecause`), while a
+service with a lossless tier HomeHub cannot reach is not. Blaming the
+catalogue in the second case would tell a listener nothing can be done when in
+fact one of their speakers can do better.
+
+`QualityExplainer` is how the caveat travels with the number — the provider
+supplies one clause per route (what librespot can reach; what lossless
+additionally requires of a speaker), because only the provider knows it.
 
 **The one lever.** `Settings.StreamQuality` — `best` (320 kbps), `balanced`
 (160), `saver` (96) — is how hard HomeHub's own decoder asks the service to
 compress. It is household-wide because the decoder is a single process holding
 a single service session, so two zones cannot be decoded at two bitrates at
 once and a per-zone control would promise what the architecture cannot keep.
-It moves `stream` and `airplay` and nothing else, and `Fix` is offered only on
-those routes and only when the setting is below `best`.
+It moves `stream` and `airplay` and nothing else, so `Fix` is offered only on
+those routes.
 
-What this must never do is offer to make Spotify lossless. It cannot be done,
-and a control implying otherwise is worse than no control — so where the source
-is the limit and the setting is already at its top, the answer is a sentence
-explaining why, and no button.
+**The second fix, which is not a control.** On a decoded route already at
+`best`, there is still one real improvement when the service has a lossless
+tier HomeHub cannot fetch: play to a single speaker that streams the service
+itself, and leave the decoded route entirely. That is offered with an empty
+`Fix.Setting` — the improvement is real, but it is something the listener does
+to their zone, not a switch this app owns, so the UI renders it as a sentence
+and never as a button.
+
+What this must never do is offer a control that would make a service lossless.
+Where the setting is at its top and there is nowhere better to send the audio,
+the answer is a sentence explaining why, and no button.
 
 ---
 

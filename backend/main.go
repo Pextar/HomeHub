@@ -22,6 +22,7 @@ import (
 	"homehub/internal/matter"
 	"homehub/internal/mqtt"
 	"homehub/internal/push"
+	"homehub/internal/qobuz"
 	"homehub/internal/reachability"
 	"homehub/internal/rf"
 	"homehub/internal/rx"
@@ -218,6 +219,13 @@ func main() {
 		log.Fatalf("failed to load spotify state: %v", err)
 	}
 
+	// Qobuz: the one provider HomeHub can stream losslessly. App credentials
+	// and the account login happen in the UI; both live in data/qobuz.json.
+	qobuzClient, err := qobuz.New(dataDir)
+	if err != nil {
+		log.Fatalf("failed to load qobuz state: %v", err)
+	}
+
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
@@ -230,6 +238,7 @@ func main() {
 		LLM:           llmClient,
 		Push:          pushSvc,
 		Spotify:       spotifyClient,
+		Qobuz:         qobuzClient,
 		AuthUser:      os.Getenv("AUTH_USER"),
 		AuthPass:      os.Getenv("AUTH_PASS"),
 		SessionSecret: secret,

@@ -34,11 +34,20 @@ homehub/
 # Backend
 cd backend && go build ./...
 cd backend && go test ./...
+cd backend && golangci-lint run   # CI runs this and it fails the build
 
 # Frontend
-cd frontend && npm run build   # production build (also used as type-check)
+cd frontend && npm run check   # svelte-check — the real type-check
+cd frontend && npm run lint
+cd frontend && npm run test
+cd frontend && npm run build   # production build
 cd frontend && npm run dev     # dev server
 ```
+
+**`npm run build` is not a type-check.** Vite strips types without reading
+them, so a type error inside a `.svelte` file builds cleanly and fails CI.
+`npm run check` is the one that catches it — run that before pushing, along
+with `golangci-lint run`, which enforces checks `go vet` does not.
 
 The session startup hook builds the frontend automatically; if `dist/`
 is already up-to-date it's skipped.

@@ -271,7 +271,7 @@ func (s *Server) sonosDeleteSpeaker(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.sonosEvents().Nudge() // release its subscriptions
-	s.pruneDeadRooms()        // and its shelf, which now plays to nothing
+	s.pruneDeadRooms()      // and its shelf, which now plays to nothing
 	w.WriteHeader(http.StatusNoContent)
 }
 

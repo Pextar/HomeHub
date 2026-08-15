@@ -174,6 +174,9 @@ func TestQualityLabelsReadLikeEquipmentLabels(t *testing.T) {
 			"Ogg Vorbis up to 320 kbps"},
 		{Quality{Codec: CodecALAC, SampleRate: 48000, BitDepth: 24, Lossless: true},
 			"ALAC 48 kHz · 24-bit"},
+		// A lossless ceiling hedges exactly as a bitrate ceiling does.
+		{Quality{Codec: CodecFLAC, SampleRate: 44100, BitDepth: 24, Lossless: true, Approximate: true},
+			"FLAC up to 44.1 kHz · 24-bit"},
 		{Quality{}, "unknown"},
 	}
 	for _, tc := range cases {
@@ -193,5 +196,152 @@ func TestTransportQualityPerRoute(t *testing.T) {
 	}
 	if q := TransportQuality(RouteAirPlay); q.SampleRate != 44100 || q.BitDepth != 16 {
 		t.Errorf("airplay carries CD quality, got %+v", q)
+	}
+}
+
+// tieredProv is the shape Spotify took on the day it launched a lossless tier:
+// lossless on the routes a speaker serves from its own account link, and lossy
+// on the two HomeHub decodes for, because the decoder it runs can only fetch
+// the compressed stream. It is the case that broke the old one-answer-per-
+// service model, and the reason a chain has to ask the route.
+type tieredProv struct {
+	*fakeProvider
+	streamImpl
+	bitrate int
+}
+
+func (p tieredProv) SourceQuality(r Route) Quality {
+	if r == RouteStream || r == RouteAirPlay {
+		return Quality{Codec: CodecVorbis, SampleRate: 44100, Channels: 2, BitrateKbps: p.bitrate}
+	}
+	return Quality{Codec: CodecFLAC, SampleRate: 44100, BitDepth: 24, Channels: 2,
+		Lossless: true, Approximate: true}
+}
+
+func (tieredProv) SourceDetail(r Route) string { return "the caveat for " + string(r) }
+
+func tiered(bitrate int) Provider {
+	return tieredProv{
+		fakeProvider: &fakeProvider{routes: RouteSet{
+			RouteNative, RouteConnect, RouteAirPlay, RouteStream}},
+		streamImpl: streamImpl{Availability{OK: true, Configured: true}},
+		bitrate:    bitrate,
+	}
+}
+
+// A ceiling is not a measurement. When the speaker holds the account, HomeHub
+// never learns what it negotiated — so the answer is "up to", nothing is
+// blamed, and the flat lossless claim is withheld. Both of the wrong answers
+// here are bad in their own direction: "lossless" invents a reading, and "not
+// lossless" tells someone with a lossless plan their system is worse than it is.
+func TestSpeakerHeldLosslessIsACeilingNotAClaim(t *testing.T) {
+	for _, r := range []Route{RouteNative, RouteConnect} {
+		chain := DescribeQuality(tiered(320), r, QualityBest)
+		if chain.Verdict != VerdictUpTo {
+			t.Errorf("%s: verdict = %q, want up_to", r, chain.Verdict)
+		}
+		if chain.Lossless {
+			t.Errorf("%s: an unmeasured ceiling must not read as measured lossless", r)
+		}
+		if chain.LimitedBy != "" {
+			t.Errorf("%s: nothing caps this, but it blames %q", r, chain.LimitedBy)
+		}
+		if !strings.Contains(chain.Summary, "up to") {
+			t.Errorf("%s: summary should hedge: %q", r, chain.Summary)
+		}
+		if chain.Fix != nil {
+			t.Errorf("%s: the speaker chooses here, so there is nothing to offer", r)
+		}
+	}
+}
+
+// The attribution that matters. When the service has a lossless tier and
+// HomeHub's decoder is what can't fetch it, blaming the service's catalogue
+// would tell a listener nothing can be done — when in fact one of their
+// speakers can do better, and the fix says so.
+func TestDecodedRouteBlamesTheDecoderNotTheService(t *testing.T) {
+	for _, r := range []Route{RouteStream, RouteAirPlay} {
+		chain := DescribeQuality(tiered(320), r, QualityBest)
+		if chain.Verdict != VerdictCapped {
+			t.Errorf("%s: verdict = %q, want capped", r, chain.Verdict)
+		}
+		if chain.LimitedBy != "HomeHub's decoder" {
+			t.Errorf("%s: limited by %q, want the decoder", r, chain.LimitedBy)
+		}
+		if strings.Contains(chain.Summary, "compressed at the source") {
+			t.Errorf("%s: this service is not the limit: %q", r, chain.Summary)
+		}
+		fix := chain.Fix
+		if fix == nil {
+			t.Fatalf("%s: leaving the decoded route is a real improvement", r)
+		}
+		if fix.Setting != "" {
+			t.Errorf("%s: this is not a switch HomeHub owns, got setting %q", r, fix.Setting)
+		}
+		if !strings.Contains(fix.Label, "one speaker") {
+			t.Errorf("%s: fix should name the move: %q", r, fix.Label)
+		}
+	}
+}
+
+// A service that is lossy everywhere keeps the old answer. The decoder is only
+// to blame when there is something better it failed to reach.
+func TestAServiceLossyEverywhereIsStillTheLimit(t *testing.T) {
+	chain := DescribeQuality(lossy(320), RouteStream, QualityBest)
+	if chain.LimitedBy != "Fake" {
+		t.Errorf("limited by %q, want the service", chain.LimitedBy)
+	}
+	if chain.Fix != nil {
+		t.Errorf("there is nowhere better to send them, got %+v", chain.Fix)
+	}
+}
+
+// Below-best decoding still offers the setting first — it is the bigger,
+// pressable win — but must not claim the service is the ceiling when it isn't.
+func TestBelowBestFixNamesTheDecoderCeiling(t *testing.T) {
+	chain := DescribeQuality(tiered(96), RouteStream, QualitySaver)
+	if chain.Fix == nil || chain.Fix.Setting != FixSettingStreamQuality {
+		t.Fatalf("the pressable lever comes first, got %+v", chain.Fix)
+	}
+	if strings.Contains(chain.Fix.Detail, "compressed at the source") {
+		t.Errorf("that is the decoder's ceiling, not the service's: %q", chain.Fix.Detail)
+	}
+	if !strings.Contains(chain.Fix.Detail, "Even at best") {
+		t.Errorf("detail should say what best still isn't: %q", chain.Fix.Detail)
+	}
+}
+
+// The provider's own caveat reaches the chain, on every route. It is the only
+// place a listener learns why the decoded routes cap where they do.
+func TestSourceCaveatIsCarriedThrough(t *testing.T) {
+	for _, r := range []Route{RouteNative, RouteStream} {
+		if got := DescribeQuality(tiered(320), r, QualityBest).Source.Detail; got != "the caveat for "+string(r) {
+			t.Errorf("%s: source detail = %q", r, got)
+		}
+	}
+	// A provider without one is not made to invent one.
+	if got := DescribeQuality(lossy(320), RouteStream, QualityBest).Source.Detail; got != "" {
+		t.Errorf("detail = %q, want none", got)
+	}
+}
+
+// Verdicts, pinned. These four are what a badge switches on, and collapsing
+// any two of them back into a boolean is the regression this guards.
+func TestVerdictsCoverTheFourAnswers(t *testing.T) {
+	unknown := (&fakeProvider{routes: RouteSet{RouteNative}, native: true}).build()
+	cases := []struct {
+		name string
+		got  Verdict
+		want Verdict
+	}{
+		{"measured lossless", DescribeQuality(lossless(), RouteAirPlay, QualityBest).Verdict, VerdictLossless},
+		{"ceiling", DescribeQuality(tiered(320), RouteNative, QualityBest).Verdict, VerdictUpTo},
+		{"capped", DescribeQuality(lossy(320), RouteStream, QualityBest).Verdict, VerdictCapped},
+		{"silent source", DescribeQuality(unknown, RouteNative, QualityBest).Verdict, VerdictUnknown},
+	}
+	for _, tc := range cases {
+		if tc.got != tc.want {
+			t.Errorf("%s: verdict = %q, want %q", tc.name, tc.got, tc.want)
+		}
 	}
 }

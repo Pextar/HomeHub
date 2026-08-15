@@ -14,6 +14,13 @@ package media
 // say what is true, including when the truth is "this cannot be fixed here."
 // A UI that offers to make Spotify lossless is worse than one that explains
 // why it cannot be.
+//
+// That rule cuts both ways, which is what the Verdict type below is for. When
+// a service adds a lossless tier that only some of the routes can carry, the
+// honest report is neither "lossless" everywhere nor "lossy" everywhere: it is
+// lossless where HomeHub can see it, capped where something in the chain caps
+// it *with that thing named*, and "up to" where the speaker holds the account
+// and never says what it negotiated.
 
 import "fmt"
 
@@ -92,6 +99,11 @@ func (q Quality) Label() string {
 	}
 	base := q.Codec.Label()
 	switch {
+	case q.Lossless && q.SampleRate > 0 && q.BitDepth > 0 && q.Approximate:
+		// The ceiling of a session HomeHub can't see into. "up to" belongs on
+		// a lossless description for exactly the same reason it belongs on a
+		// bitrate: it is the most the route can carry, not a measurement.
+		return fmt.Sprintf("%s up to %s · %d-bit", base, khz(q.SampleRate), q.BitDepth)
 	case q.Lossless && q.SampleRate > 0 && q.BitDepth > 0:
 		return fmt.Sprintf("%s %s · %d-bit", base, khz(q.SampleRate), q.BitDepth)
 	case q.BitrateKbps > 0 && q.Approximate:
@@ -124,15 +136,47 @@ type Stage struct {
 	Detail string `json:"detail,omitempty"`
 }
 
+// Verdict is the end-to-end answer, in the states it actually has rather than
+// the two a boolean allows.
+//
+// The third state is the one Spotify's lossless tier created. On a route where
+// the speaker holds the account, HomeHub never learns what quality that speaker
+// negotiated: the ceiling is lossless, whether it was reached depends on the
+// household's plan, its market and that speaker's own settings, and none of
+// those are readable from here. Calling it lossless claims a measurement nobody
+// took; calling it lossy tells a listener with a lossless plan that their
+// system is worse than it is. So it gets its own value and the UI says "up to".
+type Verdict string
+
+const (
+	// VerdictLossless: bit-exact end to end, and both stages are known
+	// rather than inferred.
+	VerdictLossless Verdict = "lossless"
+	// VerdictUpTo: nothing in the chain is lossy, but at least one stage is
+	// a ceiling rather than a measurement. LimitedBy is empty — nothing is
+	// capping this, HomeHub simply cannot see the far end.
+	VerdictUpTo Verdict = "up_to"
+	// VerdictCapped: something in the chain is lossy and LimitedBy names it.
+	VerdictCapped Verdict = "capped"
+	// VerdictUnknown: the source says nothing about itself, so neither can
+	// this report.
+	VerdictUnknown Verdict = "unknown"
+)
+
 // Chain is the whole path, source to speaker.
 type Chain struct {
 	// Source is what the service hands over; Transport is how it travels.
 	Source    Stage `json:"source"`
 	Transport Stage `json:"transport"`
-	// Lossless is the end-to-end answer: both stages, or neither.
+	// Verdict is the end-to-end answer and the field a badge should read.
+	Verdict Verdict `json:"verdict"`
+	// Lossless is true only for VerdictLossless — bit-exact and *known* to
+	// be. It is deliberately false for VerdictUpTo: a chain that can carry
+	// lossless is not a chain known to have carried it, and a caller that
+	// wants the softer claim should read Verdict.
 	Lossless bool `json:"lossless"`
 	// LimitedBy names the stage that caps the result, empty when nothing
-	// does. This is the field the UI leads with when Lossless is false.
+	// does. This is the field the UI leads with on VerdictCapped.
 	LimitedBy string `json:"limited_by,omitempty"`
 	// Summary is the chain in one sentence, fit to show a person.
 	Summary string `json:"summary"`
@@ -144,8 +188,11 @@ type Chain struct {
 
 // Fix is an improvement actually available, phrased as the change it makes.
 type Fix struct {
-	// Setting is the machine-readable lever: "stream_quality" is the only
-	// one today, and it is what PUT /api/media/quality accepts.
+	// Setting is the machine-readable lever. "stream_quality" is the only
+	// value that maps to a control — it is what PUT /api/media/quality
+	// accepts. Empty means the improvement is real but there is nothing to
+	// press: it is something the listener does to their zone, not something
+	// HomeHub can do for them, and the UI must render it as a sentence.
 	Setting string `json:"setting"`
 	// Label is the offer in the user's words.
 	Label string `json:"label"`
@@ -232,6 +279,19 @@ type QualityReporter interface {
 	SourceQuality(r Route) Quality
 }
 
+// QualityExplainer is a provider that can add a clause about its own source
+// quality on a route. Optional and separate from QualityReporter because the
+// caveat is the provider's to know: only Spotify knows that its lossless tier
+// needs Premium with lossless switched on for that particular speaker, and only
+// Spotify knows which of its routes HomeHub's decoder can't reach it on. A
+// chain builder guessing at either would be inventing.
+type QualityExplainer interface {
+	SourceDetail(r Route) string
+}
+
+// FixSettingStreamQuality is the one Fix.Setting that maps to a control.
+const FixSettingStreamQuality = "stream_quality"
+
 // TransportQuality is what a route does to the audio between the service and
 // the speaker. This is a property of the route alone, which is why it lives
 // here rather than in a provider.
@@ -280,11 +340,28 @@ func DescribeQuality(p Provider, r Route, pref StreamQuality) Chain {
 		source = qr.SourceQuality(r)
 	}
 	transport := TransportQuality(r)
+	transDetail := transportDetail(r)
+	// A route that would have to reduce this source does not get to report
+	// itself as a lossless carrier. It is lossless for audio it can carry,
+	// and this is audio it cannot — so the honest transport stage is the
+	// ceiling, named, with the note that HomeHub routes around it rather than
+	// reducing to fit.
+	if limit, decoded, yes := describeReduction(p, r); yes {
+		transport = Quality{
+			Codec: CodecPCM, SampleRate: limit.SampleRate, BitDepth: limit.BitDepth,
+			Channels: limit.Channels,
+		}
+		transDetail = fmt.Sprintf(
+			"carries %s only; this decodes to %s, and HomeHub won't reduce it — a zone like this plays over HomeHub's stream instead",
+			limit.Label(), decoded.Label())
+	}
 
 	c := Chain{
 		Source:    Stage{Name: p.Name(), Quality: source},
-		Transport: Stage{Name: routeLabel(r), Quality: transport, Detail: transportDetail(r)},
-		Lossless:  source.Lossless && transport.Lossless,
+		Transport: Stage{Name: routeLabel(r), Quality: transport, Detail: transDetail},
+	}
+	if qe, ok := p.(QualityExplainer); ok {
+		c.Source.Detail = qe.SourceDetail(r)
 	}
 
 	switch {
@@ -292,16 +369,26 @@ func DescribeQuality(p Provider, r Route, pref StreamQuality) Chain {
 		// Nothing is known about the source. Say so rather than inferring
 		// from the transport, which would report a lossy service as
 		// lossless the moment it travelled over a lossless path.
+		c.Verdict = VerdictUnknown
 		c.LimitedBy = p.Name()
 		c.Summary = fmt.Sprintf("%s doesn't say what quality it is sending", p.Name())
 	case !source.Lossless:
-		c.LimitedBy = p.Name()
-		c.Summary = fmt.Sprintf("%s at %s — %s, so nothing after it is lossless",
-			p.Name(), source.Label(), lossyBecause(p.Name()))
+		c.Verdict = VerdictCapped
+		c.LimitedBy, c.Summary = cappedSource(p, r, source)
 	case !transport.Lossless:
+		c.Verdict = VerdictCapped
 		c.LimitedBy = routeLabel(r)
-		c.Summary = fmt.Sprintf("%s is lossless, but %s", p.Name(), transportDetail(r))
+		c.Summary = fmt.Sprintf("%s is lossless, but %s", p.Name(), transDetail)
+	case source.Approximate || transport.Approximate:
+		// Nothing caps this — LimitedBy stays empty — but the far end is a
+		// ceiling rather than a reading, so the sentence says so plainly
+		// instead of borrowing the flat claim below.
+		c.Verdict = VerdictUpTo
+		c.Summary = fmt.Sprintf("%s streams up to %s here; HomeHub can't see which quality %s settled on",
+			p.Name(), source.Label(), routeLabel(r))
 	default:
+		c.Verdict = VerdictLossless
+		c.Lossless = true
 		c.Summary = fmt.Sprintf("%s at %s, bit-exact all the way to the speaker",
 			p.Name(), source.Label())
 	}
@@ -309,32 +396,115 @@ func DescribeQuality(p Provider, r Route, pref StreamQuality) Chain {
 	return c
 }
 
+// describeReduction reports whether route r could not carry the best this
+// provider might hand it, for the quality *report* rather than for routing.
+//
+// It deliberately uses the provider's ceiling where RouteReduces uses the
+// track's actual format, because the two answer different questions. Routing
+// asks "can this thing play here", and must not refuse a CD album because the
+// subscription allows hi-res. A quality sheet asks "what does this path do to
+// my music", and the useful answer names the ceiling the route imposes — the
+// listener wants to know AirPlay tops out at CD before they queue an album that
+// doesn't fit, not after.
+func describeReduction(p Provider, r Route) (limit, decoded PCMFormat, yes bool) {
+	pr, ok := p.(PCMReporter)
+	if !ok {
+		return limit, decoded, false
+	}
+	decoded = pr.DecodedFormat()
+	limit, yes = RouteReduces(r, &decoded)
+	return limit, decoded, yes
+}
+
+// cappedSource names who capped a lossy source and says it in a sentence.
+//
+// The distinction it draws is the whole reason this function exists. A service
+// whose catalogue is lossy is capped by the service, and no route or setting
+// changes that. A service that *has* a lossless tier which HomeHub's own
+// decoder can't fetch is a different situation with a different answer: the
+// service is not the limit, HomeHub is, and the listener has somewhere better
+// to go. Blaming the catalogue in that second case is the kind of confident
+// wrong sentence this whole file exists to avoid — it would tell someone their
+// speakers can't do better when one of them can.
+func cappedSource(p Provider, r Route, source Quality) (limitedBy, summary string) {
+	if decodedRoute(r) && losslessOnSomeRoute(p) {
+		return "HomeHub's decoder", fmt.Sprintf(
+			"%s at %s — HomeHub decodes this path itself and can only fetch %s's compressed stream, so it caps below what %s can deliver",
+			p.Name(), source.Label(), p.Name(), p.Name())
+	}
+	return p.Name(), fmt.Sprintf("%s at %s — %s, so nothing after it is lossless",
+		p.Name(), source.Label(), lossyBecause(p.Name()))
+}
+
+// decodedRoute reports whether HomeHub holds the audio on this route — the two
+// where its own decoder, rather than a speaker's account link, sets the ceiling.
+func decodedRoute(r Route) bool { return r == RouteStream || r == RouteAirPlay }
+
+// losslessOnSomeRoute reports whether this provider hands over lossless audio
+// on any route where a speaker streams it directly. That is what makes a lossy
+// decoded route HomeHub's limitation rather than the service's.
+func losslessOnSomeRoute(p Provider) bool {
+	qr, ok := p.(QualityReporter)
+	if !ok {
+		return false
+	}
+	routes := p.Routes()
+	for _, r := range []Route{RouteNative, RouteGroup, RouteConnect} {
+		if routes.Has(r) && qr.SourceQuality(r).Lossless {
+			return true
+		}
+	}
+	return false
+}
+
 // fixFor offers the one change that genuinely improves this chain, or nothing.
 //
-// There is exactly one lever, and it only exists on the two routes HomeHub
-// decodes for itself: how hard the decoder asks the service to compress. On
-// every other route the speaker holds the account and picks for itself, and on
-// a source that is lossy at its best setting there is no setting that makes it
-// lossless — saying so is the honest answer, and a Fix that promised otherwise
-// would be the dishonest one.
+// Two improvements can be real here, and they are ranked by how much they buy.
+// The first is the setting: how hard HomeHub's decoder asks the service to
+// compress, which only moves the two routes HomeHub decodes for. The second
+// only exists for a service with a lossless tier HomeHub's decoder can't
+// fetch — there the listener can leave the decoded route entirely by playing to
+// a single speaker that streams the service itself, and that is worth more than
+// any bitrate. It is offered with an empty Setting because it is a thing they
+// do to their zone, not a switch HomeHub owns.
+//
+// On a source that is lossy at its best everywhere, there is still no fix, and
+// saying so remains the honest answer.
 func fixFor(p Provider, r Route, pref StreamQuality, source Quality) *Fix {
-	if r != RouteStream && r != RouteAirPlay {
+	if !decodedRoute(r) {
 		return nil
 	}
-	if pref.Normalize() == QualityBest {
-		return nil
+	if pref.Normalize() != QualityBest {
+		detail := fmt.Sprintf("Decoding at %d kbps rather than %d, because this household picked %s.",
+			pref.Bitrate(), QualityBest.Bitrate(), pref.Label())
+		if !source.Lossless {
+			detail += " " + decodeCeiling(p)
+		}
+		return &Fix{
+			Setting: FixSettingStreamQuality,
+			Label:   fmt.Sprintf("Switch to %s", QualityBest.Label()),
+			Detail:  detail,
+		}
 	}
-	detail := fmt.Sprintf("Decoding at %d kbps rather than %d, because this household picked %s.",
-		pref.Bitrate(), QualityBest.Bitrate(), pref.Label())
-	if !source.Lossless {
-		detail += fmt.Sprintf(" %s will still be compressed at the source — this is as close to the original as %s goes.",
-			p.Name(), p.Name())
+	if !source.Lossless && losslessOnSomeRoute(p) {
+		return &Fix{
+			Label: fmt.Sprintf("Play this to one speaker that streams %s itself", p.Name()),
+			Detail: fmt.Sprintf(
+				"A single speaker on its own %s account link can fetch the lossless stream. HomeHub's decoder can't, so any zone it has to decode for caps here however this setting is set.",
+				p.Name()),
+		}
 	}
-	return &Fix{
-		Setting: "stream_quality",
-		Label:   fmt.Sprintf("Switch to %s", QualityBest.Label()),
-		Detail:  detail,
+	return nil
+}
+
+// decodeCeiling is the clause that says what the decoder's best still isn't,
+// which differs by whether the service has a better tier at all.
+func decodeCeiling(p Provider) string {
+	if losslessOnSomeRoute(p) {
+		return fmt.Sprintf("Even at best, HomeHub's decoder fetches %s's compressed stream rather than its lossless one.", p.Name())
 	}
+	return fmt.Sprintf("%s will still be compressed at the source — this is as close to the original as %s goes.",
+		p.Name(), p.Name())
 }
 
 // lossyBecause is the half-sentence that says whose limit it is. Split out

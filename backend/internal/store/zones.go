@@ -33,6 +33,7 @@ const (
 	SonosPrefix   = "sonos:"
 	KEFPrefix     = "kef:"
 	AirPlayPrefix = "airplay:"
+	UPnPPrefix    = "upnp:"
 )
 
 // QualifySonos and the two beside it build a member id for a stored speaker,
@@ -40,6 +41,7 @@ const (
 func QualifySonos(id string) string   { return SonosPrefix + id }
 func QualifyKEF(id string) string     { return KEFPrefix + id }
 func QualifyAirPlay(id string) string { return AirPlayPrefix + id }
+func QualifyUPnP(id string) string    { return UPnPPrefix + id }
 
 // SplitMember separates a qualified member id into its bridge and bare id.
 // Returns ok=false for anything unqualified, which is how a member written by
@@ -52,6 +54,8 @@ func SplitMember(member string) (bridge, id string, ok bool) {
 		return "kef", strings.TrimPrefix(member, KEFPrefix), true
 	case strings.HasPrefix(member, AirPlayPrefix):
 		return "airplay", strings.TrimPrefix(member, AirPlayPrefix), true
+	case strings.HasPrefix(member, UPnPPrefix):
+		return "upnp", strings.TrimPrefix(member, UPnPPrefix), true
 	}
 	return "", "", false
 }
@@ -99,6 +103,10 @@ func (s *Store) ValidateZone(z *Zone) error {
 		case "airplay":
 			if _, exists := s.AirPlay[id]; !exists {
 				return errors.New("no such AirPlay receiver: " + id)
+			}
+		case "upnp":
+			if _, exists := s.UPnP[id]; !exists {
+				return errors.New("no such UPnP renderer: " + id)
 			}
 		}
 		if seen[m] {

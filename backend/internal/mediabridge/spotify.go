@@ -97,26 +97,57 @@ func (p *SpotifyProvider) Routes() media.RouteSet {
 // SourceQuality implements media.QualityReporter: what Spotify hands over, per
 // route.
 //
-// Two different answers, because they are two different clients. On the routes
-// HomeHub decodes for itself the bitrate is the one this household configured,
-// and it is known exactly. On the routes the speaker plays for itself, the
-// speaker's own Spotify client negotiates with the service and never tells
-// HomeHub what it settled on — so that answer is marked approximate and shown
-// as "up to", rather than printed as a measurement it isn't.
+// Two different answers, because they are two different clients — and since
+// September 2025 they are two different *formats*, which is the part that
+// matters and the part this file used to get wrong.
 //
-// Either way the codec is Vorbis and the answer to "is this lossless" is no.
-// Spotify's catalogue is compressed at the source; no route, no setting and no
-// speaker changes that, and this is the one place in the system that knows it.
+// Spotify Premium now streams up to 24-bit/44.1 kHz FLAC. A speaker that holds
+// the household's own account link — a Sonos over SMAPI, anything targeted by
+// Connect — can fetch that stream directly, so on those routes the ceiling is
+// lossless. Whether a given speaker reached it depends on the plan, the market
+// and that speaker's own settings, none of which HomeHub can read, so the
+// answer is marked approximate and shown as "up to" rather than printed as a
+// measurement it isn't.
+//
+// The routes HomeHub decodes for itself do not get that. The only licensed
+// Spotify decoder HomeHub can run is librespot, which fetches the Ogg Vorbis
+// stream; Spotify's FLAC tier is not available to it (librespot-org/librespot
+// issue 1583, open and unimplemented). So on those routes the codec is Vorbis
+// at exactly the bitrate this household configured — and the ceiling is
+// HomeHub's, not Spotify's. media.DescribeQuality reads that difference off
+// these two answers and attributes the limit accordingly; getting it wrong here
+// is what would have the UI blame Spotify's catalogue for HomeHub's decoder.
 func (p *SpotifyProvider) SourceQuality(r media.Route) media.Quality {
-	q := media.Quality{Codec: media.CodecVorbis, SampleRate: 44100, Channels: 2}
-	switch r {
-	case media.RouteStream, media.RouteAirPlay:
-		q.BitrateKbps = p.bitrate
-	default:
-		q.BitrateKbps = media.QualityBest.Bitrate()
-		q.Approximate = true
+	if media.RouteStream == r || media.RouteAirPlay == r {
+		return media.Quality{
+			Codec: media.CodecVorbis, SampleRate: 44100, Channels: 2,
+			BitrateKbps: p.bitrate,
+		}
 	}
-	return q
+	return media.Quality{
+		Codec: media.CodecFLAC, SampleRate: 44100, BitDepth: 24, Channels: 2,
+		Lossless: true, Approximate: true,
+	}
+}
+
+// DecodedFormat implements media.PCMReporter: what HomeHub's decode of Spotify
+// actually produces. librespot's pipe backend writes raw S16LE at CD rate, and
+// Vorbis is a 44.1 kHz format, so this is CD quality exactly — not a ceiling
+// and not a preference. It is stated rather than assumed so the router can see
+// that every route carries it intact, and so the day a decoder here produces
+// something larger, the router notices instead of the receiver doing so.
+func (p *SpotifyProvider) DecodedFormat() media.PCMFormat { return media.CDQuality }
+
+// SourceDetail implements media.QualityExplainer: the caveat that belongs with
+// each of those two answers, and that only this file knows.
+func (p *SpotifyProvider) SourceDetail(r media.Route) string {
+	if media.RouteStream == r || media.RouteAirPlay == r {
+		return "librespot, the decoder HomeHub runs for Spotify, can only fetch the " +
+			"Ogg Vorbis stream — Spotify's lossless tier isn't available to it. " +
+			"See docs/MEDIA-PROTOCOL.md."
+	}
+	return "Lossless needs Premium with lossless switched on for that speaker. " +
+		"HomeHub can't read either, so this is the ceiling rather than a measurement."
 }
 
 func (p *SpotifyProvider) Search(ctx context.Context, query string, limit int) (*media.Results, error) {

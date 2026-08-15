@@ -1,4 +1,5 @@
 import { api } from "./api";
+import type { MediaVendor } from "./types";
 
 /**
  * The rooms a scene or an automation can aim music at.
@@ -19,7 +20,10 @@ import { api } from "./api";
 export interface MediaRoomOption {
   key: string;
   name: string;
-  kind: "sonos" | "kef" | "airplay" | "zone";
+  /** Every speaker bridge, plus zones. Mirrors MediaVendor with "zone"
+   *  added, so a new bridge shows up here the moment it exists rather than
+   *  being silently absent from every music action. */
+  kind: MediaVendor | "zone";
   /** For a zone: how many speakers it holds, so two similar names differ. */
   members?: number;
 }

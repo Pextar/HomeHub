@@ -47,12 +47,36 @@ const listeningMock = vi.fn(async () => ({
   top: [track("Top")],
 }));
 
+/** What the neutral media search answers for a second provider. */
+const mediaSearchMock = vi.fn(async (_q: string, _opts?: { provider?: string; limit?: number }) => ({
+  tracks: [
+    {
+      provider: "qobuz",
+      kind: "track",
+      uri: "qobuz:track:42",
+      title: "Blue in Green",
+      subtitle: "Miles Davis · Kind of Blue",
+      art_uri: "https://img/large.jpg",
+    },
+  ],
+  albums: [],
+  playlists: [],
+  artists: [],
+}));
+const providersMock = vi.fn(async () => [
+  { id: "spotify", name: "Spotify", availability: { ok: true, configured: true }, routes: [], streaming: { ok: true, configured: true } },
+  { id: "qobuz", name: "Qobuz", availability: { ok: true, configured: true }, routes: [], streaming: { ok: true, configured: true } },
+  { id: "broken", name: "Broken", availability: { ok: false, configured: false, reason: "not set up" }, routes: [], streaming: { ok: false, configured: false } },
+]);
+
 vi.mock("../api", () => ({
   api: {
     spotifySearch: (...args: Parameters<typeof searchMock>) => searchMock(...args),
     spotifyStatus: vi.fn(async () => status),
     spotifyMyPlaylists: vi.fn(async () => []),
     spotifyListening: () => listeningMock(),
+    mediaSearch: (...args: Parameters<typeof mediaSearchMock>) => mediaSearchMock(...args),
+    mediaProviders: () => providersMock(),
   },
 }));
 vi.mock("../stores.svelte", () => ({ toasts: { error: vi.fn() } }));
@@ -401,5 +425,57 @@ describe("paging", () => {
     await release();
     expect(store.resultsQuery).toBe("beatles");
     expect(store.results?.tracks).toHaveLength(1);
+  });
+});
+
+
+describe("searching a second service", () => {
+  it("offers only the services that are actually usable", async () => {
+    const { store: sp } = make();
+    await sp.loadProviders();
+    // The unconfigured one is absent rather than present-and-failing: a chip
+    // that searches nothing is worse than no chip.
+    expect(sp.providers.map((p) => p.id)).toEqual(["spotify", "qobuz"]);
+  });
+
+  it("maps the neutral search into the shape every row already draws", async () => {
+    const { store: sp } = make();
+    await sp.loadProviders();
+    sp.provider = "qobuz";
+    await type(sp, "kind of blue");
+
+    expect(mediaSearchMock).toHaveBeenCalledWith("kind of blue", expect.objectContaining({ provider: "qobuz" }));
+    const t = sp.results?.tracks[0];
+    expect(t?.name).toBe("Blue in Green");
+    expect(t?.sub).toBe("Miles Davis · Kind of Blue");
+    expect(t?.art_url).toBe("https://img/large.jpg");
+    // The provider rides on the item, because a URI is only playable by the
+    // service that issued it and the play path has to know which.
+    expect(t?.provider).toBe("qobuz");
+  });
+
+  it("clears the other service's results when the chip changes", async () => {
+    results = withTracks("A Spotify Song");
+    const { store: sp } = make();
+    await sp.loadProviders();
+    await type(sp, "blue");
+    expect(sp.results?.tracks[0]?.name).toBe("A Spotify Song");
+
+    sp.provider = "qobuz";
+    // Cleared immediately — leaving them on screen under a new chip would be
+    // a list that lies about where it came from.
+    expect(sp.results).toBeNull();
+    await vi.advanceTimersByTimeAsync(500);
+    expect(sp.results?.tracks[0]?.provider).toBe("qobuz");
+  });
+
+  it("keeps using Spotify's own endpoint for Spotify", async () => {
+    results = withTracks("Native");
+    const { store: sp } = make();
+    await type(sp, "blue");
+    // Spotify's endpoint knows about artists, saved albums and the rest that
+    // the neutral one does not, so it must not be routed through it.
+    expect(searchMock).toHaveBeenCalled();
+    expect(sp.results?.tracks[0]?.provider).toBeUndefined();
   });
 });

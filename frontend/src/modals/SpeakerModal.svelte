@@ -1,9 +1,18 @@
 <script lang="ts">
-    // Registering a speaker — Sonos, KEF or AirPlay. One sheet for all three,
-    // because the flow is identical (scan the LAN, or type the address; name
-    // and room are optional and default to what the device calls itself) and a
-    // separate "Add speaker" button per brand would put the least interesting
-    // decision in the user's way before they have said anything else.
+    // Registering a speaker — Sonos, KEF, AirPlay or a UPnP renderer. One
+    // sheet for all four, because the flow is nearly identical (scan the LAN,
+    // or type the address; name and room are optional and default to what the
+    // device calls itself) and a separate "Add speaker" button per brand would
+    // put the least interesting decision in the user's way before they have
+    // said anything else.
+    //
+    // UPnP is the one that breaks the pattern, in a way worth keeping visible
+    // rather than smoothing over. There is no scan — HomeHub speaks no SSDP —
+    // and there is no address to type, because a renderer publishes its control
+    // URLs inside a device description at a URL of its own choosing. So that
+    // brand asks for the description URL and nothing else, and says where to
+    // find it. Pretending it takes an IP like the others would produce a field
+    // that looks right and never works.
     //
     // AirPlay is a protocol rather than a make, and it sits in the same picker
     // for the same reason: what the user is doing is adding a speaker, and
@@ -30,12 +39,14 @@
         KEFCandidate,
         AirPlaySpeaker,
         AirPlayCandidate,
+        UPnPRenderer,
+        UPnPDescription,
     } from "../lib/types";
 
-    export type SpeakerBrand = "sonos" | "kef" | "airplay";
+    export type SpeakerBrand = "sonos" | "kef" | "airplay" | "upnp";
 
     interface Props {
-        existing?: SonosSpeaker | KEFSpeaker | AirPlaySpeaker | null;
+        existing?: SonosSpeaker | KEFSpeaker | AirPlaySpeaker | UPnPRenderer | null;
         /** Which bridge owns this speaker. Locked in edit mode. */
         brand?: SpeakerBrand;
     }
@@ -53,7 +64,30 @@
         { value: "sonos", label: "Sonos" },
         { value: "kef", label: "KEF" },
         { value: "airplay", label: "AirPlay" },
+        { value: "upnp", label: "UPnP" },
     ];
+
+    // ── UPnP ─────────────────────────────────────────────────────────────
+    // The description URL, and what reading it found. Described before it is
+    // added so someone can see they picked the right box — and, more usefully,
+    // whether it says it can play what HomeHub serves.
+    let location = $state(untrack(() => (existing as UPnPRenderer | null)?.location ?? ""));
+    let described = $state<UPnPDescription | null>(null);
+    let describing = $state(false);
+
+    async function describe() {
+        if (describing || !location.trim()) return;
+        describing = true;
+        described = null;
+        try {
+            described = await api.upnpDescribe(location.trim());
+            if (!name.trim()) name = described.name;
+        } catch (e) {
+            toasts.error("Couldn't read that renderer", (e as Error).message);
+        } finally {
+            describing = false;
+        }
+    }
 
     // ── LAN discovery (add mode only) ────────────────────────────────────
     // A candidate is normalised to what the picker needs, so the two bridges'
@@ -160,6 +194,7 @@
         candidates = [];
         scanned = false;
         chosen = null;
+        described = null;
         errors = {};
     }
 
@@ -179,6 +214,10 @@
 
     async function save() {
         if (saving) return;
+        if (kind === "upnp") {
+            await saveRenderer();
+            return;
+        }
         if (!ip.trim()) {
             errors = { ip: "Enter the speaker's IP address, or pick one from the scan." };
             return;
@@ -225,6 +264,31 @@
         }
     }
 
+    /** UPnP saves take a description URL rather than an address, so they get
+     *  their own path rather than a third branch inside save()'s address
+     *  handling. Editing only ever changes name and room: the control URLs are
+     *  the device's own answer, and are re-read by refreshing rather than
+     *  typed over. */
+    async function saveRenderer() {
+        if (!existing && !location.trim()) {
+            errors = { ip: "Enter the renderer's description URL." };
+            return;
+        }
+        saving = true;
+        try {
+            if (existing) {
+                await api.upnpUpdateRenderer(existing.id, { name, room });
+            } else {
+                await api.upnpCreateRenderer({ location: location.trim(), name, room });
+            }
+            closeModal(true);
+        } catch (e) {
+            toasts.error("Save failed", (e as Error).message);
+        } finally {
+            saving = false;
+        }
+    }
+
     async function remove() {
         if (!existing) return;
         const ok = await openModal<boolean>(ConfirmModal, {
@@ -235,7 +299,9 @@
         });
         if (!ok) return;
         try {
-            if (kind === "airplay") {
+            if (kind === "upnp") {
+                await api.upnpDeleteRenderer(existing.id);
+            } else if (kind === "airplay") {
                 await api.airplayDeleteSpeaker(existing.id);
             } else if (kind === "kef") {
                 await api.kefDeleteSpeaker(existing.id);
@@ -249,8 +315,16 @@
     }
 
     const brandName = $derived(
-        kind === "kef" ? "KEF" : kind === "airplay" ? "AirPlay" : "Sonos",
+        kind === "kef"
+            ? "KEF"
+            : kind === "airplay"
+              ? "AirPlay"
+              : kind === "upnp"
+                ? "UPnP"
+                : "Sonos",
     );
+    /** UPnP has no discovery and no address field — see the header comment. */
+    const isUPnP = $derived(kind === "upnp");
 </script>
 
 <Modal
@@ -275,6 +349,7 @@
                     {/each}
                 </div>
 
+                {#if !isUPnP}
                 <div class="scan-row" style="margin-top:var(--space-3)">
                     <button type="button" class="btn btn-secondary" onclick={scan} disabled={scanning}>
                         <Icon name="search" size={14} />
@@ -325,8 +400,69 @@
                         {/each}
                     </div>
                 {/if}
+                {/if}
             {/if}
 
+            {#if isUPnP}
+                <!-- A renderer is added by its description URL, not its
+                     address: the control URLs live inside that document and
+                     are at whatever paths the device chose. Read-only once
+                     added — re-reading it is the Refresh action, not an edit. -->
+                <div class="field" style="margin-top:var(--space-4)">
+                    <label for="speaker-loc">Description URL</label>
+                    <input id="speaker-loc" type="url" bind:value={location}
+                        class="mono" disabled={isEdit}
+                        placeholder="http://192.168.1.60:49152/description.xml"
+                        aria-invalid={errors.ip ? "true" : undefined}
+                        aria-describedby={errors.ip ? "speaker-loc-err" : undefined}
+                        oninput={() => { errors = {}; described = null; }} />
+                    {#if errors.ip}<div id="speaker-loc-err" class="field-error">{errors.ip}</div>{/if}
+                </div>
+                {#if !isEdit}
+                    <div class="scan-row" style="margin-top:var(--space-3)">
+                        <button type="button" class="btn btn-secondary"
+                            onclick={describe} disabled={describing || !location.trim()}>
+                            <Icon name="search" size={14} />
+                            {describing ? "Reading…" : "Read device"}
+                        </button>
+                        {#if describing}<span class="scan-hint mono">fetching description…</span>{/if}
+                    </div>
+                    {#if described}
+                        <!-- The check that matters before committing: whether
+                             the renderer says it takes what HomeHub serves.
+                             Advisory, and said as advice — renderers
+                             under-report, so this never blocks adding one. -->
+                        <div class="found">
+                            <div class="found-head">
+                                <span class="found-name">{described.name}</span>
+                                <span class="q-tag mono" class:ok={described.plays_pcm}>
+                                    {described.plays_pcm ? "TAKES PCM" : "NO PCM LISTED"}
+                                </span>
+                            </div>
+                            {#if described.manufacturer || described.model}
+                                <div class="found-sub mono">
+                                    {[described.manufacturer, described.model].filter(Boolean).join(" · ")}
+                                </div>
+                            {/if}
+                            <p class="found-why">
+                                {#if described.plays_pcm}
+                                    This renderer fetches the stream itself, so it plays
+                                    whatever HomeHub sends — 24-bit included.
+                                {:else}
+                                    It didn't list WAV or linear PCM. Renderers often
+                                    under-report, so adding it is still worth a try —
+                                    but if it stays silent, this is why.
+                                {/if}
+                            </p>
+                        </div>
+                    {/if}
+                    <div class="field-help" style="margin-top:var(--space-2)">
+                        HomeHub doesn't scan for renderers. Enable the DLNA/UPnP
+                        renderer on the device and use the description URL it
+                        publishes — on RoPieeeXL that's under its web interface.
+                    </div>
+                {/if}
+            {:else}
             <div class="field" style="margin-top:var(--space-4)">
                 <label for="speaker-ip">IP address</label>
                 <input id="speaker-ip" type="text" bind:value={ip} required placeholder="192.168.1.50"
@@ -336,6 +472,7 @@
                     oninput={() => (errors = {})} />
                 {#if errors.ip}<div id="speaker-ip-err" class="field-error">{errors.ip}</div>{/if}
             </div>
+            {/if}
 
             <div class="field-row" style="margin-top:var(--space-4)">
                 <div class="field">
@@ -349,7 +486,7 @@
                         placeholder={isEdit ? "" : "From the speaker"} />
                 </div>
             </div>
-            {#if !isEdit}
+            {#if !isEdit && !isUPnP}
                 <div class="field-help" style="margin-top:var(--space-2)">
                     Leave name and room blank to use the speaker's own name.
                     The speaker must be reachable when you add it.
@@ -404,6 +541,28 @@
         font: inherit;
         transition: background 150ms ease, border-color 150ms ease;
     }
+    .found {
+        margin-top: var(--space-3);
+        background: var(--card-2);
+        border: 1px solid var(--hairline);
+        border-radius: var(--r-md);
+        padding: var(--space-3);
+    }
+    .found-head {
+        display: flex; align-items: center; justify-content: space-between;
+        gap: var(--space-2);
+    }
+    .found-name { font-size: 13.5px; font-weight: 600; color: var(--text); }
+    .found-sub { font-size: 11.5px; color: var(--text-dim); margin-top: 2px; }
+    .found-why {
+        margin: 6px 0 0; font-size: 12px; line-height: 1.45; color: var(--text-mute);
+    }
+    .q-tag {
+        font-size: 10px; letter-spacing: 0.08em; color: var(--text-dim);
+    }
+    /* The sanctioned amber, same as a lossless chain — this is the same fact
+       wearing a different hat: the path can carry everything it is given. */
+    .q-tag.ok { color: var(--on); }
     .cand:hover:not(:disabled) { background: var(--card-3); }
     .cand.selected { border-color: var(--on); color: var(--on); }
     .cand:disabled { opacity: 0.5; cursor: default; }

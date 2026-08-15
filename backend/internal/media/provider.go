@@ -2,6 +2,7 @@ package media
 
 import (
 	"context"
+	"fmt"
 	"io"
 )
 
@@ -136,13 +137,77 @@ type PCMFormat struct {
 	LittleEndian bool
 }
 
-// CDQuality is 44.1 kHz 16-bit stereo little-endian — what every decoder in
-// this codebase produces and what AirPlay 1 carries.
+// CDQuality is 44.1 kHz 16-bit stereo little-endian: what a Vorbis or MP3
+// decoder produces, and the only format AirPlay 1 carries.
+//
+// It is deliberately *not* the house format. Anything that treats it as one —
+// a WAV header built from these numbers rather than from the samples it
+// describes, a buffer sized by them — silently mislabels a hi-res source, and
+// a mislabelled stream is worse than a downsampled one: the speaker plays it
+// at the wrong rate and word length instead of playing it slightly worse.
 var CDQuality = PCMFormat{SampleRate: 44100, BitDepth: 16, Channels: 2, LittleEndian: true}
 
 // Matches reports whether f is the same format as want.
 func (f *PCMFormat) Matches(want PCMFormat) bool {
 	return f != nil && *f == want
+}
+
+// Valid reports whether f describes samples something could actually play.
+// Zero values are the interesting case: they mean a provider left the format
+// unset, and a header built from zeroes describes silence at no rate.
+func (f *PCMFormat) Valid() bool {
+	return f != nil && f.SampleRate > 0 && f.Channels > 0 &&
+		(f.BitDepth == 8 || f.BitDepth == 16 || f.BitDepth == 24 || f.BitDepth == 32)
+}
+
+// BytesPerSecond is the wire rate of these samples. It is what a listener's
+// buffer is really measured in, so anything sizing a buffer should ask the
+// format rather than assuming CD rate — at 24-bit/96 kHz the same byte count
+// is a third of the audio.
+func (f *PCMFormat) BytesPerSecond() int {
+	if !f.Valid() {
+		return 0
+	}
+	return f.SampleRate * f.Channels * f.BitDepth / 8
+}
+
+// Label is the format as equipment writes it: "44.1 kHz · 16-bit".
+func (f *PCMFormat) Label() string {
+	if !f.Valid() {
+		return "unknown"
+	}
+	return fmt.Sprintf("%s · %d-bit", khz(f.SampleRate), f.BitDepth)
+}
+
+// Carries reports whether a transport limited to f can carry src with every
+// sample intact. Both directions matter: a 16-bit carrier cannot hold 24-bit
+// words, and a 44.1 kHz carrier cannot hold 96 kHz without resampling. A
+// source *below* the carrier is fine — carrying 16-bit over a 24-bit link
+// wastes bandwidth and loses nothing.
+//
+// This is the predicate behind "never downsample": where it returns false the
+// answer is to route elsewhere or refuse, never to quietly convert.
+func (f PCMFormat) Carries(src PCMFormat) bool {
+	return src.SampleRate <= f.SampleRate && src.BitDepth <= f.BitDepth &&
+		src.Channels <= f.Channels
+}
+
+// ItemFormatReporter is a provider that can say what one specific item decodes
+// to. Optional, and separate from PCMReporter because the two differ in both
+// answer and cost: PCMReporter is the provider's ceiling and is free, while
+// this is the truth about one track and may need a catalogue lookup — hence the
+// context, and hence it being called by a handler rather than by the pure
+// router.
+//
+// It exists because routing on a ceiling is wrong in a way that is invisible
+// until it bites: a subscription entitled to 24-bit/192 kHz mostly plays albums
+// that are not, and blocking AirPlay for all of them means a CD-quality album
+// cannot reach an AirPlay-only receiver at all.
+type ItemFormatReporter interface {
+	// ItemFormat returns what this item will decode to. A zero format means
+	// "not known", which callers must treat as "do not block" rather than
+	// as a reason to refuse.
+	ItemFormat(ctx context.Context, item Item) (PCMFormat, error)
 }
 
 // StreamProvider serves RouteStream: HomeHub decodes the content once and

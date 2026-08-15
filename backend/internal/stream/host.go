@@ -162,7 +162,7 @@ func (h *Host) Publish(ctx context.Context, s *media.Stream) (string, func(), er
 	p := &published{
 		id:          id,
 		source:      s.Body,
-		header:      headerFor(contentType),
+		header:      headerFor(contentType, s.PCM),
 		contentType: contentType,
 		listeners:   map[*listener]struct{}{},
 		cancel:      cancel,

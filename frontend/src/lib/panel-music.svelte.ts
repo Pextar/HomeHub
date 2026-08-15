@@ -32,6 +32,7 @@ import { api } from "./api";
 import { session, toasts } from "./stores.svelte";
 import { onLive } from "./live";
 import { kefSourceLabel } from "./kef";
+import type { MediaVendor } from "./types";
 import { haptic } from "./utils";
 import { secs, toClock, sinceRead } from "./music/time";
 import { trackLines } from "./music/format";
@@ -64,7 +65,7 @@ import type {
  *  the media layer knows, because a zone can hold any mix of them and each
  *  takes its own call — an AirPlay receiver's volume travels over the RTSP
  *  session HomeHub already holds open to it. */
-export type PanelVendor = "sonos" | "kef" | "airplay";
+export type PanelVendor = MediaVendor;
 
 /** One speaker inside a featured group or zone, coordinator/lead first. */
 export interface PanelMember {
@@ -923,6 +924,8 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
                 return api.kefSetVolume(id, level);
             case "airplay":
                 return api.airplaySetVolume(id, level);
+            case "upnp":
+                return api.upnpSetVolume(id, level);
             default:
                 return api.sonosSetVolume(id, level);
         }

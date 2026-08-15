@@ -356,18 +356,34 @@ func TestMediaProvidersReportsStreamingSeparately(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
 		t.Fatalf("decoding: %v", err)
 	}
-	if len(out) != 1 || out[0].ID != "spotify" {
-		t.Fatalf("got %+v, want one spotify provider", out)
+	byID := map[string]int{}
+	for i, p := range out {
+		byID[p.ID] = i
 	}
-	if len(out[0].Routes) != 5 {
-		t.Errorf("routes = %v, want every route", out[0].Routes)
+	for _, want := range []string{"spotify", "qobuz"} {
+		if _, ok := byID[want]; !ok {
+			t.Fatalf("got %+v, want a %s provider", out, want)
+		}
 	}
-	// Neither is available in a test server, and both must say why.
-	if out[0].Avail.Reason == "" {
-		t.Error("an unavailable provider must carry a reason")
+	if got := out[byID["spotify"]].Routes; len(got) != 5 {
+		t.Errorf("spotify routes = %v, want every route", got)
 	}
-	if out[0].Streaming.Reason == "" {
-		t.Error("unavailable streaming must carry its own reason")
+	// Qobuz advertises only the routes where HomeHub holds the audio. No
+	// speaker here has a Qobuz account link and there is no Connect
+	// equivalent, and advertising those would have the router pick one and
+	// fail at the tap.
+	if got := out[byID["qobuz"]].Routes; len(got) != 2 {
+		t.Errorf("qobuz routes = %v, want only the decoded ones", got)
+	}
+	// Nothing is available in a test server, and everything must say why —
+	// per provider, because the reasons differ and are fixed differently.
+	for _, p := range out {
+		if p.Avail.Reason == "" {
+			t.Errorf("%s: an unavailable provider must carry a reason", p.ID)
+		}
+		if p.Streaming.Reason == "" {
+			t.Errorf("%s: unavailable streaming must carry its own reason", p.ID)
+		}
 	}
 }
 

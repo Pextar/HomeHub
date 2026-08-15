@@ -218,6 +218,9 @@ func (s *Store) mediaRoomExists(key string) bool {
 	case "airplay":
 		_, exists := s.AirPlay[id]
 		return exists
+	case "upnp":
+		_, exists := s.UPnP[id]
+		return exists
 	}
 	_, exists := s.Sonos[id]
 	return exists

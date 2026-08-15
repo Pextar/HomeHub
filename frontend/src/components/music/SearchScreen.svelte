@@ -378,6 +378,26 @@
                 <!-- The filter is a chip row, and it says how much is behind
                      each one — "Albums 12" is a decision, "Albums" is a
                      guess. -->
+                <!-- Which service is being searched. Only shown when there is
+                     more than one to choose, because a single-chip row is a
+                     control that decides nothing. Above the kind filters
+                     because it is the broader question: what you searched,
+                     then what kind of thing came back. -->
+                {#if spotify.providers.length > 1}
+                    <div class="sp-filters" role="radiogroup" aria-label="Service">
+                        {#each spotify.providers as p (p.id)}
+                            <button
+                                class="chip"
+                                class:active={spotify.provider === p.id}
+                                role="radio"
+                                aria-checked={spotify.provider === p.id}
+                                onclick={() => (spotify.provider = p.id)}
+                            >
+                                {p.name}
+                            </button>
+                        {/each}
+                    </div>
+                {/if}
                 <div class="sp-filters">
                     {#if spotify.results}
                         {@const r = spotify.results}

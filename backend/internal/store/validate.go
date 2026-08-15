@@ -3,6 +3,7 @@ package store
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"homehub/internal/media"
 	"homehub/internal/sonos"
 	"homehub/internal/tasmota"
+	"homehub/internal/upnp"
 )
 
 // ValidateSchedule normalizes and validates a schedule. Caller must
@@ -654,6 +656,66 @@ func (s *Store) ValidateAirPlaySpeaker(sp *AirPlaySpeaker) error {
 		func(o *AirPlaySpeaker) speakerIdentity {
 			return speakerIdentity{ID: o.ID, Name: o.Name, IP: o.IP, DeviceID: o.DeviceID}
 		})
+}
+
+// ValidateUPnPRenderer normalises and checks a renderer.
+//
+// The control URLs are required rather than derived, and are checked against
+// the LAN policy individually: a device description is fetched from the device
+// but its contents are the *device's* claim about where to send commands, and a
+// renderer that named an off-LAN host would otherwise turn HomeHub into a proxy
+// for whatever it pointed at.
+func (s *Store) ValidateUPnPRenderer(rn *UPnPRenderer) error {
+	rn.Name = strings.TrimSpace(rn.Name)
+	rn.IP = strings.TrimSpace(rn.IP)
+	rn.Room = strings.TrimSpace(rn.Room)
+	rn.Model = strings.TrimSpace(rn.Model)
+	rn.UDN = strings.TrimSpace(rn.UDN)
+	rn.Location = strings.TrimSpace(rn.Location)
+	rn.AVTransportURL = strings.TrimSpace(rn.AVTransportURL)
+	rn.RenderingControlURL = strings.TrimSpace(rn.RenderingControlURL)
+	rn.ConnectionMgrURL = strings.TrimSpace(rn.ConnectionMgrURL)
+
+	if rn.Name == "" {
+		return errors.New("name is required")
+	}
+	if err := upnp.ValidateHost(rn.IP); err != nil {
+		return err
+	}
+	if rn.Port == 0 {
+		rn.Port = 80
+	}
+	if rn.Port < 1 || rn.Port > 65535 {
+		return errors.New("port must be between 1 and 65535")
+	}
+	if rn.AVTransportURL == "" {
+		return errors.New("this renderer has no AVTransport control URL, so nothing can be played to it")
+	}
+	for _, u := range []string{rn.AVTransportURL, rn.RenderingControlURL, rn.ConnectionMgrURL, rn.Location} {
+		if u == "" {
+			continue
+		}
+		if err := validateControlURL(u); err != nil {
+			return err
+		}
+	}
+	return uniqueSpeaker(s.UPnP,
+		speakerIdentity{ID: rn.ID, Name: rn.Name, IP: rn.IP, DeviceID: rn.UDN},
+		func(o *UPnPRenderer) speakerIdentity {
+			return speakerIdentity{ID: o.ID, Name: o.Name, IP: o.IP, DeviceID: o.UDN}
+		})
+}
+
+// validateControlURL checks one stored URL is an http(s) address on the LAN.
+func validateControlURL(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return errors.New("control URL is not a URL: " + raw)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return errors.New("control URL must be http or https: " + raw)
+	}
+	return upnp.ValidateHost(u.Host)
 }
 
 // sceneAccents is the allow-list of scene tile accent presets. Each key maps

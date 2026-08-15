@@ -282,6 +282,16 @@ zones — sets of speakers that play together regardless of make. See
 | DELETE | `/api/media/history?room=&uri=` | One room stops remembering one thing; without `uri`, the lot. Admin-only |
 | GET | `/api/media/history/top?room=&limit=&hour=` | What a room keeps coming back to — at a given local hour with `hour=` (`0`–`23` or `now`) |
 | GET | `/api/media/insights?limit=` | The household's listening summed over every room |
+| GET | `/api/upnp/renderers` | Registered DLNA renderers — the only endpoints that can be handed hi-res |
+| POST | `/api/upnp/describe` | `{"location"}` — read a device description without registering it |
+| POST | `/api/upnp/renderers` | `{"location","name","room"}` — describe and register |
+| PUT | `/api/upnp/renderers/{id}` | Rename / re-room |
+| POST | `/api/upnp/renderers/{id}/refresh` | Re-read the description after the device moved ports |
+| DELETE | `/api/upnp/renderers/{id}` | Remove, dropping it from any zone |
+| GET | `/api/qobuz/status` | App credentials + account state, and the best format the plan allows |
+| PUT | `/api/qobuz/config` | `{"app_id","app_secret"}` — issued to the application, not the listener |
+| POST | `/api/qobuz/login` | `{"email","password"}` — the password is forwarded and dropped, never stored |
+| POST | `/api/qobuz/disconnect` | Forgets the account, keeps the app credentials |
 | GET | `/api/media/quality` | What the audio actually is on every route, and the decode setting |
 | PUT | `/api/media/quality` | `{"stream_quality":"best"\|"balanced"\|"saver"}` |
 | GET | `/api/media/timers` | Every music timer, soonest first |
@@ -292,7 +302,7 @@ zones — sets of speakers that play together regardless of make. See
 | POST | `/api/media/timers/fade/cancel` | `{"room"}` — stop a ramp without deleting anything |
 
 Zone members are bridge-qualified speaker ids: `sonos:abc`, `kef:def`,
-`airplay:ghi`.
+`airplay:ghi`, `upnp:jkl`.
 
 `POST /play` answers with the route it chose, so a client can be honest about
 what is about to happen:
@@ -350,11 +360,14 @@ route, and offers the one setting that changes any of it.
       "label": "AirPlay",
       "decoded": true,
       "chain": {
-        "source":    { "name": "Spotify",  "quality": { "codec": "vorbis", "bitrate_kbps": 320, "lossless": false } },
+        "source":    { "name": "Spotify",  "quality": { "codec": "vorbis", "bitrate_kbps": 320, "lossless": false },
+                       "detail": "librespot, the decoder HomeHub runs for Spotify, can only fetch the Ogg Vorbis stream — Spotify's lossless tier isn't available to it. See docs/MEDIA-PROTOCOL.md." },
         "transport": { "name": "AirPlay",  "quality": { "codec": "pcm", "sample_rate": 44100, "bit_depth": 16, "lossless": true } },
+        "verdict": "capped",
         "lossless": false,
-        "limited_by": "Spotify",
-        "summary": "Spotify at Ogg Vorbis 320 kbps — Spotify's catalogue is compressed at the source, so nothing after it is lossless"
+        "limited_by": "HomeHub's decoder",
+        "summary": "Spotify at Ogg Vorbis 320 kbps — HomeHub decodes this path itself and can only fetch Spotify's compressed stream, so it caps below what Spotify can deliver",
+        "fix": { "setting": "", "label": "Play this to one speaker that streams Spotify itself", "detail": "…" }
       }
     }]
   }]
@@ -368,12 +381,32 @@ saying so is the point. `limited_by` names the stage that caps the result, and
 real answer, and clients must render it as one rather than as a disabled
 control.
 
+`verdict` is the end-to-end answer and the field a badge should switch on:
+
+| `verdict` | Meaning |
+| --- | --- |
+| `lossless` | Bit-exact, and both stages known rather than inferred. `lossless: true`. |
+| `up_to` | Nothing in the chain is lossy, but the far end was never measured — a speaker holding the service account does not report what it negotiated. `lossless` is **false** and `limited_by` is empty: nothing caps this. Render as "up to". |
+| `capped` | Something throws audio away; `limited_by` names it. |
+| `unknown` | The source says nothing about itself. |
+
+Clients must not reconstruct this from `lossless` alone. `lossless: false`
+covers both `capped` and `up_to`, and those are opposite messages to a
+listener — one says something is wrong, the other says nothing is.
+
 `stream_quality` moves only the routes where HomeHub holds the audio
 (`decoded: true` — `airplay` and `stream`). On the others the speaker holds the
-account and negotiates its own bitrate, which it never reports, so those stages
-are marked `approximate` and shown as "up to". The change lands on the next
-thing played: the bitrate is baked into the decoder's command line, and
-applying it immediately would mean cutting off the music to improve it.
+account and negotiates for itself, which it never reports, so those stages are
+marked `approximate` and shown as "up to". The change lands on the next thing
+played: the bitrate is baked into the decoder's command line, and applying it
+immediately would mean cutting off the music to improve it.
+
+A `fix` with an empty `setting` is advice rather than a control — there is no
+endpoint behind it, and clients must render it as a sentence. Today it appears
+on the decoded routes when the service has a lossless tier HomeHub's decoder
+cannot fetch: the listener's real improvement is to play to a single speaker
+that streams the service itself. `setting: "stream_quality"` is the only value
+that maps to an endpoint.
 
 #### Play history
 

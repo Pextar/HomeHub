@@ -62,6 +62,10 @@ type Store struct {
 	// running shairport-sync. Unlike the other two they are sinks rather
 	// than players: HomeHub sends to them. See internal/airplay.
 	AirPlay map[string]*AirPlaySpeaker
+	// UPnP are generic DLNA MediaRenderers. Like AirPlay they are not
+	// vendor-specific, and unlike AirPlay they fetch rather than receive —
+	// which is what lets them carry any format. See internal/upnp.
+	UPnP map[string]*UPnPRenderer
 	// Zones are user-arranged sets of speakers that play together, of
 	// any mix of makes. See docs/MEDIA-PROTOCOL.md.
 	Zones map[string]*Zone
@@ -186,6 +190,7 @@ const (
 	sonosFile       = "sonos.json"
 	kefFile         = "kef.json"
 	airplayFile     = "airplay.json"
+	upnpFile        = "upnp.json"
 	zonesFile       = "zones.json"
 	historyFile     = "media_history.json"
 	heardFile       = "media_heard.json"
@@ -212,6 +217,7 @@ func New(dataDir string, rf RFSender) *Store {
 		Sonos:        make(map[string]*SonosSpeaker),
 		KEF:          make(map[string]*KEFSpeaker),
 		AirPlay:      make(map[string]*AirPlaySpeaker),
+		UPnP:         make(map[string]*UPnPRenderer),
 		Zones:        make(map[string]*Zone),
 		Readings:     make(map[string][]SensorReading),
 		MediaHistory: make(map[string][]MediaPlay),

@@ -44,6 +44,7 @@
     import SonosEventsModal from "../modals/SonosEventsModal.svelte";
     import MusicQualityModal from "../modals/MusicQualityModal.svelte";
     import SpotifyConnectModal from "../modals/SpotifyConnectModal.svelte";
+    import QobuzConnectModal from "../modals/QobuzConnectModal.svelte";
     import LiveStatusChip from "../components/LiveStatusChip.svelte";
     import { api } from "../lib/api";
     import { toasts, route, bottomBar } from "../lib/stores.svelte";
@@ -59,6 +60,7 @@
     import { createSonosBridge } from "../lib/music/sonos.svelte";
     import { createKEFBridge } from "../lib/music/kef.svelte";
     import { createAirPlayBridge } from "../lib/music/airplay.svelte";
+    import { createUPnPBridge } from "../lib/music/upnp.svelte";
     import { createZonesBridge } from "../lib/music/zones.svelte";
     import { createRooms } from "../lib/music/rooms.svelte";
     import type { Room } from "../lib/music/rooms.svelte";
@@ -77,6 +79,7 @@
         SpotifyArtistDetail,
         SpotifyContextDetail,
         MediaZone,
+        UPnPRenderer,
     } from "../lib/types";
 
     // The three bridges, and the model that turns them into rooms. The busy
@@ -88,6 +91,7 @@
     // No busy handle: an AirPlay receiver has no transport of its own to be
     // busy with — see lib/music/airplay.svelte.ts.
     const airplay = createAirPlayBridge();
+    const upnp = createUPnPBridge();
     const zones = createZonesBridge(busy);
     const rooms = createRooms(sonos, kef, zones, busy);
 
@@ -115,6 +119,8 @@
         void sonos.refresh();
         void kef.refresh();
         void airplay.refresh();
+        void upnp.refresh();
+        void spotify.loadProviders();
         void zones.refresh();
         // The endpoint list is what the room editor picks from; it changes only
         // when a speaker is registered or removed, so it is read here and after
@@ -219,16 +225,29 @@
     function playItem(item: SpotifyItem) {
         const r = destination.room;
         if (!r) return;
-        const body = { service: "Spotify", uri: item.uri, title: item.name };
+        const provider = item.provider ?? "spotify";
         if (r.zone) {
             const z = r.zone;
             void startPlayback(
                 "item:" + item.uri,
-                () => zones.play(z, { uri: item.uri, title: item.name }),
+                () => zones.play(z, { uri: item.uri, title: item.name, kind: item.kind, provider }),
                 "zone",
             );
             return;
         }
+        // A bare speaker is played through its own bridge, and those two doors
+        // take a *native service* the speaker streams from its own account
+        // link. Only Spotify has one here. Anything else has to go through the
+        // media layer, which addresses zones — so the honest answer is to say
+        // that rather than send a URI the speaker will ignore.
+        if (provider !== "spotify") {
+            toasts.error(
+                `${item.name} can't play here`,
+                "This service is decoded by HomeHub rather than by the speaker, so it plays to a zone. Put this speaker in a zone and pick that instead.",
+            );
+            return;
+        }
+        const body = { service: "Spotify", uri: item.uri, title: item.name };
         void startPlayback(
             "item:" + item.uri,
             () => (r.kind === "kef" ? api.kefPlayItem(r.id, body) : api.sonosPlayItem(r.id, body)),
@@ -854,7 +873,7 @@
     });
 
     // ── Devices ──────────────────────────────────────────────────────────
-    // One sheet for both bridges — it carries the brand picker when adding and
+    // One sheet for every bridge — it carries the brand picker when adding and
     // is locked to the owning bridge when editing.
     async function openSpeakerModal(sp?: SonosSpeakerView) {
         const changed = await openModal<boolean>(
@@ -865,11 +884,27 @@
             void sonos.refresh();
             void kef.refresh();
             // The add sheet carries a brand picker, so a registration made
-            // from it could have been any of the three.
+            // from it could have been any of the four.
             void airplay.refresh();
+            void upnp.refresh();
             // A new or removed speaker changes both what rooms hold (the
             // backend cascades a delete out of them) and what the picker can
             // offer, so both reads are due.
+            void zones.refresh();
+            void zones.loadEndpoints();
+        }
+    }
+
+    /** A renderer's sheet. Same shape as the AirPlay one and for the same
+     *  reason: adding or removing one changes which routes every zone can
+     *  take, so the zone reads and the endpoint list both have to follow. */
+    async function openUPnPModal(rn: UPnPRenderer) {
+        const changed = await openModal<boolean>(SpeakerModal, {
+            existing: rn,
+            brand: "upnp" as const,
+        });
+        if (changed) {
+            void upnp.refresh();
             void zones.refresh();
             void zones.loadEndpoints();
         }
@@ -882,6 +917,7 @@
         });
         if (changed) {
             void airplay.refresh();
+            void upnp.refresh();
             void zones.refresh();
             void zones.loadEndpoints();
         }
@@ -914,6 +950,14 @@
      *  feeding, and the backend will have released that zone. */
     async function openConnectModal() {
         await openModal(SpotifyConnectModal, {});
+        void zones.refresh();
+    }
+
+    /** Qobuz setup. Signing in changes what every zone read reports about
+     *  quality — it is the one provider that can answer "lossless" — so the
+     *  zones are re-read the same way the quality sheet re-reads them. */
+    async function openQobuzModal() {
+        await openModal(QobuzConnectModal, {});
         void zones.refresh();
     }
 
@@ -1014,9 +1058,12 @@
             onEditSonos={(sp) => void openSpeakerModal(sp)}
             onEditKEF={(sp) => void openKEFModal(sp)}
             onEditAirPlay={(sp) => void openAirPlayModal(sp)}
+            onEditUPnP={(rn) => void openUPnPModal(rn)}
+            {upnp}
             onOpenEvents={openEventsModal}
             onOpenQuality={openQualityModal}
             onOpenConnect={openConnectModal}
+            onOpenQobuz={openQobuzModal}
             spotifyPlayback={spotify.status?.playback ?? false}
             onKEFOpened={(sp) => {
                 const r = rooms.byKey("kef:" + sp.id);
