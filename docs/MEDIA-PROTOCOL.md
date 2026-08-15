@@ -96,20 +96,31 @@ and both vendors have it (Sonos `SetAVTransportURI`, KEF over UPnP AVTransport).
 A bitset on `Descriptor`, so the route engine and the UI can both reason about a
 speaker without knowing its vendor.
 
-| Capability | Sonos | KEF | AirPlay | Meaning |
-|---|:---:|:---:|:---:|---|
-| `CapTransport` | ● | ● | ◐ | play / pause / next / previous |
-| `CapVolume` | ● | ● | ● | 0-100 volume, mute |
-| `CapSeek` | ● | ○ | ○ | seek within a track |
-| `CapQueue` | ● | ○ | ○ | inspect and mutate a queue |
-| `CapGroup` | ● | ○ | ○ | native multi-speaker grouping |
-| `CapPlayURI` | ● | ● | ○ | be handed an arbitrary stream URL |
-| `CapNativeService` | ● | ○ | ○ | stream a service itself, from its own account link |
-| `CapConnect` | ○ | ● | ○ | be targeted by Spotify Connect |
-| `CapWake` | ○ | ● | ○ | be woken from standby / switched to network input |
-| `CapAirPlay` | ○ | ○ | ● | be *pushed* audio, with HomeHub keeping the clock |
+| Capability | Sonos | KEF | AirPlay | UPnP | Meaning |
+|---|:---:|:---:|:---:|:---:|---|
+| `CapTransport` | ● | ● | ◐ | ◐ | play / pause / next / previous |
+| `CapVolume` | ● | ● | ● | ◐ | 0-100 volume, mute |
+| `CapSeek` | ● | ○ | ○ | ○ | seek within a track |
+| `CapQueue` | ● | ○ | ○ | ○ | inspect and mutate a queue |
+| `CapGroup` | ● | ○ | ○ | ○ | native multi-speaker grouping |
+| `CapPlayURI` | ● | ● | ○ | ● | be handed an arbitrary stream URL |
+| `CapNativeService` | ● | ○ | ○ | ○ | stream a service itself, from its own account link |
+| `CapConnect` | ○ | ● | ○ | ○ | be targeted by Spotify Connect |
+| `CapWake` | ○ | ● | ○ | ○ | be woken from standby / switched to network input |
+| `CapAirPlay` | ○ | ○ | ● | ○ | be *pushed* audio, with HomeHub keeping the clock |
 
-● supported ○ not supported ◐ play and pause only
+● supported ○ not supported ◐ partial — see below
+
+A **UPnP renderer** is the mirror image of an AirPlay receiver, and the pair is
+worth reading together. Both are protocol rather than make; both hold no account
+and no queue. But an AirPlay receiver is *pushed* samples and is therefore stuck
+with RAOP's 44.1 kHz/16-bit, while a renderer is handed a URL and *fetches* —
+which is why it is the only endpoint in the house that can be given hi-res. Its
+`CapTransport` is partial for the same reason AirPlay's is (the queue lives on
+HomeHub's side, so next and previous have nothing to ask the device), and its
+`CapVolume` is conditional: a renderer that publishes no RenderingControl
+service has no volume to set, and the capability is dropped rather than
+advertised and left to fail.
 
 Three asymmetries drive the design. Sonos can stream a service from its own
 linked account and group natively; KEF cannot do either, and has to be woken
