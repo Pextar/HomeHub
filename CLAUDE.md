@@ -1,51 +1,32 @@
 # HomeHub — project guide for Claude Code
 
-## ⚠️ Before touching any frontend file
+This file covers project-wide layout only. Conventions live in
+scoped guides that load automatically when you're working in that
+subtree:
 
-**Read `DESIGN.md` in full before editing any `.svelte`, `.css`, or `.ts`
-file in `frontend/src/`.** It is the single source of truth for every
-visual decision. When something isn't explicitly covered there, match
-the nearest existing pattern in `frontend/src/` rather than inventing.
-
----
+- **`backend/CLAUDE.md`** — Go conventions, package map, staged-flow
+  and locking rules. Read before touching anything under `backend/`.
+- **`frontend/CLAUDE.md`** — Svelte conventions, design rules, and the
+  `DESIGN.md` gate. Read before touching anything under `frontend/`.
 
 ## Project layout
 
 ```
 homehub/
-├── DESIGN.md              ← design system (read first, always)
-├── CLAUDE.md              ← this file
-├── design/                ← reference assets: mockup JSX, spec HTML,
-│   ├── handoff-spec.html  │  design styles, screenshots
+├── DESIGN.md              ← design system (frontend/CLAUDE.md points here)
+├── CLAUDE.md               ← this file
+├── backend/CLAUDE.md       ← Go conventions + package map
+├── frontend/CLAUDE.md      ← Svelte conventions + design rules
+├── design/                 ← reference assets: mockup JSX, spec HTML,
+│   ├── handoff-spec.html   │  design styles, screenshots
 │   ├── styles.css
 │   ├── screenshots/
-│   └── *.jsx              ← design canvas prototypes
-├── backend/               ← Go (net/http, gorilla/mux)
-│   └── internal/
-│       ├── api/           ← HTTP handlers
-│       ├── store/         ← state, persistence, validation, actions
-│       ├── scheduler/     ← schedule + automation engine (5-sec tick)
-│       ├── rf/            ← 433 MHz transmitter
-│       ├── tasmota/       ← Wi-Fi smart-light bridge
-│       ├── sonos/         ← Sonos speaker bridge (local UPnP/SOAP)
-│       ├── kef/           ← KEF speaker bridge (local HTTP JSON API)
-│       ├── airplay/       ← AirPlay (RAOP) sender: mDNS discovery + RTP
-│       └── matter/        ← Matter/Thread bridge
-└── frontend/              ← Svelte 5 + Vite
-    └── src/
-        ├── app.css        ← global tokens (§3 of DESIGN.md lives here)
-        ├── App.svelte     ← router; don't change view-transition wiring
-        ├── lib/
-        │   ├── types.ts   ← all TypeScript interfaces
-        │   ├── api.ts     ← typed fetch wrappers
-        │   ├── stores.svelte.ts
-        │   └── utils.ts
-        ├── components/    ← shared primitives (Modal, Icon, Switch, …)
-        ├── modals/        ← one Svelte file per sheet/dialog flow
-        └── views/         ← one Svelte file per top-level screen
+│   └── *.jsx                ← design canvas prototypes
+├── backend/                ← Go (net/http, gorilla/mux)
+│   └── internal/            ← see backend/CLAUDE.md for the package map
+└── frontend/                ← Svelte 5 + Vite
+    └── src/                  ← see frontend/CLAUDE.md for the layout
 ```
-
----
 
 ## Development workflow
 
@@ -61,89 +42,3 @@ cd frontend && npm run dev     # dev server
 
 The session startup hook builds the frontend automatically; if `dist/`
 is already up-to-date it's skipped.
-
----
-
-## Backend conventions
-
-- **All state lives in `store.Store`**; callers acquire `Mu` (RWMutex)
-  for multi-step operations. Methods annotated "Caller must hold Mu"
-  do not lock themselves.
-- **`ValidateX` functions** normalise and check; they are always called
-  before persisting. Never skip them.
-- **`Save()`** writes every JSON file atomically. Call it after any
-  mutation; callers hold the lock when calling it.
-- **`CascadeDeleteSocket`** must be kept in sync with any new field that
-  references a socket ID.
-- Scheduler ticks every 5 s; automation engine runs inside the same
-  tick. Both use the staged flow below.
-- **Multi-socket fan-out** (bulk, group, room, scene, scheduler,
-  automations) uses the staged flow in `store/staged.go`:
-  `StageAction`/`StageSocketSend` under `Mu` → `SendStaged` off-lock →
-  `ApplyStaged` under `Mu`, then `Save()` and `FlushLights()`. Device I/O
-  must never run while `Mu` is held. Single-socket toggles use
-  `ApplyState`, which transmits synchronously so the HTTP response can
-  report the device error directly.
-- All transmissions go through `store.Transmit` — never `RF.Send`
-  directly. It serializes 433 MHz sends (`txMu`) so concurrent
-  transmissions can't overlap on air.
-- Smart-light bridge calls (Tasmota, Matter) are always deferred to
-  `FlushLights()` so they never block the store lock.
-- **A scene step or automation rule may also drive music** (`MusicAction`:
-  pause / resume / volume, aimed at a media room key). It rides the same
-  buffer the lights do — `QueueMusic` under `Mu`, `FlushMusic()` off it —
-  because a scene is activated from six places and every one of them
-  already stages and drains. The store never reaches a speaker itself: it
-  calls `Store.OnMusic`, installed by the API as `runSceneMusic`, which
-  drives the vendor-neutral media layer. **Call `FlushMusic()` beside every
-  `FlushLights()`.**
-- **An automation rule may also be triggered or gated by what a room is
-  playing** (trigger/condition type `music`, same media room key). The read
-  half of the hook above: `Store.MusicPlaying`, installed by the API as
-  `roomPlaying` (`api/automation_music.go`). It returns a third answer —
-  `known=false` — for a room nothing can report on, and both the trigger and
-  the condition treat that as "don't fire" rather than as "quiet". It runs on
-  the 5 s tick, so it reads the bridges' **caches** (`Monitor.Cached`) and
-  must never touch a speaker.
-
----
-
-## Frontend conventions
-
-- **Svelte 5 runes** (`$state`, `$derived`, `$effect`, `$props`).
-  No legacy reactive `$:` declarations.
-- Component CSS is **scoped**. Global utility classes live in `app.css`.
-- Always use **CSS variables from the token set** in `DESIGN.md §3`.
-  Never hardcode a colour, radius, or shadow.
-- **Semantic HTML + ARIA**: `aria-invalid` on invalid inputs,
-  `aria-label` on icon-only buttons, `role="menu"` on overflow menus.
-- **Touch targets**: ≥ 44×44 px on `@media (pointer: coarse)`.
-- **iOS zoom prevention**: inputs must have `font-size: 16px` minimum
-  on `@media (pointer: coarse)` (or `max-width: 600px`).
-- **Numbers** (counts, %, temps, times, IDs): always `var(--font-mono)`
-  with class `mono` or `font-feature-settings: "tnum" 1`.
-
----
-
-## Key design rules (from DESIGN.md §2)
-
-- No emoji outside the Kid module (`KidHome.svelte`, `KidLampPanel.svelte`,
-  `KidScheduleSheet.svelte`).
-- No gradients except `.tile.on` and the day/night timeline.
-- No pure black; deepest surface is `--bg` (`#14130f`).
-- No tabs inside views — use chip filters.
-- No side drawers — use bottom sheets.
-- No sheet opens another sheet — make the opener a screen (sheets may swap).
-- No spinners — use the skeleton primitive.
-- All numerics in `var(--font-mono)`.
-- Icon-only buttons must have a ≥ 44×44 hit area on touch.
-
-## Quick sanity checklist (from DESIGN.md §13)
-
-- [ ] "ON" state uses `.tile.on` gradient + bulb glow, not a flat colour
-- [ ] Every number uses `var(--font-mono)` with `tnum` enabled
-- [ ] No new colours invented — only tokens from DESIGN.md §3
-- [ ] Hit areas ≥ 44×44 on touch (`pointer: coarse`)
-- [ ] `font-size: 16px` on mobile inputs (prevents iOS auto-zoom)
-- [ ] Light theme verified (`[data-theme="light"]` on `<html>`)
-- [ ] Reduced-motion query collapses animations to `0.001ms`
