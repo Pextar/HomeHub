@@ -60,6 +60,7 @@
     import { createSonosBridge } from "../lib/music/sonos.svelte";
     import { createKEFBridge } from "../lib/music/kef.svelte";
     import { createAirPlayBridge } from "../lib/music/airplay.svelte";
+    import { createUPnPBridge } from "../lib/music/upnp.svelte";
     import { createZonesBridge } from "../lib/music/zones.svelte";
     import { createRooms } from "../lib/music/rooms.svelte";
     import type { Room } from "../lib/music/rooms.svelte";
@@ -89,6 +90,7 @@
     // No busy handle: an AirPlay receiver has no transport of its own to be
     // busy with — see lib/music/airplay.svelte.ts.
     const airplay = createAirPlayBridge();
+    const upnp = createUPnPBridge();
     const zones = createZonesBridge(busy);
     const rooms = createRooms(sonos, kef, zones, busy);
 
@@ -116,6 +118,7 @@
         void sonos.refresh();
         void kef.refresh();
         void airplay.refresh();
+        void upnp.refresh();
         void zones.refresh();
         // The endpoint list is what the room editor picks from; it changes only
         // when a speaker is registered or removed, so it is read here and after
@@ -855,7 +858,7 @@
     });
 
     // ── Devices ──────────────────────────────────────────────────────────
-    // One sheet for both bridges — it carries the brand picker when adding and
+    // One sheet for every bridge — it carries the brand picker when adding and
     // is locked to the owning bridge when editing.
     async function openSpeakerModal(sp?: SonosSpeakerView) {
         const changed = await openModal<boolean>(
@@ -866,11 +869,27 @@
             void sonos.refresh();
             void kef.refresh();
             // The add sheet carries a brand picker, so a registration made
-            // from it could have been any of the three.
+            // from it could have been any of the four.
             void airplay.refresh();
+            void upnp.refresh();
             // A new or removed speaker changes both what rooms hold (the
             // backend cascades a delete out of them) and what the picker can
             // offer, so both reads are due.
+            void zones.refresh();
+            void zones.loadEndpoints();
+        }
+    }
+
+    /** A renderer's sheet. Same shape as the AirPlay one and for the same
+     *  reason: adding or removing one changes which routes every zone can
+     *  take, so the zone reads and the endpoint list both have to follow. */
+    async function openUPnPModal(rn: UPnPRenderer) {
+        const changed = await openModal<boolean>(SpeakerModal, {
+            existing: rn,
+            brand: "upnp" as const,
+        });
+        if (changed) {
+            void upnp.refresh();
             void zones.refresh();
             void zones.loadEndpoints();
         }
@@ -883,6 +902,7 @@
         });
         if (changed) {
             void airplay.refresh();
+            void upnp.refresh();
             void zones.refresh();
             void zones.loadEndpoints();
         }
@@ -1023,6 +1043,8 @@
             onEditSonos={(sp) => void openSpeakerModal(sp)}
             onEditKEF={(sp) => void openKEFModal(sp)}
             onEditAirPlay={(sp) => void openAirPlayModal(sp)}
+            onEditUPnP={(rn) => void openUPnPModal(rn)}
+            {upnp}
             onOpenEvents={openEventsModal}
             onOpenQuality={openQualityModal}
             onOpenConnect={openConnectModal}

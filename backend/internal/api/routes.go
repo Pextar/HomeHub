@@ -308,6 +308,8 @@ func (s *Server) registerSpotifyRoutes(api *mux.Router) {
 	api.HandleFunc("/upnp/renderers/{id}", s.requireAdmin(s.upnpUpdateRenderer)).Methods("PUT")
 	api.HandleFunc("/upnp/renderers/{id}/refresh", s.requireAdmin(s.upnpRefreshRenderer)).Methods("POST")
 	api.HandleFunc("/upnp/renderers/{id}", s.requireAdmin(s.upnpDeleteRenderer)).Methods("DELETE")
+	api.HandleFunc("/upnp/{id}/volume", s.requireAdminOrKid(s.upnpSetVolume)).Methods("PUT")
+	api.HandleFunc("/upnp/{id}/mute", s.requireAdminOrKid(s.upnpSetMute)).Methods("PUT")
 
 	// Qobuz: app credentials, then an account. Two steps because they are
 	// issued to two different parties — see internal/api/qobuz.go.

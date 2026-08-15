@@ -244,3 +244,87 @@ func (s *Server) upnpDeleteRenderer(w http.ResponseWriter, r *http.Request) {
 	s.pruneDeadRooms()
 	w.WriteHeader(http.StatusNoContent)
 }
+
+// upnpSetVolume handles PUT /api/upnp/{id}/volume.
+//
+// Here rather than only through the zone layer because the panel drives one
+// member of a group at a time, and every other bridge has this door. A renderer
+// without a RenderingControl service has no volume to set, and says so instead
+// of accepting the call and doing nothing.
+func (s *Server) upnpSetVolume(w http.ResponseWriter, r *http.Request) {
+	id := mux.Vars(r)["id"]
+	var body struct {
+		Level int `json:"level"`
+	}
+	if !decodeBody(w, r, &body) {
+		return
+	}
+	if body.Level < 0 || body.Level > 100 {
+		writeError(w, http.StatusBadRequest, "level must be between 0 and 100")
+		return
+	}
+
+	rn, ok := s.renderer(w, id)
+	if !ok {
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	if err := upnp.SetVolume(ctx, rendererDevice(rn), body.Level); err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// upnpSetMute handles PUT /api/upnp/{id}/mute.
+func (s *Server) upnpSetMute(w http.ResponseWriter, r *http.Request) {
+	id := mux.Vars(r)["id"]
+	var body struct {
+		Muted bool `json:"muted"`
+	}
+	if !decodeBody(w, r, &body) {
+		return
+	}
+	rn, ok := s.renderer(w, id)
+	if !ok {
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	if err := upnp.SetMute(ctx, rendererDevice(rn), body.Muted); err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// renderer reads one renderer under the lock, answering 404 when it is gone.
+// Returns a copy: the control calls that follow are device I/O and must not
+// run while the store lock is held.
+func (s *Server) renderer(w http.ResponseWriter, id string) (store.UPnPRenderer, bool) {
+	rn := store.ViewValue(s.Store, func() *store.UPnPRenderer {
+		if got, ok := s.Store.UPnP[id]; ok {
+			cp := *got
+			return &cp
+		}
+		return nil
+	})
+	if rn == nil {
+		writeError(w, http.StatusNotFound, "renderer not found")
+		return store.UPnPRenderer{}, false
+	}
+	return *rn, true
+}
+
+// rendererDevice is the control-URL bundle the upnp package works from.
+func rendererDevice(rn store.UPnPRenderer) *upnp.Device {
+	return &upnp.Device{
+		UDN:                 rn.UDN,
+		Name:                rn.Name,
+		Model:               rn.Model,
+		AVTransportURL:      rn.AVTransportURL,
+		RenderingControlURL: rn.RenderingControlURL,
+		ConnectionMgrURL:    rn.ConnectionMgrURL,
+	}
+}

@@ -58,6 +58,8 @@ import type {
   MediaEndpoint,
   MediaProvider,
   QobuzStatus,
+  UPnPRenderer,
+  UPnPDescription,
   MediaResults,
   MediaZone,
   MediaZoneRoutes,
@@ -687,6 +689,41 @@ export const api = {
   // they carry vendor specifics the detail views need.
   // See docs/MEDIA-PROTOCOL.md.
   mediaEndpoints() { return req<MediaEndpoint[]>("/media/endpoints"); },
+  // UPnP/DLNA renderers. Registration is a *describe* rather than a probe:
+  // a renderer publishes its control URLs inside a device description at a
+  // URL of its choosing, so adding one means reading that document. Describe
+  // first to show what was found, then create.
+  upnpRenderers() { return req<UPnPRenderer[]>("/upnp/renderers"); },
+  upnpDescribe(location: string) {
+    return req<UPnPDescription>("/upnp/describe", { method: "POST", body: json({ location }) });
+  },
+  upnpCreateRenderer(body: { location: string; name?: string; room?: string }) {
+    return req<UPnPRenderer>("/upnp/renderers", { method: "POST", body: json(body) });
+  },
+  upnpUpdateRenderer(id: string, body: { name?: string; room?: string }) {
+    return req<UPnPRenderer>(`/upnp/renderers/${encodeURIComponent(id)}`, {
+      method: "PUT", body: json(body),
+    });
+  },
+  /** Re-read the device description — the fix for a renderer that rebooted
+   *  onto a different port and stopped answering the URLs we remembered. */
+  upnpRefreshRenderer(id: string) {
+    return req<UPnPRenderer>(`/upnp/renderers/${encodeURIComponent(id)}/refresh`, { method: "POST" });
+  },
+  upnpDeleteRenderer(id: string) {
+    return req<void>(`/upnp/renderers/${encodeURIComponent(id)}`, { method: "DELETE" });
+  },
+  upnpSetVolume(id: string, level: number) {
+    return req<void>(`/upnp/${encodeURIComponent(id)}/volume`, {
+      method: "PUT", body: json({ level }),
+    });
+  },
+  upnpSetMute(id: string, muted: boolean) {
+    return req<void>(`/upnp/${encodeURIComponent(id)}/mute`, {
+      method: "PUT", body: json({ muted }),
+    });
+  },
+
   // Qobuz. Setup is two calls because the credentials come from two parties;
   // see QobuzStatus. The password is sent once and never stored — what
   // persists server-side is the token Qobuz returns for it.

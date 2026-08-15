@@ -4,10 +4,13 @@
 // in sonos.ts and kef.ts stay: the per-speaker detail views need vendor
 // specifics that don't generalise. See docs/MEDIA-PROTOCOL.md.
 
-/** Which bridge is behind an endpoint. `airplay` is a protocol rather than a
- *  make — a RoPieee, an Apple TV and any shairport-sync box are all driven
- *  identically, which is exactly what a vendor means to the route engine. */
-export type MediaVendor = "sonos" | "kef" | "airplay";
+/** Which bridge is behind an endpoint. `airplay` and `upnp` are protocols
+ *  rather than makes — a RoPieee, an Apple TV and any shairport-sync box are
+ *  driven identically, which is exactly what a vendor means to the route
+ *  engine. The two are opposites in who holds the audio: an AirPlay receiver
+ *  is pushed samples and is stuck with 44.1 kHz/16-bit, while a UPnP renderer
+ *  fetches and can take any format. */
+export type MediaVendor = "sonos" | "kef" | "airplay" | "upnp";
 
 /**
  * One thing a speaker can do. These are the strings the backend emits, and
@@ -518,4 +521,39 @@ export interface QobuzStatus {
   max_format?: number;
   /** The same, spelled out — use this rather than mapping the number again. */
   max_format_label?: string;
+}
+
+// ── UPnP / DLNA renderers ────────────────────────────────────────────────
+// The only endpoint in the house that fetches rather than receives, and so the
+// only one that can be handed hi-res: it reads the WAV header instead of being
+// bound to AirPlay's 44.1 kHz/16-bit. See docs/MEDIA-PROTOCOL.md.
+
+export interface UPnPRenderer {
+  id: string;
+  name: string;
+  ip: string;
+  port: number;
+  /** The device description URL, kept so control URLs can be re-read. */
+  location: string;
+  udn?: string;
+  room?: string;
+  model?: string;
+  avtransport_url: string;
+  rendering_control_url?: string;
+  connection_manager_url?: string;
+  /** What the renderer said about WAV and linear PCM when it was added.
+   *  Advisory — renderers under-report, so this never blocks a play. */
+  plays_pcm: boolean;
+}
+
+/** What `POST /api/upnp/describe` answers: a look before committing. */
+export interface UPnPDescription {
+  name: string;
+  manufacturer?: string;
+  model?: string;
+  udn?: string;
+  plays_pcm: boolean;
+  /** Every sink MIME type the renderer listed, for showing when it says it
+   *  can't play what HomeHub serves. */
+  formats?: string[];
 }
