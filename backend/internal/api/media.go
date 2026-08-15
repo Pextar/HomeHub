@@ -98,6 +98,30 @@ func (s *Server) provider(id string) (media.Provider, error) {
 	return nil, fmt.Errorf("%w: %q", media.ErrUnknownProvider, id)
 }
 
+// itemFormat asks a provider what one item will decode to, for the router.
+//
+// Nil on any doubt, and that is the safe direction here rather than the
+// cautious-looking one: nil blocks no route, so a lookup that fails leaves
+// routing exactly as it was before formats were considered at all. Refusing to
+// play because a catalogue call timed out would be a worse failure than
+// choosing a route that later turns out not to fit — the cast itself still
+// refuses to reduce, so nothing is downsampled either way.
+func (s *Server) itemFormat(ctx context.Context, p media.Provider, item media.Item) *media.PCMFormat {
+	fr, ok := p.(media.ItemFormatReporter)
+	if !ok {
+		return nil
+	}
+	f, err := fr.ItemFormat(ctx, item)
+	if err != nil {
+		log.Printf("media: reading %s format for %q: %v", p.ID(), item.URI, err)
+		return nil
+	}
+	if !f.Valid() {
+		return nil
+	}
+	return &f
+}
+
 // providers is every provider the server knows about.
 func (s *Server) providers() []media.Provider {
 	return []media.Provider{
@@ -464,14 +488,6 @@ func (s *Server) mediaZonePlay(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	plan, err := media.Resolve(p, members)
-	if err != nil {
-		// Nothing can serve this zone. The error names which speaker
-		// blocked which route, which is the actionable part.
-		writeError(w, http.StatusConflict, err.Error())
-		return
-	}
-
 	ctx, cancel := context.WithTimeout(r.Context(), mediaTimeout)
 	defer cancel()
 
@@ -481,6 +497,19 @@ func (s *Server) mediaZonePlay(w http.ResponseWriter, r *http.Request) {
 		URI:      body.URI,
 		Title:    body.Title,
 	}
+
+	// Resolve knowing what this particular thing is. The route that can carry
+	// a CD-quality album is not the route that can carry a 24-bit/192 kHz one,
+	// and deciding from the subscription instead would refuse the first
+	// wherever it cannot carry the second.
+	plan, err := media.ResolveFor(p, members, s.itemFormat(ctx, p, item))
+	if err != nil {
+		// Nothing can serve this zone. The error names which speaker
+		// blocked which route, which is the actionable part.
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
+
 	sess, err := media.Play(ctx, plan, p, item, s.mediaDeps())
 	if err != nil {
 		writeError(w, mediaErrStatus(err), err.Error())

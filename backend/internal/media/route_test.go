@@ -411,21 +411,61 @@ func hiRes(f PCMFormat) Provider {
 	}
 }
 
-// The payoff: a source AirPlay cannot carry does not fail, and is not reduced.
+// The payoff: a track AirPlay cannot carry does not fail, and is not reduced.
 // It takes the next route down, which serves any format intact.
 func TestHiResRoutesAroundAirPlayRatherThanBeingReduced(t *testing.T) {
 	eps := []Endpoint{
 		ep("Study", VendorKEF, CapAirPlay|CapPlayURI, ""),
 		ep("Hall", VendorKEF, CapAirPlay|CapPlayURI, ""),
 	}
-	p := hiRes(PCMFormat{SampleRate: 96000, BitDepth: 24, Channels: 2, LittleEndian: true})
+	hi := PCMFormat{SampleRate: 96000, BitDepth: 24, Channels: 2, LittleEndian: true}
+	p := hiRes(hi)
 
-	plan, err := Resolve(p, eps)
+	plan, err := ResolveFor(p, eps, &hi)
 	if err != nil {
-		t.Fatalf("a hi-res source must still play: %v", err)
+		t.Fatalf("a hi-res track must still play: %v", err)
 	}
 	if plan.Route != RouteStream {
 		t.Errorf("route = %s, want stream — AirPlay would have had to reduce it", plan.Route)
+	}
+}
+
+// And the same provider playing a CD-quality track keeps AirPlay. This is the
+// case an entitlement-based decision got wrong: a hi-res *subscription* mostly
+// plays albums that are not hi-res, and blocking those would strip the clocked
+// route from most of a library — or, on AirPlay-only receivers, refuse to play
+// them at all.
+func TestCDTrackKeepsAirPlayOnAHiResCapableProvider(t *testing.T) {
+	eps := []Endpoint{
+		ep("Study", VendorKEF, CapAirPlay|CapPlayURI, ""),
+		ep("Hall", VendorKEF, CapAirPlay|CapPlayURI, ""),
+	}
+	// The provider could go to 24/192; this particular track is CD quality.
+	p := hiRes(PCMFormat{SampleRate: 192000, BitDepth: 24, Channels: 2, LittleEndian: true})
+	cd := CDQuality
+
+	plan, err := ResolveFor(p, eps, &cd)
+	if err != nil {
+		t.Fatalf("a CD track must play: %v", err)
+	}
+	if plan.Route != RouteAirPlay {
+		t.Errorf("route = %s, want airplay — nothing is being reduced", plan.Route)
+	}
+}
+
+// With no track chosen, nothing is blocked. The zone reads ask "what would a
+// tap here do", and the answer genuinely depends on which track — refusing on
+// a guess is the same mistake as reducing on one.
+func TestAnUnknownFormatBlocksNothing(t *testing.T) {
+	eps := []Endpoint{ep("Study", VendorKEF, CapAirPlay, "")}
+	p := hiRes(PCMFormat{SampleRate: 192000, BitDepth: 24, Channels: 2, LittleEndian: true})
+
+	plan, err := Resolve(p, eps)
+	if err != nil {
+		t.Fatalf("resolve with no track: %v", err)
+	}
+	if plan.Route != RouteAirPlay {
+		t.Errorf("route = %s, want airplay", plan.Route)
 	}
 }
 
@@ -433,9 +473,10 @@ func TestHiResRoutesAroundAirPlayRatherThanBeingReduced(t *testing.T) {
 // would leave someone unable to tell a network fault from a format they chose.
 func TestAirPlayRejectionNamesBothFormats(t *testing.T) {
 	eps := []Endpoint{ep("Study", VendorKEF, CapAirPlay, "")}
-	p := hiRes(PCMFormat{SampleRate: 44100, BitDepth: 24, Channels: 2, LittleEndian: true})
+	deep := PCMFormat{SampleRate: 44100, BitDepth: 24, Channels: 2, LittleEndian: true}
+	p := hiRes(deep)
 
-	_, err := Resolve(p, eps)
+	_, err := ResolveFor(p, eps, &deep)
 	if err == nil {
 		t.Fatal("an AirPlay-only zone can't carry 24-bit, so nothing should serve it")
 	}
@@ -463,7 +504,8 @@ func TestCDQualityStillPrefersAirPlay(t *testing.T) {
 		ep("Study", VendorKEF, CapAirPlay|CapPlayURI, ""),
 		ep("Hall", VendorKEF, CapAirPlay|CapPlayURI, ""),
 	}
-	plan, err := Resolve(hiRes(CDQuality), eps)
+	cd := CDQuality
+	plan, err := ResolveFor(hiRes(cd), eps, &cd)
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
@@ -502,7 +544,8 @@ func TestASilentProviderIsNotAssumedHiRes(t *testing.T) {
 	eps := []Endpoint{ep("Study", VendorKEF, CapAirPlay, "")}
 	p := &fakeProvider{routes: RouteSet{RouteAirPlay}, stream: true,
 		streamAvail: Availability{OK: true, Configured: true}}
-	plan, err := Resolve(p.build(), eps)
+	cd := CDQuality
+	plan, err := ResolveFor(p.build(), eps, &cd)
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}

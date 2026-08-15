@@ -346,7 +346,7 @@ func DescribeQuality(p Provider, r Route, pref StreamQuality) Chain {
 	// and this is audio it cannot — so the honest transport stage is the
 	// ceiling, named, with the note that HomeHub routes around it rather than
 	// reducing to fit.
-	if limit, decoded, yes := RouteReduces(p, r); yes {
+	if limit, decoded, yes := describeReduction(p, r); yes {
 		transport = Quality{
 			Codec: CodecPCM, SampleRate: limit.SampleRate, BitDepth: limit.BitDepth,
 			Channels: limit.Channels,
@@ -394,6 +394,26 @@ func DescribeQuality(p Provider, r Route, pref StreamQuality) Chain {
 	}
 	c.Fix = fixFor(p, r, pref, source)
 	return c
+}
+
+// describeReduction reports whether route r could not carry the best this
+// provider might hand it, for the quality *report* rather than for routing.
+//
+// It deliberately uses the provider's ceiling where RouteReduces uses the
+// track's actual format, because the two answer different questions. Routing
+// asks "can this thing play here", and must not refuse a CD album because the
+// subscription allows hi-res. A quality sheet asks "what does this path do to
+// my music", and the useful answer names the ceiling the route imposes — the
+// listener wants to know AirPlay tops out at CD before they queue an album that
+// doesn't fit, not after.
+func describeReduction(p Provider, r Route) (limit, decoded PCMFormat, yes bool) {
+	pr, ok := p.(PCMReporter)
+	if !ok {
+		return limit, decoded, false
+	}
+	decoded = pr.DecodedFormat()
+	limit, yes = RouteReduces(r, &decoded)
+	return limit, decoded, yes
 }
 
 // cappedSource names who capped a lossy source and says it in a sentence.

@@ -40,6 +40,10 @@ type QobuzAccount interface {
 	MaxFormat() qobuz.FormatID
 	Search(ctx context.Context, query string, limit int) (*qobuz.Results, error)
 	Favorites(ctx context.Context, limit int) ([]qobuz.Item, error)
+	// Tracks expands a playable URI into its tracks. Needed here as well as
+	// in the decoder because routing has to know what the first track is
+	// before it can choose a route that can carry it.
+	Tracks(ctx context.Context, uri string) ([]qobuz.Item, error)
 }
 
 // NewQobuzProvider wraps a Qobuz account and its decoder. Both may be nil: a
@@ -142,6 +146,52 @@ func (p *QobuzProvider) DecodedFormat() media.PCMFormat {
 	q := p.SourceQuality(media.RouteStream)
 	return media.PCMFormat{
 		SampleRate: q.SampleRate, BitDepth: q.BitDepth, Channels: 2, LittleEndian: true,
+	}
+}
+
+// ItemFormat implements media.ItemFormatReporter: what this particular item
+// will decode to, which is what the router needs and what the entitlement
+// ceiling is not.
+//
+// Two things cap a track, and the smaller wins. The catalogue says what masters
+// exist for it — plenty of the Qobuz library is 16-bit/44.1 kHz and no
+// subscription changes that — and the subscription says how much of it this
+// household may have. A hi-res plan playing a CD-quality album gets CD quality,
+// which is exactly the case that must keep AirPlay.
+//
+// The first track decides, because the stream is declared in one format and
+// ends at a change (see stream.Qobuz). A zero format means the lookup told us
+// nothing, and the caller must not block on that.
+func (p *QobuzProvider) ItemFormat(ctx context.Context, item media.Item) (media.PCMFormat, error) {
+	if p.client == nil {
+		return media.PCMFormat{}, nil
+	}
+	tracks, err := p.client.Tracks(ctx, item.URI)
+	if err != nil {
+		return media.PCMFormat{}, err
+	}
+	if len(tracks) == 0 {
+		return media.PCMFormat{}, nil
+	}
+	return p.ItemFormatFor(tracks[0].SampleRate, tracks[0].BitDepth), nil
+}
+
+// ItemFormatFor caps a track's catalogue format by what this subscription may
+// actually be served. Split out from ItemFormat so the rule can be tested
+// without a catalogue behind it.
+func (p *QobuzProvider) ItemFormatFor(rate, depth int) media.PCMFormat {
+	ceiling := p.DecodedFormat()
+	if rate <= 0 || depth <= 0 {
+		// The catalogue said nothing about this track. The entitlement is
+		// then the only thing known, and it is a ceiling — returning it lets
+		// the router be conservative for the one case where it has to be.
+		return ceiling
+	}
+	return media.PCMFormat{
+		SampleRate:   min(rate, ceiling.SampleRate),
+		BitDepth:     min(depth, ceiling.BitDepth),
+		Channels:     2,
+		LittleEndian: true,
 	}
 }
 

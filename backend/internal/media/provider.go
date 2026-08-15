@@ -192,6 +192,24 @@ func (f PCMFormat) Carries(src PCMFormat) bool {
 		src.Channels <= f.Channels
 }
 
+// ItemFormatReporter is a provider that can say what one specific item decodes
+// to. Optional, and separate from PCMReporter because the two differ in both
+// answer and cost: PCMReporter is the provider's ceiling and is free, while
+// this is the truth about one track and may need a catalogue lookup — hence the
+// context, and hence it being called by a handler rather than by the pure
+// router.
+//
+// It exists because routing on a ceiling is wrong in a way that is invisible
+// until it bites: a subscription entitled to 24-bit/192 kHz mostly plays albums
+// that are not, and blocking AirPlay for all of them means a CD-quality album
+// cannot reach an AirPlay-only receiver at all.
+type ItemFormatReporter interface {
+	// ItemFormat returns what this item will decode to. A zero format means
+	// "not known", which callers must treat as "do not block" rather than
+	// as a reason to refuse.
+	ItemFormat(ctx context.Context, item Item) (PCMFormat, error)
+}
+
 // StreamProvider serves RouteStream: HomeHub decodes the content once and
 // re-serves it, which is the only way to get one service onto speakers of
 // different vendors simultaneously. See docs/MEDIA-PROTOCOL.md on why nothing

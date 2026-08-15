@@ -15,6 +15,9 @@ import (
 type fakeAccount struct {
 	status qobuz.Status
 	max    qobuz.FormatID
+	// tracks is what a URI expands to, so ItemFormat can be exercised
+	// against catalogue entries of different formats.
+	tracks []qobuz.Item
 }
 
 func (a fakeAccount) Status() qobuz.Status      { return a.status }
@@ -23,6 +26,9 @@ func (a fakeAccount) Search(context.Context, string, int) (*qobuz.Results, error
 	return &qobuz.Results{}, nil
 }
 func (a fakeAccount) Favorites(context.Context, int) ([]qobuz.Item, error) { return nil, nil }
+func (a fakeAccount) Tracks(context.Context, string) ([]qobuz.Item, error) {
+	return a.tracks, nil
+}
 
 // withEntitlement builds a signed-in provider entitled to max.
 func withEntitlement(t *testing.T, max qobuz.FormatID) *QobuzProvider {
@@ -112,18 +118,81 @@ func TestQobuzDeclaresItsDecodedFormat(t *testing.T) {
 	}
 }
 
-// A hi-res Qobuz zone routes to the stream route rather than being reduced for
-// AirPlay — the end-to-end payoff of the never-downsample work.
-func TestHiResQobuzAvoidsAirPlay(t *testing.T) {
-	p := withEntitlement(t, qobuz.FormatHiRes192)
-	if _, _, yes := media.RouteReduces(p, media.RouteAirPlay); !yes {
-		t.Error("AirPlay would have to reduce a 24-bit decode and should say so")
+// Routing is decided by the track, not the subscription. A hi-res *plan* that
+// blocked AirPlay for everything would refuse CD-quality albums on AirPlay-only
+// receivers entirely — which is what this asserts can no longer happen.
+func TestAirPlayIsDecidedByTheTrackNotThePlan(t *testing.T) {
+	hi := media.PCMFormat{SampleRate: 192000, BitDepth: 24, Channels: 2, LittleEndian: true}
+	if _, yes := media.RouteReduces(media.RouteAirPlay, &hi); !yes {
+		t.Error("AirPlay can't carry 24/192 and should say so")
 	}
-	// A CD-quality plan produces audio AirPlay carries exactly, so it must
-	// not be pushed off the clocked route for no reason.
-	cd := withEntitlement(t, qobuz.FormatCD)
-	if _, _, yes := media.RouteReduces(cd, media.RouteAirPlay); yes {
-		t.Error("CD-quality audio fits AirPlay exactly and must keep it")
+	cd := media.CDQuality
+	if _, yes := media.RouteReduces(media.RouteAirPlay, &cd); yes {
+		t.Error("a CD-quality track fits AirPlay exactly and must keep it")
+	}
+	// Even on a plan entitled to far more.
+	if got := withEntitlement(t, qobuz.FormatHiRes192).ItemFormatFor(cd.SampleRate, cd.BitDepth); got != cd {
+		t.Errorf("a CD track on a hi-res plan resolves to %+v, want CD quality", got)
+	}
+}
+
+// The track and the subscription both cap, and the smaller wins. Getting this
+// backwards in either direction is a real failure: take only the plan and a CD
+// album is refused on AirPlay; take only the catalogue and a CD-only plan is
+// reported as playing 24-bit.
+func TestItemFormatTakesTheSmallerOfTrackAndPlan(t *testing.T) {
+	cases := []struct {
+		name      string
+		plan      qobuz.FormatID
+		rate, dep int
+		wantRate  int
+		wantDepth int
+	}{
+		{"hi-res plan, hi-res track", qobuz.FormatHiRes192, 192000, 24, 192000, 24},
+		{"hi-res plan, CD track", qobuz.FormatHiRes192, 44100, 16, 44100, 16},
+		{"CD plan, hi-res track", qobuz.FormatCD, 192000, 24, 44100, 16},
+		{"hi-res plan, 96k track", qobuz.FormatHiRes192, 96000, 24, 96000, 24},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := withEntitlement(t, tc.plan).ItemFormatFor(tc.rate, tc.dep)
+			if got.SampleRate != tc.wantRate || got.BitDepth != tc.wantDepth {
+				t.Errorf("format = %d Hz/%d-bit, want %d/%d",
+					got.SampleRate, got.BitDepth, tc.wantRate, tc.wantDepth)
+			}
+		})
+	}
+}
+
+// A catalogue that says nothing about a track leaves the entitlement as the
+// only thing known, and that is a ceiling — the one case where being
+// conservative is right, because guessing low would claim a quality nobody
+// verified.
+func TestItemFormatFallsBackToTheEntitlement(t *testing.T) {
+	got := withEntitlement(t, qobuz.FormatHiRes96).ItemFormatFor(0, 0)
+	if got.SampleRate != 96000 || got.BitDepth != 24 {
+		t.Errorf("format = %+v, want the entitlement ceiling", got)
+	}
+}
+
+// End to end through the catalogue: a CD-quality album on a hi-res plan
+// resolves to CD quality, which is what keeps it on AirPlay.
+func TestItemFormatReadsTheCatalogue(t *testing.T) {
+	p := NewQobuzProvider(fakeAccount{
+		status: qobuz.Status{Configured: true, Connected: true, MaxFormat: qobuz.FormatHiRes192},
+		max:    qobuz.FormatHiRes192,
+		tracks: []qobuz.Item{{ID: "1", SampleRate: 44100, BitDepth: 16}},
+	}, nil)
+
+	got, err := p.ItemFormat(context.Background(), media.Item{URI: "qobuz:album:x"})
+	if err != nil {
+		t.Fatalf("item format: %v", err)
+	}
+	if got != media.CDQuality {
+		t.Errorf("format = %+v, want CD quality", got)
+	}
+	if _, yes := media.RouteReduces(media.RouteAirPlay, &got); yes {
+		t.Error("a CD album must not be pushed off AirPlay by a hi-res plan")
 	}
 }
 
