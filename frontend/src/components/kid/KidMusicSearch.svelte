@@ -22,14 +22,14 @@
      * keyboard leaving: Enter, or a tap on a result.
      */
     import { onMount } from "svelte";
-    import { api } from "../../lib/api";
     import { toasts } from "../../lib/stores.svelte";
     import { createSpotify } from "../../lib/music/spotify.svelte";
     import { createSearchHistory } from "../../lib/music/history.svelte";
+    import { createCatalogCache, contextItem } from "../../lib/music/catalog-cache.svelte";
     import { fmtCount, fmtMs, capFirst } from "../../lib/music/format";
     import { haptic } from "../../lib/utils";
     import type { PanelMusicStore } from "../../lib/panel-music.svelte";
-    import type { SpotifyArtistDetail, SpotifyContextDetail, SpotifyItem } from "../../lib/types";
+    import type { SpotifyItem } from "../../lib/types";
 
     let { music, kbOpen = false }: { music: PanelMusicStore; kbOpen?: boolean } = $props();
 
@@ -196,18 +196,6 @@
     let stack = $state<Level[]>([]);
     const topLevel = $derived(stack.length ? stack[stack.length - 1] : null);
 
-    let artistCache = $state<Record<string, SpotifyArtistDetail>>({});
-    let artistLoadingUri = $state<string | null>(null);
-    const artistUri = $derived(topLevel?.kind === "artist" ? topLevel.uri : null);
-    const artistDetail = $derived(artistUri ? (artistCache[artistUri] ?? null) : null);
-    const artistLoading = $derived(!!artistUri && artistLoadingUri === artistUri);
-
-    let contextCache = $state<Record<string, SpotifyContextDetail>>({});
-    let contextLoadingUri = $state<string | null>(null);
-    const contextUri = $derived(topLevel?.kind === "context" ? topLevel.uri : null);
-    const contextDetail = $derived(contextUri ? (contextCache[contextUri] ?? null) : null);
-    const contextLoading = $derived(!!contextUri && contextLoadingUri === contextUri);
-
     function pushLevel(kind: Level["kind"], uri: string) {
         stack = [...stack, { kind, uri }];
     }
@@ -216,42 +204,27 @@
         stack = stack.slice(0, -1);
     }
 
+    // The pages themselves are read and kept by the shared cache; the stack
+    // above stays this surface's, since only it knows what a level looks like.
+    const catalog = createCatalogCache({
+        artistUri: () => (topLevel?.kind === "artist" ? topLevel.uri : null),
+        contextUri: () => (topLevel?.kind === "context" ? topLevel.uri : null),
+        onFail: popLevel,
+        artistError: "Couldn't load the artist",
+    });
+
     async function openArtist(uri: string, art?: { art_url?: string; round?: boolean }) {
         if (topLevel?.kind === "artist" && topLevel.uri === uri) return;
         actedOnResult(art);
         searchEl?.blur(); // chosen — the keyboard's job is done
         pushLevel("artist", uri);
-        if (artistCache[uri]) return; // been here — renders instantly
-        artistLoadingUri = uri;
-        try {
-            artistCache[uri] = await api.spotifyArtist(uri);
-        } catch (e) {
-            toasts.error("Couldn't load the artist", (e as Error).message);
-            if (artistUri === uri) popLevel();
-        } finally {
-            if (artistLoadingUri === uri) artistLoadingUri = null;
-        }
+        await catalog.loadArtist(uri);
     }
 
     async function openContext(uri: string) {
         if (topLevel?.kind === "context" && topLevel.uri === uri) return;
         pushLevel("context", uri);
-        if (contextCache[uri]) return;
-        contextLoadingUri = uri;
-        try {
-            contextCache[uri] = await api.spotifyContext(uri);
-        } catch (e) {
-            toasts.error("Couldn't open it", (e as Error).message);
-            if (contextUri === uri) popLevel();
-        } finally {
-            if (contextLoadingUri === uri) contextLoadingUri = null;
-        }
-    }
-
-    /** The opened record as an item, for the big "Play all" — the same call
-     *  a tap on its search card makes. */
-    function contextItem(c: SpotifyContextDetail): SpotifyItem {
-        return { kind: c.kind, uri: c.uri, name: c.name, sub: c.sub, art_url: c.art_url };
+        await catalog.loadContext(uri);
     }
 
     // Escape climbs the ladder: queue actions, then each level, then the
@@ -348,10 +321,10 @@
         <button class="kms-back" onclick={popLevel} aria-label="Back one level">‹ Back</button>
 
         {#if topLevel.kind === "artist"}
-            {#if artistLoading && !artistDetail}
+            {#if catalog.artistLoading && !catalog.artistDetail}
                 <div class="kms-skel-hero" aria-hidden="true"></div>
-            {:else if artistDetail}
-                {@const d = artistDetail}
+            {:else if catalog.artistDetail}
+                {@const d = catalog.artistDetail}
                 <header class="kms-hero">
                     {#if d.art_url}
                         <img class="kms-hero-art round" src={d.art_url} alt="" />
@@ -439,10 +412,10 @@
                 {/if}
             {/if}
         {:else}
-            {#if contextLoading && !contextDetail}
+            {#if catalog.contextLoading && !catalog.contextDetail}
                 <div class="kms-skel-hero" aria-hidden="true"></div>
-            {:else if contextDetail}
-                {@const d = contextDetail}
+            {:else if catalog.contextDetail}
+                {@const d = catalog.contextDetail}
                 <header class="kms-hero">
                     {#if d.art_url}
                         <img class="kms-hero-art" src={d.art_url} alt="" />

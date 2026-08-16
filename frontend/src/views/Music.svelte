@@ -69,6 +69,7 @@
     import { createSearchHistory } from "../lib/music/history.svelte";
     import { createHeardLog } from "../lib/music/heard.svelte";
     import { createSpotify } from "../lib/music/spotify.svelte";
+    import { createCatalogCache, contextItem } from "../lib/music/catalog-cache.svelte";
     import type {
         SonosSpeakerView,
         HeardTrack,
@@ -76,7 +77,6 @@
         KEFSpeakerView,
         AirPlaySpeakerView,
         SpotifyItem,
-        SpotifyArtistDetail,
         SpotifyContextDetail,
         MediaZone,
         UPnPRenderer,
@@ -682,32 +682,20 @@
     // forth (artist → album → back), so each detail is fetched once per URI
     // and kept for the session — coming back is instant rather than a
     // skeleton replaying itself.
-    let artistCache = $state<Record<string, SpotifyArtistDetail>>({});
-    let artistLoadingUri = $state<string | null>(null);
-    const artistUri = $derived(topEntry?.id === "artist" ? topEntry.uri! : null);
-    const artistDetail = $derived(artistUri ? (artistCache[artistUri] ?? null) : null);
-    const artistLoading = $derived(!!artistUri && artistLoadingUri === artistUri);
+    // The pages themselves are read and kept by the shared cache; the screen
+    // stack above stays this view's, since only it knows what a level looks
+    // like and where it was scrolled.
+    const catalog = createCatalogCache({
+        artistUri: () => (topEntry?.id === "artist" ? (topEntry.uri ?? null) : null),
+        contextUri: () => (topEntry?.id === "context" ? (topEntry.uri ?? null) : null),
+        onFail: leaveScreen,
+    });
 
     async function openArtist(uri: string) {
         if (topEntry?.id === "artist" && topEntry.uri === uri) return;
         pushScreen({ id: "artist", uri, scroll: 0 });
-        if (artistCache[uri]) return; // been here — renders instantly
-        artistLoadingUri = uri;
-        try {
-            artistCache[uri] = await api.spotifyArtist(uri);
-        } catch (e) {
-            toasts.error("Couldn't load artist", (e as Error).message);
-            if (artistUri === uri) leaveScreen();
-        } finally {
-            if (artistLoadingUri === uri) artistLoadingUri = null;
-        }
+        await catalog.loadArtist(uri);
     }
-
-    let contextCache = $state<Record<string, SpotifyContextDetail>>({});
-    let contextLoadingUri = $state<string | null>(null);
-    const contextUri = $derived(topEntry?.id === "context" ? topEntry.uri! : null);
-    const contextDetail = $derived(contextUri ? (contextCache[contextUri] ?? null) : null);
-    const contextLoading = $derived(!!contextUri && contextLoadingUri === contextUri);
 
     /** An album or a playlist tapped anywhere — search, an artist's
      *  discography — opens its own page rather than playing blind: the track
@@ -715,16 +703,7 @@
     async function openContext(uri: string) {
         if (topEntry?.id === "context" && topEntry.uri === uri) return;
         pushScreen({ id: "context", uri, scroll: 0 });
-        if (contextCache[uri]) return;
-        contextLoadingUri = uri;
-        try {
-            contextCache[uri] = await api.spotifyContext(uri);
-        } catch (e) {
-            toasts.error("Couldn't open it", (e as Error).message);
-            if (contextUri === uri) leaveScreen();
-        } finally {
-            if (contextLoadingUri === uri) contextLoadingUri = null;
-        }
+        await catalog.loadContext(uri);
     }
 
     let browseFavorite = $state<SonosFavorite | null>(null);
@@ -1075,8 +1054,8 @@
         />
     {:else if screen === "artist"}
         <ArtistScreen
-            artist={artistDetail}
-            loading={artistLoading}
+            artist={catalog.artistDetail}
+            loading={catalog.artistLoading}
             {destination}
             {busy}
             {targetRow}
@@ -1090,19 +1069,13 @@
         />
     {:else if screen === "context"}
         <ContextScreen
-            context={contextDetail}
-            loading={contextLoading}
+            context={catalog.contextDetail}
+            loading={catalog.contextLoading}
             {destination}
             {busy}
             {targetRow}
             onBack={leaveScreen}
-            onPlayAll={() =>
-                contextDetail &&
-                playItem({
-                    kind: contextDetail.kind,
-                    uri: contextDetail.uri,
-                    name: contextDetail.name,
-                })}
+            onPlayAll={() => catalog.contextDetail && playItem(contextItem(catalog.contextDetail))}
             onPick={playItem}
             onEnqueue={(item, next) =>
                 enqueue({ service: "Spotify", uri: item.uri, title: item.name }, next)}

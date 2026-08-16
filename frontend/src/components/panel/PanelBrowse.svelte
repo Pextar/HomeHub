@@ -47,18 +47,14 @@
     import { clock } from "../../lib/music/clock.svelte";
     import type { SpotifyStore } from "../../lib/music/spotify.svelte";
     import type { SearchHistory } from "../../lib/music/history.svelte";
+    import { createCatalogCache, contextItem } from "../../lib/music/catalog-cache.svelte";
     import { fmtCount, fmtMs, capFirst, fmtHour, playCount } from "../../lib/music/format";
     import { SEARCH_KINDS as KINDS, topLine } from "../../lib/music/catalog";
     import { dur } from "../../lib/motion";
     import { kefSourceLabel } from "../../lib/kef";
     import type { PanelMusicStore, PanelSource } from "../../lib/panel-music.svelte";
     import type { Busy } from "../../lib/music/busy.svelte";
-    import type {
-        MediaPlay,
-        SpotifyArtistDetail,
-        SpotifyContextDetail,
-        SpotifyItem,
-    } from "../../lib/types";
+    import type { MediaPlay, SpotifyItem } from "../../lib/types";
 
     // The catalog and the room's history are the panel's, not this
     // component's: the depth is a route away, and a route away and back
@@ -187,17 +183,14 @@
      *  alone, and only while it is showing results rather than a page. */
     const fullBleed = $derived(searching && pane === "search" && !catalogOpen);
 
-    let artistCache = $state<Record<string, SpotifyArtistDetail>>({});
-    let artistLoadingUri = $state<string | null>(null);
-    const artistUri = $derived(topLevel?.kind === "artist" ? topLevel.uri : null);
-    const artistDetail = $derived(artistUri ? (artistCache[artistUri] ?? null) : null);
-    const artistLoading = $derived(!!artistUri && artistLoadingUri === artistUri);
-
-    let contextCache = $state<Record<string, SpotifyContextDetail>>({});
-    let contextLoadingUri = $state<string | null>(null);
-    const contextUri = $derived(topLevel?.kind === "context" ? topLevel.uri : null);
-    const contextDetail = $derived(contextUri ? (contextCache[contextUri] ?? null) : null);
-    const contextLoading = $derived(!!contextUri && contextLoadingUri === contextUri);
+    // The pages themselves are read and kept by the shared cache; the stack
+    // above stays this pane's, since only it knows what a level looks like
+    // and where it was scrolled.
+    const catalog = createCatalogCache({
+        artistUri: () => (topLevel?.kind === "artist" ? topLevel.uri : null),
+        contextUri: () => (topLevel?.kind === "context" ? topLevel.uri : null),
+        onFail: () => void popLevel(),
+    });
 
     // Scroll follows the level: pushing stashes where the outgoing list
     // was, popping puts it back — the search results count as level zero.
@@ -227,16 +220,7 @@
         actedOnResult(art);
         searchEl?.blur(); // chosen — the keyboard's job is done
         pushLevel("artist", uri);
-        if (artistCache[uri]) return; // been here — renders instantly
-        artistLoadingUri = uri;
-        try {
-            artistCache[uri] = await api.spotifyArtist(uri);
-        } catch (e) {
-            toasts.error("Couldn't load artist", (e as Error).message);
-            if (artistUri === uri) void popLevel();
-        } finally {
-            if (artistLoadingUri === uri) artistLoadingUri = null;
-        }
+        await catalog.loadArtist(uri);
     }
 
     /** Resolve a name to an artist page. The panel arrives here from the
@@ -276,16 +260,7 @@
     async function openContext(uri: string) {
         if (topLevel?.kind === "context" && topLevel.uri === uri) return;
         pushLevel("context", uri);
-        if (contextCache[uri]) return;
-        contextLoadingUri = uri;
-        try {
-            contextCache[uri] = await api.spotifyContext(uri);
-        } catch (e) {
-            toasts.error("Couldn't open it", (e as Error).message);
-            if (contextUri === uri) void popLevel();
-        } finally {
-            if (contextLoadingUri === uri) contextLoadingUri = null;
-        }
+        await catalog.loadContext(uri);
     }
 
     // The catalog screens were built for the app's stores; these two answer
@@ -323,12 +298,6 @@
             });
         },
     };
-
-    /** The opened record as an item, for the one-tap "Play album/playlist"
-     *  — the same call a tap on its search row makes. */
-    function contextItem(c: SpotifyContextDetail): SpotifyItem {
-        return { kind: c.kind, uri: c.uri, name: c.name, sub: c.sub, art_url: c.art_url };
-    }
 
     // The screens' row overflow menus answer Escape before the stack does.
     let artistScr = $state<ArtistScreen | null>(null);
@@ -681,8 +650,8 @@
                 <div class="b-stack" bind:this={stackEl}>
                     {#if level.kind === "artist"}
                         <ArtistScreen
-                            artist={artistDetail}
-                            loading={artistLoading}
+                            artist={catalog.artistDetail}
+                            loading={catalog.artistLoading}
                             destination={catalogDest}
                             busy={catalogBusy}
                             targetRow={playOnRow}
@@ -695,13 +664,13 @@
                         />
                     {:else}
                         <ContextScreen
-                            context={contextDetail}
-                            loading={contextLoading}
+                            context={catalog.contextDetail}
+                            loading={catalog.contextLoading}
                             destination={catalogDest}
                             busy={catalogBusy}
                             targetRow={playOnRow}
                             onBack={popLevel}
-                            onPlayAll={() => contextDetail && pick(contextItem(contextDetail))}
+                            onPlayAll={() => catalog.contextDetail && pick(contextItem(catalog.contextDetail))}
                             onPick={pick}
                             onEnqueue={(item, next) => music.enqueue(item, next)}
                             onOpenArtist={(uri) => void openArtist(uri)}
