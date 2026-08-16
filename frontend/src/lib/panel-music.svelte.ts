@@ -27,33 +27,31 @@
 // grouping and the speakers inside it stop appearing under their own
 // names. Showing both would put one speaker on two cards under two names.
 
-import { SvelteMap } from "svelte/reactivity";
 import { api } from "./api";
 import { session, toasts } from "./stores.svelte";
 import { onLive } from "./live";
-import { kefSourceLabel } from "./kef";
-import type { MediaVendor } from "./types";
 import { haptic } from "./utils";
 import { secs, toClock, sinceRead } from "./music/time";
-import { trackLines } from "./music/format";
 import { NEXT_REPEAT } from "./music/sonos.svelte";
 import { clock } from "./music/clock.svelte";
 import { clampVol, createVolumeThrottle } from "./music/volume";
+import { buildSources, registeredCount, roomKeyOf } from "./panel-music/sources";
+import type {
+    PanelMusicOptions,
+    PanelMusicStore,
+    PanelSource,
+    PanelVendor,
+} from "./panel-music/types";
 import type { PanelNowPlaying } from "./panel";
 import type { PlayItemBody } from "./api";
 import type {
     SonosStatus,
-    SonosGroupView,
-    SonosSpeakerView,
-    SonosGroupState,
     SonosQueueItem,
     SonosFavorite,
     KEFStatus,
     KEFSource,
     SpotifyItem,
     MediaZone,
-    MediaZoneSpeaker,
-    MediaRoute,
     MediaPlay,
     MusicTimer,
     MusicTimerView,
@@ -61,285 +59,17 @@ import type {
     AnnounceStatus,
 } from "./types";
 
-/** Which bridge a member speaker's own volume/mute calls go to. Every vendor
- *  the media layer knows, because a zone can hold any mix of them and each
- *  takes its own call — an AirPlay receiver's volume travels over the RTSP
- *  session HomeHub already holds open to it. */
-export type PanelVendor = MediaVendor;
+// The vocabulary is the same module's, just kept in its own file — every
+// component that names a `PanelSource` still imports it from here.
+export type {
+    PanelVendor,
+    PanelMember,
+    PanelSource,
+    PanelMusicStore,
+    PanelMusicOptions,
+} from "./panel-music/types";
+export { roomKeyOf } from "./panel-music/sources";
 
-/** One speaker inside a featured group or zone, coordinator/lead first. */
-export interface PanelMember {
-    id: string;
-    name: string;
-    vendor: PanelVendor;
-    volume: number;
-    muted: boolean;
-    coordinator: boolean;
-}
-
-/** One playable source on the wall: a HomeHub zone, a reachable Sonos
- *  group, or a reachable KEF speaker not already claimed by a zone. */
-export interface PanelSource {
-    key: string;
-    kind: "sonos" | "kef" | "zone";
-    id: string; // coordinator id (sonos), speaker id (kef), zone id (zone)
-    title: string; // zone / group / speaker name
-    playing: boolean;
-    standby: boolean; // kef only — powered off, no transport
-    volume: number;
-    muted: boolean;
-    /** A skip would reach something: a queue, a stream, a network input. */
-    canSkip: boolean;
-    trackTitle?: string;
-    trackSub?: string;
-    /** The artist alone, where the sub line is "artist · album". What the
-     *  radio seeds from and what the artist page is opened by name with. */
-    trackArtist?: string;
-    /** The canonical Spotify URI of what is playing, when the source is
-     *  Spotify. Absent on radio, line-in and anything else — saving and
-     *  "open the artist" render only where it is present (§15.1 applied to
-     *  a track rather than to a room). */
-    trackURI?: string;
-    art?: string;
-    /** Every speaker inside it, when there is more than one to balance. */
-    members?: PanelMember[];
-    // Sonos extras — the group's, so only on a Sonos source.
-    groupState?: SonosGroupState;
-    /** HomeHub's own "keep going with similar music" preference (§15.5). */
-    autoplay?: boolean;
-    queueTrack?: number; // 1-based position in the queue, when playing from it
-    position?: string; // H:MM:SS — the wire form, parsed by the position deriveds
-    duration?: string;
-    // KEF extras.
-    input?: string; // current physical input
-    // KEF + zone extras: milliseconds. (Sonos speaks H:MM:SS, above.)
-    positionMs?: number;
-    durationMs?: number;
-    /** Unix ms the reading was taken, on every make — what the position
-     *  extrapolates from, rather than from when the poll happened to land. */
-    readAt?: number
-    // Zone extras.
-    zone?: MediaZone;
-    /** How content reaches a zone right now — what makes skip honest. */
-    route?: MediaRoute;
-}
-
-export interface PanelMusicStore {
-    readonly hasSpeakers: boolean;
-    /** Speakers are registered but none answered — the column stays and
-     *  says so rather than vanishing and reflowing the panel grid. */
-    readonly unreachable: boolean;
-    readonly sources: PanelSource[];
-    readonly featured: PanelSource | undefined;
-    /** The user's chip pick; null falls back to whatever is playing. */
-    selected: string | null;
-    /** Pin the current fallback as an explicit pick, so a room that starts
-     *  playing elsewhere can't move the destination under a finger. */
-    latchFeatured(): void;
-    readonly busy: Record<string, boolean>;
-    /** What the ambient face shows while music plays. */
-    readonly nowPlaying: PanelNowPlaying | null;
-    /** Anything playing anywhere — what "Pause everything" is offered for. */
-    readonly anyPlaying: boolean;
-    /** While the panel sleeps, the poll can slow right down. */
-    setIdle(idle: boolean): void;
-
-    // ── Position (extrapolated between polls on the 1s beat) ──
-    readonly posSec: number;
-    readonly durSec: number;
-    /** A seek endpoint exists: a Sonos track with a length behind it. */
-    readonly seekable: boolean;
-    seek(sec: number): void;
-
-    // ── Volume ──
-    /** Group (or single-speaker) fader value — the finger's while it's down. */
-    readonly vol: number;
-    /** Live, on every movement: shows at once, sends on a short throttle. */
-    dragVolume(s: PanelSource, level: number): void;
-    /** On release — the authoritative value. */
-    setVolume(s: PanelSource, level: number): void;
-    /** One step of the ± buttons — a fader is imprecise at arm's length. */
-    nudgeVolume(s: PanelSource, delta: number): void;
-    /** Per-member faders, when a group or zone has more than one speaker. */
-    readonly memVol: Record<string, number>;
-    dragMemberVolume(id: string, level: number): void;
-    setMemberVolume(id: string, level: number): void;
-    /** No memberId mutes the whole room; one mutes that speaker. */
-    toggleMute(s: PanelSource, memberId?: string): void;
-
-    // ── Transport & play modes ──
-    togglePlay(s: PanelSource): void;
-    skip(s: PanelSource, dir: "next" | "previous"): void;
-    /** Wake a KEF speaker out of standby — the panel's own job, not the
-     *  full view's: waking a speaker isn't configuring one. */
-    wake(s: PanelSource): void;
-    /** Pause every source that is playing, in one tap. */
-    pauseAll(): void;
-    toggleShuffle(): void;
-    cycleRepeat(): void;
-    toggleCrossfade(): void;
-    /** "Play similar": keep the room going once the queue runs out (§15.5). */
-    toggleAutoplay(): void;
-
-    // ── KEF ──
-    setKefSource(s: PanelSource, source: KEFSource): void;
-
-    // ── Sleep and wake (HomeHub's own timers, any room) ──────────────────
-    /** Every music timer in the house, soonest first. */
-    readonly timers: MusicTimerView[];
-    /** The featured room's, soonest first. */
-    readonly roomTimers: MusicTimerView[];
-    /** The featured room's sleep timer — the one-shot stop — if it has one. */
-    readonly sleepTimer: MusicTimerView | undefined;
-    /** Whole minutes until the featured room goes quiet, counted down
-     *  locally between reads; 0 when nothing is going to quiet it. */
-    readonly sleepMinutesLeft: number;
-    /** A ramp is walking the featured room right now: the state between
-     *  "sleep timer set" and "room quiet", otherwise visible only as the
-     *  volume drifting on its own. */
-    readonly fading: boolean;
-    /** "Quiet in forty minutes", on any room — the gesture this whole
-     *  mechanism exists for. Replaces the room's existing sleep timer. */
-    setSleepIn(minutes: number): void;
-    /** Call the whole thing off: the timer goes, and a ramp already in
-     *  flight is cancelled, which puts the volume back and leaves the music
-     *  playing. */
-    clearSleep(): void;
-    /** "I'm still up" — stop the ramp without deleting the timer. */
-    cancelFade(): void;
-    /** Wake this room to something at a time of day. */
-    setWake(opts: {
-        time: string;
-        days: number[];
-        volume?: number;
-        fadeMinutes?: number;
-        item: MusicTimer["item"];
-        name?: string;
-    }): void;
-    setTimerEnabled(t: MusicTimerView, enabled: boolean): void;
-    deleteTimer(t: MusicTimerView): void;
-
-    // ── Sonos' own sleep timer (set in the Sonos app, reported by it) ────
-    /** Whole minutes left on a timer the *speaker* is keeping, which is not
-     *  the same thing as HomeHub's — the panel says so rather than folding
-     *  two different clocks into one number. 0 for none. */
-    readonly sonosSleepMinutes: number;
-    /** Clear the speaker's own timer. Only ever called with 0 from the
-     *  panel: HomeHub's timers are what the wall now sets. */
-    setSonosSleep(minutes: number): void;
-
-    // ── Queue (a Sonos group's — empty for anything else) ──
-    readonly queue: SonosQueueItem[];
-    readonly queueLoading: boolean;
-    /** The first queued track after the one playing — the Up-next row. */
-    readonly nextInQueue: SonosQueueItem | undefined;
-    /** False when shuffle or repeat-one means queue order isn't play order,
-     *  so nothing on the wall may claim to know what comes next. */
-    readonly queueOrderKnown: boolean;
-    jumpTo(track: number): void;
-    removeQueued(track: number): void;
-    /** Move a queued track one place up (-1) or down (+1). One place at a
-     *  time, by tap: the app's drag is an imprecise aim at arm's length. */
-    moveQueued(track: number, dir: -1 | 1): void;
-    clearQueue(): void;
-    /** Add a search result without disturbing what's playing. */
-    enqueue(item: SpotifyItem, next: boolean): void;
-    /** The last thing queued, for the player column's inline confirmation —
-     *  a queued track changes nothing visible on its own. */
-    readonly lastQueued: { title: string; next: boolean; at: number } | null;
-
-    // ── Sonos favorites (a household list — radio, and what was starred) ──
-    readonly favorites: SonosFavorite[];
-    playFavorite(f: SonosFavorite): void;
-
-    // ── Starting something ──
-    playItem(item: SpotifyItem): Promise<void>;
-
-    // ── What this room played before (HomeHub's own memory, per room) ──
-    readonly history: MediaPlay[];
-    /** True when the list is the household's rather than this room's own —
-     *  the shelf says which, because a wall must never imply a room played
-     *  something it didn't. */
-    readonly historyHousehold: boolean;
-    playFromHistory(p: MediaPlay): void;
-    /** This room stops remembering something. The shelves are ranked, so a
-     *  record started by mistake doesn't sink out of the way on its own — it
-     *  competes for the first thing the wall offers, and every accidental
-     *  replay pushes it further up. Only ever the featured room's own list;
-     *  the household's fallback is not this room's to edit. */
-    forgetPlay(p: MediaPlay): void;
-    /** Whether `forgetPlay` would reach anything: the shelf is showing this
-     *  room's own memory rather than the household's, and the login may
-     *  write. Absent rather than refused, per §15.1. */
-    readonly canForget: boolean;
-
-    // ── What this room keeps coming back to ──────────────────────────────
-    /** Ranked by how often this room has started them — and, when it has a
-     *  habit at the hour it currently is, ranked by what it plays *then*.
-     *  Empty for a room with nothing of its own; the plain history is what
-     *  a shelf falls back to. */
-    readonly topPlays: MediaPlay[];
-    /** True when `topPlays` is this room's habit at `topPlaysHour` rather
-     *  than its favourites overall. The shelf's label depends on it. */
-    readonly topPlaysByHour: boolean;
-    /** The local hour those plays were ranked for. */
-    readonly topPlaysHour: number;
-
-    // ── What the household listens to ────────────────────────────────────
-    /** Summed over every room: who does the listening, which artists the
-     *  house keeps coming back to, and how far back the numbers reach.
-     *  Null while the read is out or when it was refused. */
-    readonly insights: Listening | null;
-
-    // ── Saving what's playing ──
-    /** The login may write to the library. False hides the heart rather
-     *  than offering a tap that will be refused. */
-    readonly canSave: boolean;
-    /** Whether what's playing is in the account's library. Meaningless
-     *  unless the featured source has a trackURI. */
-    readonly saved: boolean;
-    toggleSaved(): void;
-
-    // ── More like this ──
-    /** Something is playing with an artist to seed from. */
-    readonly canRadio: boolean;
-    /** Queue more of what's on (Sonos), or play the first of it (anywhere
-     *  else, which has no queue to fill). */
-    startRadio(): void;
-    /** What the last run added, for the in-place confirmation — queuing
-     *  changes nothing visible on its own. */
-    readonly lastRadio: { count: number; artist: string; at: number } | null;
-
-    // ── Announcements ──
-    /** Where an announcement would go and whether it would be spoken.
-     *  Null while the read is out or when the server has no answer. */
-    readonly announce: AnnounceStatus | null;
-    sendAnnouncement(text: string, rooms?: string[]): void;
-    readonly lastAnnounce: { text: string; rooms: string[]; spoken: boolean; at: number } | null;
-
-    // ── Grouping (Sonos-native only) ──
-    /** The Sonos rooms that could join the featured one — every other
-     *  reachable Sonos source. Empty unless a Sonos room is featured:
-     *  nothing else groups natively, and a control that would be refused
-     *  is worse than one that isn't there (§15.1). */
-    readonly joinable: PanelSource[];
-    /** There is something to say about grouping at all: a Sonos room with
-     *  either somewhere to join from or more than one speaker to split. */
-    readonly canGroup: boolean;
-    /** Every speaker in src's group joins the featured group. */
-    joinSource(src: PanelSource): void;
-    /** Every joinable room at once — the wall's "play everywhere" tap. */
-    joinAll(): void;
-    /** Take the music with you: the featured room's group moves to dest and
-     *  leaves where it was. Sonos-native, like every other grouping call. */
-    moveTo(dest: PanelSource): void;
-    /** Every non-coordinator member leaves the featured group. */
-    ungroupFeatured(): void;
-    /** One member steps out of the featured group. */
-    leaveMember(memberId: string): void;
-
-    refresh(): Promise<void>;
-}
 
 const POLL_MS = 15_000;
 const LIVE_POLL_MS = 45_000;
@@ -366,29 +96,6 @@ const IDLE_PLAYING_POLL_MS = 30_000;
 export function pollEveryMs(opts: { idle: boolean; playing: boolean; live: boolean }): number {
     if (opts.idle) return opts.playing ? IDLE_PLAYING_POLL_MS : IDLE_POLL_MS;
     return opts.live ? LIVE_POLL_MS : POLL_MS;
-}
-
-/** KEF inputs a skip means anything on. There is nothing to step through
- *  on the TV or the analog input — the speaker would simply refuse. */
-const KEF_SKIPPABLE = new Set(["wifi", "bluetooth"]);
-
-/**
- * The destination key the media layer files a room's plays and timers
- * under: "sonos:<id>", "kef:<id>", "zone:<id>".
- *
- * Exported because it is the vocabulary shared with the backend — a shelf,
- * a timer and an insights tally all name a room this way — and a second
- * spelling of it in a component is a room that silently stops matching
- * itself.
- */
-export function roomKeyOf(s: PanelSource | undefined): string {
-    if (!s) return "";
-    return (s.kind === "sonos" ? "sonos:" : s.kind === "kef" ? "kef:" : "zone:") + s.id;
-}
-
-export interface PanelMusicOptions {
-    /** The kid surface: Sonos only — never poll KEF or zones, never list one. */
-    sonosOnly?: boolean;
 }
 
 function seenSpeakers(): boolean {
@@ -499,197 +206,9 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
     // Sonos grouping, then the KEF speakers standing alone; the featured
     // one is the user's pick, else whatever is playing, else the first.
     const speakers = $derived(status?.speakers ?? []);
-    const byId = $derived(new SvelteMap(speakers.map((s) => [s.id, s])));
+    const sources = $derived(buildSources({ status, kef, zones }));
+    const registered = $derived(registeredCount({ status, kef, zones }));
 
-    /** Every speaker a zone already claims, so it can't also stand alone. */
-    const claimed = $derived.by(() => {
-        // Plain sets: rebuilt whole by this derivation, never mutated after.
-        /* eslint-disable svelte/prefer-svelte-reactivity */
-        const s = new Set<string>();
-        const k = new Set<string>();
-        /* eslint-enable svelte/prefer-svelte-reactivity */
-        for (const z of zones ?? []) {
-            for (const sp of z.speakers) {
-                if (sp.missing) continue;
-                (sp.vendor === "kef" ? k : s).add(sp.id);
-            }
-        }
-        return { sonos: s, kef: k };
-    });
-
-    /** How many speakers this home has registered, answering or not — what
-     *  tells "no speakers here" from "nothing answered this minute". */
-    const registered = $derived(
-        (status?.speakers.length ?? 0) + (kef?.speakers.length ?? 0) + (zones?.length ?? 0),
-    );
-
-    function coordinatorOf(g: SonosGroupView): SonosSpeakerView | undefined {
-        return byId.get(g.coordinator_id) ?? byId.get(g.member_ids[0]);
-    }
-    function groupTitle(g: SonosGroupView): string {
-        const names = g.member_ids.map((id) => byId.get(id)?.name).filter((n): n is string => !!n);
-        if (names.length <= 2) return names.join(" + ");
-        return `${names[0]} + ${names.length - 1} more`;
-    }
-
-    /** The zone member whose reading stands for the zone — the app's rule
-     *  (zones.svelte.ts): the first that is playing something with a name. */
-    function leadOf(z: MediaZone): MediaZoneSpeaker | undefined {
-        const live = z.speakers.filter((sp) => !sp.missing);
-        return (
-            live.find((sp) => sp.state?.state === "playing" && sp.state.track?.title) ??
-            live.find((sp) => sp.state?.track?.title) ??
-            live.find((sp) => sp.state) ??
-            live[0]
-        );
-    }
-
-    function zoneSource(z: MediaZone): PanelSource {
-        const live = z.speakers.filter((sp) => !sp.missing);
-        const lead = leadOf(z);
-        const withState = live.filter((sp) => sp.state);
-        // The mean, because a zone-wide set writes one level to every
-        // speaker: showing the loudest would jump the fader when touched.
-        const volume = withState.length
-            ? Math.round(
-                  withState.reduce((n, sp) => n + (sp.state?.volume ?? 0), 0) / withState.length,
-              )
-            : 0;
-        const at = lead?.state?.at ? Date.parse(lead.state.at) : NaN;
-        const zoneLines = trackLines(lead?.state?.track);
-        return {
-            key: "z:" + z.id,
-            kind: "zone",
-            id: z.id,
-            title: z.name,
-            playing: live.some((sp) => sp.state?.state === "playing"),
-            standby: false,
-            volume,
-            // Audible if any one speaker is: muting all is what the zone
-            // mute does, so anything less reads as unmuted.
-            muted: withState.length > 0 && withState.every((sp) => sp.state?.muted),
-            // On the stream route HomeHub is the Spotify device and the
-            // speakers pull a live stream: `next` is a call they refuse.
-            // See rooms.svelte.ts: neither route HomeHub decodes for has a
-            // track the speakers can skip.
-            canSkip: z.route !== "stream" && z.route !== "airplay",
-            trackTitle: zoneLines.title || undefined,
-            trackSub: zoneLines.sub,
-            trackArtist: lead?.state?.track?.artist,
-            art: lead?.state?.track?.art_uri,
-            members:
-                live.length > 1
-                    ? live.map((sp) => ({
-                          id: sp.id,
-                          name: sp.name,
-                          vendor: sp.vendor,
-                          volume: sp.state?.volume ?? 0,
-                          muted: !!sp.state?.muted,
-                          coordinator: sp.id === lead?.id,
-                      }))
-                    : undefined,
-            positionMs: lead?.state?.position_ms,
-            durationMs: lead?.state?.duration_ms,
-            readAt: Number.isNaN(at) ? undefined : at,
-            zone: z,
-            route: z.route,
-        };
-    }
-
-    const sources = $derived.by((): PanelSource[] => {
-        const out: PanelSource[] = [];
-        for (const z of zones ?? []) {
-            if (z.speakers.some((sp) => !sp.missing)) out.push(zoneSource(z));
-        }
-        for (const g of status?.groups ?? []) {
-            if (g.member_ids.some((id) => claimed.sonos.has(id))) continue;
-            const c = coordinatorOf(g);
-            if (!c?.reachable) continue;
-            const st = c.state;
-            const members = g.member_ids
-                .map((id) => byId.get(id))
-                .filter((x): x is SonosSpeakerView => !!x);
-            // Group volume isn't reported by the status poll — only each
-            // member's own — so the fader's value is the members' average,
-            // same as the full Music view's Sonos bridge (sonos.svelte.ts).
-            // Reading the coordinator's own volume here would desync the
-            // fader the moment a group's members sit at different levels.
-            const memberVols = members
-                .map((x) => x.state?.volume)
-                .filter((v): v is number => v !== undefined);
-            const groupVolume = memberVols.length
-                ? Math.round(memberVols.reduce((a, b) => a + b, 0) / memberVols.length)
-                : (st?.volume ?? 0);
-            const lines = trackLines(st?.track);
-            out.push({
-                key: "s:" + g.coordinator_id,
-                kind: "sonos",
-                id: g.coordinator_id,
-                title: groupTitle(g),
-                playing: !!st?.playing,
-                standby: false,
-                volume: groupVolume,
-                // A group is muted only when every speaker in it is: one
-                // audible speaker means the room is audible. Reading the
-                // coordinator's own flag here made the icon disagree with
-                // what the button then did.
-                muted: members.length > 0 && members.every((x) => !!x.state?.muted),
-                canSkip: true,
-                // Radio names itself in its own fields, so the two lines
-                // are composed once for every make (`trackLines`) rather
-                // than assembled from artist and album here.
-                trackTitle: lines.title || undefined,
-                trackSub: lines.sub,
-                trackArtist: st?.track?.artist,
-                trackURI: st?.track?.spotify_uri,
-                art: st?.track?.art_uri,
-                members: members.map((x) => ({
-                    id: x.id,
-                    name: x.name,
-                    vendor: "sonos" as const,
-                    volume: x.state?.volume ?? 0,
-                    muted: !!x.state?.muted,
-                    coordinator: x.id === g.coordinator_id,
-                })),
-                groupState: c.group_state,
-                autoplay: c.autoplay,
-                queueTrack: st?.queue_track,
-                position: st?.position,
-                duration: st?.duration,
-                // The coordinator's, because its state is the group's.
-                readAt: c.read_at,
-            });
-        }
-        for (const sp of kef?.speakers ?? []) {
-            if (!sp.reachable || claimed.kef.has(sp.id)) continue;
-            const st = sp.state;
-            const kefLines = trackLines(st?.track);
-            out.push({
-                key: "k:" + sp.id,
-                kind: "kef",
-                id: sp.id,
-                title: sp.name,
-                playing: !!st?.playing,
-                standby: st ? !st.powered_on : false,
-                volume: st?.volume ?? 0,
-                muted: !!st?.muted,
-                // A skip reaches something on a network source; on the TV or
-                // the analog input there is nothing to step through.
-                canSkip: !!st && st.powered_on && KEF_SKIPPABLE.has(st.source),
-                trackTitle:
-                    kefLines.title ||
-                    (st?.playing && st.source ? `${kefSourceLabel(st.source)} input` : undefined),
-                trackSub: kefLines.sub,
-                trackArtist: st?.track?.artist,
-                art: st?.track?.art_uri,
-                input: st?.source,
-                positionMs: st?.position_ms,
-                durationMs: st?.duration_ms,
-                readAt: sp.read_at,
-            });
-        }
-        return out;
-    });
 
     let selected = $state<string | null>(null);
     const featured = $derived(
