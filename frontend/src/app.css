@@ -859,3 +859,51 @@ textarea[aria-invalid="true"]:focus-visible {
 .protocol-badge[data-proto="tasmota"] { color: var(--p-wifi); }
 .protocol-badge[data-proto="matter"]  { color: var(--p-matter); }
 .protocol-badge[data-proto="mqtt"]    { color: var(--p-mqtt); }
+
+/* The kiosk's chip button (DESIGN.md §16) — a filter, a pager, a "Join
+   this room". Global for the same reason the section scaffolding above is:
+   the panel's browse depth is now a handful of components rather than one
+   file, and the chip is the one control every one of them draws. `.active`
+   is a filter that is selected; `.on` is a state that is live. */
+.k-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 8px 14px;
+    border-radius: var(--r-pill);
+    border: 1px solid var(--hairline);
+    background: var(--card-2);
+    color: var(--text-mute);
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition:
+        background var(--t-fast),
+        color var(--t-fast),
+        border-color var(--t-fast),
+        transform var(--t-fast);
+}
+.k-chip:active {
+    transform: scale(0.95);
+    transition-duration: 80ms;
+}
+.k-chip.active {
+    background: var(--text);
+    color: var(--bg);
+    border-color: var(--text);
+}
+.k-chip.on {
+    background: var(--on-soft);
+    border-color: var(--tile-on-border);
+    color: var(--on);
+}
+.k-chip:disabled {
+    opacity: 0.55;
+}
+@media (pointer: coarse) {
+    .k-chip {
+        min-height: 44px;
+        padding-inline: 16px;
+    }
+}
