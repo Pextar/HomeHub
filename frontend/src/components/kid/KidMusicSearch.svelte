@@ -25,8 +25,9 @@
     import { toasts } from "../../lib/stores.svelte";
     import { createSpotify } from "../../lib/music/spotify.svelte";
     import { createSearchHistory } from "../../lib/music/history.svelte";
+    import KidTrackRow from "./KidTrackRow.svelte";
+    import KidMediaCard from "./KidMediaCard.svelte";
     import { createCatalogCache, contextItem } from "../../lib/music/catalog-cache.svelte";
-    import { rowSub } from "../../lib/music/catalog";
     import { fmtCount, fmtMs, capFirst } from "../../lib/music/format";
     import { haptic } from "../../lib/utils";
     import type { PanelMusicStore } from "../../lib/panel-music.svelte";
@@ -224,73 +225,6 @@
     });
 </script>
 
-{#snippet trackRow(item: SpotifyItem, num: number | null)}
-    <!-- The one song row for every list in the kid module: tap plays it,
-         the big ＋ queues it without stopping what's on. -->
-    <div class="kms-row">
-        <button
-            class="kms-main"
-            class:starting={!!music.busy["item:" + item.uri]}
-            disabled={!!music.busy["item:" + item.uri]}
-            onclick={() => pick(item)}
-        >
-            {#if num !== null}
-                <span class="kms-num mono">{num}</span>
-            {/if}
-            {#if item.art_url}
-                <img class="kms-art" src={item.art_url} alt="" loading="lazy" />
-            {:else}
-                <span class="kms-art kms-art-none" aria-hidden="true">🎵</span>
-            {/if}
-            <span class="kms-names">
-                <span class="kms-name">{item.name}</span>
-                {#if rowSub(item)}
-                    <span class="kms-sub">{rowSub(item)}</span>
-                {/if}
-            </span>
-            {#if item.duration_ms}
-                <span class="kms-dur mono">{fmtMs(item.duration_ms)}</span>
-            {/if}
-        </button>
-        <button
-            class="kms-plus"
-            class:open={queueFor === item.uri}
-            aria-label="Queue “{item.name}”"
-            aria-expanded={queueFor === item.uri}
-            onclick={() => toggleQueueFor(item.uri)}
-        >
-            ＋
-        </button>
-    </div>
-    {#if queueFor === item.uri}
-        <div class="kms-qactions" role="group" aria-label="Queue options">
-            <button class="kms-qbtn" onclick={() => queueIt(item, true)}>▶️ Play next</button>
-            <button class="kms-qbtn" onclick={() => queueIt(item, false)}>➕ Add to the end</button>
-        </div>
-    {/if}
-    {#if queuedFlash === item.uri}
-        <p class="kms-flash" role="status">Added to the queue 🎉</p>
-    {/if}
-{/snippet}
-
-{#snippet mediaCard(item: SpotifyItem)}
-    <!-- The one cover card: albums, playlists and artists are chosen by
-         their picture as much as their name. -->
-    <button class="kms-card" onclick={() => act(item)}>
-        {#if item.art_url}
-            <img class="kms-card-art" class:round={item.kind === "artist"} src={item.art_url} alt="" loading="lazy" />
-        {:else}
-            <span class="kms-card-art kms-card-none" class:round={item.kind === "artist"} aria-hidden="true">
-                {KIND_EMOJI[item.kind]}
-            </span>
-        {/if}
-        <span class="kms-card-name">{item.name}</span>
-        {#if rowSub(item)}
-            <span class="kms-card-sub">{rowSub(item)}</span>
-        {/if}
-    </button>
-{/snippet}
-
 {#snippet shelfLabel(text: string)}
     <h3 class="kms-label">{text}</h3>
 {/snippet}
@@ -337,24 +271,24 @@
                 {#if d.top_tracks.length > 0}
                     {@render shelfLabel("🎵 Popular songs")}
                     {#each d.top_tracks as t, i (t.uri)}
-                        {@render trackRow(t, i + 1)}
+                        <KidTrackRow
+    item={t}
+    num={i + 1}
+    {music}
+    {kbOpen}
+    queueOpen={queueFor === (t).uri}
+    flashed={queuedFlash === (t).uri}
+    onPick={pick}
+    onToggleQueue={toggleQueueFor}
+    onQueue={queueIt}
+/>
                     {/each}
                 {/if}
                 {#if d.albums.length > 0}
                     {@render shelfLabel("💿 Albums")}
                     <div class="kms-grid">
                         {#each d.albums as a (a.uri)}
-                            <button class="kms-card" onclick={() => void openContext(a.uri)}>
-                                {#if a.art_url}
-                                    <img class="kms-card-art" src={a.art_url} alt="" loading="lazy" />
-                                {:else}
-                                    <span class="kms-card-art kms-card-none" aria-hidden="true">💿</span>
-                                {/if}
-                                <span class="kms-card-name">{a.name}</span>
-                                {#if rowSub(a)}
-                                    <span class="kms-card-sub">{rowSub(a)}</span>
-                                {/if}
-                            </button>
+                            <KidMediaCard item={a} onPick={(x) => void openContext(x.uri)} />
                         {/each}
                     </div>
                 {/if}
@@ -362,17 +296,7 @@
                     {@render shelfLabel("💿 Singles")}
                     <div class="kms-grid">
                         {#each d.singles as sg (sg.uri)}
-                            <button class="kms-card" onclick={() => void openContext(sg.uri)}>
-                                {#if sg.art_url}
-                                    <img class="kms-card-art" src={sg.art_url} alt="" loading="lazy" />
-                                {:else}
-                                    <span class="kms-card-art kms-card-none" aria-hidden="true">💿</span>
-                                {/if}
-                                <span class="kms-card-name">{sg.name}</span>
-                                {#if rowSub(sg)}
-                                    <span class="kms-card-sub">{rowSub(sg)}</span>
-                                {/if}
-                            </button>
+                            <KidMediaCard item={sg} onPick={(x) => void openContext(x.uri)} />
                         {/each}
                     </div>
                 {/if}
@@ -380,14 +304,7 @@
                     {@render shelfLabel("🎤 More like them")}
                     <div class="kms-grid">
                         {#each d.related as ra (ra.uri)}
-                            <button class="kms-card" onclick={() => void openArtist(ra.uri, ra.art_url ? { art_url: ra.art_url, round: true } : undefined)}>
-                                {#if ra.art_url}
-                                    <img class="kms-card-art round" src={ra.art_url} alt="" loading="lazy" />
-                                {:else}
-                                    <span class="kms-card-art kms-card-none round" aria-hidden="true">🎤</span>
-                                {/if}
-                                <span class="kms-card-name">{ra.name}</span>
-                            </button>
+                            <KidMediaCard item={ra} onPick={act} />
                         {/each}
                     </div>
                 {/if}
@@ -418,7 +335,17 @@
 
                 {@render shelfLabel("🎵 Songs")}
                 {#each d.tracks as t, i (t.uri)}
-                    {@render trackRow(t, d.kind === "album" ? i + 1 : null)}
+                    <KidTrackRow
+    item={t}
+    num={d.kind === "album" ? i + 1 : null}
+    {music}
+    {kbOpen}
+    queueOpen={queueFor === (t).uri}
+    flashed={queuedFlash === (t).uri}
+    onPick={pick}
+    onToggleQueue={toggleQueueFor}
+    onQueue={queueIt}
+/>
                 {/each}
             {/if}
         {/if}
@@ -582,14 +509,24 @@
                     {@render shelfLabel(`${sec.emoji} ${sec.label}`)}
                     {#if sec.id === "tracks"}
                         {#each sec.items as item (item.uri)}
-                            {@render trackRow(item, null)}
+                            <KidTrackRow
+    item={item}
+    num={null}
+    {music}
+    {kbOpen}
+    queueOpen={queueFor === (item).uri}
+    flashed={queuedFlash === (item).uri}
+    onPick={pick}
+    onToggleQueue={toggleQueueFor}
+    onQueue={queueIt}
+/>
                         {/each}
                     {:else}
                         <!-- Songs are a list; everything else is a grid —
                              a container is chosen by its cover. -->
                         <div class="kms-grid">
                             {#each sec.items as item (item.uri)}
-                                {@render mediaCard(item)}
+                                <KidMediaCard item={item} onPick={act} />
                             {/each}
                         </div>
                     {/if}
@@ -603,7 +540,17 @@
             {#if spotify.recentTracks.length > 0}
                 {@render shelfLabel("🔁 Play it again")}
                 {#each spotify.recentTracks.slice(0, 6) as item (item.uri)}
-                    {@render trackRow(item, null)}
+                    <KidTrackRow
+    item={item}
+    num={null}
+    {music}
+    {kbOpen}
+    queueOpen={queueFor === (item).uri}
+    flashed={queuedFlash === (item).uri}
+    onPick={pick}
+    onToggleQueue={toggleQueueFor}
+    onQueue={queueIt}
+/>
                 {/each}
             {/if}
             {#if recents.list.length > 0}
@@ -636,7 +583,7 @@
                 {@render shelfLabel("📃 Your playlists")}
                 <div class="kms-grid">
                     {#each spotify.myPlaylists as item (item.uri)}
-                        {@render mediaCard(item)}
+                        <KidMediaCard item={item} onPick={act} />
                     {/each}
                 </div>
             {/if}
@@ -660,9 +607,15 @@
        whatever landed in its place. */
     .kms-results { display: flex; flex-direction: column; gap: var(--space-3); }
     .kms-results.stale { opacity: 0.45; pointer-events: none; transition: opacity var(--t-fast); }
-    @media (prefers-reduced-motion: reduce) {
+@media (prefers-reduced-motion: reduce) {
+
+
+
+
+
+
         .kms-results.stale { transition-duration: 0.001ms; }
-    }
+}
 
     /* ── Search box ── */
     .kms-box {
@@ -757,143 +710,16 @@
     .kms-clearall:active { transform: scale(0.94); }
 
     /* ── Track rows ── */
-    .kms-row {
-        display: flex;
-        align-items: stretch;
-        gap: var(--space-2);
-    }
-    .kms-main {
-        flex: 1;
-        min-width: 0;
-        display: flex;
-        align-items: center;
-        gap: var(--space-3);
-        padding: var(--space-2) var(--space-3);
-        min-height: 64px;
-        border-radius: var(--radius-lg);
-        border: 2px solid var(--border);
-        background: var(--bg-elevated);
-        cursor: pointer;
-        text-align: left;
-        transition: transform 0.12s ease, border-color 0.15s ease;
-        -webkit-tap-highlight-color: transparent;
-    }
-    .kms-main:active { transform: scale(0.98); border-color: var(--kid-accent); }
-    .kms-main:disabled { opacity: 0.75; }
     /* A tapped song can take a moment to reach the speaker — the cover
        breathes until the player (or the mini bar) names it. */
-    .kms-main.starting .kms-art,
     .kms-top.starting .kms-top-art { animation: kms-start 0.9s ease-in-out infinite; }
     @keyframes kms-start {
         0%, 100% { opacity: 1; }
         50% { opacity: 0.4; }
     }
-    .kms-num {
-        font-family: var(--font-mono);
-        font-feature-settings: "tnum" 1;
-        font-size: 0.95rem;
-        font-weight: 700;
-        color: var(--text-faint);
-        width: 2ch;
-        text-align: right;
-        flex-shrink: 0;
-    }
-    .kms-art {
-        width: 48px;
-        height: 48px;
-        border-radius: var(--radius-md);
-        object-fit: cover;
-        flex-shrink: 0;
-    }
-    .kms-art-none {
-        background: var(--surface-hover);
-        display: grid;
-        place-items: center;
-        font-size: 1.4rem;
-    }
-    .kms-names {
-        flex: 1;
-        min-width: 0;
-        display: flex;
-        flex-direction: column;
-        gap: 2px;
-    }
-    .kms-name {
-        font-size: 1rem;
-        font-weight: 800;
-        color: var(--text);
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-    }
-    .kms-sub {
-        font-size: 0.82rem;
-        font-weight: 600;
-        color: var(--text-muted);
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-    }
-    .kms-dur {
-        font-family: var(--font-mono);
-        font-feature-settings: "tnum" 1;
-        font-size: 0.85rem;
-        font-weight: 700;
-        color: var(--text-muted);
-        flex-shrink: 0;
-    }
     /* On a phone the length was being paid for by the title and artist you
        choose a song by — the trade DESIGN.md §15.9 already settled for the
        app's rows, applied to the kid's. */
-    @media (max-width: 480px) {
-        .kms-dur { display: none; }
-    }
-    .kms-plus {
-        width: 52px;
-        min-height: 52px;
-        border-radius: var(--radius-lg);
-        border: 2px solid var(--border);
-        background: var(--bg-elevated);
-        color: var(--kid-accent);
-        font-size: 1.4rem;
-        font-weight: 800;
-        cursor: pointer;
-        flex-shrink: 0;
-        align-self: center;
-        transition: transform 0.12s ease, border-color 0.15s ease;
-        -webkit-tap-highlight-color: transparent;
-    }
-    .kms-plus:active { transform: scale(0.9); }
-    .kms-plus.open { border-color: var(--kid-accent); background: var(--kid-accent-soft); }
-
-    .kms-qactions {
-        display: flex;
-        flex-wrap: wrap;
-        gap: var(--space-2);
-        padding-left: var(--space-3);
-    }
-    .kms-qbtn {
-        /* Both on one line where they fit; stacked full-width on a narrow
-           phone rather than wrapping "Add to the end" onto two lines. */
-        flex: 1 1 190px;
-        font-size: 1rem;
-        font-weight: 800;
-        padding: 12px 16px;
-        min-height: 52px;
-        border-radius: var(--radius-lg);
-        border: 2px solid var(--kid-accent);
-        background: var(--kid-accent-soft);
-        color: var(--kid-accent);
-        cursor: pointer;
-        -webkit-tap-highlight-color: transparent;
-    }
-    .kms-qbtn:active { transform: scale(0.96); }
-    .kms-flash {
-        font-size: 0.9rem;
-        font-weight: 800;
-        color: var(--kid-green);
-        padding-left: var(--space-3);
-    }
 
     /* ── Cover grids ── */
     .kms-grid {
@@ -901,52 +727,11 @@
         grid-template-columns: repeat(auto-fill, minmax(min(140px, 45%), 1fr));
         gap: var(--space-3);
     }
-    .kms-card {
-        display: flex;
-        flex-direction: column;
-        align-items: stretch;
-        gap: var(--space-2);
-        padding: var(--space-3);
-        border-radius: var(--radius-lg);
-        border: 2px solid var(--border);
-        background: var(--bg-elevated);
-        cursor: pointer;
-        text-align: left;
-        transition: transform 0.12s ease, border-color 0.15s ease;
-        -webkit-tap-highlight-color: transparent;
-    }
-    .kms-card:active { transform: scale(0.96); border-color: var(--kid-accent); }
-    .kms-card-art {
-        width: 100%;
-        aspect-ratio: 1;
-        border-radius: var(--radius-md);
-        object-fit: cover;
-    }
-    .kms-card-art.round { border-radius: 50%; }
     .kms-card-none {
         background: var(--surface-hover);
         display: grid;
         place-items: center;
         font-size: 2.6rem;
-    }
-    .kms-card-name {
-        font-size: 0.95rem;
-        font-weight: 800;
-        color: var(--text);
-        line-height: 1.2;
-        display: -webkit-box;
-        -webkit-line-clamp: 2;
-        line-clamp: 2;
-        -webkit-box-orient: vertical;
-        overflow: hidden;
-    }
-    .kms-card-sub {
-        font-size: 0.78rem;
-        font-weight: 600;
-        color: var(--text-muted);
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
     }
 
     /* ── Top result ── */
@@ -1223,18 +1008,17 @@
         -webkit-backdrop-filter: blur(20px) saturate(1.6);
         border-bottom: 1px solid var(--dock-edge);
     }
-    .kb-open .kms-sub,
-    .kb-open .kms-dur,
     .kb-open .kms-label,
     .kb-open .kms-kinds,
     .kb-open .kms-shelf-head { display: none; }
-    .kb-open .kms-main { min-height: 52px; }
-    .kb-open .kms-art { width: 36px; height: 36px; }
     .kb-open .kms-grid { grid-template-columns: repeat(auto-fill, minmax(min(110px, 30%), 1fr)); }
-
     @media (prefers-reduced-motion: reduce) {
-        .kms-skel, .kms-skel-hero { animation: none; }
-        .kms-main.starting .kms-art,
-        .kms-top.starting .kms-top-art { animation: none; }
+        .kms-skel,
+        .kms-skel-hero {
+            animation: none;
+        }
+        .kms-top.starting .kms-top-art {
+            animation: none;
+        }
     }
 </style>
