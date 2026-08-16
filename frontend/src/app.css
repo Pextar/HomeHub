@@ -907,3 +907,142 @@ textarea[aria-invalid="true"]:focus-visible {
         padding-inline: 16px;
     }
 }
+
+/* ── Device detail pages ──────────────────────────────────────────────────
+   The chrome a speaker's own page wears: the head with its back chip and
+   sibling switcher, the settings rows inside the cards, the range slider,
+   the unreachable state, and the spec list at the foot.
+
+   Global, and namespaced under `.detail` rather than left bare, because
+   two views already drew every one of these identically — the KEF page and
+   the Sonos page — and a third make would have copied them a third time.
+   The namespace is not decoration: `.row` is a class eight other
+   components use for something else, and the range element selector would
+   otherwise reach every slider in the app. */
+.detail { display: flex; flex-direction: column; gap: var(--space-4); }
+.detail .sk { height: 92px; border-radius: var(--r-md); }
+.detail .dhead {
+        display: flex;
+        align-items: center;
+        gap: var(--space-3);
+        min-height: 44px;
+    }
+.detail .dtitle {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 1px;
+        text-align: center;
+    }
+.detail .dtitle h1 {
+        font-size: 17px;
+        font-weight: 600;
+        letter-spacing: -0.02em;
+        line-height: 1.1;
+        max-width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+.detail .dsub {
+        font-size: 12px;
+        color: var(--text-mute);
+        max-width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+.detail .dhead.paned .dtitle { align-items: flex-start; text-align: left; }
+.detail .switch-row {
+        display: flex;
+        gap: var(--space-2);
+        overflow-x: auto;
+        scrollbar-width: none;
+        padding-bottom: 2px;
+    }
+.detail .switch-row::-webkit-scrollbar { display: none; }
+.detail .switch-row .chip { flex-shrink: 0; }
+.detail .card-header {
+        display: flex;
+        align-items: center;
+        justify-content: flex-start;
+        gap: var(--space-2);
+    }
+.detail .c-ico { display: inline-flex; color: var(--text-dim); }
+.detail .c-none {
+        font-size: 12px;
+        color: var(--text-mute);
+        line-height: 1.5;
+        margin-top: var(--space-2);
+    }
+.detail .unreach {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: var(--space-2);
+    }
+.detail .unreach-title { font-size: 13.5px; font-weight: 600; }
+.detail .unreach-msg { font-size: 12px; color: var(--text-mute); line-height: 1.5; }
+.detail .row {
+        display: flex;
+        align-items: center;
+        gap: var(--space-3);
+        min-height: 44px;
+        padding: 6px 0;
+        border-bottom: 1px solid var(--hairline);
+    }
+.detail .row:last-child { border-bottom: 0; }
+.detail .r-meta { display: flex; flex-direction: column; gap: 1px; flex: 1; min-width: 0; }
+.detail .r-label { font-size: 13.5px; font-weight: 500; }
+.detail .row > .r-label { flex: 1; min-width: 0; }
+.detail .r-meta .r-label { flex: none; }
+.detail .r-help { font-size: 11.5px; color: var(--text-mute); line-height: 1.4; }
+.detail .r-num {
+        font-size: 12px;
+        color: var(--text-mute);
+        width: 3ch;
+        text-align: right;
+        flex-shrink: 0;
+    }
+.detail .row.slider > .r-label { flex: none; width: 78px; }
+.detail input[type="range"] {
+        flex: 1;
+        min-width: 60px;
+        appearance: none;
+        height: 6px;
+        border-radius: 3px;
+        outline: none;
+        background: var(--card-3);
+        accent-color: var(--on);
+    }
+.detail input[type="range"]::-webkit-slider-thumb {
+        appearance: none;
+        width: 18px; height: 18px; border-radius: 50%;
+        background: var(--knob); border: 2px solid var(--knob-edge);
+        cursor: pointer; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+    }
+.detail input[type="range"]::-moz-range-thumb {
+        width: 18px; height: 18px; border-radius: 50%;
+        background: var(--knob); border: 2px solid var(--knob-edge);
+        cursor: pointer; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+    }
+.detail input[type="range"]:focus-visible { box-shadow: 0 0 0 2px var(--on-soft); }
+.detail input[type="range"]:disabled { opacity: 0.5; }
+.detail .chips { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.detail .info {
+        display: grid;
+        grid-template-columns: auto 1fr;
+        gap: 6px var(--space-4);
+        margin: 0;
+        font-size: 12px;
+    }
+.detail .info dt { color: var(--text-mute); }
+.detail .info dd {
+        margin: 0;
+        color: var(--text);
+        font-size: 11.5px;
+        overflow-wrap: anywhere;
+        text-align: right;
+    }

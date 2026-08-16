@@ -533,57 +533,10 @@
 </div>
 
 <style>
-    .detail { display: flex; flex-direction: column; gap: var(--space-4); }
-    .sk { height: 92px; border-radius: var(--r-md); }
-
     /* ── §11 detail head ── */
-    .dhead {
-        display: flex;
-        align-items: center;
-        gap: var(--space-3);
-        min-height: 44px;
-    }
-    .dtitle {
-        flex: 1;
-        min-width: 0;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        gap: 1px;
-        text-align: center;
-    }
-    .dtitle h1 {
-        font-size: 17px;
-        font-weight: 600;
-        letter-spacing: -0.02em;
-        line-height: 1.1;
-        max-width: 100%;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-    }
-    .dsub {
-        font-size: 12px;
-        color: var(--text-mute);
-        max-width: 100%;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-    }
     /* Beside the list it is a pane header, not a detail head: nothing to go
        back to, so the title leads from the left instead of centring over an
        empty slot. */
-    .dhead.paned .dtitle { align-items: flex-start; text-align: left; }
-
-    .switch-row {
-        display: flex;
-        gap: var(--space-2);
-        overflow-x: auto;
-        scrollbar-width: none;
-        padding-bottom: 2px;
-    }
-    .switch-row::-webkit-scrollbar { display: none; }
-    .switch-row .chip { flex-shrink: 0; }
 
     /* ── Hero: the device's portrait ── */
     .hero { display: flex; flex-direction: row; align-items: center; gap: var(--space-4); }
@@ -640,102 +593,19 @@
     /* ── Cards ──
        The global rule is space-between, which would fling the title to the
        far edge away from its icon; here the icon leads the title. */
-    .card-header {
-        display: flex;
-        align-items: center;
-        justify-content: flex-start;
-        gap: var(--space-2);
-    }
-    .c-ico { display: inline-flex; color: var(--text-dim); }
     .c-tag { margin-left: auto; font-size: 11px; color: var(--on); }
-    .c-none {
-        font-size: 12px;
-        color: var(--text-mute);
-        line-height: 1.5;
-        margin-top: var(--space-2);
-    }
     .c-none strong { color: var(--text); font-weight: 500; }
 
     /* ── Unreachable ── */
-    .unreach {
-        display: flex;
-        flex-direction: column;
-        align-items: flex-start;
-        gap: var(--space-2);
-    }
-    .unreach-title { font-size: 13.5px; font-weight: 600; }
-    .unreach-msg { font-size: 12px; color: var(--text-mute); line-height: 1.5; }
 
     /* ── Rows: the §11 list shape, label left, control right ── */
-    .row {
-        display: flex;
-        align-items: center;
-        gap: var(--space-3);
-        min-height: 44px;
-        padding: 6px 0;
-        border-bottom: 1px solid var(--hairline);
-    }
-    .row:last-child { border-bottom: 0; }
-    .r-meta { display: flex; flex-direction: column; gap: 1px; flex: 1; min-width: 0; }
-    .r-label { font-size: 13.5px; font-weight: 500; }
     /* A bare label (no sub-line) still has to push its control to the right
        edge, so it takes the free space rather than hugging its text. */
-    .row > .r-label { flex: 1; min-width: 0; }
-    .r-meta .r-label { flex: none; }
-    .r-help { font-size: 11.5px; color: var(--text-mute); line-height: 1.4; }
-    .r-num {
-        font-size: 12px;
-        color: var(--text-mute);
-        width: 3ch;
-        text-align: right;
-        flex-shrink: 0;
-    }
 
     /* A slider row is the exception: the label is pinned narrow so the track
        keeps its travel instead of being squeezed by a long word. */
-    .row.slider > .r-label { flex: none; width: 78px; }
-    input[type="range"] {
-        flex: 1;
-        min-width: 60px;
-        appearance: none;
-        height: 6px;
-        border-radius: 3px;
-        outline: none;
-        background: var(--card-3);
-        accent-color: var(--on);
-    }
-    input[type="range"]::-webkit-slider-thumb {
-        appearance: none;
-        width: 18px; height: 18px; border-radius: 50%;
-        background: var(--knob); border: 2px solid var(--knob-edge);
-        cursor: pointer; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
-    }
-    input[type="range"]::-moz-range-thumb {
-        width: 18px; height: 18px; border-radius: 50%;
-        background: var(--knob); border: 2px solid var(--knob-edge);
-        cursor: pointer; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
-    }
-    input[type="range"]:focus-visible { box-shadow: 0 0 0 2px var(--on-soft); }
-    input[type="range"]:disabled { opacity: 0.5; }
-
-    .chips { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 
     /* ── Device block ── */
-    .info {
-        display: grid;
-        grid-template-columns: auto 1fr;
-        gap: 6px var(--space-4);
-        margin: 0;
-        font-size: 12px;
-    }
-    .info dt { color: var(--text-mute); }
-    .info dd {
-        margin: 0;
-        color: var(--text);
-        font-size: 11.5px;
-        overflow-wrap: anywhere;
-        text-align: right;
-    }
 
     @media (pointer: coarse) {
         input[type="range"] { height: 10px; border-radius: 5px; }
