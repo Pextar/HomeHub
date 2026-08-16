@@ -44,8 +44,8 @@
     import type { SpotifyStore } from "../../lib/music/spotify.svelte";
     import type { SearchHistory } from "../../lib/music/history.svelte";
     import { createCatalogCache, contextItem } from "../../lib/music/catalog-cache.svelte";
-    import { fmtCount, fmtMs, capFirst, fmtHour, playCount } from "../../lib/music/format";
-    import { SEARCH_KINDS as KINDS, topLine } from "../../lib/music/catalog";
+    import { fmtMs, fmtHour, playCount } from "../../lib/music/format";
+    import { SEARCH_KINDS as KINDS, topLine, rowSub } from "../../lib/music/catalog";
     import { dur } from "../../lib/motion";
     import type { PanelMusicStore } from "../../lib/panel-music.svelte";
     import type { Busy } from "../../lib/music/busy.svelte";
@@ -451,24 +451,6 @@
 
     /** What a row says under its name — different per kind, because what
      *  makes each one worth choosing is different. */
-    function sub(item: SpotifyItem): string {
-        if (item.kind === "artist") {
-            if (item.followers) return `${fmtCount(item.followers)} followers`;
-            return item.genres?.[0] ? capFirst(item.genres[0]) : "";
-        }
-        if (item.kind === "album") {
-            return [item.sub, item.year, item.total_tracks ? `${item.total_tracks} songs` : ""]
-                .filter(Boolean)
-                .join(" · ");
-        }
-        if (item.kind === "playlist") {
-            return [item.sub, item.total_tracks ? `${item.total_tracks} songs` : ""]
-                .filter(Boolean)
-                .join(" · ");
-        }
-        return [item.sub, item.album].filter(Boolean).join(" · ");
-    }
-
     /** A search that led somewhere is worth remembering. The store's own
      *  remembering is §15.8's submission — Enter, or a chip re-run — but
      *  the wall's flow is type → tap the result, with no Enter in between,
@@ -938,7 +920,7 @@
                                     {#each spotify.myPlaylists as item (item.uri)}
                                         <MediaCard
                                             {item}
-                                            sub={sub(item)}
+                                            sub={rowSub(item)}
                                             onOpen={() => pick(item)}
                                         />
                                     {/each}
@@ -956,7 +938,7 @@
                                     {#each spotify.savedAlbums as item (item.uri)}
                                         <MediaCard
                                             {item}
-                                            sub={sub(item)}
+                                            sub={rowSub(item)}
                                             onOpen={() => pick(item)}
                                         />
                                     {/each}
@@ -973,7 +955,7 @@
                                         <MediaCard
                                             {item}
                                             round
-                                            sub={sub(item)}
+                                            sub={rowSub(item)}
                                             onOpen={() =>
                                                 void openArtist(
                                                     item.uri,
@@ -995,7 +977,7 @@
                                     {#each spotify.newReleases as item (item.uri)}
                                         <MediaCard
                                             {item}
-                                            sub={sub(item)}
+                                            sub={rowSub(item)}
                                             onOpen={() => pick(item)}
                                         />
                                     {/each}
@@ -1268,8 +1250,8 @@
                          to say it is the artist or it reads as one more
                          song. -->
                     <span class="r-sub">{topLine(item)}</span>
-                {:else if sub(item)}
-                    <span class="r-sub">{sub(item)}</span>
+                {:else if rowSub(item)}
+                    <span class="r-sub">{rowSub(item)}</span>
                 {/if}
             </span>
             <span class="r-tail">

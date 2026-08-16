@@ -7,11 +7,13 @@
 // fastest" is the same question on both, and a top result that reads
 // differently depending on which screen you found it on is a bug.
 //
-// Only the genuinely shared answer lives here. The per-row subtitle is
-// *not* shared: a card under a cover has room for two facts and a row in a
-// list has room for four, so each surface still writes its own.
+// Only the genuinely shared answer lives here, and the split that matters
+// is card against row rather than surface against surface: a card under a
+// cover has room for two facts and a row in a list has room for four. So
+// every list of rows shares `rowSub` below, and a screen that lays its
+// results out as cards still writes its own.
 
-import { fmtCount, fmtMs } from "./format";
+import { fmtCount, fmtMs, capFirst } from "./format";
 import type { SpotifyItem } from "../types";
 
 /** The kinds a search answers with, in the order results are shelved.
@@ -50,4 +52,33 @@ export function topLine(item: SpotifyItem): string {
     if (item.total_tracks) bits.push(`${item.total_tracks} songs`);
   }
   return bits.filter(Boolean).join(" · ");
+}
+
+/**
+ * What a row says under its name — different per kind, because what makes
+ * each one worth choosing is different. An artist is sized by its
+ * following (or named by its genre, where the following is unknown); a
+ * record says who made it, when, and how long it is; a song says its
+ * artist and the album it came off.
+ *
+ * The wall's dense list and the kid module's big one draw the same row and
+ * so read the same line. A card's shorter subtitle is its own — see the
+ * note at the top of this file.
+ */
+export function rowSub(item: SpotifyItem): string {
+  if (item.kind === "artist") {
+    if (item.followers) return `${fmtCount(item.followers)} followers`;
+    return item.genres?.[0] ? capFirst(item.genres[0]) : "";
+  }
+  if (item.kind === "album") {
+    return [item.sub, item.year, item.total_tracks ? `${item.total_tracks} songs` : ""]
+      .filter(Boolean)
+      .join(" · ");
+  }
+  if (item.kind === "playlist") {
+    return [item.sub, item.total_tracks ? `${item.total_tracks} songs` : ""]
+      .filter(Boolean)
+      .join(" · ");
+  }
+  return [item.sub, item.album].filter(Boolean).join(" · ");
 }

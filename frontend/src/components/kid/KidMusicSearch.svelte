@@ -26,6 +26,7 @@
     import { createSpotify } from "../../lib/music/spotify.svelte";
     import { createSearchHistory } from "../../lib/music/history.svelte";
     import { createCatalogCache, contextItem } from "../../lib/music/catalog-cache.svelte";
+    import { rowSub } from "../../lib/music/catalog";
     import { fmtCount, fmtMs, capFirst } from "../../lib/music/format";
     import { haptic } from "../../lib/utils";
     import type { PanelMusicStore } from "../../lib/panel-music.svelte";
@@ -101,26 +102,6 @@
         if (spotify.kindFilter === "all") return all.filter((s) => s.items.length > 0);
         return all.filter((s) => s.id === spotify.kindFilter);
     });
-
-    /** What a row says under its name — different per kind, because what
-     *  makes each one worth choosing is different. */
-    function sub(item: SpotifyItem): string {
-        if (item.kind === "artist") {
-            if (item.followers) return `${fmtCount(item.followers)} followers`;
-            return item.genres?.[0] ? capFirst(item.genres[0]) : "";
-        }
-        if (item.kind === "album") {
-            return [item.sub, item.year, item.total_tracks ? `${item.total_tracks} songs` : ""]
-                .filter(Boolean)
-                .join(" · ");
-        }
-        if (item.kind === "playlist") {
-            return [item.sub, item.total_tracks ? `${item.total_tracks} songs` : ""]
-                .filter(Boolean)
-                .join(" · ");
-        }
-        return [item.sub, item.album].filter(Boolean).join(" · ");
-    }
 
     const KIND_WORD: Record<string, string> = {
         artist: "Artist",
@@ -263,8 +244,8 @@
             {/if}
             <span class="kms-names">
                 <span class="kms-name">{item.name}</span>
-                {#if sub(item)}
-                    <span class="kms-sub">{sub(item)}</span>
+                {#if rowSub(item)}
+                    <span class="kms-sub">{rowSub(item)}</span>
                 {/if}
             </span>
             {#if item.duration_ms}
@@ -304,8 +285,8 @@
             </span>
         {/if}
         <span class="kms-card-name">{item.name}</span>
-        {#if sub(item)}
-            <span class="kms-card-sub">{sub(item)}</span>
+        {#if rowSub(item)}
+            <span class="kms-card-sub">{rowSub(item)}</span>
         {/if}
     </button>
 {/snippet}
@@ -370,8 +351,8 @@
                                     <span class="kms-card-art kms-card-none" aria-hidden="true">💿</span>
                                 {/if}
                                 <span class="kms-card-name">{a.name}</span>
-                                {#if sub(a)}
-                                    <span class="kms-card-sub">{sub(a)}</span>
+                                {#if rowSub(a)}
+                                    <span class="kms-card-sub">{rowSub(a)}</span>
                                 {/if}
                             </button>
                         {/each}
@@ -388,8 +369,8 @@
                                     <span class="kms-card-art kms-card-none" aria-hidden="true">💿</span>
                                 {/if}
                                 <span class="kms-card-name">{sg.name}</span>
-                                {#if sub(sg)}
-                                    <span class="kms-card-sub">{sub(sg)}</span>
+                                {#if rowSub(sg)}
+                                    <span class="kms-card-sub">{rowSub(sg)}</span>
                                 {/if}
                             </button>
                         {/each}
