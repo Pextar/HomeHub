@@ -36,6 +36,9 @@ import { NEXT_REPEAT } from "./music/sonos.svelte";
 import { clock } from "./music/clock.svelte";
 import { clampVol, createVolumeThrottle } from "./music/volume";
 import { buildSources, registeredCount, roomKeyOf } from "./panel-music/sources";
+import { createPanelTimers } from "./panel-music/timers.svelte";
+import { createPanelAnnounce } from "./panel-music/announce.svelte";
+import { createPanelSaved } from "./panel-music/saved.svelte";
 import type {
     PanelMusicOptions,
     PanelMusicStore,
@@ -53,10 +56,6 @@ import type {
     SpotifyItem,
     MediaZone,
     MediaPlay,
-    MusicTimer,
-    MusicTimerView,
-    Listening,
-    AnnounceStatus,
 } from "./types";
 
 // The vocabulary is the same module's, just kept in its own file — every
@@ -69,7 +68,6 @@ export type {
     PanelMusicOptions,
 } from "./panel-music/types";
 export { roomKeyOf } from "./panel-music/sources";
-
 
 const POLL_MS = 15_000;
 const LIVE_POLL_MS = 45_000;
@@ -589,173 +587,13 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
         );
     }
 
-    // ── HomeHub's music timers ───────────────────────────────────────────
-    // The wall's own "quiet in forty minutes", and the other end of the same
-    // mechanism: "wake this room at 06:45". Both reach every kind of room
-    // the panel can feature — a Sonos group, a KEF speaker, a HomeHub zone —
-    // where the speaker's own timer reaches only the one make that has one.
-    //
-    // Read on a slow beat of its own rather than on the speaker poll: a
-    // timer changes when somebody sets one and when one fires, and the
-    // countdown between reads is arithmetic, not a round trip. The one thing
-    // that genuinely moves on its own is a ramp in flight, and a minute's
-    // granularity is right for something that takes five.
-    //
-    // Not on the kid surface: the endpoints are admin-only, and asking would
-    // be a guaranteed 403 on every load of a screen with no control to draw
-    // with the answer.
-    const TIMERS_MS = 60_000;
-    let timers = $state<MusicTimerView[]>([]);
-
-    async function loadTimers() {
-        if (opts.sonosOnly) return;
-        try {
-            timers = await api.musicTimers();
-        } catch {
-            timers = [];
-        }
-    }
-
-    const roomTimers = $derived.by(() => {
-        const key = roomKeyOf(featured);
-        return key ? timers.filter((t) => t.room === key) : [];
-    });
-    /** A sleep timer is the one-shot stop: no time of day, nothing to play.
-     *  A recurring "stop at 23:00" is a standing instruction and belongs in
-     *  the list with the wake-ups, not on the "quiet in…" row. */
-    const sleepTimer = $derived(
-        roomTimers.find((t) => t.action === "stop" && !t.time && !!t.fires_at),
-    );
-    const fading = $derived(roomTimers.some((t) => t.fading));
-
-    /** Minutes until the room is actually quiet: the timer fires when the
-     *  fade *starts*, so the fade's own length is still to come. */
-    const sleepMinutesLeft = $derived.by(() => {
-        void clock.beat;
-        const t = sleepTimer;
-        if (!t?.fires_at || !t.enabled) return 0;
-        const quietAt = Date.parse(t.fires_at) + (t.fade_minutes ?? 0) * 60_000;
-        return Math.max(0, Math.ceil((quietAt - Date.now()) / 60_000));
+    // ── HomeHub's music timers, and the listening picture on their beat ──
+    const timerStore = createPanelTimers({
+        sonosOnly: !!opts.sonosOnly,
+        roomKey: () => roomKeyOf(featured),
+        run,
     });
 
-    function setSleepIn(minutes: number) {
-        const key = roomKeyOf(featured);
-        if (!key) return;
-        void run(
-            "sleepin:" + key,
-            () => api.musicSleep({ room: key, minutes }).then(loadTimers),
-            "Couldn't set the sleep timer",
-        );
-    }
-
-    function clearSleep() {
-        const t = sleepTimer;
-        if (!t) return;
-        // Deleting cancels the ramp too, which puts the volume back and
-        // leaves the music playing — "I'm still up" said with the timer.
-        void run(
-            "sleepin:" + t.room,
-            () => api.musicDeleteTimer(t.id).then(loadTimers),
-            "Couldn't clear the sleep timer",
-        );
-    }
-
-    function cancelFade() {
-        const key = roomKeyOf(featured);
-        if (!key) return;
-        void run(
-            "fade:" + key,
-            () => api.musicCancelFade(key).then(loadTimers),
-            "Couldn't stop the fade",
-        );
-    }
-
-    function setWake(o: {
-        time: string;
-        days: number[];
-        volume?: number;
-        fadeMinutes?: number;
-        item: MusicTimer["item"];
-        name?: string;
-    }) {
-        const key = roomKeyOf(featured);
-        if (!key || !o.item?.uri) return;
-        void run(
-            "wake:" + key + ":" + o.time,
-            () =>
-                api
-                    .musicCreateTimer({
-                        room: key,
-                        action: "start",
-                        enabled: true,
-                        time: o.time,
-                        days: o.days,
-                        item: o.item,
-                        volume: o.volume,
-                        fade_minutes: o.fadeMinutes,
-                        name: o.name,
-                    })
-                    .then(loadTimers),
-            "Couldn't set that alarm",
-        );
-    }
-
-    function setTimerEnabled(t: MusicTimerView, enabled: boolean) {
-        void run(
-            "timer:" + t.id,
-            () =>
-                api
-                    .musicUpdateTimer(t.id, {
-                        room: t.room,
-                        action: t.action,
-                        enabled,
-                        fires_at: t.fires_at,
-                        time: t.time,
-                        days: t.days,
-                        item: t.item,
-                        volume: t.volume,
-                        fade_minutes: t.fade_minutes,
-                        name: t.name,
-                    })
-                    .then(loadTimers),
-            "Couldn't change that timer",
-        );
-    }
-
-    function deleteTimer(t: MusicTimerView) {
-        void run(
-            "timer:" + t.id,
-            () => api.musicDeleteTimer(t.id).then(loadTimers),
-            "Couldn't remove that timer",
-        );
-    }
-
-    // ── What the household listens to ────────────────────────────────────
-    // The one picture no single room can give, and the reason it rides on
-    // the timers' beat rather than the speakers': it changes when something
-    // is played, which the panel finds out about anyway.
-    let insights = $state<Listening | null>(null);
-    async function loadInsights() {
-        if (opts.sonosOnly) return;
-        try {
-            insights = await api.mediaInsights(8);
-        } catch {
-            insights = null;
-        }
-    }
-
-    $effect(() => {
-        if (opts.sonosOnly) return;
-        if (!session.isAdmin) return;
-        void loadTimers();
-        void loadInsights();
-        const t = setInterval(() => {
-            if (document.hidden) return;
-            void loadTimers();
-            void loadInsights();
-        }, TIMERS_MS);
-        return () => clearInterval(t);
-    });
 
     // ── Queue ────────────────────────────────────────────────────────────
     let queue = $state<SonosQueueItem[]>([]);
@@ -1160,68 +998,10 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
     const canForget = $derived(!!featured && !historyHousehold && session.isAdmin);
 
     // ── Saving what's playing ────────────────────────────────────────────
-    // The heart. It needs a catalog id, which only a Spotify source has —
-    // radio and line-in carry an artist line and nothing to save — so the
-    // control renders only where `trackURI` does (§15.1 applied to a track).
-    //
-    // The saved *state* is read on whatever login the panel has, because
-    // reading has always been in the grant; only the write needs the newer
-    // scope, so an old login shows an honest heart and refuses the tap
-    // rather than being offered a control that will fail.
-    let savedURI = $state("");
-    let saved = $state(false);
-    let canSave = $state(false);
-    let savedSeq = 0;
-
-    void api
-        .spotifyStatus()
-        .then((st) => {
-            canSave = st.connected && !!st.library;
-        })
-        .catch(() => {
-            canSave = false;
-        });
-
-    $effect(() => {
-        const uri = featured?.trackURI ?? "";
-        if (uri === savedURI) return;
-        savedURI = uri;
-        saved = false;
-        const mine = ++savedSeq;
-        if (!uri) return;
-        void api
-            .spotifySaved(uri)
-            .then((r) => {
-                if (mine === savedSeq) saved = r.saved;
-            })
-            .catch(() => {});
+    const savedStore = createPanelSaved({
+        trackURI: () => featured?.trackURI,
+        run,
     });
-
-    function toggleSaved() {
-        const uri = featured?.trackURI;
-        if (!uri || !canSave) return;
-        const next = !saved;
-        // Optimistic: the heart is the confirmation, and a wall panel has
-        // nothing else to show while a round trip to Spotify completes.
-        saved = next;
-        void run(
-            "save:" + uri,
-            () => api.spotifySetSaved(uri, next),
-            next ? "Couldn't save that song" : "Couldn't remove that song",
-        ).then(() => {
-            // Then re-read, because the optimistic flip above is a guess
-            // until Spotify agrees — and a refused write (an older grant,
-            // a dropped connection) has already been toasted by run(),
-            // which must not leave a heart claiming otherwise.
-            if (featured?.trackURI !== uri) return;
-            void api
-                .spotifySaved(uri)
-                .then((r) => {
-                    if (featured?.trackURI === uri) saved = r.saved;
-                })
-                .catch(() => {});
-        });
-    }
 
     // ── More like this ───────────────────────────────────────────────────
     // The same engine "play similar" uses when a queue runs dry (§15.5),
@@ -1283,49 +1063,11 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
     }
 
     // ── Announcements ────────────────────────────────────────────────────
-    // Calling the house from the wall — the panel's own feature more than
-    // the app's, since "dinner's ready" is shouted from a hallway and not
-    // typed on a phone. It goes to every reachable Sonos room at once; the
-    // status read is what says whether there is anywhere to announce to and
-    // whether there will be words or only a chime.
-    let announce = $state<AnnounceStatus | null>(null);
-    let lastAnnounce = $state<{ text: string; rooms: string[]; spoken: boolean; at: number } | null>(
-        null,
-    );
-
-    // Not on the kid surface: announcing is a household action and the
-    // endpoint is admin-only, so asking would be one guaranteed 403 on
-    // every load of a screen that has no control to draw with the answer.
-    if (!opts.sonosOnly) {
-        void api
-            .announceStatus()
-            .then((st) => {
-                announce = st;
-            })
-            .catch(() => {
-                announce = null;
-            });
-    }
-
-    function sendAnnouncement(text: string, rooms?: string[]) {
-        void run(
-            "announce",
-            async () => {
-                const res = await api.announce(text, rooms);
-                lastAnnounce = {
-                    text,
-                    rooms: res.rooms,
-                    spoken: res.spoken,
-                    at: Date.now(),
-                };
-                // Every room has been interrupted and will be put back a few
-                // seconds from now; re-read once that has happened so the
-                // panel doesn't show the announcement as what's playing.
-                setTimeout(() => void refresh(), res.duration_ms + 1500);
-            },
-            "Couldn't announce that",
-        );
-    }
+    const announceStore = createPanelAnnounce({
+        sonosOnly: !!opts.sonosOnly,
+        run,
+        refresh,
+    });
 
     // ── Grouping ─────────────────────────────────────────────────────────
     // Sonos-native only, the daily "play together": joining is the whole
@@ -1501,26 +1243,26 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
         toggleAutoplay,
         setKefSource,
         get timers() {
-            return timers;
+            return timerStore.timers;
         },
         get roomTimers() {
-            return roomTimers;
+            return timerStore.roomTimers;
         },
         get sleepTimer() {
-            return sleepTimer;
+            return timerStore.sleepTimer;
         },
         get sleepMinutesLeft() {
-            return sleepMinutesLeft;
+            return timerStore.sleepMinutesLeft;
         },
         get fading() {
-            return fading;
+            return timerStore.fading;
         },
-        setSleepIn,
-        clearSleep,
-        cancelFade,
-        setWake,
-        setTimerEnabled,
-        deleteTimer,
+        setSleepIn: timerStore.setSleepIn,
+        clearSleep: timerStore.clearSleep,
+        cancelFade: timerStore.cancelFade,
+        setWake: timerStore.setWake,
+        setTimerEnabled: timerStore.setTimerEnabled,
+        deleteTimer: timerStore.deleteTimer,
         get sonosSleepMinutes() {
             return sonosSleepMinutes;
         },
@@ -1571,15 +1313,15 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
             return topPlaysHour;
         },
         get insights() {
-            return insights;
+            return timerStore.insights;
         },
         get canSave() {
-            return canSave;
+            return savedStore.canSave;
         },
         get saved() {
-            return saved;
+            return savedStore.saved;
         },
-        toggleSaved,
+        toggleSaved: savedStore.toggle,
         get canRadio() {
             return canRadio;
         },
@@ -1588,11 +1330,11 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
             return lastRadio;
         },
         get announce() {
-            return announce;
+            return announceStore.status;
         },
-        sendAnnouncement,
+        sendAnnouncement: announceStore.send,
         get lastAnnounce() {
-            return lastAnnounce;
+            return announceStore.last;
         },
         get joinable() {
             return joinable;
