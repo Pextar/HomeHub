@@ -20,16 +20,22 @@ import type {
 
 export const spotifyApi = {
   // Spotify search/browse (user's own account via PKCE — configured in the Music view)
-  spotifyStatus() { return req<SpotifyStatus>("/spotify/status"); },
+  spotifyStatus() {
+    return req<SpotifyStatus>("/spotify/status");
+  },
   spotifySetConfig(clientId: string) {
     return req<void>("/spotify/config", { method: "PUT", body: json({ client_id: clientId }) });
   },
-  spotifyLoginURL() { return req<{ url: string }>("/spotify/login"); },
+  spotifyLoginURL() {
+    return req<{ url: string }>("/spotify/login");
+  },
   // Manual-flow finish: pass the full address the browser landed on after consent.
   spotifyExchange(url: string) {
     return req<void>("/spotify/exchange", { method: "POST", body: json({ url }) });
   },
-  spotifyDisconnect() { return req<void>("/spotify/disconnect", { method: "POST" }); },
+  spotifyDisconnect() {
+    return req<void>("/spotify/disconnect", { method: "POST" });
+  },
   // `kind` narrows to one of tracks/albums/playlists/artists and `offset`
   // pages into it — what a shelf's "Show more" needs, since Spotify caps a
   // search at ten results per kind. `signal` lets a superseded search be
@@ -44,10 +50,14 @@ export const spotifyApi = {
     if (opts.offset) p.set("offset", String(opts.offset));
     return req<SpotifyResults>(`/spotify/search?${p}`, { signal: opts.signal });
   },
-  spotifyMyPlaylists() { return req<SpotifyItem[]>("/spotify/playlists"); },
+  spotifyMyPlaylists() {
+    return req<SpotifyItem[]>("/spotify/playlists");
+  },
   // What the account has been playing, for the idle shelves. 409 means the
   // login predates the listening scopes — a reconnect, not a fault.
-  spotifyListening() { return req<SpotifyListening>("/spotify/listening"); },
+  spotifyListening() {
+    return req<SpotifyListening>("/spotify/listening");
+  },
   // Songs to continue with, seeded from an artist name — the same engine
   // "play similar" uses when a queue runs dry, asked for on purpose. By
   // name because that is what a speaker reports about what it is playing.

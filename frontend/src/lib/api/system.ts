@@ -8,11 +8,7 @@
  */
 
 import { req, json } from "./http";
-import type {
-  AssistantStatus,
-  NotifPrefs,
-  PushSubscriptionBody,
-} from "../types";
+import type { AssistantStatus, NotifPrefs, PushSubscriptionBody } from "../types";
 
 export const systemApi = {
   // Push notifications

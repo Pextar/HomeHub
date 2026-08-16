@@ -22,31 +22,55 @@ import type {
 export const kefApi = {
   // KEF speakers (local HTTP control). No grouping, queue or favorites —
   // the speaker's API has none; the input selector is what picks a source.
-  kefStatus() { return req<KEFStatus>("/kef/status"); },
-  kefDiscover() { return req<KEFCandidate[]>("/kef/discover"); },
+  kefStatus() {
+    return req<KEFStatus>("/kef/status");
+  },
+  kefDiscover() {
+    return req<KEFCandidate[]>("/kef/discover");
+  },
   kefCreateSpeaker(body: { ip: string; name?: string; room?: string }) {
     return req<KEFSpeaker>("/kef/speakers", { method: "POST", body: json(body) });
   },
   kefUpdateSpeaker(id: string, body: { ip?: string; name?: string; room?: string }) {
-    return req<KEFSpeaker>(`/kef/speakers/${encodeURIComponent(id)}`, { method: "PUT", body: json(body) });
+    return req<KEFSpeaker>(`/kef/speakers/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      body: json(body),
+    });
   },
   kefDeleteSpeaker(id: string) {
     return req<void>(`/kef/speakers/${encodeURIComponent(id)}`, { method: "DELETE" });
   },
-  kefPlay(id: string) { return req<void>(`/kef/${encodeURIComponent(id)}/play`, { method: "POST" }); },
-  kefPause(id: string) { return req<void>(`/kef/${encodeURIComponent(id)}/pause`, { method: "POST" }); },
-  kefNext(id: string) { return req<void>(`/kef/${encodeURIComponent(id)}/next`, { method: "POST" }); },
-  kefPrevious(id: string) { return req<void>(`/kef/${encodeURIComponent(id)}/previous`, { method: "POST" }); },
+  kefPlay(id: string) {
+    return req<void>(`/kef/${encodeURIComponent(id)}/play`, { method: "POST" });
+  },
+  kefPause(id: string) {
+    return req<void>(`/kef/${encodeURIComponent(id)}/pause`, { method: "POST" });
+  },
+  kefNext(id: string) {
+    return req<void>(`/kef/${encodeURIComponent(id)}/next`, { method: "POST" });
+  },
+  kefPrevious(id: string) {
+    return req<void>(`/kef/${encodeURIComponent(id)}/previous`, { method: "POST" });
+  },
   kefSetVolume(id: string, level: number) {
-    return req<void>(`/kef/${encodeURIComponent(id)}/volume`, { method: "PUT", body: json({ level }) });
+    return req<void>(`/kef/${encodeURIComponent(id)}/volume`, {
+      method: "PUT",
+      body: json({ level }),
+    });
   },
   kefSetMute(id: string, muted: boolean) {
-    return req<void>(`/kef/${encodeURIComponent(id)}/mute`, { method: "PUT", body: json({ muted }) });
+    return req<void>(`/kef/${encodeURIComponent(id)}/mute`, {
+      method: "PUT",
+      body: json({ muted }),
+    });
   },
   // Switching the input is how you pick what plays: there is no queue to
   // point somewhere, so selecting "optic" *is* the "play the TV" action.
   kefSetSource(id: string, source: KEFSource) {
-    return req<void>(`/kef/${encodeURIComponent(id)}/source`, { method: "PUT", body: json({ source }) });
+    return req<void>(`/kef/${encodeURIComponent(id)}/source`, {
+      method: "PUT",
+      body: json({ source }),
+    });
   },
   kefSetPower(id: string, on: boolean) {
     return req<void>(`/kef/${encodeURIComponent(id)}/power`, { method: "PUT", body: json({ on }) });
@@ -58,7 +82,10 @@ export const kefApi = {
   },
   // One field per interaction, so "what did the speaker refuse" stays clear.
   kefUpdateSettings(id: string, patch: KEFSettingsPatch) {
-    return req<void>(`/kef/${encodeURIComponent(id)}/settings`, { method: "PUT", body: json(patch) });
+    return req<void>(`/kef/${encodeURIComponent(id)}/settings`, {
+      method: "PUT",
+      body: json(patch),
+    });
   },
   // Starts a Spotify item on a KEF speaker. Same body as sonosPlayItem, a
   // different road underneath: the speaker's own API can't be handed content,
@@ -66,7 +93,10 @@ export const kefApi = {
   // the speaker onto Wi-Fi first. A 409 means something the user can fix —
   // reconnect Spotify, or pick which Connect device this speaker is.
   kefPlayItem(id: string, body: PlayItemBody) {
-    return req<void>(`/kef/${encodeURIComponent(id)}/play-item`, { method: "POST", body: json(body) });
+    return req<void>(`/kef/${encodeURIComponent(id)}/play-item`, {
+      method: "POST",
+      body: json(body),
+    });
   },
   // The Connect pairing for one speaker, plus the account's visible devices.
   kefSpotifyDevices(id: string) {

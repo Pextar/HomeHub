@@ -38,12 +38,16 @@ export const mediaApi = {
   // that play together regardless of make. The sonos*/kef* calls above stay:
   // they carry vendor specifics the detail views need.
   // See docs/MEDIA-PROTOCOL.md.
-  mediaEndpoints() { return req<MediaEndpoint[]>("/media/endpoints"); },
+  mediaEndpoints() {
+    return req<MediaEndpoint[]>("/media/endpoints");
+  },
   // UPnP/DLNA renderers. Registration is a *describe* rather than a probe:
   // a renderer publishes its control URLs inside a device description at a
   // URL of its choosing, so adding one means reading that document. Describe
   // first to show what was found, then create.
-  upnpRenderers() { return req<UPnPRenderer[]>("/upnp/renderers"); },
+  upnpRenderers() {
+    return req<UPnPRenderer[]>("/upnp/renderers");
+  },
   upnpDescribe(location: string) {
     return req<UPnPDescription>("/upnp/describe", { method: "POST", body: json({ location }) });
   },
@@ -52,32 +56,39 @@ export const mediaApi = {
   },
   upnpUpdateRenderer(id: string, body: { name?: string; room?: string }) {
     return req<UPnPRenderer>(`/upnp/renderers/${encodeURIComponent(id)}`, {
-      method: "PUT", body: json(body),
+      method: "PUT",
+      body: json(body),
     });
   },
   /** Re-read the device description — the fix for a renderer that rebooted
    *  onto a different port and stopped answering the URLs we remembered. */
   upnpRefreshRenderer(id: string) {
-    return req<UPnPRenderer>(`/upnp/renderers/${encodeURIComponent(id)}/refresh`, { method: "POST" });
+    return req<UPnPRenderer>(`/upnp/renderers/${encodeURIComponent(id)}/refresh`, {
+      method: "POST",
+    });
   },
   upnpDeleteRenderer(id: string) {
     return req<void>(`/upnp/renderers/${encodeURIComponent(id)}`, { method: "DELETE" });
   },
   upnpSetVolume(id: string, level: number) {
     return req<void>(`/upnp/${encodeURIComponent(id)}/volume`, {
-      method: "PUT", body: json({ level }),
+      method: "PUT",
+      body: json({ level }),
     });
   },
   upnpSetMute(id: string, muted: boolean) {
     return req<void>(`/upnp/${encodeURIComponent(id)}/mute`, {
-      method: "PUT", body: json({ muted }),
+      method: "PUT",
+      body: json({ muted }),
     });
   },
 
   // Qobuz. Setup is two calls because the credentials come from two parties;
   // see QobuzStatus. The password is sent once and never stored — what
   // persists server-side is the token Qobuz returns for it.
-  qobuzStatus() { return req<QobuzStatus>("/qobuz/status"); },
+  qobuzStatus() {
+    return req<QobuzStatus>("/qobuz/status");
+  },
   qobuzSetConfig(appId: string, appSecret: string) {
     return req<QobuzStatus>("/qobuz/config", {
       method: "PUT",
@@ -87,21 +98,30 @@ export const mediaApi = {
   qobuzLogin(email: string, password: string) {
     return req<QobuzStatus>("/qobuz/login", { method: "POST", body: json({ email, password }) });
   },
-  qobuzDisconnect() { return req<QobuzStatus>("/qobuz/disconnect", { method: "POST" }); },
+  qobuzDisconnect() {
+    return req<QobuzStatus>("/qobuz/disconnect", { method: "POST" });
+  },
 
-  mediaProviders() { return req<MediaProvider[]>("/media/providers"); },
+  mediaProviders() {
+    return req<MediaProvider[]>("/media/providers");
+  },
   mediaSearch(q: string, opts?: { provider?: string; limit?: number }) {
     const p = new URLSearchParams({ q });
     if (opts?.provider) p.set("provider", opts.provider);
     if (opts?.limit) p.set("limit", String(opts.limit));
     return req<MediaResults>(`/media/search?${p}`);
   },
-  mediaZones() { return req<MediaZone[]>("/media/zones"); },
+  mediaZones() {
+    return req<MediaZone[]>("/media/zones");
+  },
   mediaCreateZone(body: { name: string; members: string[]; room?: string }) {
     return req<MediaZone>("/media/zones", { method: "POST", body: json(body) });
   },
   mediaUpdateZone(id: string, body: { name?: string; members?: string[]; room?: string }) {
-    return req<MediaZone>(`/media/zones/${encodeURIComponent(id)}`, { method: "PUT", body: json(body) });
+    return req<MediaZone>(`/media/zones/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      body: json(body),
+    });
   },
   mediaDeleteZone(id: string) {
     return req<void>(`/media/zones/${encodeURIComponent(id)}`, { method: "DELETE" });
@@ -120,23 +140,34 @@ export const mediaApi = {
   // speaker, install librespot, or pick different speakers.
   mediaZonePlay(
     id: string,
-    body: { provider?: string; uri: string; title?: string; kind?: string; sub?: string; art_uri?: string },
+    body: {
+      provider?: string;
+      uri: string;
+      title?: string;
+      kind?: string;
+      sub?: string;
+      art_uri?: string;
+    },
   ) {
     return req<MediaPlayResult>(`/media/zones/${encodeURIComponent(id)}/play`, {
-      method: "POST", body: json(body),
+      method: "POST",
+      body: json(body),
     });
   },
   // What the audio actually is on every path through the house, and the one
   // setting that changes it. Read rather than inferred: whether something is
   // lossless depends on the service *and* the route, and only the backend
   // knows both.
-  mediaQuality() { return req<MediaQualityReport>("/media/quality"); },
+  mediaQuality() {
+    return req<MediaQualityReport>("/media/quality");
+  },
   // Lands on the next thing played, not on what is playing: the bitrate is
   // baked into the decoder's command line, so applying it now would mean
   // cutting off the music to improve it.
   setMediaQuality(quality: StreamQuality) {
     return req<{ stream_quality: StreamQuality; bitrate_kbps: number; applies: string }>(
-      "/media/quality", { method: "PUT", body: json({ stream_quality: quality }) },
+      "/media/quality",
+      { method: "PUT", body: json({ stream_quality: quality }) },
     );
   },
   // What a room has been asked to play, newest first. A room with no history
@@ -144,9 +175,7 @@ export const mediaApi = {
   // "Played here" for one and "Played recently" for the other, because a wall
   // must never imply a room played something it didn't.
   mediaHistory(room: string, limit = 12) {
-    return req<MediaHistory>(
-      `/media/history?room=${encodeURIComponent(room)}&limit=${limit}`,
-    );
+    return req<MediaHistory>(`/media/history?room=${encodeURIComponent(room)}&limit=${limit}`);
   },
   // One room stops remembering one thing; without a uri it forgets the lot.
   // The shelves are *ranked*, so a record started by mistake doesn't sink —
@@ -194,7 +223,9 @@ export const mediaApi = {
   // full, so it is ordinary CRUD; a sleep timer is set by someone already in
   // bed and is "forty minutes, this room", so it has a call of its own that
   // does the arithmetic.
-  musicTimers() { return req<MusicTimerView[]>("/media/timers"); },
+  musicTimers() {
+    return req<MusicTimerView[]>("/media/timers");
+  },
   musicCreateTimer(body: Omit<MusicTimer, "id">) {
     return req<MusicTimer>("/media/timers", { method: "POST", body: json(body) });
   },
@@ -203,7 +234,8 @@ export const mediaApi = {
   // of them looks like.
   musicUpdateTimer(id: string, body: Omit<MusicTimer, "id">) {
     return req<MusicTimer>(`/media/timers/${encodeURIComponent(id)}`, {
-      method: "PUT", body: json(body),
+      method: "PUT",
+      body: json(body),
     });
   },
   musicDeleteTimer(id: string) {
@@ -221,13 +253,16 @@ export const mediaApi = {
   // room keeps whatever volume it started the fade at.
   musicCancelFade(room: string) {
     return req<{ cancelled: boolean }>("/media/timers/fade/cancel", {
-      method: "POST", body: json({ room }),
+      method: "POST",
+      body: json({ room }),
     });
   },
 
   // Calling the house. The status read is what decides whether the control is
   // drawn at all and whether it offers words or only a chime.
-  announceStatus() { return req<AnnounceStatus>("/announce"); },
+  announceStatus() {
+    return req<AnnounceStatus>("/announce");
+  },
   announce(text: string, rooms?: string[]) {
     return req<AnnounceResult>("/announce", {
       method: "POST",
@@ -253,9 +288,15 @@ export const mediaApi = {
     return req<void>(`/media/zones/${encodeURIComponent(id)}/stop`, { method: "POST" });
   },
   mediaZoneVolume(id: string, level: number) {
-    return req<void>(`/media/zones/${encodeURIComponent(id)}/volume`, { method: "PUT", body: json({ level }) });
+    return req<void>(`/media/zones/${encodeURIComponent(id)}/volume`, {
+      method: "PUT",
+      body: json({ level }),
+    });
   },
   mediaZoneMute(id: string, muted: boolean) {
-    return req<void>(`/media/zones/${encodeURIComponent(id)}/mute`, { method: "PUT", body: json({ muted }) });
+    return req<void>(`/media/zones/${encodeURIComponent(id)}/mute`, {
+      method: "PUT",
+      body: json({ muted }),
+    });
   },
 };

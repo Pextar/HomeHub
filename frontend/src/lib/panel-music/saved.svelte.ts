@@ -15,86 +15,86 @@ import { api } from "../api";
 import type { PanelRunner } from "./timers.svelte";
 
 export interface PanelSavedStore {
-    /** The login may write to the library. False hides the heart rather
-     *  than offering a tap that will be refused. */
-    readonly canSave: boolean;
-    /** Whether what's playing is in the account's library. Meaningless
-     *  unless the featured source has a trackURI. */
-    readonly saved: boolean;
-    toggle(): void;
+  /** The login may write to the library. False hides the heart rather
+   *  than offering a tap that will be refused. */
+  readonly canSave: boolean;
+  /** Whether what's playing is in the account's library. Meaningless
+   *  unless the featured source has a trackURI. */
+  readonly saved: boolean;
+  toggle(): void;
 }
 
 export interface PanelSavedDeps {
-    /** The featured source's catalog id, or undefined where there is none.
-     *  A getter: what is playing moves under this. */
-    trackURI: () => string | undefined;
-    run: PanelRunner;
+  /** The featured source's catalog id, or undefined where there is none.
+   *  A getter: what is playing moves under this. */
+  trackURI: () => string | undefined;
+  run: PanelRunner;
 }
 
 export function createPanelSaved(deps: PanelSavedDeps): PanelSavedStore {
-    let savedURI = $state("");
-    let saved = $state(false);
-    let canSave = $state(false);
-    let seq = 0;
+  let savedURI = $state("");
+  let saved = $state(false);
+  let canSave = $state(false);
+  let seq = 0;
 
-    void api
-        .spotifyStatus()
-        .then((st) => {
-            canSave = st.connected && !!st.library;
-        })
-        .catch(() => {
-            canSave = false;
-        });
-
-    $effect(() => {
-        const uri = deps.trackURI() ?? "";
-        if (uri === savedURI) return;
-        savedURI = uri;
-        saved = false;
-        const mine = ++seq;
-        if (!uri) return;
-        void api
-            .spotifySaved(uri)
-            .then((r) => {
-                if (mine === seq) saved = r.saved;
-            })
-            .catch(() => {});
+  void api
+    .spotifyStatus()
+    .then((st) => {
+      canSave = st.connected && !!st.library;
+    })
+    .catch(() => {
+      canSave = false;
     });
 
-    return {
-        get canSave() {
-            return canSave;
-        },
-        get saved() {
-            return saved;
-        },
-        toggle() {
-            const uri = deps.trackURI();
-            if (!uri || !canSave) return;
-            const next = !saved;
-            // Optimistic: the heart is the confirmation, and a wall panel
-            // has nothing else to show while a round trip to Spotify runs.
-            saved = next;
-            void deps
-                .run(
-                    "save:" + uri,
-                    () => api.spotifySetSaved(uri, next),
-                    next ? "Couldn't save that song" : "Couldn't remove that song",
-                )
-                .then(() => {
-                    // Then re-read, because the optimistic flip above is a
-                    // guess until Spotify agrees — and a refused write (an
-                    // older grant, a dropped connection) has already been
-                    // toasted by run(), which must not leave a heart
-                    // claiming otherwise.
-                    if (deps.trackURI() !== uri) return;
-                    void api
-                        .spotifySaved(uri)
-                        .then((r) => {
-                            if (deps.trackURI() === uri) saved = r.saved;
-                        })
-                        .catch(() => {});
-                });
-        },
-    };
+  $effect(() => {
+    const uri = deps.trackURI() ?? "";
+    if (uri === savedURI) return;
+    savedURI = uri;
+    saved = false;
+    const mine = ++seq;
+    if (!uri) return;
+    void api
+      .spotifySaved(uri)
+      .then((r) => {
+        if (mine === seq) saved = r.saved;
+      })
+      .catch(() => {});
+  });
+
+  return {
+    get canSave() {
+      return canSave;
+    },
+    get saved() {
+      return saved;
+    },
+    toggle() {
+      const uri = deps.trackURI();
+      if (!uri || !canSave) return;
+      const next = !saved;
+      // Optimistic: the heart is the confirmation, and a wall panel
+      // has nothing else to show while a round trip to Spotify runs.
+      saved = next;
+      void deps
+        .run(
+          "save:" + uri,
+          () => api.spotifySetSaved(uri, next),
+          next ? "Couldn't save that song" : "Couldn't remove that song",
+        )
+        .then(() => {
+          // Then re-read, because the optimistic flip above is a
+          // guess until Spotify agrees — and a refused write (an
+          // older grant, a dropped connection) has already been
+          // toasted by run(), which must not leave a heart
+          // claiming otherwise.
+          if (deps.trackURI() !== uri) return;
+          void api
+            .spotifySaved(uri)
+            .then((r) => {
+              if (deps.trackURI() === uri) saved = r.saved;
+            })
+            .catch(() => {});
+        });
+    },
+  };
 }

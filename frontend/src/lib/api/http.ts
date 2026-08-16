@@ -44,13 +44,20 @@ export async function req<T>(path: string, opts: RequestInit = {}): Promise<T> {
   const text = await res.text();
   let data: unknown = null;
   if (text) {
-    try { data = JSON.parse(text); } catch { /* non-JSON body, leave data null */ }
+    try {
+      data = JSON.parse(text);
+    } catch {
+      /* non-JSON body, leave data null */
+    }
   }
   if (!res.ok) {
     const msg =
-      (data && typeof data === "object" && "error" in data && typeof (data as { error: unknown }).error === "string"
+      data &&
+      typeof data === "object" &&
+      "error" in data &&
+      typeof (data as { error: unknown }).error === "string"
         ? (data as { error: string }).error
-        : text || res.statusText || "Request failed");
+        : text || res.statusText || "Request failed";
     throw new ApiError(msg, res.status);
   }
   return data as T;

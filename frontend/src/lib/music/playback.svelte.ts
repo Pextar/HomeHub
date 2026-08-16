@@ -90,7 +90,11 @@ export function createPlayback(deps: PlaybackDeps): Playback {
     await busy.claim(key, async () => {
       try {
         await fn();
-        await (kind === "kef" ? kef.refresh() : kind === "zone" ? zones.refresh() : sonos.refresh());
+        await (kind === "kef"
+          ? kef.refresh()
+          : kind === "zone"
+            ? zones.refresh()
+            : sonos.refresh());
         // A KEF play answers as soon as *Spotify* accepted it — the audio
         // then goes out to the cloud and comes back — so the read above
         // still says "stopped". A streamed room has the same gap: the

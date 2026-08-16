@@ -39,6 +39,7 @@ import { buildSources, registeredCount, roomKeyOf } from "./panel-music/sources"
 import { createPanelTimers } from "./panel-music/timers.svelte";
 import { createPanelAnnounce } from "./panel-music/announce.svelte";
 import { createPanelSaved } from "./panel-music/saved.svelte";
+import { createPanelHistory } from "./panel-music/history.svelte";
 import type {
     PanelMusicOptions,
     PanelMusicStore,
@@ -55,7 +56,6 @@ import type {
     KEFSource,
     SpotifyItem,
     MediaZone,
-    MediaPlay,
 } from "./types";
 
 // The vocabulary is the same module's, just kept in its own file — every
@@ -859,143 +859,17 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
         if (s.kind !== "sonos") for (const ms of [1200, 4000]) setTimeout(() => void refresh(), ms);
     }
 
-    // ── What this room played before ─────────────────────────────────────
-    // HomeHub's own memory, per room, because Spotify's is one list for the
-    // whole household and cannot say that the kitchen gets radio at
-    // breakfast. It is what the band's shelf falls back to for a room that
-    // has no queue and no favorites — a KEF or a zone, which until now got
-    // a third of the wall's height as air (§16).
-    //
-    // A room with no history of its own answers with the household's, and
-    // says which it is: the wall must never imply a room played something
-    // it didn't.
-    let history = $state<MediaPlay[]>([]);
-    let historyHousehold = $state(false);
-    let historyFor = "";
-    let historySeq = 0;
-
-    // And what it keeps *coming back to*, which is a different question and
-    // usually the better answer to "put something on": the plain list says
-    // what was on last, and by eight in the evening the kitchen's breakfast
-    // radio and its dinner records are equally recent. Asked for at the hour
-    // it currently is, so a room with a habit at this hour gets that habit
-    // and a room without one gets its favourites overall — the answer says
-    // which, and the shelf's label repeats it rather than inventing one.
-    let topPlays = $state<MediaPlay[]>([]);
-    let topPlaysByHour = $state(false);
-    // Plain dates throughout this block: each one is read for the hour it
-    // is now and thrown away in the same statement, never held and never
-    // mutated, so there is nothing for a reactive Date to be reactive about.
-    // eslint-disable-next-line svelte/prefer-svelte-reactivity
-    let topPlaysHour = $state(new Date().getHours());
-
-    async function loadHistory(key: string) {
-        const mine = ++historySeq;
-        // Both shelves in one pass, settled: they answer different
-        // questions about the same room and either can come back empty
-        // without costing the other its list.
-        const [plain, top] = await Promise.allSettled([
-            api.mediaHistory(key, 12),
-            api.mediaTopPlays(key, { limit: 8, hour: "now" }),
-        ]);
-        if (mine !== historySeq) return;
-        if (plain.status === "fulfilled") {
-            history = plain.value.plays;
-            historyHousehold = plain.value.household;
-        } else {
-            history = [];
-            historyHousehold = false;
-        }
-        if (top.status === "fulfilled") {
-            topPlays = top.value.plays;
-            topPlaysByHour = top.value.by_hour;
-            topPlaysHour = top.value.hour;
-        } else {
-            topPlays = [];
-            topPlaysByHour = false;
-        }
-    }
-
-    $effect(() => {
-        const key = roomKeyOf(featured);
-        if (key === historyFor) return;
-        historyFor = key;
-        historySeq++;
-        history = [];
-        historyHousehold = false;
-        topPlays = [];
-        topPlaysByHour = false;
-        if (key) void loadHistory(key);
-    });
-
-    // The hour is half of what the ranking above was asked for, so when the
-    // wall clock rolls into a new one the shelf is answering yesterday
-    // evening's question. Re-read on the minute beat the store already has,
-    // and only when the hour has actually changed.
-    // eslint-disable-next-line svelte/prefer-svelte-reactivity
-    let shelfHour = new Date().getHours();
-    $effect(() => {
-        void clock.beat;
-        // eslint-disable-next-line svelte/prefer-svelte-reactivity
-        const h = new Date().getHours();
-        if (h === shelfHour) return;
-        shelfHour = h;
-        if (historyFor) void loadHistory(historyFor);
-    });
-
-    /** Start something out of the history again.
-     *
-     *  A Sonos favorite is replayed through the favorites path it came from,
-     *  matched by URI against the household's current list — a favorite that
-     *  has since been deleted simply stops being offered, which is better
-     *  than a tile that fails. Everything else is a Spotify item and goes
-     *  back the way it was started. */
-    function playFromHistory(p: MediaPlay) {
-        const s = featured;
-        if (!s) return;
-        if (p.provider === "sonos") {
-            const fav = favorites.find((f) => f.uri === p.uri);
+    // ── What this room played before, and keeps coming back to ──────────
+    const historyStore = createPanelHistory({
+        roomKey: () => roomKeyOf(featured),
+        featured: () => featured,
+        run,
+        playFavoriteByURI: (uri) => {
+            const fav = favorites.find((f) => f.uri === uri);
             if (fav) playFavorite(fav);
-            return;
-        }
-        void run(
-            "hist:" + p.uri,
-            () =>
-                startOn(s, {
-                    service: "Spotify",
-                    uri: p.uri,
-                    title: p.title,
-                    kind: p.kind,
-                    sub: p.sub,
-                    art_uri: p.art_uri,
-                }).then(() => loadHistory(roomKeyOf(s))),
-            "Couldn't play that again",
-        );
-    }
-
-    /** Forget one thing this room played.
-     *
-     *  The counterweight to a ranked shelf. `topPlays` puts what a room keeps
-     *  coming back to at the front of the wall, which is the right answer
-     *  right up until the thing it keeps coming back to is a mistake — and a
-     *  mistake is exactly what gets replayed, because it is the tile in the
-     *  first slot. Until this existed the cures were to out-play it thirty
-     *  times or to delete the speaker.
-     *
-     *  Never the household's list: the fallback shelf is other rooms' plays,
-     *  and one room is not the place to edit them. `canForget` is what keeps
-     *  the control off that shelf. */
-    function forgetPlay(p: MediaPlay) {
-        const key = roomKeyOf(featured);
-        if (!key || historyHousehold || !session.isAdmin) return;
-        void run(
-            "forget:" + p.uri,
-            () => api.mediaForgetPlay(key, p.uri).then(() => loadHistory(key)),
-            "Couldn't forget that",
-        );
-    }
-
-    const canForget = $derived(!!featured && !historyHousehold && session.isAdmin);
+        },
+        startOn,
+    });
 
     // ── Saving what's playing ────────────────────────────────────────────
     const savedStore = createPanelSaved({
@@ -1293,24 +1167,24 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
         playFavorite,
         playItem,
         get history() {
-            return history;
+            return historyStore.history;
         },
         get historyHousehold() {
-            return historyHousehold;
+            return historyStore.historyHousehold;
         },
-        playFromHistory,
-        forgetPlay,
+        playFromHistory: historyStore.playFromHistory,
+        forgetPlay: historyStore.forgetPlay,
         get canForget() {
-            return canForget;
+            return historyStore.canForget;
         },
         get topPlays() {
-            return topPlays;
+            return historyStore.topPlays;
         },
         get topPlaysByHour() {
-            return topPlaysByHour;
+            return historyStore.topPlaysByHour;
         },
         get topPlaysHour() {
-            return topPlaysHour;
+            return historyStore.topPlaysHour;
         },
         get insights() {
             return timerStore.insights;
