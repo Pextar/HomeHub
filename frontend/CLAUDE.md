@@ -39,6 +39,28 @@ Worth a component test: anything a parent's stylesheet used to reach into
 (a layout mode that became a prop), anything with an armed or optimistic
 state, and any control §15 says must be *absent* rather than disabled.
 
+## The panel store's roles
+
+`PanelMusicStore` is ninety-odd members and no component wants more than a
+fifth of them. It is declared as roles — `PanelRooms`, `PanelTransport`,
+`PanelQueue`, `PanelGrouping`, … — and the store is their sum.
+
+A component names the roles it uses:
+
+```ts
+let { music }: { music: PanelRooms & PanelQueue } = $props();
+```
+
+Structural typing does the rest: the real store satisfies any subset, the
+parent still passes `{music}`, and nothing changes at runtime. What changes
+is that reaching for something the component did not declare stops
+compiling — and a test can hand it a small object instead of a whole store.
+
+A component that passes `{music}` on to children needs their roles too, so
+containers end up naming most of them; that is the honest reading, not a
+reason to widen a leaf. `PanelBrowseRooms` takes the whole store for exactly
+this reason.
+
 ## Layout
 
 ```

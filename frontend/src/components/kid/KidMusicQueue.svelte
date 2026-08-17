@@ -10,9 +10,9 @@
     import { onDestroy } from "svelte";
     import { haptic } from "../../lib/utils";
     import { trimClock } from "../../lib/music/time";
-    import type { PanelMusicStore } from "../../lib/panel-music.svelte";
+    import type { PanelQueue, PanelRooms } from "../../lib/panel-music.svelte";
 
-    let { music, onFindMusic }: { music: PanelMusicStore; onFindMusic: () => void } = $props();
+    let { music, onFindMusic }: { music: PanelRooms & PanelQueue; onFindMusic: () => void } = $props();
 
     const featured = $derived(music.featured);
 

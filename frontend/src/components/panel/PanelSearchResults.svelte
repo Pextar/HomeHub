@@ -29,7 +29,13 @@
     import { playCount } from "../../lib/music/format";
     import type { SpotifyStore } from "../../lib/music/spotify.svelte";
     import type { SearchHistory } from "../../lib/music/history.svelte";
-    import type { PanelMusicStore, PanelSource } from "../../lib/panel-music.svelte";
+    import type {
+        PanelMemory,
+        PanelQueue,
+        PanelRooms,
+        PanelSource,
+        PanelStarting,
+    } from "../../lib/panel-music.svelte";
     import type { MediaPlay, SonosFavorite, SpotifyItem } from "../../lib/types";
 
     let {
@@ -51,7 +57,7 @@
         onOpenArtist,
         onRunRecent,
     }: {
-        music: PanelMusicStore;
+        music: PanelRooms & PanelStarting & PanelMemory & PanelQueue;
         spotify: SpotifyStore;
         recents: SearchHistory;
         featured: PanelSource | undefined;

@@ -12,7 +12,7 @@
      */
     import { rowSub } from "../../lib/music/catalog";
     import { fmtMs } from "../../lib/music/format";
-    import type { PanelMusicStore } from "../../lib/panel-music.svelte";
+    import type { PanelRooms } from "../../lib/panel-music.svelte";
     import type { SpotifyItem } from "../../lib/types";
 
     let {
@@ -29,7 +29,7 @@
         item: SpotifyItem;
         /** Track number, where the list is a numbered one. */
         num?: number | null;
-        music: PanelMusicStore;
+        music: PanelRooms;
         /** The software keyboard is up, so the row goes dense. */
         kbOpen?: boolean;
         /** This row's queue choices are showing. */

@@ -20,7 +20,7 @@
     import Icon from "../Icon.svelte";
     import { topLine, rowSub } from "../../lib/music/catalog";
     import { fmtMs } from "../../lib/music/format";
-    import type { PanelMusicStore, PanelSource } from "../../lib/panel-music.svelte";
+    import type { PanelQueue, PanelRooms, PanelSource } from "../../lib/panel-music.svelte";
     import type { SpotifyItem } from "../../lib/types";
 
     let {
@@ -43,7 +43,7 @@
         kbOpen?: boolean;
         /** The results have the whole width — the full-bleed layout. */
         full?: boolean;
-        music: PanelMusicStore;
+        music: PanelRooms & PanelQueue;
         featured: PanelSource | undefined;
         onOpenArtist: (uri: string, art?: { art_url?: string; round?: boolean }) => void;
         onPick: (item: SpotifyItem) => void;

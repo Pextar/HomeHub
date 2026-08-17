@@ -89,7 +89,24 @@ export interface PanelSource {
   route?: MediaRoute;
 }
 
-export interface PanelMusicStore {
+/**
+ * The panel store, as the roles a component can ask for.
+ *
+ * The store is one object with ninety-odd members, and no component wants
+ * more than about a fifth of them — the median is eight. Taking the whole
+ * thing to use three of it hides what a component actually depends on, and
+ * makes every one of them look coupled to every feature of the panel.
+ *
+ * So the surface is declared as roles and `PanelMusicStore` is their sum. A
+ * component names the roles it needs and TypeScript does the rest:
+ * structural typing means the real store satisfies any subset, so nothing
+ * changes at runtime and the parent still passes `{music}`. What changes is
+ * that reaching for something a component did not ask for stops compiling.
+ */
+
+/** Which rooms there are, which one the wall is driving, and what is in
+ *  flight. Nearly everything needs this much. */
+export interface PanelRooms {
   readonly hasSpeakers: boolean;
   /** Speakers are registered but none answered — the column stays and
    *  says so rather than vanishing and reflowing the panel grid. */
@@ -108,15 +125,43 @@ export interface PanelMusicStore {
   readonly anyPlaying: boolean;
   /** While the panel sleeps, the poll can slow right down. */
   setIdle(idle: boolean): void;
+}
 
-  // ── Position (extrapolated between polls on the 1s beat) ──
+/**
+ * Playing, pausing, skipping and the play modes — plus the KEF input
+ * selector, which is how a KEF picks what plays at all.
+ */
+export interface PanelTransport {
+  togglePlay(s: PanelSource): void;
+  skip(s: PanelSource, dir: "next" | "previous"): void;
+  /** Wake a KEF speaker out of standby — the panel's own job, not the
+   *  full view's: waking a speaker isn't configuring one. */
+  wake(s: PanelSource): void;
+  /** Pause every source that is playing, in one tap. */
+  pauseAll(): void;
+  toggleShuffle(): void;
+  cycleRepeat(): void;
+  toggleCrossfade(): void;
+  /** "Play similar": keep the room going once the queue runs out (§15.5). */
+  toggleAutoplay(): void;
+  setKefSource(s: PanelSource, source: KEFSource): void;
+}
+
+/**
+ * Where the track is and whether it can be scrubbed.
+ */
+export interface PanelPosition {
   readonly posSec: number;
   readonly durSec: number;
   /** A seek endpoint exists: a Sonos track with a length behind it. */
   readonly seekable: boolean;
   seek(sec: number): void;
+}
 
-  // ── Volume ──
+/**
+ * The room fader and the per-speaker ones inside it.
+ */
+export interface PanelVolume {
   /** Group (or single-speaker) fader value — the finger's while it's down. */
   readonly vol: number;
   /** Live, on every movement: shows at once, sends on a short throttle. */
@@ -131,25 +176,38 @@ export interface PanelMusicStore {
   setMemberVolume(id: string, level: number): void;
   /** No memberId mutes the whole room; one mutes that speaker. */
   toggleMute(s: PanelSource, memberId?: string): void;
+}
 
-  // ── Transport & play modes ──
-  togglePlay(s: PanelSource): void;
-  skip(s: PanelSource, dir: "next" | "previous"): void;
-  /** Wake a KEF speaker out of standby — the panel's own job, not the
-   *  full view's: waking a speaker isn't configuring one. */
-  wake(s: PanelSource): void;
-  /** Pause every source that is playing, in one tap. */
-  pauseAll(): void;
-  toggleShuffle(): void;
-  cycleRepeat(): void;
-  toggleCrossfade(): void;
-  /** "Play similar": keep the room going once the queue runs out (§15.5). */
-  toggleAutoplay(): void;
+/**
+ * A Sonos group's queue. Empty for anything else, because nothing else
+ * has one — the pane that draws it says so rather than showing zero.
+ */
+export interface PanelQueue {
+  readonly queue: SonosQueueItem[];
+  readonly queueLoading: boolean;
+  /** The first queued track after the one playing — the Up-next row. */
+  readonly nextInQueue: SonosQueueItem | undefined;
+  /** False when shuffle or repeat-one means queue order isn't play order,
+   *  so nothing on the wall may claim to know what comes next. */
+  readonly queueOrderKnown: boolean;
+  jumpTo(track: number): void;
+  removeQueued(track: number): void;
+  /** Move a queued track one place up (-1) or down (+1). One place at a
+   *  time, by tap: the app's drag is an imprecise aim at arm's length. */
+  moveQueued(track: number, dir: -1 | 1): void;
+  clearQueue(): void;
+  /** Add a search result without disturbing what's playing. */
+  enqueue(item: SpotifyItem, next: boolean): void;
+  /** The last thing queued, for the player column's inline confirmation —
+   *  a queued track changes nothing visible on its own. */
+  readonly lastQueued: { title: string; next: boolean; at: number } | null;
+}
 
-  // ── KEF ──
-  setKefSource(s: PanelSource, source: KEFSource): void;
-
-  // ── Sleep and wake (HomeHub's own timers, any room) ──────────────────
+/**
+ * The room's own clocks: HomeHub's sleep and wake timers, and the
+ * separate one a Sonos speaker keeps for itself.
+ */
+export interface PanelTimersView {
   /** Every music timer in the house, soonest first. */
   readonly timers: MusicTimerView[];
   /** The featured room's, soonest first. */
@@ -183,8 +241,6 @@ export interface PanelMusicStore {
   }): void;
   setTimerEnabled(t: MusicTimerView, enabled: boolean): void;
   deleteTimer(t: MusicTimerView): void;
-
-  // ── Sonos' own sleep timer (set in the Sonos app, reported by it) ────
   /** Whole minutes left on a timer the *speaker* is keeping, which is not
    *  the same thing as HomeHub's — the panel says so rather than folding
    *  two different clocks into one number. 0 for none. */
@@ -192,35 +248,22 @@ export interface PanelMusicStore {
   /** Clear the speaker's own timer. Only ever called with 0 from the
    *  panel: HomeHub's timers are what the wall now sets. */
   setSonosSleep(minutes: number): void;
+}
 
-  // ── Queue (a Sonos group's — empty for anything else) ──
-  readonly queue: SonosQueueItem[];
-  readonly queueLoading: boolean;
-  /** The first queued track after the one playing — the Up-next row. */
-  readonly nextInQueue: SonosQueueItem | undefined;
-  /** False when shuffle or repeat-one means queue order isn't play order,
-   *  so nothing on the wall may claim to know what comes next. */
-  readonly queueOrderKnown: boolean;
-  jumpTo(track: number): void;
-  removeQueued(track: number): void;
-  /** Move a queued track one place up (-1) or down (+1). One place at a
-   *  time, by tap: the app's drag is an imprecise aim at arm's length. */
-  moveQueued(track: number, dir: -1 | 1): void;
-  clearQueue(): void;
-  /** Add a search result without disturbing what's playing. */
-  enqueue(item: SpotifyItem, next: boolean): void;
-  /** The last thing queued, for the player column's inline confirmation —
-   *  a queued track changes nothing visible on its own. */
-  readonly lastQueued: { title: string; next: boolean; at: number } | null;
-
-  // ── Sonos favorites (a household list — radio, and what was starred) ──
+/**
+ * Putting something on: the household's favorites, and anything the
+ * catalog returned.
+ */
+export interface PanelStarting {
   readonly favorites: SonosFavorite[];
   playFavorite(f: SonosFavorite): void;
-
-  // ── Starting something ──
   playItem(item: SpotifyItem): Promise<void>;
+}
 
-  // ── What this room played before (HomeHub's own memory, per room) ──
+/**
+ * What this room has played, and what it keeps coming back to.
+ */
+export interface PanelMemory {
   readonly history: MediaPlay[];
   /** True when the list is the household's rather than this room's own —
    *  the shelf says which, because a wall must never imply a room played
@@ -237,8 +280,6 @@ export interface PanelMusicStore {
    *  room's own memory rather than the household's, and the login may
    *  write. Absent rather than refused, per §15.1. */
   readonly canForget: boolean;
-
-  // ── What this room keeps coming back to ──────────────────────────────
   /** Ranked by how often this room has started them — and, when it has a
    *  habit at the hour it currently is, ranked by what it plays *then*.
    *  Empty for a room with nothing of its own; the plain history is what
@@ -249,14 +290,24 @@ export interface PanelMusicStore {
   readonly topPlaysByHour: boolean;
   /** The local hour those plays were ranked for. */
   readonly topPlaysHour: number;
+}
 
-  // ── What the household listens to ────────────────────────────────────
+/**
+ * The household's listening picture — the one thing no single room can
+ * report.
+ */
+export interface PanelInsightsView {
   /** Summed over every room: who does the listening, which artists the
    *  house keeps coming back to, and how far back the numbers reach.
    *  Null while the read is out or when it was refused. */
   readonly insights: Listening | null;
+}
 
-  // ── Saving what's playing ──
+/**
+ * The two things you can do to whatever is playing: keep it, or ask for
+ * more like it.
+ */
+export interface PanelNowActions {
   /** The login may write to the library. False hides the heart rather
    *  than offering a tap that will be refused. */
   readonly canSave: boolean;
@@ -264,8 +315,6 @@ export interface PanelMusicStore {
    *  unless the featured source has a trackURI. */
   readonly saved: boolean;
   toggleSaved(): void;
-
-  // ── More like this ──
   /** Something is playing with an artist to seed from. */
   readonly canRadio: boolean;
   /** Queue more of what's on (Sonos), or play the first of it (anywhere
@@ -274,15 +323,23 @@ export interface PanelMusicStore {
   /** What the last run added, for the in-place confirmation — queuing
    *  changes nothing visible on its own. */
   readonly lastRadio: { count: number; artist: string; at: number } | null;
+}
 
-  // ── Announcements ──
+/**
+ * Calling the house.
+ */
+export interface PanelAnnounceView {
   /** Where an announcement would go and whether it would be spoken.
    *  Null while the read is out or when the server has no answer. */
   readonly announce: AnnounceStatus | null;
   sendAnnouncement(text: string, rooms?: string[]): void;
   readonly lastAnnounce: { text: string; rooms: string[]; spoken: boolean; at: number } | null;
+}
 
-  // ── Grouping (Sonos-native only) ──
+/**
+ * Sonos-native grouping: joining, moving and splitting rooms.
+ */
+export interface PanelGrouping {
   /** The Sonos rooms that could join the featured one — every other
    *  reachable Sonos source. Empty unless a Sonos room is featured:
    *  nothing else groups natively, and a control that would be refused
@@ -303,6 +360,27 @@ export interface PanelMusicStore {
   /** One member steps out of the featured group. */
   leaveMember(memberId: string): void;
 
+  refresh(): Promise<void>;
+}
+
+/**
+ * Everything, which is what `createPanelMusic` returns and what the two
+ * views that own an instance hold. Components should name roles instead.
+ */
+export interface PanelMusicStore
+  extends
+    PanelRooms,
+    PanelTransport,
+    PanelPosition,
+    PanelVolume,
+    PanelQueue,
+    PanelTimersView,
+    PanelStarting,
+    PanelMemory,
+    PanelInsightsView,
+    PanelNowActions,
+    PanelAnnounceView,
+    PanelGrouping {
   refresh(): Promise<void>;
 }
 

@@ -66,6 +66,20 @@ export type {
     PanelSource,
     PanelMusicStore,
     PanelMusicOptions,
+    // The roles. A component names the ones it uses rather than taking the
+    // whole store — see the note at the top of panel-music/types.ts.
+    PanelRooms,
+    PanelTransport,
+    PanelPosition,
+    PanelVolume,
+    PanelQueue,
+    PanelTimersView,
+    PanelStarting,
+    PanelMemory,
+    PanelInsightsView,
+    PanelNowActions,
+    PanelAnnounceView,
+    PanelGrouping,
 } from "./panel-music/types";
 export { roomKeyOf } from "./panel-music/sources";
 

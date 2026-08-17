@@ -1,6 +1,6 @@
 <script lang="ts">
     import Icon from "../Icon.svelte";
-    import type { PanelMusicStore } from "../../lib/panel-music.svelte";
+    import type { PanelAnnounceView, PanelRooms } from "../../lib/panel-music.svelte";
 
     /**
      * Calling the house from the wall (DESIGN.md §16).
@@ -27,7 +27,7 @@
      *                  and the strip says exactly that instead of taking a
      *                  sentence nobody will hear.
      */
-    let { music, onClose }: { music: PanelMusicStore; onClose: () => void } = $props();
+    let { music, onClose }: { music: PanelRooms & PanelAnnounceView; onClose: () => void } = $props();
 
     const status = $derived(music.announce);
     const voice = $derived(!!status?.voice);

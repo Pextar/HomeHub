@@ -1,7 +1,7 @@
 <script lang="ts">
     import { onMount } from "svelte";
     import { roomKeyOf } from "../../lib/panel-music.svelte";
-    import type { PanelMusicStore } from "../../lib/panel-music.svelte";
+    import type { PanelInsightsView, PanelRooms } from "../../lib/panel-music.svelte";
 
     /**
      * What this house listens to, at the foot of the depth's Rooms pane
@@ -27,7 +27,7 @@
         music,
         onArtist,
     }: {
-        music: PanelMusicStore;
+        music: PanelRooms & PanelInsightsView;
         /** Open an artist by name — the same door the full player's artist
          *  line uses, since a speaker reports names and not catalog ids. */
         onArtist: (name: string) => void;

@@ -39,9 +39,9 @@
     import Icon from "../Icon.svelte";
     import Slider from "../music/Slider.svelte";
     import Waveform from "../music/Waveform.svelte";
-    import type { PanelMusicStore, PanelSource } from "../../lib/panel-music.svelte";
+    import type { PanelGrouping, PanelRooms, PanelSource, PanelVolume } from "../../lib/panel-music.svelte";
 
-    let { music }: { music: PanelMusicStore } = $props();
+    let { music }: { music: PanelRooms & PanelGrouping & PanelVolume } = $props();
 
     const featured = $derived(music.featured);
     /** Lead first: it is the speaker the group's queue, modes and stream

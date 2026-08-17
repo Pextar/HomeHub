@@ -5,7 +5,7 @@
     import { fmtUntil, fmtDays } from "../../lib/music/format";
     import { clock } from "../../lib/music/clock.svelte";
     import { roomKeyOf } from "../../lib/panel-music.svelte";
-    import type { PanelMusicStore } from "../../lib/panel-music.svelte";
+    import type { PanelMemory, PanelRooms, PanelStarting, PanelTimersView } from "../../lib/panel-music.svelte";
     import type { MusicTimer, MusicTimerView } from "../../lib/types";
 
     /**
@@ -32,7 +32,7 @@
      * this room and a panel that knew and didn't say would be lying by
      * omission — but as its own line, never folded into HomeHub's number.
      */
-    let { music }: { music: PanelMusicStore } = $props();
+    let { music }: { music: PanelRooms & PanelTimersView & PanelMemory & PanelStarting } = $props();
 
     const featured = $derived(music.featured);
 

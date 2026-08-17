@@ -23,7 +23,7 @@
     import { fly } from "svelte/transition";
     import Icon from "../Icon.svelte";
     import { dur } from "../../lib/motion";
-    import type { PanelMusicStore, PanelSource } from "../../lib/panel-music.svelte";
+    import type { PanelRooms, PanelSource, PanelTransport } from "../../lib/panel-music.svelte";
 
     let {
         music,
@@ -32,7 +32,7 @@
         queuedLine = null,
         onBack,
     }: {
-        music: PanelMusicStore;
+        music: PanelRooms & PanelTransport;
         featured: PanelSource | undefined;
         /** The software keyboard is up, so the dock goes to one line. */
         kbOpen?: boolean;
