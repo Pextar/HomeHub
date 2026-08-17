@@ -67,6 +67,10 @@ function sonosSpeaker(id: string, name = id): SonosSpeakerView {
 function kefSpeaker(id: string, name = id): KEFSpeakerView {
   return { id, name, reachable: true } as KEFSpeakerView;
 }
+/** A KEF speaker that has answered, so its capabilities are knowable. */
+function kefState(id: string, state: Record<string, unknown>): KEFSpeakerView {
+  return { id, name: id, reachable: true, state } as unknown as KEFSpeakerView;
+}
 function member(id: string, vendor: "sonos" | "kef"): MediaZoneSpeaker {
   return { id, name: id, vendor, member: `${vendor}:${id}`, capabilities: [] } as MediaZoneSpeaker;
 }
@@ -153,7 +157,22 @@ describe("what each room can actually do", () => {
     expect(kefRoom.canQueue).toBe(false);
     expect(kefRoom.canSeek).toBe(false);
     expect(kefRoom.canPickInput).toBe(true);
-    expect(kefRoom.canSkip).toBe(true);
+    // This speaker has not answered yet, so what it is playing — if
+    // anything — is unknown, and a skip is not offered on a guess. The rule
+    // is `lib/music/capabilities.ts`, shared with the panel; this view used
+    // to claim a KEF could always skip, including on the TV input where the
+    // speaker refuses the call.
+    expect(kefRoom.canSkip).toBe(false);
+  });
+
+  it("offers a KEF's skips on a network input and withholds them on a physical one", async () => {
+    kefFixture = [
+      kefState("study", { powered_on: true, source: "wifi" }),
+      kefState("den", { powered_on: true, source: "tv" }),
+    ];
+    const { rooms } = await build();
+    expect(rooms.byKey("kef:study")!.canSkip).toBe(true);
+    expect(rooms.byKey("kef:den")!.canSkip).toBe(false);
   });
 
   it("takes the skips off a room HomeHub is streaming to", async () => {

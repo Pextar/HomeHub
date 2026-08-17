@@ -16,6 +16,7 @@
  */
 
 import { kefSourceLabel } from "../kef";
+import { kefCapabilities, sonosCapabilities, zoneCapabilities } from "../music/capabilities";
 import { trackLines } from "../music/format";
 import type { PanelSource } from "./types";
 import type {
@@ -34,10 +35,6 @@ export interface SourceInput {
   kef: KEFStatus | null;
   zones: MediaZone[] | null;
 }
-
-/** KEF inputs a skip means anything on. There is nothing to step through
- *  on the TV or the analog input — the speaker would simply refuse. */
-const KEF_SKIPPABLE = new Set(["wifi", "bluetooth"]);
 
 /**
  * The destination key the media layer files a room's plays and timers
@@ -108,11 +105,7 @@ export function zoneSource(z: MediaZone): PanelSource {
     // Audible if any one speaker is: muting all is what the zone
     // mute does, so anything less reads as unmuted.
     muted: withState.length > 0 && withState.every((sp) => sp.state?.muted),
-    // On the stream route HomeHub is the Spotify device and the
-    // speakers pull a live stream: `next` is a call they refuse.
-    // See rooms.svelte.ts: neither route HomeHub decodes for has a
-    // track the speakers can skip.
-    canSkip: z.route !== "stream" && z.route !== "airplay",
+    canSkip: zoneCapabilities(z.route).canSkip,
     trackTitle: zoneLines.title || undefined,
     trackSub: zoneLines.sub,
     trackArtist: lead?.state?.track?.artist,
@@ -191,7 +184,7 @@ export function buildSources({ status, kef, zones }: SourceInput): PanelSource[]
       // coordinator's own flag here made the icon disagree with
       // what the button then did.
       muted: members.length > 0 && members.every((x) => !!x.state?.muted),
-      canSkip: true,
+      canSkip: sonosCapabilities().canSkip,
       // Radio names itself in its own fields, so the two lines
       // are composed once for every make (`trackLines`) rather
       // than assembled from artist and album here.
@@ -230,9 +223,7 @@ export function buildSources({ status, kef, zones }: SourceInput): PanelSource[]
       standby: st ? !st.powered_on : false,
       volume: st?.volume ?? 0,
       muted: !!st?.muted,
-      // A skip reaches something on a network source; on the TV or
-      // the analog input there is nothing to step through.
-      canSkip: !!st && st.powered_on && KEF_SKIPPABLE.has(st.source),
+      canSkip: kefCapabilities(st).canSkip,
       trackTitle:
         kefLines.title ||
         (st?.playing && st.source ? `${kefSourceLabel(st.source)} input` : undefined),

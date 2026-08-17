@@ -8,6 +8,7 @@ import type { ZonesBridge } from "./zones.svelte";
 import { secs } from "./time";
 import { clampVol } from "./volume";
 import { trackLines } from "./format";
+import { kefCapabilities, sonosCapabilities, zoneCapabilities } from "./capabilities";
 import type {
   KEFSpeakerView,
   MediaZone,
@@ -75,6 +76,9 @@ export interface Room {
   grouped: boolean;
   reachable: boolean;
 
+  // The five below are `./capabilities` — the same answers the panel's
+  // room model reads, so a control offered on one surface is offered on
+  // the other and refused on neither (§15).
   canSkip: boolean;
   canSeek: boolean;
   canQueue: boolean;
@@ -205,11 +209,7 @@ export function createRooms(
       // On the two routes HomeHub decodes for, it is the Spotify device and
       // the speakers are being fed a live stream: `next` sent to one is a
       // call it refuses, because the track is the service's to change.
-      canSkip: z.route !== "stream" && z.route !== "airplay",
-      canSeek: false, // there is no zone seek — a fan-out of a stream can't be scrubbed
-      canQueue: false,
-      canPlayMode: false,
-      canPickInput: false,
+      ...zoneCapabilities(z.route),
       zone: z,
     };
   }
@@ -229,11 +229,7 @@ export function createRooms(
       memberIds: g.member_ids.map((id) => qualify("sonos", id)),
       grouped: g.member_ids.length > 1,
       reachable: speakers.some((x) => x.reachable),
-      canSkip: true,
-      canSeek: true, // per track, actually — `durationSec` is the real gate
-      canQueue: true,
-      canPlayMode: true,
-      canPickInput: false,
+      ...sonosCapabilities(),
       group: g,
     };
   }
@@ -250,11 +246,7 @@ export function createRooms(
       memberIds: [qualify("kef", sp.id)],
       grouped: false,
       reachable: sp.reachable,
-      canSkip: true,
-      canSeek: false, // KEF's API has no seek at all
-      canQueue: false,
-      canPlayMode: false,
-      canPickInput: true,
+      ...kefCapabilities(sp.state),
       speaker: sp,
     };
   }
