@@ -21,6 +21,24 @@ cd frontend && npm run dev     # dev server
 The session startup hook builds the frontend automatically; if `dist/`
 is already up-to-date it's skipped.
 
+## Tests
+
+Two layers, both under `npm run test`:
+
+- **`lib/`** — stores and pure functions. A store built from runes needs
+  an effect root, which `src/test-runes.svelte.ts` provides.
+- **components** — mounted into jsdom with `@testing-library/svelte` and
+  queried by role or label, so a test fails for the same reason a person
+  would notice. See `src/test-setup.ts` for the pattern and the two jsdom
+  gaps it patches (`matchMedia`, `Element.animate`).
+
+Runes do not work inside a `.test.ts` file — those aren't run through the
+Svelte compiler. Use a plain object for props a component mutates.
+
+Worth a component test: anything a parent's stylesheet used to reach into
+(a layout mode that became a prop), anything with an armed or optimistic
+state, and any control §15 says must be *absent* rather than disabled.
+
 ## Layout
 
 ```

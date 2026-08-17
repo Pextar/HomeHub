@@ -7,6 +7,11 @@ import { svelte } from "@sveltejs/vite-plugin-svelte";
 // imports transitively — compile their runes.
 export default defineConfig({
   plugins: [svelte()],
+  // Without this, `import { mount } from "svelte"` resolves to Svelte's
+  // server build, whose lifecycle functions throw on sight — components
+  // render to a string there, and a component test needs a real DOM to
+  // query. jsdom is a browser as far as module resolution is concerned.
+  resolve: { conditions: ["browser"] },
   test: {
     environment: "jsdom",
     globals: true,
