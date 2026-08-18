@@ -39,6 +39,7 @@ import { createFader } from "./music/fader.svelte";
 import { buildSources, registeredCount, roomKeyOf } from "./panel-music/sources";
 import { createPanelGrouping } from "./panel-music/grouping.svelte";
 import { createPanelQueue } from "./panel-music/queue.svelte";
+import { createPanelStarting } from "./panel-music/starting.svelte";
 import { createPanelTimers } from "./panel-music/timers.svelte";
 import { createPanelAnnounce } from "./panel-music/announce.svelte";
 import { createPanelSaved } from "./panel-music/saved.svelte";
@@ -50,13 +51,10 @@ import type {
     PanelVendor,
 } from "./panel-music/types";
 import type { PanelNowPlaying } from "./panel";
-import type { PlayItemBody } from "./api";
 import type {
     SonosStatus,
-    SonosFavorite,
     KEFStatus,
     KEFSource,
-    SpotifyItem,
     MediaZone,
 } from "./types";
 
@@ -632,111 +630,19 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
         };
     });
 
-    // ── Sonos favorites ──────────────────────────────────────────────────
-    // The household's own list — radio stations, and whatever was starred
-    // in the Sonos app. Kept on the wall because it is the only thing a
-    // home without a linked Spotify account can start from here at all,
-    // and because a station is a one-tap job that search can't be.
-    let favorites = $state<SonosFavorite[]>([]);
-    let favsFor = "";
-    $effect(() => {
-        // Household-wide, so any Sonos speaker can answer for the list —
-        // read once per household rather than per featured room.
-        const anySonos = speakers.find((sp) => sp.reachable);
-        const id = anySonos?.id ?? "";
-        if (!id || id === favsFor) return;
-        favsFor = id;
-        void api
-            .sonosFavorites(id)
-            .then((f) => {
-                if (favsFor === id) favorites = f;
-            })
-            .catch(() => {
-                if (favsFor === id) favorites = [];
-            });
+    // ── Putting something on ─────────────────────────────────────────────
+    // Search results, the household's favorites and "more like this" all
+    // start audio through one call that knows a play takes a different road
+    // per make — panel-music/starting.svelte.ts.
+    const starting = createPanelStarting({
+        featured: () => featured,
+        speakers: () => speakers,
+        busy,
+        run,
+        refresh,
+        reloadQueue: (id) => queueStore.load(id),
     });
-
-    /** Favorites are a Sonos household list, so only a Sonos room takes one. */
-    function playFavorite(f: SonosFavorite) {
-        const s = featured;
-        if (!s || s.kind !== "sonos") return;
-        void run("fav:" + f.id, () => api.sonosPlayFavorite(s.id, f), "Couldn't play that");
-    }
-
-    // ── Starting something from search ───────────────────────────────────
-    // The featured source is the destination — the chips above the player
-    // are how it is chosen — and the player is the confirmation, since
-    // playback is invisible until the next poll lands.
-    async function playItem(item: SpotifyItem) {
-        const s = featured;
-        if (!s) return;
-        const key = "item:" + item.uri;
-        if (busy[key]) return;
-        busy[key] = true;
-        haptic();
-        try {
-            let body: PlayItemBody = {
-                service: "Spotify",
-                uri: item.uri,
-                title: item.name,
-                kind: item.kind,
-                // Carried for the room's history rather than for the
-                // speaker: a shelf tile needs a picture and a second line,
-                // and asking the catalog for them again later would be a
-                // service round-trip to redraw a row we already have.
-                sub: item.sub,
-                art_uri: item.art_url,
-            };
-            if (item.kind === "artist") {
-                // No speaker takes an artist URI (DESIGN.md §15), so an
-                // artist starts their top track — which the player then names.
-                const d = await api.spotifyArtist(item.uri);
-                const top = d.top_tracks[0];
-                if (!top) throw new Error(`No tracks found for ${item.name}`);
-                body = {
-                    service: "Spotify",
-                    uri: top.uri,
-                    title: top.name,
-                    kind: "track",
-                    sub: top.sub ?? item.name,
-                    art_uri: top.art_url ?? item.art_url,
-                };
-            }
-            await startOn(s, body);
-        } catch (e) {
-            toasts.error("Couldn't play", (e as Error).message);
-        } finally {
-            busy[key] = false;
-        }
-    }
-
-    /** Hand one item to whichever bridge the destination belongs to. The
-     *  three roads differ (queue-based on Sonos, Connect on a KEF, a route
-     *  the media layer picks for a zone) and nothing above this line should
-     *  have to know which. */
-    async function startOn(s: PanelSource, body: PlayItemBody) {
-        if (s.kind === "zone") {
-            // The media layer resolves a route across whatever makes are
-            // in the zone and answers with the one it chose.
-            await api.mediaZonePlay(s.id, {
-                provider: "spotify",
-                uri: body.uri,
-                title: body.title,
-                kind: body.kind,
-                sub: body.sub,
-                art_uri: body.art_uri,
-            });
-        } else if (s.kind === "sonos") {
-            await api.sonosPlayItem(s.id, body);
-        } else {
-            await api.kefPlayItem(s.id, body);
-        }
-        await refresh();
-        // A KEF or streamed play answers as soon as *Spotify* accepted it
-        // — the audio goes out to the cloud and comes back — so the read
-        // above can still say "stopped". Backstops for that gap.
-        if (s.kind !== "sonos") for (const ms of [1200, 4000]) setTimeout(() => void refresh(), ms);
-    }
+    const favorites = $derived(starting.favorites);
 
     // ── What this room played before, and keeps coming back to ──────────
     const historyStore = createPanelHistory({
@@ -745,9 +651,9 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
         run,
         playFavoriteByURI: (uri) => {
             const fav = favorites.find((f) => f.uri === uri);
-            if (fav) playFavorite(fav);
+            if (fav) starting.playFavorite(fav);
         },
-        startOn,
+        startOn: starting.startOn,
     });
 
     // ── Saving what's playing ────────────────────────────────────────────
@@ -755,65 +661,6 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
         trackURI: () => featured?.trackURI,
         run,
     });
-
-    // ── More like this ───────────────────────────────────────────────────
-    // The same engine "play similar" uses when a queue runs dry (§15.5),
-    // asked for on purpose instead of automatically. Seeded by artist name
-    // because that is what a speaker reports — a room on radio has an
-    // artist line and no catalog id at all.
-    //
-    // On Sonos it fills the queue behind what is playing, so the record you
-    // are listening to isn't interrupted by asking for more of it. Anywhere
-    // else there is no queue to fill, so the first result plays.
-    let lastRadio = $state<{ count: number; artist: string; at: number } | null>(null);
-
-    const canRadio = $derived(!!featured?.trackArtist);
-
-    function startRadio() {
-        const s = featured;
-        const artist = s?.trackArtist;
-        if (!s || !artist) return;
-        void run(
-            "radio",
-            async () => {
-                const items = await api.spotifySimilar(artist, 8);
-                if (!items.length) throw new Error(`Nothing else by ${artist} came back`);
-                if (s.kind === "sonos") {
-                    // The whole run in one request. This used to be eight
-                    // sequential calls sent *backwards* — Sonos resolves each
-                    // "play next" against wherever the queue is at that
-                    // moment, so a forwards loop scatters the run and a
-                    // reversed one happens to come out in order. That trick
-                    // worked and was a trick, and it cost eight round trips
-                    // from the slowest client this app has. The hub does the
-                    // dealing now: one request, one position read, and the
-                    // order of the array is the order they land in.
-                    const added = await api.sonosQueueAddMany(
-                        s.id,
-                        items.map((item) => ({
-                            service: "Spotify",
-                            uri: item.uri,
-                            title: item.name,
-                        })),
-                        true,
-                    );
-                    await queueStore.load(s.id);
-                    lastRadio = { count: added.added || items.length, artist, at: Date.now() };
-                } else {
-                    await startOn(s, {
-                        service: "Spotify",
-                        uri: items[0].uri,
-                        title: items[0].name,
-                        kind: "track",
-                        sub: items[0].sub,
-                        art_uri: items[0].art_url,
-                    });
-                    lastRadio = { count: 1, artist, at: Date.now() };
-                }
-            },
-            "Couldn't find more like this",
-        );
-    }
 
     // ── Announcements ────────────────────────────────────────────────────
     const announceStore = createPanelAnnounce({
@@ -941,10 +788,10 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
             return queueStore.lastQueued;
         },
         get favorites() {
-            return favorites;
+            return starting.favorites;
         },
-        playFavorite,
-        playItem,
+        playFavorite: starting.playFavorite,
+        playItem: starting.playItem,
         get history() {
             return historyStore.history;
         },
@@ -976,11 +823,11 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
         },
         toggleSaved: savedStore.toggle,
         get canRadio() {
-            return canRadio;
+            return starting.canRadio;
         },
-        startRadio,
+        startRadio: starting.startRadio,
         get lastRadio() {
-            return lastRadio;
+            return starting.lastRadio;
         },
         get announce() {
             return announceStore.status;
