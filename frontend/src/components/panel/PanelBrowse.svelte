@@ -47,6 +47,7 @@
     import type { SearchHistory } from "../../lib/music/history.svelte";
     import { contextItem } from "../../lib/music/catalog-cache.svelte";
     import { createCatalogStack } from "../../lib/music/catalog-stack.svelte";
+    import { createSoftKeyboard } from "../../lib/music/keyboard.svelte";
     import { fmtHour } from "../../lib/music/format";
     import { searchSections } from "../../lib/music/catalog";
     import { dur } from "../../lib/motion";
@@ -331,21 +332,9 @@
     // visualViewport measures the real thing: docked, floating or split,
     // and it degrades to zero (no type mode) where there is no software
     // keyboard at all.
-    let kb = $state(0);
-    const kbOpen = $derived(kb > 150);
-    onMount(() => {
-        const vv = window.visualViewport;
-        if (!vv) return;
-        const measure = () => {
-            kb = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
-        };
-        vv.addEventListener("resize", measure);
-        vv.addEventListener("scroll", measure);
-        return () => {
-            vv.removeEventListener("resize", measure);
-            vv.removeEventListener("scroll", measure);
-        };
-    });
+    const keyboard = createSoftKeyboard();
+    const kb = $derived(keyboard.height);
+    const kbOpen = $derived(keyboard.open);
 
     // A fresh page of results while typing starts the dense list from the
     // top — the first rows are the ones being aimed at.

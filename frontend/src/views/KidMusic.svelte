@@ -31,6 +31,7 @@
     import { fly } from "svelte/transition";
     import { backOut } from "svelte/easing";
     import { createPanelMusic } from "../lib/panel-music.svelte";
+    import { createSoftKeyboard } from "../lib/music/keyboard.svelte";
     import { haptic } from "../lib/utils";
     import { dur, reducedMotion } from "../lib/motion";
     import KidPlayer from "../components/kid/KidPlayer.svelte";
@@ -111,22 +112,8 @@
     // Measured once, here, because three things answer to it: the results go
     // dense, the sticky chips stand down (they cost 13% of what's left of a
     // phone screen), and the mini bar hides rather than sit behind the keys.
-    let kb = $state(0);
-    const kbOpen = $derived(kb > 150);
-    onMount(() => {
-        const vv = window.visualViewport;
-        if (!vv) return;
-        const measure = () => {
-            kb = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
-        };
-        measure();
-        vv.addEventListener("resize", measure);
-        vv.addEventListener("scroll", measure);
-        return () => {
-            vv.removeEventListener("resize", measure);
-            vv.removeEventListener("scroll", measure);
-        };
-    });
+    const keyboard = createSoftKeyboard();
+    const kbOpen = $derived(keyboard.open);
 
     // ── The mini bar: the phone's dock (§15.5's rule, kid form) ─────────
     // A fallback, never a duplicate — so what it watches is the transport
