@@ -68,14 +68,56 @@ frontend/src/
 ├── app.css        ← global tokens (§3 of DESIGN.md lives here)
 ├── App.svelte     ← router; don't change view-transition wiring
 ├── lib/
-│   ├── types.ts   ← all TypeScript interfaces
-│   ├── api.ts     ← typed fetch wrappers
+│   ├── types/     ← interfaces, one file per domain; index.ts re-exports
+│   ├── api/       ← typed fetch wrappers, one slice per domain
+│   ├── music/     ← the music layer (below) — stores and pure rules
+│   ├── panel-music/        ← the wall's own concerns
+│   ├── panel-music.svelte.ts ← the panel store; its roles are in
+│   │                           panel-music/types.ts
 │   ├── stores.svelte.ts
 │   └── utils.ts
 ├── components/    ← shared primitives (Modal, Icon, Switch, …)
+│   ├── music/     ← the Music view's parts
+│   ├── panel/     ← the wall's parts
+│   └── kid/       ← the kid module's parts (DESIGN.md §17)
 ├── modals/        ← one Svelte file per sheet/dialog flow
 └── views/         ← one Svelte file per top-level screen
 ```
+
+`types.ts`, `api.ts` and the big components were single files once. When one
+grows past what a reader can hold, split it by domain and leave the old name
+re-exporting, rather than letting it keep growing.
+
+## The music layer (`lib/music/`)
+
+Four surfaces play music — the Music view, the wall's depth (`components/
+panel/`), the kid module (`components/kid/`) and the device detail pages —
+and each of them has, at various times, written its own copy of the same
+rule. Every copy so far has drifted before anyone noticed, because a rule
+written twice is a rule nobody owns.
+
+So a rule that more than one surface needs lives here, and the surfaces
+supply what genuinely differs as hooks:
+
+| module | the one rule it owns |
+|---|---|
+| `catalog.ts` | what a row, card or top result says about an item; how a result set is shelved (`searchSections`); the kind vocabulary (`SEARCH_KINDS`) |
+| `catalog-cache.svelte.ts` | reading an artist or record page once per URI |
+| `catalog-stack.svelte.ts` | the ladder over those pages — push, pop, don't re-push the top |
+| `fader.svelte.ts` | who owns a volume slider's value, the finger or the device |
+| `volume.ts` | the clamp, and the mid-drag send throttle behind `fader` |
+| `format.ts` | counts, durations, hours |
+
+Before writing a rule about *what music means* inside a `.svelte` file, look
+here for it. If it isn't here and a second surface will need it, put it here
+with tests — these modules are plain enough to test directly, which is the
+main reason they're worth extracting.
+
+**Not everything shared should be.** The Music view's search screen doesn't
+use `searchSections`, and its screen router doesn't use `catalog-stack`:
+both are genuinely different from the wall's, and forcing them through a
+shared shape would cost more than the copy it saves. Say so in a comment
+when you decide that, so the next reader doesn't "finish the job".
 
 ## Conventions
 
