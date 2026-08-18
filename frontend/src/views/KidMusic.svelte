@@ -377,14 +377,14 @@
                                     </button>
                                     <span class="km-member-name">{m.name}</span>
                                     <KidSlider
-                                        value={Math.min(VOL_MAX, music.memVol[m.id] ?? m.volume)}
+                                        value={Math.min(VOL_MAX, music.memberVol(m))}
                                         max={VOL_MAX}
                                         label="Volume {m.name}"
-                                        valueText="{music.memVol[m.id] ?? m.volume}%"
+                                        valueText="{music.memberVol(m)}%"
                                         onInput={(v) => music.dragMemberVolume(m.id, v)}
                                         onChange={(v) => music.setMemberVolume(m.id, v)}
                                     />
-                                    <span class="km-vol-val mono">{music.memVol[m.id] ?? m.volume}</span>
+                                    <span class="km-vol-val mono">{music.memberVol(m)}</span>
                                 </div>
                             {/each}
                         </div>

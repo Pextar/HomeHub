@@ -170,8 +170,10 @@ export interface PanelVolume {
   setVolume(s: PanelSource, level: number): void;
   /** One step of the ± buttons — a fader is imprecise at arm's length. */
   nudgeVolume(s: PanelSource, delta: number): void;
-  /** Per-member faders, when a group or zone has more than one speaker. */
-  readonly memVol: Record<string, number>;
+  /** Per-member faders, when a group or zone has more than one speaker.
+   *  What one member's slider shows — the finger's value while it holds,
+   *  the speaker's own otherwise. */
+  memberVol(m: { id: string; volume: number }): number;
   dragMemberVolume(id: string, level: number): void;
   setMemberVolume(id: string, level: number): void;
   /** No memberId mutes the whole room; one mutes that speaker. */

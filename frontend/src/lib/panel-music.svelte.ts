@@ -34,7 +34,8 @@ import { haptic } from "./utils";
 import { secs, toClock, sinceRead } from "./music/time";
 import { NEXT_REPEAT } from "./music/sonos.svelte";
 import { clock } from "./music/clock.svelte";
-import { clampVol, createVolumeThrottle } from "./music/volume";
+import { clampVol } from "./music/volume";
+import { createFader } from "./music/fader.svelte";
 import { buildSources, registeredCount, roomKeyOf } from "./panel-music/sources";
 import { createPanelTimers } from "./panel-music/timers.svelte";
 import { createPanelAnnounce } from "./panel-music/announce.svelte";
@@ -374,29 +375,15 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
     }
 
     // ── Volume ───────────────────────────────────────────────────────────
-    // The room answers the finger while it moves, not when it lifts: the
-    // local value shows at once and a throttled send goes out as the drag
-    // runs (`lib/music/volume.ts`, the same helper the Music view's faders
-    // use), with the authoritative value on release. Group volume for Sonos
-    // and zone-wide for a zone, so the whole room answers rather than one
-    // speaker in it.
+    // The room answers the finger while it moves, not when it lifts. Which
+    // value the slider shows — the finger's or the poll's — is the shared
+    // rule in `lib/music/fader.svelte.ts`, the same one the Music view's
+    // three bridges are on. Group volume for Sonos and zone-wide for a zone,
+    // so the whole room answers rather than one speaker in it.
     //
-    // The drag flags are deliberately not reactive — the sync effects must
-    // re-run when the speaker's reported volume moves, never when the finger
-    // lifts. `…At` extends the same claim past release: for a moment after
-    // the send, a poll that hasn't caught up yet must not flinch the slider
-    // back to the value the speaker was last read at.
-    const VOL_HOLD_MS = 2500;
-    let vol = $state(0);
-    let dragging = false;
-    let volAt = 0;
+    // The source behind a drag is remembered because the throttle carries
+    // only an id, and which call to make depends on the kind.
     let dragSource: PanelSource | null = null;
-    $effect(() => {
-        const level = featured?.volume;
-        if (level === undefined) return;
-        if (dragging || Date.now() - volAt < VOL_HOLD_MS) return;
-        vol = level;
-    });
 
     function sendVolume(s: PanelSource, level: number): Promise<void> {
         if (s.kind === "zone") return api.mediaZoneVolume(s.id, level);
@@ -404,47 +391,36 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
         return api.sonosSetVolume(s.id, level, true);
     }
 
-    const volThrottle = createVolumeThrottle((id, level) => {
+    const fader = createFader((id, level) => {
         const s = dragSource;
         if (!s || s.id !== id) return;
         // A dropped mid-drag frame self-heals on release or the next poll.
         void sendVolume(s, level).catch(() => { });
     });
 
+    /** The featured room's fader. Keyed by source, so switching rooms
+     *  mid-hold shows the new room's own level rather than the last one's. */
+    const vol = () => (featured ? fader.shown(featured.id, featured.volume) : 0);
+
     function dragVolume(s: PanelSource, level: number) {
-        const v = clampVol(level);
-        dragging = true;
         dragSource = s;
-        vol = v;
-        volAt = Date.now();
-        volThrottle.schedule(s.id, v);
+        fader.drag(s.id, level);
     }
     function setVolume(s: PanelSource, level: number) {
-        const v = clampVol(level);
-        volThrottle.cancel(s.id);
-        dragging = false;
-        vol = v;
-        volAt = Date.now();
+        const v = fader.commit(s.id, level);
         void run("vol:" + s.id, () => sendVolume(s, v), "Volume failed");
     }
     /** One step of the ± buttons. A 10px rail is a poor aim at arm's length,
      *  so the wall gets a discrete way to move the volume as well. */
     function nudgeVolume(s: PanelSource, delta: number) {
-        setVolume(s, clampVol(vol + delta));
+        setVolume(s, clampVol(fader.shown(s.id, s.volume) + delta));
     }
 
     // Per-member faders, one per speaker in a multi-speaker group or zone.
-    // Same contract, keyed by speaker id — and vendor-aware, because a zone
-    // can hold both makes and each takes its own call.
-    const memVol = $state<Record<string, number>>({});
-    const memDrag: Record<string, boolean> = {};
-    const memAt: Record<string, number> = {};
-    $effect(() => {
-        const now = Date.now();
-        for (const m of featured?.members ?? []) {
-            if (memDrag[m.id] || now - (memAt[m.id] ?? 0) < VOL_HOLD_MS) continue;
-            memVol[m.id] = m.volume;
-        }
+    // Same rule, keyed by speaker id — and vendor-aware, because a zone can
+    // hold both makes and each takes its own call.
+    const memFader = createFader((id, level) => {
+        void sendMemberVolume(id, level).catch(() => { });
     });
     function memberVendor(id: string): PanelVendor {
         return featured?.members?.find((m) => m.id === id)?.vendor ?? "sonos";
@@ -461,23 +437,17 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
                 return api.sonosSetVolume(id, level);
         }
     }
-    const memThrottle = createVolumeThrottle((id, level) => {
-        void sendMemberVolume(id, level).catch(() => { });
-    });
     function dragMemberVolume(id: string, level: number) {
-        const v = clampVol(level);
-        memDrag[id] = true;
-        memVol[id] = v;
-        memAt[id] = Date.now();
-        memThrottle.schedule(id, v);
+        memFader.drag(id, level);
     }
     function setMemberVolume(id: string, level: number) {
-        const v = clampVol(level);
-        memThrottle.cancel(id);
-        memDrag[id] = false;
-        memVol[id] = v;
-        memAt[id] = Date.now();
+        const v = memFader.commit(id, level);
         void run("vol:" + id, () => sendMemberVolume(id, v), "Volume failed");
+    }
+    /** What one member's slider shows. The `?? m.volume` fallback used to be
+     *  written at each of the four places that draw one. */
+    function memberVol(m: { id: string; volume: number }): number {
+        return memFader.shown(m.id, m.volume);
     }
 
     function toggleMute(s: PanelSource, memberId?: string) {
@@ -1110,14 +1080,12 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
         },
         seek,
         get vol() {
-            return vol;
+            return vol();
         },
         dragVolume,
         setVolume,
         nudgeVolume,
-        get memVol() {
-            return memVol;
-        },
+        memberVol,
         dragMemberVolume,
         setMemberVolume,
         toggleMute,

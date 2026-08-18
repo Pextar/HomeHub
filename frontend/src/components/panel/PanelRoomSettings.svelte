@@ -122,13 +122,13 @@
                         </button>
                         <span class="rs-mname">{m.name}</span>
                         <Slider
-                            value={music.memVol[m.id] ?? m.volume}
+                            value={music.memberVol(m)}
                             label="Volume {m.name}"
-                            valueText="{music.memVol[m.id] ?? m.volume}%"
+                            valueText="{music.memberVol(m)}%"
                             onInput={(v) => music.dragMemberVolume(m.id, v)}
                             onChange={(v) => music.setMemberVolume(m.id, v)}
                         />
-                        <span class="rs-val mono">{music.memVol[m.id] ?? m.volume}</span>
+                        <span class="rs-val mono">{music.memberVol(m)}</span>
                     </div>
                 {/each}
             </div>

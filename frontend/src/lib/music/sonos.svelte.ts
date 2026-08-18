@@ -11,7 +11,8 @@ import type {
 import type { Busy } from "./busy.svelte";
 import { clock } from "./clock.svelte";
 import { secs, toClock, sinceRead } from "./time";
-import { clampVol, createVolumeThrottle } from "./volume";
+import { clampVol } from "./volume";
+import { createFader } from "./fader.svelte";
 import { trackLines } from "./format";
 
 /**
@@ -153,19 +154,16 @@ export function createSonosBridge(busy: Busy): SonosBridge {
   let statusSeq = 0;
   let queueSeq = 0;
 
-  // Volume the user just set, keyed by speaker id. The poll must not yank the
-  // slider back to a stale value while the command is still propagating, so
-  // recent local sets win over polled state briefly.
-  const volOverride: Record<string, { v: number; at: number }> = {};
-  const localVol = $state<Record<string, number>>({});
-  const groupVol = $state<Record<string, number>>({});
-
-  const dragThrottle = createVolumeThrottle((id, v) => {
-    api.sonosSetVolume(id, v).catch(() => {}); // a dropped mid-drag frame self-heals on release or the next poll
+  // The two faders — one per speaker, one per group — on the shared rule
+  // (see fader.svelte.ts). A group has no volume of its own to poll, so the
+  // members' mean is computed below and stands in as what it "reports".
+  const fader = createFader((id, v) => {
+    api.sonosSetVolume(id, v).catch(() => {});
   });
-  const dragGroupThrottle = createVolumeThrottle((coordinatorId, v) => {
+  const groupFader = createFader((coordinatorId, v) => {
     api.sonosSetVolume(coordinatorId, v, true).catch(() => {});
   });
+  const groupReported = $state<Record<string, number>>({});
 
   // A play/pause round-trip plus the refresh behind it takes long enough that
   // an un-flipped button reads as a dropped tap. The new state is applied
@@ -256,21 +254,18 @@ export function createSonosBridge(busy: Busy): SonosBridge {
           delete playOverride[id];
         }
       }
-      for (const sp of st.speakers) {
-        const ov = volOverride[sp.id];
-        if (ov && now - ov.at < 3000) continue; // user just moved it
-        if (sp.state) localVol[sp.id] = sp.state.volume;
-      }
       for (const g of st.groups) {
-        // Group volume isn't reported by the status poll; seed the slider with
-        // the members' average unless recently set.
-        const ov = volOverride["g:" + g.coordinator_id];
-        if (ov && now - ov.at < 3000) continue;
+        // Group volume isn't reported by the status poll, so the members'
+        // average stands in for it. Recorded unconditionally: whether the
+        // finger or the poll wins is the fader's call, made where the slider
+        // is drawn rather than by dropping the reading on the way in.
         const vols = g.member_ids
           .map((id) => st.speakers.find((x) => x.id === id)?.state?.volume)
           .filter((v): v is number => v !== undefined);
         if (vols.length) {
-          groupVol[g.coordinator_id] = Math.round(vols.reduce((a, b) => a + b, 0) / vols.length);
+          groupReported[g.coordinator_id] = Math.round(
+            vols.reduce((a, b) => a + b, 0) / vols.length,
+          );
         }
       }
       if (!favsLoaded && st.speakers.some((x) => x.reachable)) {
@@ -297,18 +292,14 @@ export function createSonosBridge(busy: Busy): SonosBridge {
   // the speaker as they go, then always send the authoritative value on
   // release (onchange) — see dragThrottle/dragGroupThrottle above.
   function setVolume(id: string, v: number) {
-    dragThrottle.cancel(id);
-    localVol[id] = v;
-    volOverride[id] = { v, at: Date.now() };
-    api.sonosSetVolume(id, v).catch((e) => toasts.error("Volume failed", (e as Error).message));
+    const level = fader.commit(id, v);
+    api.sonosSetVolume(id, level).catch((e) => toasts.error("Volume failed", (e as Error).message));
   }
 
   function setGroupVolume(coordinatorId: string, v: number) {
-    dragGroupThrottle.cancel(coordinatorId);
-    groupVol[coordinatorId] = v;
-    volOverride["g:" + coordinatorId] = { v, at: Date.now() };
+    const level = groupFader.commit(coordinatorId, v);
     api
-      .sonosSetVolume(coordinatorId, v, true)
+      .sonosSetVolume(coordinatorId, level, true)
       .catch((e) => toasts.error("Volume failed", (e as Error).message));
   }
 
@@ -423,23 +414,15 @@ export function createSonosBridge(busy: Busy): SonosBridge {
       return total ? Math.min(total, advanced) : advanced;
     },
 
-    shownVolume: (sp) => localVol[sp.id] ?? sp.state?.volume ?? 0,
-    shownGroupVolume: (coordinatorId) => groupVol[coordinatorId] ?? 0,
-    // Both stamp `volOverride` as well as writing the local value. Without
-    // that stamp the very next status poll wrote `sp.state.volume` straight
-    // back over the finger's position — the slider sprang back to where the
-    // speaker had last been read, mid-drag, once a second. The override
-    // window is "this value is the user's, not the poll's", and a finger on
-    // the slider is the clearest case of that there is.
+    shownVolume: (sp) => fader.shown(sp.id, sp.state?.volume),
+    shownGroupVolume: (coordinatorId) =>
+      groupFader.shown(coordinatorId, groupReported[coordinatorId]),
+
     dragVolume(id, v) {
-      localVol[id] = v;
-      volOverride[id] = { v, at: Date.now() };
-      dragThrottle.schedule(id, v);
+      fader.drag(id, v);
     },
     dragGroupVolume(coordinatorId, v) {
-      groupVol[coordinatorId] = v;
-      volOverride["g:" + coordinatorId] = { v, at: Date.now() };
-      dragGroupThrottle.schedule(coordinatorId, v);
+      groupFader.drag(coordinatorId, v);
     },
 
     setVolume,
@@ -450,14 +433,16 @@ export function createSonosBridge(busy: Busy): SonosBridge {
     // speaker moves on its own.
     nudgeVolume(g, delta) {
       if (g.member_ids.length > 1) {
-        const cur = groupVol[g.coordinator_id] ?? coordinatorOf(g)?.state?.volume ?? 0;
+        const cur = groupFader.shown(
+          g.coordinator_id,
+          groupReported[g.coordinator_id] ?? coordinatorOf(g)?.state?.volume,
+        );
         setGroupVolume(g.coordinator_id, clampVol(cur + delta));
         return;
       }
       const sp = coordinatorOf(g);
       if (!sp) return;
-      const cur = localVol[sp.id] ?? sp.state?.volume ?? 0;
-      setVolume(sp.id, clampVol(cur + delta));
+      setVolume(sp.id, clampVol(fader.shown(sp.id, sp.state?.volume) + delta));
     },
 
     toggleMute(sp) {

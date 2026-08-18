@@ -90,11 +90,25 @@ describe("Sonos volume", () => {
     expect(api.sonosSetVolume).toHaveBeenCalled();
   });
 
+  it("holds it under a finger that has stopped moving", async () => {
+    const sonos = make();
+    await sonos.refresh();
+
+    sonos.dragVolume("sp0", 55);
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    statusFixture = status(70, 70);
+    await sonos.refresh();
+    // The finger is still down, so the slider is still its own.
+    expect(sonos.shownVolume(statusFixture.speakers[0])).toBe(55);
+  });
+
   it("lets the poll take over once the drag is over", async () => {
     const sonos = make();
     await sonos.refresh();
 
     sonos.dragVolume("sp0", 55);
+    sonos.setVolume("sp0", 55); // released
     await vi.advanceTimersByTimeAsync(3001);
 
     // Someone turned it up on the speaker itself. It is the authority on its
