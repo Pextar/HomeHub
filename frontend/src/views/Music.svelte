@@ -40,11 +40,6 @@
     import MiniPlayer from "../components/music/MiniPlayer.svelte";
     import MusicHome from "../components/music/MusicHome.svelte";
     import ConfirmModal from "../components/ConfirmModal.svelte";
-    import SpeakerModal from "../modals/SpeakerModal.svelte";
-    import SonosEventsModal from "../modals/SonosEventsModal.svelte";
-    import MusicQualityModal from "../modals/MusicQualityModal.svelte";
-    import SpotifyConnectModal from "../modals/SpotifyConnectModal.svelte";
-    import QobuzConnectModal from "../modals/QobuzConnectModal.svelte";
     import LiveStatusChip from "../components/LiveStatusChip.svelte";
     import { api } from "../lib/api";
     import { toasts, route, bottomBar } from "../lib/stores.svelte";
@@ -67,16 +62,14 @@
     import { createSpotify } from "../lib/music/spotify.svelte";
     import { createPlayback } from "../lib/music/playback.svelte";
     import { createCatalogCache, contextItem } from "../lib/music/catalog-cache.svelte";
+    import { createDeviceSheets } from "../lib/music/device-sheets";
     import { createMusicNav } from "../lib/music/navigation.svelte";
     import type { ScreenEntry } from "../lib/music/navigation.svelte";
     import type {
-        SonosSpeakerView,
         SonosFavorite,
         KEFSpeakerView,
-        AirPlaySpeakerView,
         SpotifyContextDetail,
         MediaZone,
-        UPnPRenderer,
     } from "../lib/types";
 
     // The three bridges, and the model that turns them into rooms. The busy
@@ -273,7 +266,7 @@
         if (r.zone && r.members.length === 0) return openRoomEditor(r.zone);
         // An unreachable KEF speaker can't answer anything; fixing its address
         // is what the tap actually wants.
-        if (r.speaker && !r.reachable) return void openKEFModal(r.speaker);
+        if (r.speaker && !r.reachable) return void sheetsFor.openKEF(r.speaker);
         playerOrigin = originOf(from);
         playerKey = r.key;
         destination.focus(r);
@@ -630,100 +623,19 @@
     });
 
     // ── Devices ──────────────────────────────────────────────────────────
-    // One sheet for every bridge — it carries the brand picker when adding and
-    // is locked to the owning bridge when editing.
-    async function openSpeakerModal(sp?: SonosSpeakerView) {
-        const changed = await openModal<boolean>(
-            SpeakerModal,
-            sp ? { existing: sp, brand: "sonos" as const } : {},
-        );
-        if (changed) {
-            void sonos.refresh();
-            void kef.refresh();
-            // The add sheet carries a brand picker, so a registration made
-            // from it could have been any of the four.
-            void airplay.refresh();
-            void upnp.refresh();
-            // A new or removed speaker changes both what rooms hold (the
-            // backend cascades a delete out of them) and what the picker can
-            // offer, so both reads are due.
-            void zones.refresh();
-            void zones.loadEndpoints();
-        }
-    }
-
-    /** A renderer's sheet. Same shape as the AirPlay one and for the same
-     *  reason: adding or removing one changes which routes every zone can
-     *  take, so the zone reads and the endpoint list both have to follow. */
-    async function openUPnPModal(rn: UPnPRenderer) {
-        const changed = await openModal<boolean>(SpeakerModal, {
-            existing: rn,
-            brand: "upnp" as const,
-        });
-        if (changed) {
-            void upnp.refresh();
-            void zones.refresh();
-            void zones.loadEndpoints();
-        }
-    }
-
-    async function openAirPlayModal(sp: AirPlaySpeakerView) {
-        const changed = await openModal<boolean>(SpeakerModal, {
-            existing: sp,
-            brand: "airplay" as const,
-        });
-        if (changed) {
-            void airplay.refresh();
-            void upnp.refresh();
-            void zones.refresh();
-            void zones.loadEndpoints();
-        }
-    }
-
-    async function openKEFModal(sp: KEFSpeakerView) {
-        const changed = await openModal<boolean>(SpeakerModal, {
-            existing: sp,
-            brand: "kef" as const,
-        });
-        if (changed) {
-            if (kefDetailId === sp.id) kefDetailId = null;
-            void kef.refresh();
-            void zones.refresh();
-            void zones.loadEndpoints();
-        }
-    }
-
-    /** What the audio actually is on each path, and the decode setting. Read
-     *  fresh by the sheet itself: the answer depends on the route a zone would
-     *  take, which changes with what is registered. */
-    async function openQualityModal() {
-        await openModal(MusicQualityModal, {});
-        // A changed decode quality changes what every zone read reports.
-        void zones.refresh();
-    }
-
-    /** The Connect picker. Reading the zones after it closes: a transfer made
-     *  in there can take the account's session away from a room HomeHub was
-     *  feeding, and the backend will have released that zone. */
-    async function openConnectModal() {
-        await openModal(SpotifyConnectModal, {});
-        void zones.refresh();
-    }
-
-    /** Qobuz setup. Signing in changes what every zone read reports about
-     *  quality — it is the one provider that can answer "lossless" — so the
-     *  zones are re-read the same way the quality sheet re-reads them. */
-    async function openQobuzModal() {
-        await openModal(QobuzConnectModal, {});
-        void zones.refresh();
-    }
-
-    /** The push-status sheet. Retrying inside it can turn subscriptions on, and
-     *  that changes which poll interval this view should be using. */
-    async function openEventsModal() {
-        await openModal(SonosEventsModal, {});
-        void sonos.refresh();
-    }
+    // The equipment sheets, and the reads each one is owed when it closes —
+    // lib/music/device-sheets.ts, because "what changed when a speaker did"
+    // is a rule about the house rather than about this screen.
+    const sheetsFor = createDeviceSheets({
+        sonos,
+        kef,
+        airplay,
+        upnp,
+        zones,
+        onKefEdited: (id) => {
+            if (kefDetailId === id) kefDetailId = null;
+        },
+    });
 
     // Which speaker's settings the Speakers screen has open. Held here because
     // the player's configure action pushes the screen *and* opens a pane in one
@@ -766,7 +678,7 @@
                     <span class="act-label">Browse</span>
                 </button>
             {:else}
-                <button class="chip" onclick={() => openSpeakerModal()}>
+                <button class="chip" onclick={() => sheetsFor.openSpeaker()}>
                     <Icon name="plus" size={14} /> Add speaker
                 </button>
             {/if}
@@ -783,7 +695,7 @@
         title="No speakers yet"
         message="Add your Sonos or KEF speakers to control playback, volume and grouping right here, with neither app needed."
     >
-        <button class="btn btn-primary" onclick={() => openSpeakerModal()}>Add speaker</button>
+        <button class="btn btn-primary" onclick={() => sheetsFor.openSpeaker()}>Add speaker</button>
     </EmptyState>
 {/if}
 
@@ -811,16 +723,16 @@
             {totalSpeakers}
             {readyCount}
             onBack={nav.leaveScreen}
-            onAdd={() => openSpeakerModal()}
-            onEditSonos={(sp) => void openSpeakerModal(sp)}
-            onEditKEF={(sp) => void openKEFModal(sp)}
-            onEditAirPlay={(sp) => void openAirPlayModal(sp)}
-            onEditUPnP={(rn) => void openUPnPModal(rn)}
+            onAdd={() => sheetsFor.openSpeaker()}
+            onEditSonos={(sp) => void sheetsFor.openSpeaker(sp)}
+            onEditKEF={(sp) => void sheetsFor.openKEF(sp)}
+            onEditAirPlay={(sp) => void sheetsFor.openAirPlay(sp)}
+            onEditUPnP={(rn) => void sheetsFor.openUPnP(rn)}
             {upnp}
-            onOpenEvents={openEventsModal}
-            onOpenQuality={openQualityModal}
-            onOpenConnect={openConnectModal}
-            onOpenQobuz={openQobuzModal}
+            onOpenEvents={sheetsFor.openEvents}
+            onOpenQuality={sheetsFor.openQuality}
+            onOpenConnect={sheetsFor.openConnect}
+            onOpenQobuz={sheetsFor.openQobuz}
             spotifyPlayback={spotify.status?.playback ?? false}
             onKEFOpened={(sp) => {
                 const r = rooms.byKey("kef:" + sp.id);
