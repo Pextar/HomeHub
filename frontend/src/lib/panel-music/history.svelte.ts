@@ -20,7 +20,7 @@ import { api } from "../api";
 import { session } from "../stores.svelte";
 import { clock } from "../music/clock.svelte";
 import type { PanelSource } from "./types";
-import type { PanelRunner } from "./timers.svelte";
+import type { PanelRunner } from "./types";
 import type { PlayItemBody } from "../api";
 import type { MediaPlay } from "../types";
 

@@ -22,16 +22,7 @@ import { api } from "../api";
 import { session } from "../stores.svelte";
 import { clock } from "../music/clock.svelte";
 import type { Listening, MusicTimer, MusicTimerView } from "../types";
-
-/** The store's own guarded runner: claims the key, re-reads on success,
- *  toasts on failure. Passed in rather than rebuilt so a timer action
- *  disables the same control every other panel action does. */
-export type PanelRunner = (
-  key: string,
-  fn: () => Promise<unknown>,
-  errTitle: string,
-  ok?: () => void,
-) => Promise<void>;
+import type { PanelRunner } from "./types";
 
 export interface PanelTimersDeps {
   /** The kid surface: the endpoints are admin-only, and asking would be a

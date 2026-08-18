@@ -33,6 +33,16 @@ import type {
 export type PanelVendor = MediaVendor;
 
 /** One speaker inside a featured group or zone, coordinator/lead first. */
+/** The panel store's guarded runner: claims a busy key, re-reads on success,
+ *  toasts on failure. Every module under here takes one rather than building
+ *  its own, so one action disables the same control as any other. */
+export type PanelRunner = (
+  key: string,
+  fn: () => Promise<unknown>,
+  errTitle: string,
+  ok?: () => void,
+) => Promise<void>;
+
 export interface PanelMember {
   id: string;
   name: string;

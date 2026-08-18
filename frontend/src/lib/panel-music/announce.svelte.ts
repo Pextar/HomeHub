@@ -12,7 +12,7 @@
 
 import { api } from "../api";
 import type { AnnounceStatus } from "../types";
-import type { PanelRunner } from "./timers.svelte";
+import type { PanelRunner } from "./types";
 
 export interface PanelAnnounceStore {
   /** Where an announcement would go and whether it would be spoken.

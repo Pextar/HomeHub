@@ -12,7 +12,7 @@
  */
 
 import { api } from "../api";
-import type { PanelRunner } from "./timers.svelte";
+import type { PanelRunner } from "./types";
 
 export interface PanelSavedStore {
   /** The login may write to the library. False hides the heart rather
