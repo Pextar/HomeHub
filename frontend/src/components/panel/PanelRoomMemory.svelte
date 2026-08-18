@@ -1,7 +1,7 @@
 <script lang="ts">
     import Icon from "../Icon.svelte";
     import { fmtHour, playCount } from "../../lib/music/format";
-    import type { PanelMusicStore } from "../../lib/panel-music.svelte";
+    import type { PanelMemory, PanelRooms } from "../../lib/panel-music.svelte";
     import type { MediaPlay } from "../../lib/types";
 
     /**
@@ -33,7 +33,7 @@
      * not shown. The household fallback the shelves lean on is other rooms'
      * memory, and one room is not the place to edit it.
      */
-    let { music }: { music: PanelMusicStore } = $props();
+    let { music }: { music: PanelRooms & PanelMemory } = $props();
 
     const featured = $derived(music.featured);
     /** This room's own plays, ranked where there is a ranking. The same two

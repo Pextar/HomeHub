@@ -1,13 +1,13 @@
 <script lang="ts">
     import Waveform from "../music/Waveform.svelte";
-    import type { PanelMusicStore } from "../../lib/panel-music.svelte";
+    import type { PanelRooms } from "../../lib/panel-music.svelte";
 
     // Where the sound goes. This used to sit inside the player card, in a
     // column narrow enough that three rooms wrapped to two rows and six to
     // three — 150px of a 720px panel spent on the control you touch least,
     // taken from the cover you look at most. On the surface's own header it
     // is one line, and the card's height goes to the cover instead (§16).
-    let { music }: { music: PanelMusicStore } = $props();
+    let { music }: { music: PanelRooms } = $props();
 
     const featured = $derived(music.featured);
 

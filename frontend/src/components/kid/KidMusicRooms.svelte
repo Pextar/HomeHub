@@ -17,9 +17,9 @@
      */
     import { onDestroy } from "svelte";
     import { haptic } from "../../lib/utils";
-    import type { PanelMusicStore, PanelSource } from "../../lib/panel-music.svelte";
+    import type { PanelGrouping, PanelRooms, PanelSource } from "../../lib/panel-music.svelte";
 
-    let { music }: { music: PanelMusicStore } = $props();
+    let { music }: { music: PanelRooms & PanelGrouping } = $props();
 
     const featured = $derived(music.featured);
 

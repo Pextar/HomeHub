@@ -69,14 +69,13 @@
     import { createSearchHistory } from "../lib/music/history.svelte";
     import { createHeardLog } from "../lib/music/heard.svelte";
     import { createSpotify } from "../lib/music/spotify.svelte";
+    import { createPlayback } from "../lib/music/playback.svelte";
+    import { createCatalogCache, contextItem } from "../lib/music/catalog-cache.svelte";
     import type {
         SonosSpeakerView,
-        HeardTrack,
         SonosFavorite,
         KEFSpeakerView,
         AirPlaySpeakerView,
-        SpotifyItem,
-        SpotifyArtistDetail,
         SpotifyContextDetail,
         MediaZone,
         UPnPRenderer,
@@ -141,8 +140,7 @@
         clearInterval(pollTimer);
         stopLive?.();
         clearTimeout(announceTimer);
-        for (const t of followUps) clearTimeout(t);
-        followUps.clear();
+        playback.dispose(); // the delayed re-reads still pending
         drag.end(); // takes the document-level touchmove block with it
         // The body-scroll lock is the sheet effect's, and its teardown runs on
         // unmount — releasing it here as well would decrement it twice.
@@ -168,109 +166,17 @@
     });
 
     // ── Starting something ───────────────────────────────────────────────
-    // The player is the confirmation: the track, the room and the route all
-    // land on it as soon as the re-read below returns. It used to also say so
-    // in a toast, which meant every tap on a search result was followed by a
-    // card repeating what the screen already showed.
-    async function startPlayback(
-        key: string,
-        fn: () => Promise<unknown>,
-        kind: "sonos" | "kef" | "zone" = "sonos",
-    ) {
-        await busy.claim(key, async () => {
-            try {
-                await fn();
-                await (kind === "kef"
-                    ? kef.refresh()
-                    : kind === "zone"
-                      ? zones.refresh()
-                      : sonos.refresh());
-                // A KEF play answers as soon as *Spotify* accepted it — the
-                // audio then goes out to the cloud and comes back — so the read
-                // above still says "stopped". A streamed room has the same gap:
-                // the decoder has to start and every speaker has to fill its
-                // buffer. These are the backstop for an install where the
-                // backend's own push isn't getting through.
-                if (kind !== "sonos") {
-                    const again = kind === "kef" ? kef.refresh : zones.refresh;
-                    for (const ms of [1200, 4000]) followUp(ms, again);
-                }
-            } catch (e) {
-                toasts.error("Couldn't play", (e as Error).message);
-            }
-        });
-    }
-
-    /** A delayed re-read that doesn't outlive the view. Nothing renders this
-     *  set — it exists only so `onDestroy` can cancel what's still pending —
-     *  so a reactive one would be bookkeeping for no reader. */
-    // eslint-disable-next-line svelte/prefer-svelte-reactivity
-    const followUps = new Set<ReturnType<typeof setTimeout>>();
-    function followUp(ms: number, fn: () => void) {
-        const t = setTimeout(() => {
-            followUps.delete(t);
-            fn();
-        }, ms);
-        followUps.add(t);
-    }
-
-    /**
-     * A search result plays on the focused room. Same tap, three roads: a
-     * Sonos room loads it into its queue and streams it with the household's
-     * linked account; a KEF speaker is started through Spotify Connect,
-     * because its own API has no way to be handed content; a HomeHub room
-     * hands it to the media layer, which resolves a route across whatever
-     * makes are in it and answers with the one it chose.
-     */
-    function playItem(item: SpotifyItem) {
-        const r = destination.room;
-        if (!r) return;
-        const provider = item.provider ?? "spotify";
-        if (r.zone) {
-            const z = r.zone;
-            void startPlayback(
-                "item:" + item.uri,
-                () => zones.play(z, { uri: item.uri, title: item.name, kind: item.kind, provider }),
-                "zone",
-            );
-            return;
-        }
-        // A bare speaker is played through its own bridge, and those two doors
-        // take a *native service* the speaker streams from its own account
-        // link. Only Spotify has one here. Anything else has to go through the
-        // media layer, which addresses zones — so the honest answer is to say
-        // that rather than send a URI the speaker will ignore.
-        if (provider !== "spotify") {
-            toasts.error(
-                `${item.name} can't play here`,
-                "This service is decoded by HomeHub rather than by the speaker, so it plays to a zone. Put this speaker in a zone and pick that instead.",
-            );
-            return;
-        }
-        const body = { service: "Spotify", uri: item.uri, title: item.name };
-        void startPlayback(
-            "item:" + item.uri,
-            () => (r.kind === "kef" ? api.kefPlayItem(r.id, body) : api.sonosPlayItem(r.id, body)),
-            r.kind,
-        );
-    }
-
-    /**
-     * Something out of the listening log, played again in the room it was
-     * heard in. It is a track and it carries the service URI the speaker was
-     * given, so this is the same road a search result takes — the row was
-     * only ever a remembered version of one.
-     */
-    function playHeard(t: HeardTrack) {
-        if (!t.uri) return; // radio and line-in leave nothing to hand back
-        playItem({
-            kind: "track",
-            uri: t.uri,
-            name: t.title,
-            sub: t.artist,
-            art_url: t.art_uri,
-        });
-    }
+    // Which road a tap takes is the room's property, not this screen's, so
+    // the three of them live in lib/music/playback.svelte.ts.
+    const playback = createPlayback({
+        busy,
+        sonos,
+        kef,
+        zones,
+        destination,
+        playerRoom: () => playerRoom,
+    });
+    const { playItem, playHeard, playFavorite, enqueue } = playback;
 
     /** A room stops keeping a log. Destructive and unrecoverable, so it asks. */
     async function clearHeard(r: Room) {
@@ -282,28 +188,6 @@
         });
         if (!ok) return;
         await busy.run("heardclear:" + r.id, () => heard.clear(r.key), "Couldn't clear it");
-    }
-
-    /** Favorites are a Sonos household list, so only a Sonos room can take one. */
-    function playFavorite(f: SonosFavorite, target: string | null = destination.sonosTarget) {
-        if (!target) return;
-        void startPlayback("fav:" + f.id, () => api.sonosPlayFavorite(target, f));
-    }
-
-    /**
-     * Queue a search result or favorite without disturbing what's playing. The
-     * toast is the point: queueing onto a room playing radio is legal but
-     * silent, so the feedback has to name where it landed.
-     */
-    async function enqueue(
-        item: { uri: string; title?: string; service?: string; metadata?: string },
-        next: boolean,
-        target: string | null = destination.sonosTarget,
-    ) {
-        if (!target) return;
-        const added = await sonos.enqueue(target, item, next);
-        if (!added) return;
-        if (playerRoom?.id === target) void sonos.loadQueue(target);
     }
 
     // ── Screens ──────────────────────────────────────────────────────────
@@ -682,32 +566,20 @@
     // forth (artist → album → back), so each detail is fetched once per URI
     // and kept for the session — coming back is instant rather than a
     // skeleton replaying itself.
-    let artistCache = $state<Record<string, SpotifyArtistDetail>>({});
-    let artistLoadingUri = $state<string | null>(null);
-    const artistUri = $derived(topEntry?.id === "artist" ? topEntry.uri! : null);
-    const artistDetail = $derived(artistUri ? (artistCache[artistUri] ?? null) : null);
-    const artistLoading = $derived(!!artistUri && artistLoadingUri === artistUri);
+    // The pages themselves are read and kept by the shared cache; the screen
+    // stack above stays this view's, since only it knows what a level looks
+    // like and where it was scrolled.
+    const catalog = createCatalogCache({
+        artistUri: () => (topEntry?.id === "artist" ? (topEntry.uri ?? null) : null),
+        contextUri: () => (topEntry?.id === "context" ? (topEntry.uri ?? null) : null),
+        onFail: leaveScreen,
+    });
 
     async function openArtist(uri: string) {
         if (topEntry?.id === "artist" && topEntry.uri === uri) return;
         pushScreen({ id: "artist", uri, scroll: 0 });
-        if (artistCache[uri]) return; // been here — renders instantly
-        artistLoadingUri = uri;
-        try {
-            artistCache[uri] = await api.spotifyArtist(uri);
-        } catch (e) {
-            toasts.error("Couldn't load artist", (e as Error).message);
-            if (artistUri === uri) leaveScreen();
-        } finally {
-            if (artistLoadingUri === uri) artistLoadingUri = null;
-        }
+        await catalog.loadArtist(uri);
     }
-
-    let contextCache = $state<Record<string, SpotifyContextDetail>>({});
-    let contextLoadingUri = $state<string | null>(null);
-    const contextUri = $derived(topEntry?.id === "context" ? topEntry.uri! : null);
-    const contextDetail = $derived(contextUri ? (contextCache[contextUri] ?? null) : null);
-    const contextLoading = $derived(!!contextUri && contextLoadingUri === contextUri);
 
     /** An album or a playlist tapped anywhere — search, an artist's
      *  discography — opens its own page rather than playing blind: the track
@@ -715,16 +587,7 @@
     async function openContext(uri: string) {
         if (topEntry?.id === "context" && topEntry.uri === uri) return;
         pushScreen({ id: "context", uri, scroll: 0 });
-        if (contextCache[uri]) return;
-        contextLoadingUri = uri;
-        try {
-            contextCache[uri] = await api.spotifyContext(uri);
-        } catch (e) {
-            toasts.error("Couldn't open it", (e as Error).message);
-            if (contextUri === uri) leaveScreen();
-        } finally {
-            if (contextLoadingUri === uri) contextLoadingUri = null;
-        }
+        await catalog.loadContext(uri);
     }
 
     let browseFavorite = $state<SonosFavorite | null>(null);
@@ -1075,8 +938,8 @@
         />
     {:else if screen === "artist"}
         <ArtistScreen
-            artist={artistDetail}
-            loading={artistLoading}
+            artist={catalog.artistDetail}
+            loading={catalog.artistLoading}
             {destination}
             {busy}
             {targetRow}
@@ -1090,19 +953,13 @@
         />
     {:else if screen === "context"}
         <ContextScreen
-            context={contextDetail}
-            loading={contextLoading}
+            context={catalog.contextDetail}
+            loading={catalog.contextLoading}
             {destination}
             {busy}
             {targetRow}
             onBack={leaveScreen}
-            onPlayAll={() =>
-                contextDetail &&
-                playItem({
-                    kind: contextDetail.kind,
-                    uri: contextDetail.uri,
-                    name: contextDetail.name,
-                })}
+            onPlayAll={() => catalog.contextDetail && playItem(contextItem(catalog.contextDetail))}
             onPick={playItem}
             onEnqueue={(item, next) =>
                 enqueue({ service: "Spotify", uri: item.uri, title: item.name }, next)}
