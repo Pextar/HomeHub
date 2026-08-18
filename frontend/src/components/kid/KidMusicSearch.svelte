@@ -27,11 +27,11 @@
     import { createSearchHistory } from "../../lib/music/history.svelte";
     import KidTrackRow from "./KidTrackRow.svelte";
     import KidMediaCard from "./KidMediaCard.svelte";
-    import { contextItem } from "../../lib/music/catalog-cache.svelte";
+    import KidCatalogPage from "./KidCatalogPage.svelte";
+    import { KIND_EMOJI } from "./kind-emoji";
     import { createCatalogStack } from "../../lib/music/catalog-stack.svelte";
     import { SEARCH_KINDS, searchSections, topLine } from "../../lib/music/catalog";
-    import type { ItemKind, SearchKind } from "../../lib/music/catalog";
-    import { fmtCount, capFirst } from "../../lib/music/format";
+    import type { SearchKind } from "../../lib/music/catalog";
     import { haptic } from "../../lib/utils";
     import type { PanelMusicStore } from "../../lib/panel-music.svelte";
     import type { SpotifyItem } from "../../lib/types";
@@ -52,18 +52,6 @@
             booted = true;
         });
     });
-
-    // The one emoji vocabulary of this module, keyed the way an item names
-    // its own kind. A shelf reaches it through `SEARCH_KINDS`, which carries
-    // the pairing, rather than keeping a second map keyed by shelf.
-    // (DESIGN.md §2 keeps emoji inside the kid module; the catalog's shared
-    // rules stay plain and pick one up on the way past.)
-    const KIND_EMOJI: Record<ItemKind, string> = {
-        track: "🎵",
-        album: "💿",
-        playlist: "📃",
-        artist: "🎤",
-    };
 
     // ── The box behaves like a search box ────────────────────────────────
     let searchEl = $state<HTMLInputElement | null>(null);
@@ -192,124 +180,17 @@
 
 <div class="kms" class:kb-open={kbOpen}>
     {#if topLevel}
-        <!-- One level deeper: an artist's page or a record's listing. The
-             back button climbs exactly one level. -->
-        <button class="kms-back" onclick={() => void catalog.pop()} aria-label="Back one level">‹ Back</button>
-
-        {#if topLevel.kind === "artist"}
-            {#if catalog.artistLoading && !catalog.artistDetail}
-                <div class="kms-skel-hero" aria-hidden="true"></div>
-            {:else if catalog.artistDetail}
-                {@const d = catalog.artistDetail}
-                <header class="kms-hero">
-                    {#if d.art_url}
-                        <img class="kms-hero-art round" src={d.art_url} alt="" />
-                    {:else}
-                        <span class="kms-hero-art kms-card-none round" aria-hidden="true">🎤</span>
-                    {/if}
-                    <span class="kms-hero-name">{d.name}</span>
-                    {#if d.followers || d.genres?.length}
-                        <span class="kms-hero-sub">
-                            {[d.followers ? `${fmtCount(d.followers)} followers` : "", d.genres?.[0] ? capFirst(d.genres[0]) : ""]
-                                .filter(Boolean)
-                                .join(" · ")}
-                        </span>
-                    {/if}
-                    {#if d.top_tracks[0]}
-                        <!-- No speaker takes an artist URI, so the button
-                             starts their top song — and names it. -->
-                        <button
-                            class="kms-bigplay"
-                            disabled={!!music.busy["item:" + d.uri]}
-                            onclick={() => pick({ kind: "artist", uri: d.uri, name: d.name, art_url: d.art_url })}
-                        >
-                            ▶️ Play
-                        </button>
-                        <span class="kms-playnote">Plays “{d.top_tracks[0].name}”</span>
-                    {/if}
-                </header>
-
-                {#if d.top_tracks.length > 0}
-                    {@render shelfLabel("🎵 Popular songs")}
-                    {#each d.top_tracks as t, i (t.uri)}
-                        <KidTrackRow
-    item={t}
-    num={i + 1}
-    {music}
-    {kbOpen}
-    queueOpen={queueFor === (t).uri}
-    flashed={queuedFlash === (t).uri}
-    onPick={pick}
-    onToggleQueue={toggleQueueFor}
-    onQueue={queueIt}
-/>
-                    {/each}
-                {/if}
-                {#if d.albums.length > 0}
-                    {@render shelfLabel("💿 Albums")}
-                    <div class="kms-grid">
-                        {#each d.albums as a (a.uri)}
-                            <KidMediaCard item={a} onPick={(x) => void catalog.openContext(x.uri)} />
-                        {/each}
-                    </div>
-                {/if}
-                {#if d.singles.length > 0}
-                    {@render shelfLabel("💿 Singles")}
-                    <div class="kms-grid">
-                        {#each d.singles as sg (sg.uri)}
-                            <KidMediaCard item={sg} onPick={(x) => void catalog.openContext(x.uri)} />
-                        {/each}
-                    </div>
-                {/if}
-                {#if d.related.length > 0}
-                    {@render shelfLabel("🎤 More like them")}
-                    <div class="kms-grid">
-                        {#each d.related as ra (ra.uri)}
-                            <KidMediaCard item={ra} onPick={act} />
-                        {/each}
-                    </div>
-                {/if}
-            {/if}
-        {:else}
-            {#if catalog.contextLoading && !catalog.contextDetail}
-                <div class="kms-skel-hero" aria-hidden="true"></div>
-            {:else if catalog.contextDetail}
-                {@const d = catalog.contextDetail}
-                <header class="kms-hero">
-                    {#if d.art_url}
-                        <img class="kms-hero-art" src={d.art_url} alt="" />
-                    {:else}
-                        <span class="kms-hero-art kms-card-none" aria-hidden="true">{KIND_EMOJI[d.kind]}</span>
-                    {/if}
-                    <span class="kms-hero-name">{d.name}</span>
-                    <span class="kms-hero-sub">
-                        {[d.sub, d.year, d.total_tracks ? `${d.total_tracks} songs` : ""].filter(Boolean).join(" · ")}
-                    </span>
-                    <button
-                        class="kms-bigplay"
-                        disabled={!!music.busy["item:" + d.uri]}
-                        onclick={() => pick(contextItem(d))}
-                    >
-                        ▶️ Play all
-                    </button>
-                </header>
-
-                {@render shelfLabel("🎵 Songs")}
-                {#each d.tracks as t, i (t.uri)}
-                    <KidTrackRow
-    item={t}
-    num={d.kind === "album" ? i + 1 : null}
-    {music}
-    {kbOpen}
-    queueOpen={queueFor === (t).uri}
-    flashed={queuedFlash === (t).uri}
-    onPick={pick}
-    onToggleQueue={toggleQueueFor}
-    onQueue={queueIt}
-/>
-                {/each}
-            {/if}
-        {/if}
+        <KidCatalogPage
+            {catalog}
+            {music}
+            {kbOpen}
+            {queueFor}
+            {queuedFlash}
+            onPick={pick}
+            onToggleQueue={toggleQueueFor}
+            onQueue={queueIt}
+            onAct={act}
+        />
     {:else}
         <!-- The wrapper only earns its keep while the keyboard is up, when it
              becomes the band the box pins to (see .kb-open below). -->
@@ -792,84 +673,11 @@
     }
     .kms-recent-x:active { color: var(--kid-pink); }
 
-    /* ── Drill-down hero ── */
-    .kms-back {
-        align-self: flex-start;
-        font-size: 1rem;
-        font-weight: 800;
-        padding: 12px 18px;
-        min-height: 48px;
-        border-radius: 999px;
-        border: none;
-        background: var(--surface-hover);
-        color: var(--text);
-        cursor: pointer;
-        -webkit-tap-highlight-color: transparent;
-    }
-    .kms-back:active { transform: scale(0.93); }
-    .kms-hero {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        gap: var(--space-2);
-        text-align: center;
-        padding: var(--space-2) 0 var(--space-3);
-    }
-    .kms-hero-art {
-        width: 132px;
-        height: 132px;
-        border-radius: var(--radius-xl);
-        object-fit: cover;
-        box-shadow: 0 10px 34px rgba(0, 0, 0, 0.35);
-    }
-    .kms-hero-art.round { border-radius: 50%; }
-    .kms-hero-name {
-        font-size: 1.5rem;
-        font-weight: 800;
-        letter-spacing: -0.02em;
-        color: var(--text);
-        line-height: 1.15;
-    }
-    .kms-hero-sub {
-        font-size: 0.9rem;
-        font-weight: 600;
-        color: var(--text-muted);
-    }
-    .kms-bigplay {
-        margin-top: var(--space-2);
-        font-size: 1.15rem;
-        font-weight: 800;
-        padding: 16px 40px;
-        min-height: 60px;
-        border-radius: 999px;
-        border: none;
-        background: var(--kid-accent-grad);
-        color: var(--kid-on-text);
-        box-shadow: 0 0 0 4px var(--kid-ring), 0 10px 30px var(--kid-glow);
-        cursor: pointer;
-        transition: transform 0.12s ease;
-        -webkit-tap-highlight-color: transparent;
-    }
-    .kms-bigplay:active { transform: scale(0.94); }
-    .kms-bigplay:disabled { opacity: 0.6; }
-    .kms-playnote {
-        font-size: 0.85rem;
-        font-weight: 600;
-        color: var(--text-muted);
-    }
-
     /* ── Skeletons & empties ── */
     .kms-sklist { display: flex; flex-direction: column; gap: var(--space-3); }
     .kms-skel {
         height: 64px;
         border-radius: var(--radius-lg);
-        background: linear-gradient(90deg, var(--surface) 0%, var(--surface-hover) 50%, var(--surface) 100%);
-        background-size: 200% 100%;
-        animation: kms-shimmer 1.5s linear infinite;
-    }
-    .kms-skel-hero {
-        height: 220px;
-        border-radius: var(--radius-xl);
         background: linear-gradient(90deg, var(--surface) 0%, var(--surface-hover) 50%, var(--surface) 100%);
         background-size: 200% 100%;
         animation: kms-shimmer 1.5s linear infinite;
@@ -974,10 +782,7 @@
     .kb-open .kms-shelf-head { display: none; }
     .kb-open .kms-grid { grid-template-columns: repeat(auto-fill, minmax(min(110px, 30%), 1fr)); }
     @media (prefers-reduced-motion: reduce) {
-        .kms-skel,
-        .kms-skel-hero {
-            animation: none;
-        }
+        .kms-skel { animation: none; }
         .kms-top.starting .kms-top-art {
             animation: none;
         }
