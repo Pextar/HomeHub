@@ -1,6 +1,7 @@
 import { api } from "../api";
 import { toasts } from "../stores.svelte";
 import { copyText } from "../clipboard";
+import type { SearchKind } from "./catalog";
 import type { SpotifyStatus, SpotifyItem, SpotifyResults, MediaItem } from "../types";
 
 /**
@@ -20,7 +21,10 @@ import type { SpotifyStatus, SpotifyItem, SpotifyResults, MediaItem } from "../t
  * And **focus** — putting the caret in the box — stays with the component that
  * owns the input, since only it has the element.
  */
-export type SpotifyKind = "all" | "tracks" | "albums" | "playlists" | "artists";
+/** The kind chips: one of the shelved kinds, or no narrowing at all. The
+ *  kinds themselves are the catalog's vocabulary (`SEARCH_KINDS`), not this
+ *  store's — listing them again here is how the two drift apart. */
+export type SpotifyKind = "all" | SearchKind;
 
 export interface SpotifyStore {
   /** Null when the integration is unavailable — the whole card hides. */

@@ -14,19 +14,65 @@
 // results out as cards still writes its own.
 
 import { fmtCount, fmtMs, capFirst } from "./format";
-import type { SpotifyItem } from "../types";
+import type { SpotifyItem, SpotifyResults } from "../types";
 
 /** The kinds a search answers with, in the order results are shelved.
- *  Songs lead — playing one is the commonest reason to search at all. */
+ *  Songs lead — playing one is the commonest reason to search at all.
+ *
+ *  Each carries both names its kind goes by: `id` is the shelf — the key a
+ *  result set and the kind chips use — and `kind` is what one item off that
+ *  shelf calls itself. They lived as two lists that happened to agree, which
+ *  is the arrangement where keying a map by the wrong one of the two renders
+ *  a blank rather than failing to compile. */
 export const SEARCH_KINDS = [
-  { id: "tracks", label: "Songs" },
-  { id: "albums", label: "Albums" },
-  { id: "playlists", label: "Playlists" },
-  { id: "artists", label: "Artists" },
+  { id: "tracks", kind: "track", label: "Songs" },
+  { id: "albums", kind: "album", label: "Albums" },
+  { id: "playlists", kind: "playlist", label: "Playlists" },
+  { id: "artists", kind: "artist", label: "Artists" },
 ] as const;
 
+/** The shelf a result set keys by. The vocabulary lives here rather than in
+ *  the store, so the list of kinds and the order they shelve in are one
+ *  fact. */
+export type SearchKind = (typeof SEARCH_KINDS)[number]["id"];
+/** What a single item off one of those shelves calls itself. */
+export type ItemKind = (typeof SEARCH_KINDS)[number]["kind"];
+
+export interface SearchSection {
+  id: SearchKind;
+  label: string;
+  items: SpotifyItem[];
+}
+
+/**
+ * A result set cut into shelves, in `SEARCH_KINDS` order.
+ *
+ * Unfiltered, only the kinds that matched get a shelf — an empty "Playlists"
+ * heading is a row of screen spent saying nothing. With a chip narrowing the
+ * list it is the one shelf, kept even when empty, because *that* emptiness is
+ * the answer to the chip and the surface has an empty state to say so.
+ *
+ * The wall and the kid module shelve results identically and drew it twice;
+ * the app's own search screen does not use this, and shouldn't be made to —
+ * it pulls songs out ahead of the grids and pages the rest, which is a
+ * different layout rather than this one with different CSS.
+ */
+export function searchSections(
+  results: SpotifyResults | null,
+  filter: SearchKind | "all",
+): SearchSection[] {
+  if (!results) return [];
+  const all: SearchSection[] = SEARCH_KINDS.map((k) => ({
+    id: k.id,
+    label: k.label,
+    items: results[k.id],
+  }));
+  if (filter === "all") return all.filter((s) => s.items.length > 0);
+  return all.filter((s) => s.id === filter);
+}
+
 /** What one item is, named the way a person would name it. */
-export const KIND_LABEL: Record<string, string> = {
+export const KIND_LABEL: Record<ItemKind, string> = {
   artist: "Artist",
   album: "Album",
   playlist: "Playlist",

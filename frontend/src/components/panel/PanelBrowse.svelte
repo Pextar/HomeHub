@@ -47,7 +47,7 @@
     import type { SearchHistory } from "../../lib/music/history.svelte";
     import { createCatalogCache, contextItem } from "../../lib/music/catalog-cache.svelte";
     import { fmtHour } from "../../lib/music/format";
-    import { SEARCH_KINDS as KINDS } from "../../lib/music/catalog";
+    import { searchSections } from "../../lib/music/catalog";
     import { dur } from "../../lib/motion";
     import type { PanelMusicStore } from "../../lib/panel-music.svelte";
     import type { Busy } from "../../lib/music/busy.svelte";
@@ -417,15 +417,7 @@
     }
 
     // ── Results ──────────────────────────────────────────────────────────
-    // Songs lead — playing one is the commonest reason to search at all —
-    // and only shelves that matched are rendered.
-    const sections = $derived.by(() => {
-        const r = spotify.results;
-        if (!r) return [];
-        const all = KINDS.map((k) => ({ ...k, items: r[k.id] as SpotifyItem[] }));
-        if (spotify.kindFilter === "all") return all.filter((s) => s.items.length > 0);
-        return all.filter((s) => s.id === spotify.kindFilter);
-    });
+    const sections = $derived(searchSections(spotify.results, spotify.kindFilter));
 
     /** The artist the query names, pulled out of the shelf it would
      *  otherwise sit in.

@@ -28,7 +28,9 @@
     import KidTrackRow from "./KidTrackRow.svelte";
     import KidMediaCard from "./KidMediaCard.svelte";
     import { createCatalogCache, contextItem } from "../../lib/music/catalog-cache.svelte";
-    import { fmtCount, fmtMs, capFirst } from "../../lib/music/format";
+    import { SEARCH_KINDS, searchSections, topLine } from "../../lib/music/catalog";
+    import type { ItemKind, SearchKind } from "../../lib/music/catalog";
+    import { fmtCount, capFirst } from "../../lib/music/format";
     import { haptic } from "../../lib/utils";
     import type { PanelMusicStore } from "../../lib/panel-music.svelte";
     import type { SpotifyItem } from "../../lib/types";
@@ -50,7 +52,12 @@
         });
     });
 
-    const KIND_EMOJI: Record<string, string> = {
+    // The one emoji vocabulary of this module, keyed the way an item names
+    // its own kind. A shelf reaches it through `SEARCH_KINDS`, which carries
+    // the pairing, rather than keeping a second map keyed by shelf.
+    // (DESIGN.md §2 keeps emoji inside the kid module; the catalog's shared
+    // rules stay plain and pick one up on the way past.)
+    const KIND_EMOJI: Record<ItemKind, string> = {
         track: "🎵",
         album: "💿",
         playlist: "📃",
@@ -87,44 +94,16 @@
     }
 
     // ── Results ──────────────────────────────────────────────────────────
-    const KINDS = [
-        { id: "tracks", label: "Songs", emoji: "🎵" },
-        { id: "albums", label: "Albums", emoji: "💿" },
-        { id: "playlists", label: "Playlists", emoji: "📃" },
-        { id: "artists", label: "Artists", emoji: "🎤" },
-    ] as const;
-
-    // Songs lead — playing one is the commonest reason to search at all —
-    // and only shelves that matched are rendered.
-    const sections = $derived.by(() => {
-        const r = spotify.results;
-        if (!r) return [];
-        const all = KINDS.map((k) => ({ ...k, items: r[k.id] as SpotifyItem[] }));
-        if (spotify.kindFilter === "all") return all.filter((s) => s.items.length > 0);
-        return all.filter((s) => s.id === spotify.kindFilter);
-    });
-
-    const KIND_WORD: Record<string, string> = {
-        artist: "Artist",
-        album: "Album",
-        playlist: "Playlist",
-        track: "Song",
-    };
-
-    /** The top result's own line — the kind first, then the one stat that
-     *  identifies it fastest. */
-    function topLine(item: SpotifyItem): string {
-        const bits = [KIND_WORD[item.kind]];
-        if (item.kind === "artist") {
-            if (item.followers) bits.push(`${fmtCount(item.followers)} followers`);
-        } else {
-            if (item.sub) bits.push(item.sub);
-            if (item.year) bits.push(item.year);
-            if (item.duration_ms) bits.push(fmtMs(item.duration_ms));
-            if (item.total_tracks) bits.push(`${item.total_tracks} songs`);
-        }
-        return bits.join(" · ");
-    }
+    // Shelved by the catalog's own rule, each shelf labelled with the emoji
+    // for the kind it holds.
+    const shelfEmoji = (id: SearchKind) =>
+        KIND_EMOJI[SEARCH_KINDS.find((k) => k.id === id)!.kind];
+    const sections = $derived(
+        searchSections(spotify.results, spotify.kindFilter).map((s) => ({
+            ...s,
+            emoji: shelfEmoji(s.id),
+        })),
+    );
 
     /** A search that led somewhere is worth remembering: the store remembers
      *  submissions (Enter, chip re-runs), but the kid flow is type → tap a
@@ -383,13 +362,13 @@
                     class="kms-kind"
                     class:active={spotify.kindFilter === "all"}
                     onclick={() => (spotify.kindFilter = "all")}>All</button>
-                {#each KINDS as k (k.id)}
+                {#each SEARCH_KINDS as k (k.id)}
                     {#if r[k.id].length > 0}
                         <button
                             class="kms-kind"
                             class:active={spotify.kindFilter === k.id}
                             onclick={() => (spotify.kindFilter = k.id)}
-                            >{k.emoji} {k.label} <span class="mono">{r[k.id].length}</span></button>
+                            >{KIND_EMOJI[k.kind]} {k.label} <span class="mono">{r[k.id].length}</span></button>
                     {/if}
                 {/each}
             </div>
