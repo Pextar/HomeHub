@@ -106,6 +106,9 @@ supply what genuinely differs as hooks:
 | `catalog-stack.svelte.ts` | the ladder over those pages — push, pop, don't re-push the top |
 | `fader.svelte.ts` | who owns a volume slider's value, the finger or the device |
 | `volume.ts` | the clamp, and the mid-drag send throttle behind `fader` |
+| `keyboard.svelte.ts` | how much of the screen the software keyboard has taken |
+| `navigation.svelte.ts` | where the Music view is: its screen stack, its sheet run, and the one history entry over both |
+| `device-sheets.ts` | the equipment sheets, and what has to be re-read when one changes something |
 | `format.ts` | counts, durations, hours |
 
 Before writing a rule about *what music means* inside a `.svelte` file, look
@@ -118,6 +121,35 @@ use `searchSections`, and its screen router doesn't use `catalog-stack`:
 both are genuinely different from the wall's, and forcing them through a
 shared shape would cost more than the copy it saves. Say so in a comment
 when you decide that, so the next reader doesn't "finish the job".
+
+## Splitting a big file
+
+Two different problems wear the same symptom, and they want opposite cures.
+
+**A big script** is a component doing several jobs. Extract each into
+`lib/` as a factory taking the bits it genuinely needs — usually getters,
+since what it watches moves under it — and hand back what differs as hooks.
+The win isn't the line count: a rule that only ever ran inside a mounted
+component has no test, and every one extracted so far has turned out to have
+a bug in it.
+
+**A big stylesheet** is a component drawing several things. Extract each as
+a component that takes its own CSS with it. Two guards make this safe:
+
+- **`npm run check` names every selector left behind.** Nothing dead comes
+  along, and nothing live gets stranded — trust the warnings, they're exact.
+- **Scoped CSS doesn't reach across a component boundary**, in either
+  direction. A rule that keys off an ancestor's state class (`.kb-open .x`,
+  `.full .x`) stays with the ancestor, and shared chrome has to become a
+  component of its own rather than a class two files both style. Where the
+  parent's state genuinely has to reach a child, pass it as a prop.
+
+When two blocks look like candidates for separate components, check whether
+they share a stylesheet first. Two things styled alike are usually one thing
+with a parameter — the room's fader and a speaker's are `KidVolumeRow`, and
+an artist's page and a record's are `KidCatalogPage`. Splitting them would
+have handed each a copy of the chrome, which is where the two versions start
+disagreeing.
 
 ## Conventions
 
