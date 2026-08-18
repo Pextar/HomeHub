@@ -1,115 +1,20 @@
-<script lang="ts" module>
-    import { data } from "../lib/stores.svelte";
-    import { isSmartProtocol } from "../lib/utils";
-    import type {
-        RuleActionDraft, RuleDraft, TargetType, AutomationAction,
-        AutomationCondition, Socket,
-    } from "../lib/types";
-
-    /** Member sockets of a group/room action target. Rooms are matched by the
-     *  socket's room name (sockets reference rooms by name, targets by id). */
-    export function membersOf(a: RuleActionDraft): Socket[] {
-        const v = data.value;
-        if (a.target_type === "group") {
-            const g = v.groups.find(x => x.id === a.target_id);
-            return (g?.socket_ids ?? [])
-                .map(id => v.sockets.find(s => s.id === id))
-                .filter((s): s is Socket => !!s);
-        }
-        if (a.target_type === "room") {
-            const rn = v.rooms.find(r => r.id === a.target_id)?.name;
-            return v.sockets.filter(s => s.room === rn);
-        }
-        return [];
-    }
-
-    /** Expand one THEN draft action into the API actions it implies. A per-lamp
-     *  group/room action becomes one socket action per configured member; every
-     *  other action maps 1:1, mirroring the legacy inline builders. */
-    export function compileAction(a: RuleActionDraft): AutomationAction[] {
-        if ((a.target_type === "group" || a.target_type === "room") && a.action === "on" && a.perLamp) {
-            const out: AutomationAction[] = [];
-            for (const m of membersOf(a)) {
-                const cfg = a.perLamp[m.id] ?? { state: "on", level: a.level ?? 100, color: a.color ?? "" };
-                if (cfg.state === "ignore") continue;
-                const act: AutomationAction = { target_type: "socket", target_id: m.id, action: cfg.state };
-                if (cfg.state === "on" && isSmartProtocol(m.protocol)) {
-                    act.level = cfg.level ?? 100;
-                    if (cfg.color) act.color = cfg.color;
-                }
-                out.push(act);
-            }
-            return out;
-        }
-        const base: AutomationAction = {
-            target_type: a.target_type,
-            target_id: a.target_id,
-            action: (a.target_type === "scene" ? "activate" : a.action) as AutomationAction["action"],
-        };
-        if (a.action === "on" || a.action === "set") {
-            if (a.target_type === "socket") {
-                base.level = a.level ?? 100;
-                if (a.color) base.color = a.color;
-            } else if (a.target_type === "group" || a.target_type === "room") {
-                // "set" changes brightness/colour only, so always carry the
-                // level; an "on" only attaches lighting when moved off default.
-                if (a.action === "set" || a.color || a.level !== 100) {
-                    base.level = a.level ?? 100;
-                    if (a.color) base.color = a.color;
-                }
-            }
-        }
-        return [base];
-    }
-
-    /** Colour presets for smart socket targets. Also used by the
-     *  SceneModal snapshot section — keep the two in sync by importing. */
-    export const COLOURS: { hex: string; name: string }[] = [
-        { hex: "", name: "Auto" },
-        { hex: "f5bd6e", name: "Warm" },
-        { hex: "ffe9c4", name: "Soft" },
-        { hex: "ffffff", name: "Bright" },
-        { hex: "c4a4e0", name: "Lilac" },
-        { hex: "7aa4d9", name: "Cool" },
-    ];
-
-    /** Selectable targets for a THEN action's target type. */
-    export function targetsFor(type: string): { id: string; label: string }[] {
-        const v = data.value;
-        if (type === "socket") return v.sockets.map(s => ({ id: s.id, label: s.name }));
-        if (type === "group")  return v.groups.map(g => ({ id: g.id, label: g.name }));
-        if (type === "room")   return [...v.rooms].sort((a, b) => a.name.localeCompare(b.name)).map(r => ({ id: r.id, label: r.name }));
-        return v.scenes.map(s => ({ id: s.id, label: s.name }));
-    }
-
-    /** First target type that has at least one entity to point at. */
-    export function firstTargetType(): TargetType {
-        const v = data.value;
-        return v.sockets.length ? "socket" : v.groups.length ? "group" : v.rooms.length ? "room" : "scene";
-    }
-
-    /** A fresh THEN row, seeded with the first valid target so a newly
-     *  added row never needs to be "fixed up" later. */
-    export function blankRuleAction(): RuleActionDraft {
-        const target_type = firstTargetType();
-        return {
-            target_type,
-            target_id: targetsFor(target_type)[0]?.id ?? "",
-            action: target_type === "scene" ? "activate" : "on",
-            level: 100,
-            color: "",
-        };
-    }
-</script>
-
 <script lang="ts" generics="T extends RuleDraft">
     import Segmented from "./Segmented.svelte";
     import DayPicker from "./DayPicker.svelte";
     import Icon from "./Icon.svelte";
     import MusicActionRows from "./MusicActionRows.svelte";
+    import LightRow from "./LightRow.svelte";
+    import RuleLampMatrix from "./RuleLampMatrix.svelte";
+    import { data } from "../lib/stores.svelte";
+    import { isSmartProtocol } from "../lib/utils";
+    import {
+        membersOf, targetsFor, blankRuleAction,
+    } from "../lib/rules";
+    import type {
+        RuleActionDraft, RuleDraft, AutomationCondition,
+    } from "../lib/types";
     import { loadMediaRooms, type MediaRoomOption } from "../lib/media-rooms";
     import { onMount } from "svelte";
-    // isSmartProtocol is imported in the module script above (shared scope).
 
     interface Props {
         /** The rule being edited; the editor mutates it in place. */
@@ -141,24 +46,6 @@
 
     const v = data.value;
     const isSmart = isSmartProtocol;
-
-    // Matter lamp presets — same palette as MatterLightModal. White presets
-    // carry a CT-approximated hex for display and to nudge the RGB mode toward
-    // the right temperature on lamps that don't expose CT via this bridge path.
-    type MatterPreset = { label: string; level: number; color: string; cssColor: string };
-    const MATTER_PRESETS: MatterPreset[] = [
-        { label: "Reading",     level: 100, color: "dcdbd6", cssColor: "#dcdbd6" },
-        { label: "Concentrate", level: 100, color: "d2e5f4", cssColor: "#d2e5f4" },
-        { label: "Daylight",    level: 100, color: "d5e2eb", cssColor: "#d5e2eb" },
-        { label: "Warm",        level: 80,  color: "edcaa2", cssColor: "#edcaa2" },
-        { label: "Relax",       level: 40,  color: "f1c696", cssColor: "#f1c696" },
-        { label: "Night",       level: 12,  color: "f9bf7f", cssColor: "#f9bf7f" },
-        { label: "Sunset",      level: 70,  color: "ff6a3d", cssColor: "#ff6a3d" },
-        { label: "Forest",      level: 60,  color: "3dbf6a", cssColor: "#3dbf6a" },
-        { label: "Ocean",       level: 70,  color: "3dafff", cssColor: "#3dafff" },
-        { label: "Lavender",    level: 60,  color: "b47cff", cssColor: "#b47cff" },
-        { label: "Rose",        level: 60,  color: "ff6fa3", cssColor: "#ff6fa3" },
-    ];
 
     const hasLocation = $derived(v.settings.latitude !== 0 || v.settings.longitude !== 0);
     const sensorUnit = $derived(v.sensors.find(s => s.id === draft.trigSensorId)?.unit ?? "");
@@ -203,45 +90,16 @@
         if (a.action === "set" && !canSetLight(a)) a.action = "on";
     }
 
-    // ── Per-lamp authoring (group/room "on" actions) ──────────────────
-    // Switching to per-lamp seeds every member from the uniform base the user
-    // already set, so the matrix starts as "all the same" and they tweak the
-    // outliers. Compilation to socket actions lives in compileAction (module).
-    function lampCfg(a: RuleActionDraft, id: string) {
-        return a.perLamp?.[id] ?? { state: "on" as const, level: a.level ?? 100, color: a.color ?? "" };
-    }
-    function setLamp(a: RuleActionDraft, id: string,
-        patch: Partial<{ state: "on" | "off" | "ignore"; level: number; color: string }>) {
-        if (!a.perLamp) return;
-        a.perLamp[id] = { ...lampCfg(a, id), ...patch };
-    }
+    // Per-lamp authoring is RuleLampMatrix's; switching into it seeds every
+    // member from the uniform setting already chosen, so the matrix opens as
+    // "all the same" rather than as an empty form.
     function enablePerLamp(a: RuleActionDraft) {
         if (a.perLamp) return;
         const pl: Record<string, { state: "on" | "off" | "ignore"; level: number; color: string }> = {};
         for (const m of membersOf(a)) pl[m.id] = { state: "on", level: a.level ?? 100, color: a.color ?? "" };
         a.perLamp = pl;
     }
-    function setAllLamps(a: RuleActionDraft, state: "on" | "off" | "ignore") {
-        for (const m of membersOf(a)) setLamp(a, m.id, { state });
-    }
-    function setAllLampLevel(a: RuleActionDraft, level: number) {
-        if (isNaN(level)) return;
-        for (const m of membersOf(a)) if (isSmart(m.protocol)) setLamp(a, m.id, { level, state: "on" });
-    }
-    // Apply a whole preset (brightness + colour together) to every smart member.
-    function setAllLampPreset(a: RuleActionDraft, level: number, color: string) {
-        for (const m of membersOf(a)) if (isSmart(m.protocol)) setLamp(a, m.id, { level, color, state: "on" });
-    }
-    // Representative bulk values — the first smart member. After a bulk apply
-    // every smart member matches, so this reflects the shared setting.
-    function bulkLampLevel(a: RuleActionDraft): number {
-        const f = membersOf(a).find(m => isSmart(m.protocol));
-        return f ? lampCfg(a, f.id).level : 100;
-    }
-    function bulkLampColor(a: RuleActionDraft): string {
-        const f = membersOf(a).find(m => isSmart(m.protocol));
-        return f ? lampCfg(a, f.id).color : "";
-    }
+
     function targetMissing(a: RuleActionDraft): boolean {
         return !targetsFor(a.target_type).some(t => t.id === a.target_id);
     }
@@ -272,31 +130,6 @@
     }
 </script>
 
-<!-- Named brightness+colour presets, shared by every smart-light picker
-     (single socket, uniform group/room, and each per-lamp row) so the palette
-     reads identically everywhere. onPick receives the preset's level + colour. -->
-{#snippet lightPresets(curColor: string, onPick: (level: number, color: string) => void)}
-    <div class="preset-chips" role="group" aria-label="Lighting preset">
-        <button type="button" class="preset-chip auto"
-            class:active={!curColor}
-            title="No preset"
-            aria-label="No lighting preset" aria-pressed={!curColor}
-            onclick={() => onPick(100, "")}>
-            —
-        </button>
-        {#each MATTER_PRESETS as p (p.label)}
-            <button type="button" class="preset-chip"
-                class:active={curColor === p.color}
-                style="--pc: {p.cssColor}"
-                title="{p.label} · {p.level}%"
-                aria-label="{p.label} preset" aria-pressed={curColor === p.color}
-                onclick={() => onPick(p.level, p.color)}>
-                <span class="preset-dot" style="background:{p.cssColor}"></span>
-                {p.label}
-            </button>
-        {/each}
-    </div>
-{/snippet}
 
 <!-- WHEN -->
 <div class="block when">
@@ -551,12 +384,12 @@
             {#if a.action === "on" || a.action === "set"}
                 {#if a.target_type === "socket" && isSmart(v.sockets.find(s => s.id === a.target_id)?.protocol ?? "")}
                     <div class="action-light-row">
-                        <div class="bright">
-                            <span class="bright-ico"><Icon name="sun" size={14} /></span>
-                            <input type="range" min="1" max="100" step="1" bind:value={a.level} aria-label="Brightness" />
-                            <span class="bright-val mono">{a.level ?? 100}%</span>
-                        </div>
-                        {@render lightPresets(a.color ?? "", (lvl, col) => { a.level = lvl; a.color = col; })}
+                        <LightRow
+                            level={a.level ?? 100}
+                            color={a.color ?? ""}
+                            onLevel={(lvl) => (a.level = lvl)}
+                            onPreset={(lvl, col) => { a.level = lvl; a.color = col; }}
+                        />
                     </div>
                 {:else if a.target_type === "group" || a.target_type === "room"}
                     {#if a.action === "set"}
@@ -565,12 +398,12 @@
                         {@const members = membersOf(a)}
                         {#if members.some(m => isSmart(m.protocol))}
                             <div class="action-light-row">
-                                <div class="bright">
-                                    <span class="bright-ico"><Icon name="sun" size={14} /></span>
-                                    <input type="range" min="1" max="100" step="1" bind:value={a.level} aria-label="Brightness" />
-                                    <span class="bright-val mono">{a.level ?? 100}%</span>
-                                </div>
-                                {@render lightPresets(a.color ?? "", (lvl, col) => { a.level = lvl; a.color = col; })}
+                                <LightRow
+                                    level={a.level ?? 100}
+                                    color={a.color ?? ""}
+                                    onLevel={(lvl) => (a.level = lvl)}
+                                    onPreset={(lvl, col) => { a.level = lvl; a.color = col; }}
+                                />
                             </div>
                         {:else}
                             <div class="lamp-empty mono">No smart lights in this {a.target_type}</div>
@@ -586,98 +419,15 @@
                         </div>
                         {#if !a.perLamp}
                             <div class="action-light-row">
-                                <div class="bright">
-                                    <span class="bright-ico"><Icon name="sun" size={14} /></span>
-                                    <input type="range" min="1" max="100" step="1" bind:value={a.level} aria-label="Brightness" />
-                                    <span class="bright-val mono">{a.level ?? 100}%</span>
-                                </div>
-                                {@render lightPresets(a.color ?? "", (lvl, col) => { a.level = lvl; a.color = col; })}
+                                <LightRow
+                                    level={a.level ?? 100}
+                                    color={a.color ?? ""}
+                                    onLevel={(lvl) => (a.level = lvl)}
+                                    onPreset={(lvl, col) => { a.level = lvl; a.color = col; }}
+                                />
                             </div>
                         {:else}
-                            {@const members = membersOf(a)}
-                            {#if members.length === 0}
-                                <div class="lamp-empty mono">No devices in this {a.target_type}</div>
-                            {:else}
-                                <div class="lamp-matrix">
-                                    <div class="bulk-bar">
-                                        <span class="bulk-lbl">Set all<span class="bulk-n mono">{members.length}</span></span>
-                                        <div class="state-group" role="group" aria-label="Set all lamps">
-                                            <button type="button" class="state-btn"
-                                                onclick={() => setAllLamps(a, 'ignore')}
-                                                aria-label="Leave all lamps unchanged">—</button>
-                                            <button type="button" class="state-btn s-on"
-                                                onclick={() => setAllLamps(a, 'on')}
-                                                aria-label="Turn all lamps on">On</button>
-                                            <button type="button" class="state-btn s-off"
-                                                onclick={() => setAllLamps(a, 'off')}
-                                                aria-label="Turn all lamps off">Off</button>
-                                        </div>
-                                        {#if members.some(m => isSmart(m.protocol))}
-                                            <div class="bulk-light">
-                                                <div class="bright">
-                                                    <span class="bright-ico"><Icon name="sun" size={14} /></span>
-                                                    <input type="range" min="1" max="100" step="1"
-                                                        value={bulkLampLevel(a)}
-                                                        oninput={(e) => setAllLampLevel(a, parseInt((e.target as HTMLInputElement).value, 10))}
-                                                        aria-label="Brightness for all lamps" />
-                                                    <span class="bright-val mono">{bulkLampLevel(a)}%</span>
-                                                </div>
-                                                {@render lightPresets(bulkLampColor(a), (lvl, col) => setAllLampPreset(a, lvl, col))}
-                                            </div>
-                                        {/if}
-                                    </div>
-                                    <div class="lamp-rows">
-                                        {#each members as m, mi (m.id)}
-                                            {@const cfg = lampCfg(a, m.id)}
-                                            {#if mi > 0}<div class="row-sep" aria-hidden="true"></div>{/if}
-                                            <div class="lamp-row" class:row-on={cfg.state === 'on'}>
-                                                <div class="lamp-main">
-                                                    <div class="row-bulb"
-                                                        class:bulb-on={cfg.state === 'on'}
-                                                        class:bulb-off={cfg.state === 'off'}
-                                                        aria-hidden="true">
-                                                        <Icon name="light" size={14} />
-                                                    </div>
-                                                    <div class="row-info">
-                                                        <span class="row-name">{m.name}</span>
-                                                        <span class="row-room">{m.room || "Unassigned"}</span>
-                                                    </div>
-                                                    <div class="state-group" role="group" aria-label="Action for {m.name}">
-                                                        <button type="button" class="state-btn"
-                                                            class:s-active={cfg.state === 'ignore'}
-                                                            onclick={() => setLamp(a, m.id, { state: 'ignore' })}
-                                                            aria-pressed={cfg.state === 'ignore'}
-                                                            aria-label="Leave {m.name} unchanged">—</button>
-                                                        <button type="button" class="state-btn s-on"
-                                                            class:s-active={cfg.state === 'on'}
-                                                            onclick={() => setLamp(a, m.id, { state: 'on' })}
-                                                            aria-pressed={cfg.state === 'on'}
-                                                            aria-label="Turn {m.name} on">On</button>
-                                                        <button type="button" class="state-btn s-off"
-                                                            class:s-active={cfg.state === 'off'}
-                                                            onclick={() => setLamp(a, m.id, { state: 'off' })}
-                                                            aria-pressed={cfg.state === 'off'}
-                                                            aria-label="Turn {m.name} off">Off</button>
-                                                    </div>
-                                                </div>
-                                                {#if cfg.state === 'on' && isSmart(m.protocol)}
-                                                    <div class="light-row">
-                                                        <div class="bright">
-                                                            <span class="bright-ico"><Icon name="sun" size={14} /></span>
-                                                            <input type="range" min="1" max="100" step="1"
-                                                                value={cfg.level}
-                                                                oninput={(e) => setLamp(a, m.id, { level: parseInt((e.target as HTMLInputElement).value, 10) })}
-                                                                aria-label="Brightness for {m.name}" />
-                                                            <span class="bright-val mono">{cfg.level}%</span>
-                                                        </div>
-                                                        {@render lightPresets(cfg.color, (lvl, col) => setLamp(a, m.id, { level: lvl, color: col }))}
-                                                    </div>
-                                                {/if}
-                                            </div>
-                                        {/each}
-                                    </div>
-                                </div>
-                            {/if}
+                            <RuleLampMatrix bind:action={draft.actions[ai]} />
                         {/if}
                     {/if}
                 {/if}
@@ -820,113 +570,13 @@
     .mode-btn.active { background: var(--card-3); color: var(--text); box-shadow: var(--shadow-sm); }
 
     .lamp-empty { padding: 14px 12px; text-align: center; font-size: 12px; color: var(--text-dim); }
-    .lamp-matrix {
-        display: flex; flex-direction: column; gap: 8px;
-        margin-top: var(--space-2);
-        border: 1px solid var(--hairline); border-radius: var(--r-sm);
-        background: var(--card-2); padding: 6px;
-    }
-    .bulk-bar {
-        display: flex; align-items: center; flex-wrap: wrap; gap: 10px;
-        padding: 6px 8px; border-radius: var(--r-sm); background: var(--card-3);
-    }
-    .bulk-lbl {
-        display: inline-flex; align-items: center; gap: 6px;
-        font-family: var(--font-mono); font-size: 10.5px;
-        text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-mute);
-        flex-shrink: 0;
-    }
-    .bulk-n { font-size: 11px; color: var(--text-dim); background: var(--card-2); border-radius: var(--r-pill); padding: 0 6px; }
-    .bulk-light { display: flex; align-items: center; gap: 12px; flex: 1; flex-wrap: wrap; min-width: 200px; }
-    .bulk-light .bright { flex: 1; min-width: 140px; }
-
-    .lamp-rows { display: flex; flex-direction: column; }
-    .row-sep { height: 1px; background: var(--separator); margin: 0 10px 0 52px; }
-    .lamp-row {
-        display: flex; flex-direction: column;
-        border-radius: var(--r-sm); overflow: hidden;
-        transition: background var(--t-fast);
-    }
-    .lamp-row.row-on { background: var(--on-soft); }
-    .lamp-main { display: flex; align-items: center; gap: 12px; padding: 8px 10px; min-height: 46px; }
-    .row-bulb {
-        width: 28px; height: 28px; border-radius: 50%;
-        background: var(--card-3); display: grid; place-items: center;
-        color: var(--text-dim); flex-shrink: 0;
-        transition: background var(--t-fast), color var(--t-fast), box-shadow var(--t-fast);
-    }
-    .row-bulb.bulb-on {
-        background: var(--on); color: var(--primary-fg);
-        box-shadow: 0 0 0 1px var(--on), 0 0 14px 2px var(--on-glow);
-    }
-    .row-bulb.bulb-off { background: var(--bg-elevated); color: var(--text-dim); }
-    .row-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-    .row-name { font-size: 13px; font-weight: 500; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .row-room { font-size: 11px; color: var(--text-mute); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-
-    .state-group {
-        display: flex; background: var(--bg-elevated); border: 1px solid var(--border);
-        border-radius: var(--r-pill); padding: 2px; gap: 1px; flex-shrink: 0;
-    }
-    .state-btn {
-        padding: 5px 10px; border-radius: var(--r-pill); border: none;
-        background: transparent; font-size: 12px; font-weight: 500;
-        color: var(--text-mute); cursor: pointer; touch-action: manipulation;
-        transition: background var(--t-fast), color var(--t-fast), box-shadow var(--t-fast);
-        white-space: nowrap; line-height: 1;
-    }
-    .state-btn:hover:not(.s-active) { color: var(--text); }
-    .state-btn.s-active { background: var(--card-3); color: var(--text); box-shadow: var(--shadow-sm); }
-    .state-btn.s-on.s-active { background: var(--on-soft); color: var(--on); box-shadow: none; }
-
-    .light-row { display: flex; flex-direction: column; gap: 8px; padding: 0 10px 10px 50px; }
-
     @media (prefers-reduced-motion: reduce) {
-        .mode-btn, .state-btn, .row-bulb, .lamp-row { transition-duration: 0.001ms; }
+        .mode-btn { transition-duration: 0.001ms; }
     }
     @media (pointer: coarse) {
-        .mode-btn, .state-btn { min-height: 34px; }
+        .mode-btn { min-height: 34px; }
     }
 
-    /* ── Matter preset chips (group/room actions) ─────────────────── */
-    .preset-chips {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 5px;
-    }
-    .preset-chip {
-        display: inline-flex;
-        align-items: center;
-        gap: 5px;
-        padding: 3px 9px;
-        font-size: 12px;
-        background: var(--card-2);
-        border: 1px solid var(--hairline);
-        border-radius: var(--r-pill);
-        color: var(--text-mute);
-        cursor: pointer;
-        touch-action: manipulation;
-        transition: background var(--t-fast), color var(--t-fast), box-shadow var(--t-fast);
-        white-space: nowrap;
-    }
-    .preset-chip:hover { background: var(--card-3); color: var(--text); }
-    .preset-chip.active {
-        background: var(--card-3);
-        color: var(--text);
-        box-shadow: 0 0 0 1px var(--border-strong) inset;
-    }
-    .preset-chip.auto { color: var(--text-dim); font-size: 13px; }
-    .preset-dot {
-        width: 10px;
-        height: 10px;
-        border-radius: 50%;
-        flex-shrink: 0;
-        border: 1px solid rgba(255,255,255,0.15);
-    }
-    @media (pointer: coarse) {
-        .preset-chip { padding: 6px 12px; font-size: 13px; min-height: 36px; }
-        .preset-dot { width: 12px; height: 12px; }
-    }
     /* Time inputs inside condition cards — mono face so digits align */
     .cond-time {
         font-family: var(--font-mono);
@@ -943,16 +593,7 @@
     }
     .field-help.warn { color: var(--warn, var(--danger)); }
 
-    /* ── Smart-light controls ────────────────────────────────────── */
-    .bright { display: flex; align-items: center; gap: 8px; }
-    .bright-ico { color: var(--on); display: inline-flex; flex-shrink: 0; }
-    .bright input[type="range"] { flex: 1; }
-    .bright-val { font-size: 12px; color: var(--text-muted); min-width: 38px; text-align: right; }
-
     /* ── Mobile ──────────────────────────────────────────────────── */
-    @media (max-width: 600px) {
-        .bright input[type="range"] { height: 28px; }
-    }
     @media (pointer: coarse) {
         input[type="range"] { height: 28px; }
     }

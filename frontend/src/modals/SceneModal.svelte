@@ -1,7 +1,7 @@
 <script lang="ts">
     import Modal from "../components/Modal.svelte";
     import Icon from "../components/Icon.svelte";
-    import { COLOURS } from "../components/RuleEditor.svelte";
+    import { COLOURS } from "../lib/rules";
     import { closeModal } from "../lib/modal.svelte";
     import { api } from "../lib/api";
     import { data, toasts } from "../lib/stores.svelte";
