@@ -122,6 +122,32 @@ both are genuinely different from the wall's, and forcing them through a
 shared shape would cost more than the copy it saves. Say so in a comment
 when you decide that, so the next reader doesn't "finish the job".
 
+## The wall's store (`lib/panel-music/`)
+
+`panel-music.svelte.ts` keeps what is genuinely about *the panel* — the
+sources, the featured room, polling, the transport — and each feature under
+it has its own file. Every one takes the same two things: getters for what
+moves under it (`featured`, `sources`) and the store's guarded `run`, so one
+action disables the same control as any other.
+
+`announce` · `grouping` · `history` · `queue` · `saved` · `sources` ·
+`starting` · `timers` — plus `types.ts`, which holds the store's roles and
+the `PanelRunner` they all take.
+
+## Logic that isn't music
+
+The same rule applies outside the music layer: a rule with no markup in it
+belongs in `lib/`, not in a component's `<script module>`.
+
+| module | what it owns |
+|---|---|
+| `rules.ts` | what an automation rule means — the target vocabulary, and `compileAction`, which translates the shape a rule is *authored* in into the shape it is *run* in |
+| `console-language.ts` | how the console understands a name: resolution order, sentence parsing, and what Tab offers |
+
+Both of these lived in a component and were imported *from* a `.svelte` file
+by other components, which is the tell. Both had no test until they moved,
+and both turned out to have a bug in them.
+
 ## Splitting a big file
 
 Two different problems wear the same symptom, and they want opposite cures.
