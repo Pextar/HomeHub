@@ -45,7 +45,8 @@
     import { clock } from "../../lib/music/clock.svelte";
     import type { SpotifyStore } from "../../lib/music/spotify.svelte";
     import type { SearchHistory } from "../../lib/music/history.svelte";
-    import { createCatalogCache, contextItem } from "../../lib/music/catalog-cache.svelte";
+    import { contextItem } from "../../lib/music/catalog-cache.svelte";
+    import { createCatalogStack } from "../../lib/music/catalog-stack.svelte";
     import { fmtHour } from "../../lib/music/format";
     import { searchSections } from "../../lib/music/catalog";
     import { dur } from "../../lib/motion";
@@ -165,9 +166,28 @@
     // one level instead of leaving the depth. Each detail is fetched once
     // per URI and kept for the session — coming back is instant rather
     // than a skeleton replaying itself.
-    type Level = { kind: "artist" | "context"; uri: string; scroll: number };
-    let stack = $state<Level[]>([]);
-    const topLevel = $derived(stack.length ? stack[stack.length - 1] : null);
+    // Scroll follows the level: pushing stashes where the outgoing list was,
+    // popping puts it back — the search results count as level zero, which is
+    // why `scrollOf`/`scrollTo` pick their element off the depth rather than
+    // always reaching for the stack's.
+    let resultsEl = $state<HTMLElement | null>(null);
+    let stackEl = $state<HTMLElement | null>(null);
+
+    // The ladder is shared with the kid module's search; the stashing below
+    // and the fold-away of the search layout are this pane's own.
+    const catalog = createCatalogStack({
+        onOpened: (art) => {
+            actedOnResult(art);
+            searchEl?.blur(); // chosen — the keyboard's job is done
+        },
+        // A page opened is a question answered: the typing is over, and the
+        // player comes back beside the discography being read.
+        onPush: () => (searching = false),
+        scrollOf: () => (catalog.depth === 0 ? resultsEl : stackEl)?.scrollTop ?? 0,
+        scrollTo: (y) => (catalog.depth === 0 ? resultsEl : stackEl)?.scrollTo(0, y),
+    });
+    const topLevel = $derived(catalog.top);
+
     /** The stack is the Search pane's — it was opened from a search row and
      *  it is where the back chip climbs to. With the switcher on the header
      *  it is reachable while a page is open, so Queue and Rooms answer over
@@ -180,46 +200,6 @@
      *  alone, and only while it is showing results rather than a page. */
     const fullBleed = $derived(searching && pane === "search" && !catalogOpen);
 
-    // The pages themselves are read and kept by the shared cache; the stack
-    // above stays this pane's, since only it knows what a level looks like
-    // and where it was scrolled.
-    const catalog = createCatalogCache({
-        artistUri: () => (topLevel?.kind === "artist" ? topLevel.uri : null),
-        contextUri: () => (topLevel?.kind === "context" ? topLevel.uri : null),
-        onFail: () => void popLevel(),
-    });
-
-    // Scroll follows the level: pushing stashes where the outgoing list
-    // was, popping puts it back — the search results count as level zero.
-    let resultsEl = $state<HTMLElement | null>(null);
-    let stackEl = $state<HTMLElement | null>(null);
-    let searchScroll = 0;
-
-    function pushLevel(kind: Level["kind"], uri: string) {
-        if (stack.length === 0) searchScroll = resultsEl?.scrollTop ?? 0;
-        else stack[stack.length - 1].scroll = stackEl?.scrollTop ?? 0;
-        stack = [...stack, { kind, uri, scroll: 0 }];
-        // A page opened is a question answered: the typing is over, and the
-        // player comes back beside the discography being read.
-        searching = false;
-    }
-
-    async function popLevel() {
-        if (!stack.length) return;
-        stack = stack.slice(0, -1);
-        await flushDOM();
-        if (stack.length === 0) resultsEl?.scrollTo(0, searchScroll);
-        else stackEl?.scrollTo(0, stack[stack.length - 1].scroll);
-    }
-
-    async function openArtist(uri: string, art?: { art_url?: string; round?: boolean }) {
-        if (topLevel?.kind === "artist" && topLevel.uri === uri) return;
-        actedOnResult(art);
-        searchEl?.blur(); // chosen — the keyboard's job is done
-        pushLevel("artist", uri);
-        await catalog.loadArtist(uri);
-    }
-
     /** Resolve a name to an artist page. The panel arrives here from the
      *  full player, where all that is known about who is playing is what
      *  the speaker said. */
@@ -230,7 +210,7 @@
             const res = await api.spotifySearch(name, 5, { kind: "artists" });
             const hit = res.artists?.[0];
             if (hit) {
-                await openArtist(hit.uri, { art_url: hit.art_url, round: true });
+                await catalog.openArtist(hit.uri, { art_url: hit.art_url, round: true });
                 return;
             }
         } catch {
@@ -254,11 +234,6 @@
         if (openPane === "queue" || openPane === "rooms") showPane(openPane);
     });
 
-    async function openContext(uri: string) {
-        if (topLevel?.kind === "context" && topLevel.uri === uri) return;
-        pushLevel("context", uri);
-        await catalog.loadContext(uri);
-    }
 
     // The catalog screens were built for the app's stores; these two answer
     // their props from the panel's own instead — the featured source is the
@@ -313,7 +288,7 @@
             // behind the Queue pane is not what an Escape over the queue is
             // aimed at.
             if (catalogOpen) {
-                void popLevel();
+                void catalog.pop();
                 return;
             }
             // The full-bleed search is a rung of the same ladder: Escape
@@ -578,11 +553,11 @@
                             destination={catalogDest}
                             busy={catalogBusy}
                             targetRow={playOnRow}
-                            onBack={popLevel}
+                            onBack={() => void catalog.pop()}
                             onPick={pick}
                             onEnqueue={(item, next) => music.enqueue(item, next)}
-                            onOpenArtist={(uri) => void openArtist(uri)}
-                            onOpenContext={(uri) => void openContext(uri)}
+                            onOpenArtist={(uri) => void catalog.openArtist(uri)}
+                            onOpenContext={(uri) => void catalog.openContext(uri)}
                             bind:this={artistScr}
                         />
                     {:else}
@@ -592,11 +567,11 @@
                             destination={catalogDest}
                             busy={catalogBusy}
                             targetRow={playOnRow}
-                            onBack={popLevel}
+                            onBack={() => void catalog.pop()}
                             onPlayAll={() => catalog.contextDetail && pick(contextItem(catalog.contextDetail))}
                             onPick={pick}
                             onEnqueue={(item, next) => music.enqueue(item, next)}
-                            onOpenArtist={(uri) => void openArtist(uri)}
+                            onOpenArtist={(uri) => void catalog.openArtist(uri)}
                             bind:this={contextScr}
                         />
                     {/if}
@@ -633,7 +608,7 @@
                         {fullBleed}
                         bind:resultsEl
                         onPick={pick}
-                        onOpenArtist={(uri, art) => void openArtist(uri, art)}
+                        onOpenArtist={(uri, art) => void catalog.openArtist(uri, art)}
                         onRunRecent={runRecent}
                     />
                 </div>

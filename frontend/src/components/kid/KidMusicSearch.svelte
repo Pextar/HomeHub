@@ -27,7 +27,8 @@
     import { createSearchHistory } from "../../lib/music/history.svelte";
     import KidTrackRow from "./KidTrackRow.svelte";
     import KidMediaCard from "./KidMediaCard.svelte";
-    import { createCatalogCache, contextItem } from "../../lib/music/catalog-cache.svelte";
+    import { contextItem } from "../../lib/music/catalog-cache.svelte";
+    import { createCatalogStack } from "../../lib/music/catalog-stack.svelte";
     import { SEARCH_KINDS, searchSections, topLine } from "../../lib/music/catalog";
     import type { ItemKind, SearchKind } from "../../lib/music/catalog";
     import { fmtCount, capFirst } from "../../lib/music/format";
@@ -117,7 +118,10 @@
     // A tap plays a song or a whole container; an artist opens instead.
     function act(item: SpotifyItem) {
         if (item.kind === "artist") {
-            void openArtist(item.uri, item.art_url ? { art_url: item.art_url, round: true } : undefined);
+            void catalog.openArtist(
+                item.uri,
+                item.art_url ? { art_url: item.art_url, round: true } : undefined,
+            );
         } else {
             pick(item);
         }
@@ -153,40 +157,18 @@
     }
 
     // ── The catalog stack: artist and record pages, one level deeper ────
-    type Level = { kind: "artist" | "context"; uri: string };
-    let stack = $state<Level[]>([]);
-    const topLevel = $derived(stack.length ? stack[stack.length - 1] : null);
-
-    function pushLevel(kind: Level["kind"], uri: string) {
-        stack = [...stack, { kind, uri }];
-    }
-    function popLevel() {
-        haptic();
-        stack = stack.slice(0, -1);
-    }
-
-    // The pages themselves are read and kept by the shared cache; the stack
-    // above stays this surface's, since only it knows what a level looks like.
-    const catalog = createCatalogCache({
-        artistUri: () => (topLevel?.kind === "artist" ? topLevel.uri : null),
-        contextUri: () => (topLevel?.kind === "context" ? topLevel.uri : null),
-        onFail: popLevel,
+    // The ladder itself is shared with the wall's depth; what is this
+    // module's own is the haptic under each rung. Levels here don't scroll
+    // independently, so there is no scroll to stash.
+    const catalog = createCatalogStack({
+        onOpened: (art) => {
+            actedOnResult(art);
+            searchEl?.blur(); // chosen — the keyboard's job is done
+        },
+        onPop: haptic,
         artistError: "Couldn't load the artist",
     });
-
-    async function openArtist(uri: string, art?: { art_url?: string; round?: boolean }) {
-        if (topLevel?.kind === "artist" && topLevel.uri === uri) return;
-        actedOnResult(art);
-        searchEl?.blur(); // chosen — the keyboard's job is done
-        pushLevel("artist", uri);
-        await catalog.loadArtist(uri);
-    }
-
-    async function openContext(uri: string) {
-        if (topLevel?.kind === "context" && topLevel.uri === uri) return;
-        pushLevel("context", uri);
-        await catalog.loadContext(uri);
-    }
+    const topLevel = $derived(catalog.top);
 
     // Escape climbs the ladder: queue actions, then each level, then the
     // box's query (handled on the input itself).
@@ -197,7 +179,7 @@
                 queueFor = null;
                 return;
             }
-            if (stack.length) popLevel();
+            if (catalog.depth) void catalog.pop();
         };
         window.addEventListener("keydown", onKey);
         return () => window.removeEventListener("keydown", onKey);
@@ -212,7 +194,7 @@
     {#if topLevel}
         <!-- One level deeper: an artist's page or a record's listing. The
              back button climbs exactly one level. -->
-        <button class="kms-back" onclick={popLevel} aria-label="Back one level">‹ Back</button>
+        <button class="kms-back" onclick={() => void catalog.pop()} aria-label="Back one level">‹ Back</button>
 
         {#if topLevel.kind === "artist"}
             {#if catalog.artistLoading && !catalog.artistDetail}
@@ -267,7 +249,7 @@
                     {@render shelfLabel("💿 Albums")}
                     <div class="kms-grid">
                         {#each d.albums as a (a.uri)}
-                            <KidMediaCard item={a} onPick={(x) => void openContext(x.uri)} />
+                            <KidMediaCard item={a} onPick={(x) => void catalog.openContext(x.uri)} />
                         {/each}
                     </div>
                 {/if}
@@ -275,7 +257,7 @@
                     {@render shelfLabel("💿 Singles")}
                     <div class="kms-grid">
                         {#each d.singles as sg (sg.uri)}
-                            <KidMediaCard item={sg} onPick={(x) => void openContext(x.uri)} />
+                            <KidMediaCard item={sg} onPick={(x) => void catalog.openContext(x.uri)} />
                         {/each}
                     </div>
                 {/if}
