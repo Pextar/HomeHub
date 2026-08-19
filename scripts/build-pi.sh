@@ -33,7 +33,7 @@ echo "==> Cross-compiling backend (GOOS=linux GOARCH=$GOARCH${GOARM:+ GOARM=$GOA
 (
   cd "$ROOT/backend"
   env CGO_ENABLED=0 GOOS=linux GOARCH="$GOARCH" ${GOARM_VAR[@]+"${GOARM_VAR[@]}"} \
-    go build -trimpath -ldflags='-s -w' -o "$RELEASE/homehub" .
+    go build -trimpath -ldflags='-s -w' -o "$RELEASE/homehub" ./cmd/homehub
 )
 
 # Matter bridge is platform-independent (JS) — package the sources and let

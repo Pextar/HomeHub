@@ -395,7 +395,7 @@ required on the Pi:
 
 ```bash
 cd frontend && npm install && npm run build && cd ..
-cd backend  && go build -o homehub && cd ..
+cd backend  && go build -o homehub ./cmd/homehub && cd ..
 AUTH_USER=admin AUTH_PASS=secret PORT=8080 ./backend/homehub
 ```
 
