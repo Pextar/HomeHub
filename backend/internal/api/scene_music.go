@@ -70,7 +70,7 @@ func (s *Server) runSceneMusic(actions []store.MusicAction) {
 
 // applyMusicAction is one room, one verb. Caller must NOT hold Mu.
 func (s *Server) applyMusicAction(a store.MusicAction) error {
-	eps, _, err := s.mediaRoom(a.Room)
+	eps, _, err := s.Music.Room(a.Room)
 	if err != nil {
 		return err
 	}
@@ -91,12 +91,12 @@ func (s *Server) applyMusicAction(a store.MusicAction) error {
 		// usefully do about it, and the alternative (silently starting
 		// something else) is the one thing a scene must not do.
 		zoneID, isZone := strings.CutPrefix(a.Room, "zone:")
-		plan := s.zonePlan(zoneID, eps)
+		plan := s.Music.Plan(zoneID, eps)
 		if err := media.Control(ctx, plan, media.TransportPlay); err != nil {
 			return err
 		}
 		if isZone {
-			s.touchZone(eps)
+			s.Music.Touch(eps)
 		}
 		return nil
 

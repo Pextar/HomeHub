@@ -150,7 +150,7 @@ func (s *Server) fireMusicTimer(ctx context.Context, t store.MusicTimer) {
 // runMusicTimer is the timer's actual work, split out so fireMusicTimer owns
 // the logging and the activity row and this owns only the music.
 func (s *Server) runMusicTimer(ctx context.Context, t store.MusicTimer) error {
-	eps, _, err := s.mediaRoom(t.Room)
+	eps, _, err := s.Music.Room(t.Room)
 	if err != nil {
 		return err
 	}
@@ -185,7 +185,7 @@ func (s *Server) runMusicTimer(ctx context.Context, t store.MusicTimer) error {
 // startForTimer puts the room's music on, coming up to volume if asked. It
 // sets *ramping when it hands the room's fade to a detached ramp.
 func (s *Server) startForTimer(ctx, fadeCtx context.Context, t store.MusicTimer, eps []media.Endpoint, ramping *bool) error {
-	p, err := s.provider(t.Item.Provider)
+	p, err := s.Music.Provider(t.Item.Provider)
 	if err != nil {
 		return err
 	}
@@ -227,9 +227,9 @@ func (s *Server) startForTimer(ctx, fadeCtx context.Context, t store.MusicTimer,
 		return err
 	}
 	if zoneID, ok := strings.CutPrefix(t.Room, "zone:"); ok {
-		s.setZoneSession(zoneID, sess)
+		s.Music.SetSession(zoneID, sess)
 	}
-	s.touchZone(eps)
+	s.Music.Touch(eps)
 	s.recordPlay(t.Room, s.musicRoomName(t.Room), store.MediaPlay{
 		Provider: p.ID(),
 		Kind:     t.Item.Kind,
@@ -313,7 +313,7 @@ func (s *Server) rampDownAndPause(ctx context.Context, t store.MusicTimer, eps [
 	if err := media.SetVolumes(restoreCtx, eps, before); err != nil {
 		s.mediaLogf("music timer: restoring volume in %s: %v", t.Room, err)
 	}
-	s.touchZone(eps)
+	s.Music.Touch(eps)
 }
 
 // pauseRoom stops a room the way its own stop handler would: through the
@@ -323,14 +323,14 @@ func (s *Server) pauseRoom(ctx context.Context, room string, eps []media.Endpoin
 	defer cancel()
 
 	zoneID, isZone := strings.CutPrefix(room, "zone:")
-	plan := s.zonePlan(zoneID, eps)
+	plan := s.Music.Plan(zoneID, eps)
 	err := media.Control(ctx, plan, media.TransportPause)
 	if isZone {
 		// A streamed zone leaves a decoder holding the account's Spotify
 		// session; pausing the speakers alone would keep it held all night.
-		s.endZoneSession(zoneID)
+		s.Music.EndSession(zoneID)
 	}
-	s.touchZone(eps)
+	s.Music.Touch(eps)
 	return err
 }
 

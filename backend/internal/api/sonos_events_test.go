@@ -9,6 +9,7 @@ import (
 	"homehub/internal/announce"
 	"homehub/internal/audio"
 	"homehub/internal/media"
+	"homehub/internal/music"
 	"homehub/internal/speakermon"
 	"homehub/internal/store"
 )
@@ -19,7 +20,7 @@ func testServer(t *testing.T) *Server {
 	if err := st.Load(); err != nil {
 		t.Fatalf("load store: %v", err)
 	}
-	return &Server{Store: st, SPADir: t.TempDir(), Audio: testAudio(st), Announce: testAnnouncer(), Speakers: testSpeakers(st)}
+	return &Server{Store: st, SPADir: t.TempDir(), Audio: testAudio(st), Announce: testAnnouncer(), Speakers: testSpeakers(st), Music: testMusic(st)}
 }
 
 // testAudio is the audio runtime a test server gets. It is the real engine —
@@ -29,6 +30,16 @@ func testServer(t *testing.T) *Server {
 // testSpeakers is the real monitor pair, wired to the same store. Neither
 // monitor polls or subscribes until Run is called, so a test gets the caches
 // and the lookups without any traffic.
+// testMusic is the real service on the same store: the resolution a handler
+// does is the resolution under test, not a stand-in for it.
+func testMusic(st *store.Store) *music.Service {
+	return music.New(music.Config{
+		Store:    st,
+		Speakers: testSpeakers(st),
+		Audio:    testAudio(st),
+	})
+}
+
 func testSpeakers(st *store.Store) *speakermon.Monitors {
 	return speakermon.New(speakermon.Config{
 		Store:     st,

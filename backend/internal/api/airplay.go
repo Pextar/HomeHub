@@ -20,8 +20,6 @@ import (
 	"github.com/gorilla/mux"
 
 	"homehub/internal/airplay"
-	"homehub/internal/media"
-	"homehub/internal/mediabridge"
 	"homehub/internal/store"
 )
 
@@ -270,13 +268,4 @@ func (s *Server) airplaySetVolume(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	w.WriteHeader(http.StatusNoContent)
-}
-
-// airplayEndpoints builds live endpoints for every registered receiver.
-// Caller must hold Mu (read is enough).
-func (s *Server) airplayEndpoints(out map[string]media.Endpoint) {
-	caster := s.Audio.Caster()
-	for id, sp := range s.Store.AirPlay {
-		out[store.QualifyAirPlay(id)] = mediabridge.NewAirPlayEndpoint(*sp, caster.Live)
-	}
 }

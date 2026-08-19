@@ -31,7 +31,6 @@ import (
 	"github.com/gorilla/mux"
 
 	"homehub/internal/media"
-	"homehub/internal/mediabridge"
 	"homehub/internal/store"
 )
 
@@ -40,100 +39,12 @@ import (
 // anything comes out.
 const mediaTimeout = 45 * time.Second
 
-// endpoints builds live endpoints for every registered speaker, keyed by
-// qualified id. Caller must hold Mu (read is enough).
-//
-// The state functions close over the monitors, so the media layer reads from
-// the same event-driven and polled caches the vendor views do rather than
-// adding a second round of traffic to every speaker.
-func (s *Server) endpoints() map[string]media.Endpoint {
-	out := make(map[string]media.Endpoint,
-		len(s.Store.Sonos)+len(s.Store.KEF)+len(s.Store.AirPlay)+len(s.Store.UPnP))
-	for id, sp := range s.Store.Sonos {
-		out[store.QualifySonos(id)] = mediabridge.NewSonosEndpoint(*sp, "", s.Speakers.SonosState)
-	}
-	for id, sp := range s.Store.KEF {
-		out[store.QualifyKEF(id)] = mediabridge.NewKEFEndpoint(*sp, s.Speakers.KEFState)
-	}
-	// A UPnP renderer holds its own transport state, so unlike an AirPlay
-	// receiver it is asked rather than inferred — see mediabridge/upnp.go.
-	for id, rn := range s.Store.UPnP {
-		out[store.QualifyUPnP(id)] = mediabridge.NewUPnPEndpoint(*rn)
-	}
-	// AirPlay receivers have no monitor to read from — there is nothing on
-	// the device to poll — so their state comes from the live cast instead.
-	s.airplayEndpoints(out)
-	return out
-}
-
-// provider returns the media provider for an id. The lookup is by name so
-// that adding one is a registration rather than a new branch at every call
-// site.
-//
-// The empty id still means Spotify. It is the default because it is the
-// provider every household has wired up, not because it is the better one —
-// a caller that wants lossless asks for it.
-func (s *Server) provider(id string) (media.Provider, error) {
-	switch {
-	case id == "" || strings.EqualFold(id, "spotify"):
-		return mediabridge.NewSpotifyProvider(s.Spotify, s.Audio.Decoder(), s.Audio.Quality()), nil
-	case strings.EqualFold(id, "qobuz"):
-		return mediabridge.NewQobuzProvider(s.qobuzAccount(), s.Audio.QobuzDecoder()), nil
-	}
-	return nil, fmt.Errorf("%w: %q", media.ErrUnknownProvider, id)
-}
-
-// qobuzAccount adapts the optional Qobuz client to the provider's interface.
-//
-// The nil check is load-bearing rather than defensive: assigning a nil
-// *qobuz.Client straight into the interface would produce a non-nil interface
-// holding a nil pointer, and the provider's "is it configured" check would pass
-// on its way to a panic.
-func (s *Server) qobuzAccount() mediabridge.QobuzAccount {
-	if s.Qobuz == nil {
-		return nil
-	}
-	return s.Qobuz
-}
-
-// itemFormat asks a provider what one item will decode to, for the router.
-//
-// Nil on any doubt, and that is the safe direction here rather than the
-// cautious-looking one: nil blocks no route, so a lookup that fails leaves
-// routing exactly as it was before formats were considered at all. Refusing to
-// play because a catalogue call timed out would be a worse failure than
-// choosing a route that later turns out not to fit — the cast itself still
-// refuses to reduce, so nothing is downsampled either way.
-func (s *Server) itemFormat(ctx context.Context, p media.Provider, item media.Item) *media.PCMFormat {
-	fr, ok := p.(media.ItemFormatReporter)
-	if !ok {
-		return nil
-	}
-	f, err := fr.ItemFormat(ctx, item)
-	if err != nil {
-		log.Printf("media: reading %s format for %q: %v", p.ID(), item.URI, err)
-		return nil
-	}
-	if !f.Valid() {
-		return nil
-	}
-	return &f
-}
-
-// providers is every provider the server knows about.
-func (s *Server) providers() []media.Provider {
-	return []media.Provider{
-		mediabridge.NewSpotifyProvider(s.Spotify, s.Audio.Decoder(), s.Audio.Quality()),
-		mediabridge.NewQobuzProvider(s.qobuzAccount(), s.Audio.QobuzDecoder()),
-	}
-}
-
 // mediaEndpoints handles GET /api/media/endpoints — every speaker in one
 // uniform shape, with the capabilities the UI needs to know what to offer.
 func (s *Server) mediaEndpoints(w http.ResponseWriter, r *http.Request) {
 	var eps map[string]media.Endpoint
 	s.Store.View(func() {
-		eps = s.endpoints()
+		eps = s.Music.Endpoints()
 	})
 
 	type view struct {
@@ -160,7 +71,7 @@ func (s *Server) mediaProviders(w http.ResponseWriter, r *http.Request) {
 		// own sentence when it isn't.
 		Streaming media.Availability `json:"streaming"`
 	}
-	provs := s.providers()
+	provs := s.Music.Providers()
 	out := make([]view, 0, len(provs))
 	for _, p := range provs {
 		v := view{ID: p.ID(), Name: p.Name(), Avail: p.Available(), Routes: p.Routes()}
@@ -208,7 +119,7 @@ func (s *Server) mediaZones(w http.ResponseWriter, r *http.Request) {
 	var eps map[string]media.Endpoint
 	var zones []*store.Zone
 	s.Store.View(func() {
-		eps = s.endpoints()
+		eps = s.Music.Endpoints()
 		// Deep-copied so the zone views can be built off-lock.
 		zones = make([]*store.Zone, 0, len(s.Store.Zones))
 		for _, z := range s.Store.Zones {
@@ -220,7 +131,7 @@ func (s *Server) mediaZones(w http.ResponseWriter, r *http.Request) {
 
 	sort.Slice(zones, func(i, j int) bool { return zones[i].Name < zones[j].Name })
 
-	p, _ := s.provider("")
+	p, _ := s.Music.Provider("")
 	out := make([]zoneView, 0, len(zones))
 	for _, z := range zones {
 		out = append(out, s.buildZoneView(ctx, z, eps, p))
@@ -363,7 +274,7 @@ func (s *Server) resolveZone(w http.ResponseWriter, r *http.Request) ([]media.En
 		if z, ok = s.Store.Zones[id]; ok {
 			zone = *z
 			zone.Members = append([]string(nil), z.Members...)
-			eps = s.endpoints()
+			eps = s.Music.Endpoints()
 		}
 	})
 
@@ -382,69 +293,6 @@ func (s *Server) resolveZone(w http.ResponseWriter, r *http.Request) ([]media.En
 		return nil, nil, false
 	}
 	return members, &zone, true
-}
-
-// mediaRoom resolves a destination key — "sonos:<id>", "kef:<id>" or
-// "zone:<id>" — to live endpoints and the name the house calls it.
-//
-// This is the vocabulary the play history already uses, and having one
-// resolver for it is what lets anything that isn't an HTTP handler address a
-// room: a music timer names a room the same way a shelf does, and a single
-// speaker is simply a zone of one as far as the route engine is concerned.
-//
-// Takes and releases the read lock itself, so callers are off-lock by the
-// time they touch a speaker.
-func (s *Server) mediaRoom(key string) ([]media.Endpoint, string, error) {
-	key = strings.TrimSpace(key)
-	var members []string
-	var name string
-
-	s.Store.View(func() {
-		if id, ok := strings.CutPrefix(key, "zone:"); ok {
-			z, exists := s.Store.Zones[id]
-			if !exists {
-				return
-			}
-			name = z.Name
-			members = append([]string(nil), z.Members...)
-			return
-		}
-		bridge, id, ok := store.SplitMember(key)
-		if !ok {
-			return
-		}
-		switch bridge {
-		case "kef":
-			if sp, exists := s.Store.KEF[id]; exists {
-				name, members = sp.Name, []string{key}
-			}
-		case "airplay":
-			if sp, exists := s.Store.AirPlay[id]; exists {
-				name, members = sp.Name, []string{key}
-			}
-		default:
-			if sp, exists := s.Store.Sonos[id]; exists {
-				name, members = sp.Name, []string{key}
-			}
-		}
-	})
-
-	if name == "" {
-		return nil, "", fmt.Errorf("%w: %q", media.ErrUnknownEndpoint, key)
-	}
-
-	var eps map[string]media.Endpoint
-	s.Store.View(func() { eps = s.endpoints() })
-	out := make([]media.Endpoint, 0, len(members))
-	for _, m := range members {
-		if e, exists := eps[m]; exists {
-			out = append(out, e)
-		}
-	}
-	if len(out) == 0 {
-		return nil, name, fmt.Errorf("%w: %s", media.ErrEmptyZone, name)
-	}
-	return out, name, nil
 }
 
 // mediaZonePlay handles POST /api/media/zones/{id}/play with
@@ -471,7 +319,7 @@ func (s *Server) mediaZonePlay(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "uri is required")
 		return
 	}
-	p, err := s.provider(body.Provider)
+	p, err := s.Music.Provider(body.Provider)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -500,7 +348,7 @@ func (s *Server) mediaZonePlay(w http.ResponseWriter, r *http.Request) {
 	// a CD-quality album is not the route that can carry a 24-bit/192 kHz one,
 	// and deciding from the subscription instead would refuse the first
 	// wherever it cannot carry the second.
-	plan, err := media.ResolveFor(p, members, s.itemFormat(ctx, p, item))
+	plan, err := media.ResolveFor(p, members, s.Music.ItemFormat(ctx, p, item))
 	if err != nil {
 		// Nothing can serve this zone. The error names which speaker
 		// blocked which route, which is the actionable part.
@@ -513,11 +361,11 @@ func (s *Server) mediaZonePlay(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mediaErrStatus(err), err.Error())
 		return
 	}
-	s.setZoneSession(zone.ID, sess)
+	s.Music.SetSession(zone.ID, sess)
 
 	// Nudge both monitors so now-playing moves off "nothing playing" without
 	// waiting for the next poll.
-	s.touchZone(members)
+	s.Music.Touch(members)
 
 	s.recordPlay("zone:"+zone.ID, zone.Name, store.MediaPlay{
 		Provider: p.ID(),
@@ -547,7 +395,7 @@ func (s *Server) mediaZoneRoutes(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	p, err := s.provider(r.URL.Query().Get("provider"))
+	p, err := s.Music.Provider(r.URL.Query().Get("provider"))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -590,12 +438,12 @@ func (s *Server) mediaZoneTransport(verb media.Transport) http.HandlerFunc {
 		// group is addressed through its coordinator rather than member by
 		// member. Without a live session — after a restart, say — fall back
 		// to addressing every speaker, which is correct if noisier.
-		plan := s.zonePlan(zone.ID, members)
+		plan := s.Music.Plan(zone.ID, members)
 		if err := media.Control(ctx, plan, verb); err != nil {
 			writeError(w, mediaErrStatus(err), err.Error())
 			return
 		}
-		s.touchZone(members)
+		s.Music.Touch(members)
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
@@ -623,7 +471,7 @@ func (s *Server) mediaZoneVolume(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.rememberAirPlayVolume(members, *body.Level)
-	s.touchZone(members)
+	s.Music.Touch(members)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -679,7 +527,7 @@ func (s *Server) mediaZoneMute(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mediaErrStatus(err), err.Error())
 		return
 	}
-	s.touchZone(members)
+	s.Music.Touch(members)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -694,14 +542,14 @@ func (s *Server) mediaZoneStop(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), mediaTimeout)
 	defer cancel()
 
-	plan := s.zonePlan(zone.ID, members)
+	plan := s.Music.Plan(zone.ID, members)
 	err := media.Control(ctx, plan, media.TransportPause)
-	s.endZoneSession(zone.ID)
+	s.Music.EndSession(zone.ID)
 	if err != nil {
 		writeError(w, mediaErrStatus(err), err.Error())
 		return
 	}
-	s.touchZone(members)
+	s.Music.Touch(members)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -712,7 +560,7 @@ func (s *Server) mediaSearch(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "q is required")
 		return
 	}
-	p, err := s.provider(r.URL.Query().Get("provider"))
+	p, err := s.Music.Provider(r.URL.Query().Get("provider"))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -731,29 +579,6 @@ func (s *Server) mediaSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, res)
-}
-
-// touchZone asks both monitors to re-read the speakers a command just
-// touched, so the UI's now-playing updates promptly instead of at the next
-// scheduled poll.
-func (s *Server) touchZone(eps []media.Endpoint) {
-	sonosTouched := false
-	for _, e := range eps {
-		d := e.Descriptor()
-		if d.Vendor == media.VendorKEF {
-			s.Speakers.KEF.Touch(d.ID)
-			// A streamed KEF takes a moment to actually start, since the
-			// audio comes back to it over the network.
-			s.Speakers.KEF.TouchAfter(d.ID, 3*time.Second)
-			continue
-		}
-		sonosTouched = true
-	}
-	if sonosTouched {
-		// Sonos is event-driven, so there is nothing per-speaker to poke;
-		// a nudge makes the monitor reconcile now.
-		s.Speakers.Sonos.Nudge()
-	}
 }
 
 // names lists endpoint names for a response.

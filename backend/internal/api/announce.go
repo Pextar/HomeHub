@@ -49,10 +49,6 @@ const (
 	announceRestoreBudget = 45 * time.Second
 )
 
-// AnnouncePath is where the clips are served. Outside /api for the same
-// reason the stream is: the clients are speakers, and /api is session-gated.
-const AnnouncePath = "/announce"
-
 // announceStatus handles GET /api/announce — what the surface needs to draw
 // the control before anyone taps it: whether there is anywhere to announce
 // to, and whether it will be spoken or only chimed.

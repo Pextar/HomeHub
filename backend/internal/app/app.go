@@ -30,6 +30,7 @@ import (
 	"homehub/internal/matter"
 	"homehub/internal/media"
 	"homehub/internal/mqtt"
+	"homehub/internal/music"
 	"homehub/internal/push"
 	"homehub/internal/qobuz"
 	"homehub/internal/reachability"
@@ -60,6 +61,7 @@ type App struct {
 	api   *api.Server
 
 	monitors *speakermon.Monitors
+	music    *music.Service
 
 	matter *matter.Client
 	mqtt   *mqtt.Client
@@ -170,6 +172,20 @@ func New(cfg Config) (*App, error) {
 		Logf:      log.Printf,
 	})
 
+	// ── Music ────────────────────────────────────────────────────────────
+	// Where a household means when it names a room, what can play there,
+	// and what stays running once it does. Everything above it — the HTTP
+	// handlers, the sleep timer, a scene's music step — asks here rather
+	// than assembling the answer from the store and the bridges itself.
+	a.music = music.New(music.Config{
+		Store:    a.store,
+		Speakers: a.monitors,
+		Audio:    audioEngine,
+		Spotify:  spotifyClient,
+		Qobuz:    qobuzClient,
+		Logf:     log.Printf,
+	})
+
 	// Announcements share the audio engine's address discovery: both are
 	// "somewhere a speaker can fetch from", and resolving it twice would
 	// mean two ways to be wrong on a multi-homed box.
@@ -189,6 +205,7 @@ func New(cfg Config) (*App, error) {
 		Audio:         audioEngine,
 		Announce:      announcer,
 		Speakers:      a.monitors,
+		Music:         a.music,
 		Matter:        a.matter,
 		MQTT:          a.mqtt,
 		LLM:           llmClient,
@@ -350,10 +367,10 @@ func (a *App) shutdown(stopBackground, stopSonosEvents context.CancelFunc, sonos
 
 	a.mqtt.Close()
 
-	// Release any live zone playback. The stream route runs a decoder
-	// holding the account's Spotify session, and leaving it behind would
-	// keep the user's Spotify pointed at a HomeHub that has stopped.
-	a.api.CloseMedia()
+	// Release any live zone playback and stop the decoder. The stream route
+	// holds the account's Spotify session, and leaving it behind would keep
+	// the user's Spotify pointed at a HomeHub that has stopped.
+	a.music.Close()
 
 	ctx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
 	defer cancel()

@@ -158,25 +158,13 @@ func (s *Server) connectInterrupts(playing *spotify.Playback) string {
 	}
 }
 
-// zonesUsingTheDecoder lists the zones whose live session is one HomeHub is
-// decoding for.
+// zonesUsingTheDecoder names the zones whose live session is one HomeHub is
+// decoding for, so a warning can say which rooms a transfer would silence.
 func (s *Server) zonesUsingTheDecoder() []string {
-	s.zoneMu.Lock()
-	live := make(map[string]bool, len(s.zoneSessions))
-	for id, sess := range s.zoneSessions {
-		if sess == nil {
-			continue
-		}
-		live[id] = sess.Route == "stream" || sess.Route == "airplay"
-	}
-	s.zoneMu.Unlock()
-
+	ids := s.Music.DecodedZones()
 	var names []string
 	s.Store.View(func() {
-		for id, on := range live {
-			if !on {
-				continue
-			}
+		for _, id := range ids {
 			if z, ok := s.Store.Zones[id]; ok {
 				names = append(names, z.Name)
 			}
@@ -260,16 +248,7 @@ func (s *Server) spotifyConnectVolume(w http.ResponseWriter, r *http.Request) {
 // releaseDecodedZones ends the zone sessions HomeHub was decoding for, after
 // something else took the account's playback session away.
 func (s *Server) releaseDecodedZones() {
-	s.zoneMu.Lock()
-	var ending []string
-	for id, sess := range s.zoneSessions {
-		if sess != nil && (sess.Route == "stream" || sess.Route == "airplay") {
-			ending = append(ending, id)
-		}
-	}
-	s.zoneMu.Unlock()
-
-	for _, id := range ending {
-		s.endZoneSession(id)
+	for _, id := range s.Music.DecodedZones() {
+		s.Music.EndSession(id)
 	}
 }

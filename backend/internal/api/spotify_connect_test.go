@@ -136,7 +136,7 @@ func TestInterruptsOnlyNamesRoomsHomeHubIsFeeding(t *testing.T) {
 	hub := srv.Audio.DecoderName()
 
 	srv.Store.Zones["z1"] = &store.Zone{ID: "z1", Name: "Downstairs"}
-	srv.setZoneSession("z1", &media.Session{Route: media.RouteAirPlay})
+	srv.Music.SetSession("z1", &media.Session{Route: media.RouteAirPlay})
 
 	if got := srv.connectInterrupts(&spotify.Playback{DeviceName: hub}); got != "Downstairs" {
 		t.Errorf("interrupts = %q, want the zone HomeHub is feeding", got)
@@ -153,7 +153,7 @@ func TestInterruptsOnlyNamesRoomsHomeHubIsFeeding(t *testing.T) {
 	// A natively grouped zone does not hold the account's session, so it is
 	// not at risk either.
 	srv.Store.Zones["z2"] = &store.Zone{ID: "z2", Name: "Living Room"}
-	srv.setZoneSession("z2", &media.Session{Route: media.RouteNative})
+	srv.Music.SetSession("z2", &media.Session{Route: media.RouteNative})
 	got := srv.connectInterrupts(&spotify.Playback{DeviceName: hub})
 	if strings.Contains(got, "Living Room") {
 		t.Errorf("a native zone is not interrupted by a transfer: %q", got)
@@ -161,25 +161,19 @@ func TestInterruptsOnlyNamesRoomsHomeHubIsFeeding(t *testing.T) {
 }
 
 // After the session moves away, HomeHub must stop claiming the rooms it was
-// feeding — otherwise the Music view shows a stream nobody is receiving.
-func TestReleaseDecodedZonesEndsOnlyTheDecodedOnes(t *testing.T) {
+// feeding — otherwise the Music view shows a stream nobody is receiving. Which
+// sessions survive that is the music service's own test; this pins that the
+// Connect handler asks for it at all.
+func TestReleaseDecodedZonesReleasesThem(t *testing.T) {
 	srv := testServer(t)
-	srv.setZoneSession("streamed", &media.Session{Route: media.RouteStream})
-	srv.setZoneSession("cast", &media.Session{Route: media.RouteAirPlay})
-	srv.setZoneSession("native", &media.Session{Route: media.RouteNative})
+	srv.Music.SetSession("streamed", &media.Session{Route: media.RouteStream})
+	srv.Music.SetSession("cast", &media.Session{Route: media.RouteAirPlay})
+	srv.Music.SetSession("native", &media.Session{Route: media.RouteNative})
 
 	srv.releaseDecodedZones()
 
-	srv.zoneMu.Lock()
-	defer srv.zoneMu.Unlock()
-	if _, ok := srv.zoneSessions["streamed"]; ok {
-		t.Error("the streamed zone should have been released")
-	}
-	if _, ok := srv.zoneSessions["cast"]; ok {
-		t.Error("the cast zone should have been released")
-	}
-	if _, ok := srv.zoneSessions["native"]; !ok {
-		t.Error("a natively played zone keeps playing and keeps its session")
+	if left := srv.Music.DecodedZones(); len(left) != 0 {
+		t.Errorf("%v still decoded after the account moved away", left)
 	}
 }
 

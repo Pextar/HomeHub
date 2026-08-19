@@ -24,8 +24,8 @@ import (
 	"homehub/internal/audio"
 	"homehub/internal/llm"
 	"homehub/internal/matter"
-	"homehub/internal/media"
 	"homehub/internal/mqtt"
+	"homehub/internal/music"
 	"homehub/internal/push"
 	"homehub/internal/qobuz"
 	"homehub/internal/speakermon"
@@ -54,6 +54,11 @@ type Server struct {
 	// Sonos over GENA, KEF by polling — plus the two slow lookups that hang
 	// off it. Required; supplied by the composition root.
 	Speakers *speakermon.Monitors
+	// Music resolves rooms and providers and owns the live playbacks —
+	// everything the handlers here need to know about where a household
+	// means and what can play there. Required; supplied by the composition
+	// root.
+	Music *music.Service
 
 	Matter  *matter.Client  // optional; nil-safe via Matter.Enabled()
 	MQTT    *mqtt.Client    // optional; nil-safe via MQTT.Enabled()
@@ -120,13 +125,6 @@ type Server struct {
 	// See musictimer.go.
 	fadeMu sync.Mutex
 	fades  map[string]context.CancelFunc
-
-	// zoneSessions tracks live zone playbacks. Only the stream route
-	// leaves anything running — a decoder holding the account's Spotify
-	// session and an HTTP stream several speakers pull from — so this is
-	// what remembers to shut it down. See media_session.go.
-	zoneMu       sync.Mutex
-	zoneSessions map[string]*media.Session
 }
 
 // Handler returns the configured router with logging, optional basic

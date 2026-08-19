@@ -18,11 +18,6 @@ import (
 	"homehub/internal/store"
 )
 
-// SonosEventPath is the callback prefix; the monitor appends a per-speaker
-// token. Deliberately outside /api: the speakers posting here can't
-// authenticate, so the route must not sit behind the API's auth middleware.
-const SonosEventPath = "/sonos/event"
-
 // maxSonosEventBody caps a notification. The largest thing a speaker sends
 // is the household topology, which is kilobytes even in a big house.
 const maxSonosEventBody = 512 << 10
