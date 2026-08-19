@@ -55,6 +55,10 @@ type StateUpdate struct {
 type Client struct {
 	BaseURL string
 	HTTP    *http.Client
+
+	// networks is the transports the bridge has been given credentials for —
+	// "thread", "wifi", or both. See Transports.
+	networks []string
 }
 
 // FromEnv returns a Client pointing at MATTER_BRIDGE_URL or the
@@ -71,7 +75,35 @@ func FromEnv() *Client {
 	// No client-level timeout — every call passes its own context deadline.
 	// A client timeout would silently override the longer commissioning
 	// deadline (90s) and abort BLE onboarding mid-handshake.
-	return &Client{BaseURL: strings.TrimRight(u, "/"), HTTP: &http.Client{}}
+	return &Client{
+		BaseURL:  strings.TrimRight(u, "/"),
+		HTTP:     &http.Client{},
+		networks: networksFromEnv(),
+	}
+}
+
+// networksFromEnv reads which networks a new device can be commissioned onto
+// from the same variables the bridge itself is configured with. Having the
+// credentials is what makes a transport offerable: a house with no Thread
+// dataset cannot put a device on Thread, whatever the device supports.
+func networksFromEnv() []string {
+	var out []string
+	if strings.TrimSpace(os.Getenv("MATTER_BRIDGE_THREAD_DATASET")) != "" {
+		out = append(out, "thread")
+	}
+	if strings.TrimSpace(os.Getenv("MATTER_BRIDGE_WIFI_SSID")) != "" {
+		out = append(out, "wifi")
+	}
+	return out
+}
+
+// Transports returns the networks the commission wizard may offer, never nil.
+// Both can be configured at once, and the user picks per device.
+func (c *Client) Transports() []string {
+	if c == nil || len(c.networks) == 0 {
+		return []string{}
+	}
+	return append([]string{}, c.networks...)
 }
 
 // Enabled reports whether the client has a base URL to call. Callers can

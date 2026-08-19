@@ -21,6 +21,7 @@
 package control
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -38,6 +39,14 @@ const (
 	SourceManual Source = "manual"
 	// SourceAssistant is the local LLM acting on a sentence.
 	SourceAssistant Source = "assistant"
+	// SourceSchedule is a schedule coming due on the clock.
+	SourceSchedule Source = "schedule"
+	// SourceTimer is a one-shot timer firing.
+	SourceTimer Source = "timer"
+	// SourceAutomation is an automation rule — whether a trigger matched or a
+	// person pressed "Run" in its editor. The two are the same run, and the
+	// log should not claim otherwise.
+	SourceAutomation Source = "automation"
 )
 
 // Allow reports whether the caller may act on a socket. Passing a predicate
@@ -84,6 +93,19 @@ type Result struct {
 	// Found is false when nothing matched the target at all — a caller turns
 	// that into a 404 rather than reporting a successful no-op.
 	Found bool
+}
+
+// Err returns the first device failure, or nil when every send landed.
+//
+// It exists for the background engines, which have no one to report a partial
+// result to and want a line in the log. A caller answering a request should
+// use Failures instead: "one of nine lamps refused" is what the household
+// needs to see, and an error flattens it.
+func (r Result) Err() error {
+	if len(r.Failures) == 0 {
+		return nil
+	}
+	return errors.New(r.Failures[0]["error"])
 }
 
 // Socket applies on/off/toggle to one socket by id.
@@ -219,7 +241,7 @@ func (a *Actions) Scene(id string, source Source) (Result, error) {
 			sends, _ := st.StageAction("scene", id, "activate")
 			return scene.Name, sends, true
 		},
-		afterApply: func(string) {
+		afterApply: func(Result) {
 			// Telemetry for the UI's "ran N× · 2h ago". Re-fetched rather
 			// than captured: the scene may have been deleted while the sends
 			// were in flight.
@@ -251,9 +273,11 @@ type staged struct {
 	stage func() (label string, sends []store.StagedSend, found bool)
 
 	// afterApply runs under the write lock once the send results have been
-	// folded in, for bookkeeping that belongs in the same transaction as the
-	// state change. Optional.
-	afterApply func(label string)
+	// folded in and before the save, for bookkeeping that belongs in the same
+	// transaction as the state change. It is handed the result so that
+	// bookkeeping which only counts on success — a schedule's "last fired" —
+	// can tell the difference. Optional.
+	afterApply func(Result)
 
 	// flushLights drains the smart-light queue after the lock is released.
 	// Only staging that queues light changes (scenes) needs it.
@@ -288,14 +312,19 @@ func (a *Actions) staged(s staged) (Result, error) {
 	res := Result{Label: label, Found: true}
 	res.OK, res.Failures = tally(sends)
 	if s.afterApply != nil {
-		s.afterApply(label)
+		s.afterApply(res)
 	}
 	entry := store.ActivityEntry{
 		Kind: s.kind, Source: string(s.source), Action: s.action, Label: label,
 	}
 	if len(res.Failures) > 0 {
 		entry.Status = "error"
-		entry.Error = fmt.Sprintf("%d of %d failed", len(res.Failures), res.OK+len(res.Failures))
+		// The count and one of the reasons. A household looking at "2 of 9
+		// failed" can see something is wrong; "no route to device" is what
+		// tells them which kind of wrong, and a schedule pointed at a group
+		// that has since been deleted says exactly that here.
+		entry.Error = fmt.Sprintf("%d of %d failed: %s",
+			len(res.Failures), res.OK+len(res.Failures), res.Failures[0]["error"])
 	}
 	st.Activity.Add(entry)
 	err := st.Save()

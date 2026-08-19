@@ -184,13 +184,6 @@ func (c *Client) Health(ctx context.Context) error {
 	return nil
 }
 
-// Chat runs one non-streaming round and returns the assistant message,
-// including any tool calls the model decided to make. Used when we need the
-// complete tool_calls array before acting.
-func (c *Client) Chat(ctx context.Context, messages []ChatMessage, tools []Tool, options map[string]any) (ChatMessage, error) {
-	return c.ChatStream(ctx, messages, tools, options, nil)
-}
-
 // ChatStream runs one round with streaming enabled, forwarding each content
 // delta to onToken as it arrives, and returns the fully-assembled assistant
 // message (concatenated content plus any tool calls). onToken may be nil to

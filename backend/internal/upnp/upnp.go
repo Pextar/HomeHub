@@ -34,7 +34,6 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -459,11 +458,6 @@ func HostPort(controlURL string) (host string, port int) {
 		port = 80
 	}
 	return host, port
-}
-
-// JoinHostPort is net.JoinHostPort with an int port, for building addresses.
-func JoinHostPort(host string, port int) string {
-	return net.JoinHostPort(host, strconv.Itoa(port))
 }
 
 // xmlEscape escapes a value for embedding in XML.

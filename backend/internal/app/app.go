@@ -406,8 +406,13 @@ func (a *App) Run(ctx context.Context) error {
 // startBackground launches everything that runs on its own clock. All of it
 // rides the same context, so one cancel stops the lot.
 func (a *App) startBackground(ctx context.Context) {
-	// Schedules, timers and the automation engine, on a 5-second tick.
-	go scheduler.Run(ctx, a.store, a.push)
+	// Schedules, timers and the automation engine, on a 5-second tick. It
+	// reaches devices through the same action layer the HTTP handlers use.
+	go scheduler.Run(ctx, scheduler.Config{
+		Store:   a.store,
+		Control: a.control,
+		Push:    a.push,
+	})
 
 	// 433 MHz sensor readings, over the air and over serial.
 	go rx.FromEnv().Run(ctx, a.store)

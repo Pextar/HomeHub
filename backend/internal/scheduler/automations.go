@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"time"
 
+	"homehub/internal/control"
 	"homehub/internal/push"
 	"homehub/internal/store"
 )
@@ -65,7 +66,8 @@ func ruleKey(id string, idx int) string { return id + "#" + strconv.Itoa(idx) }
 // state and fires those whose trigger edge occurred and whose conditions all
 // hold. prev is the previous tick's time, anchoring the (prev, now] window for
 // time triggers (see timeWindowMatches).
-func (e *autoEngine) tick(st *store.Store, prev, now time.Time, pushSvc *push.Service) {
+func (e *autoEngine) tick(cfg Config, prev, now time.Time) {
+	st := cfg.Store
 	stamp := now.Format("2006-01-02 15:04")
 
 	// Snapshot the state we need under a read lock, then evaluate without it.
@@ -144,7 +146,7 @@ func (e *autoEngine) tick(st *store.Store, prev, now time.Time, pushSvc *push.Se
 	e.primed = true
 
 	for _, d := range due {
-		if err := e.execute(st, d.a, d.ruleIdx, now, pushSvc); err != nil {
+		if err := e.execute(cfg, d.a, d.ruleIdx); err != nil {
 			log.Printf("automation %s (%s) rule %d failed: %v", d.a.ID, d.a.Name, d.ruleIdx, err)
 		}
 	}
@@ -286,56 +288,31 @@ func (e *autoEngine) conditionsHold(conds []store.AutomationCondition, cur *snap
 	return true
 }
 
-func (e *autoEngine) execute(st *store.Store, a store.Automation, ruleIdx int, now time.Time, pushSvc *push.Service) error {
-	actions := a.Rules[ruleIdx].Actions
-	// Stage under the lock (this also queues smart-light brightness/colour),
-	// transmit off-lock, then fold the results back in — a slow device can't
-	// stall the scheduler tick or the API.
-	st.Mu.Lock()
-	staged := st.StageAutomationActions(actions)
-	st.QueueMusic(a.Rules[ruleIdx].Music)
-	st.Mu.Unlock()
-
-	st.SendStaged(staged)
-
-	st.Mu.Lock()
-	st.SuppressStateChange = true
-	firstErr := st.ApplyStaged(staged)
-	st.SuppressStateChange = false
-
-	kind := "bulk"
-	if len(actions) == 1 {
-		kind = actions[0].TargetType
+// execute fires one rule. It runs through the same entry point the "Run"
+// button in the automation editor uses, so a rule that fires on its trigger
+// and a rule someone tests by hand do the same thing to the house.
+func (e *autoEngine) execute(cfg Config, a store.Automation, ruleIdx int) error {
+	res, err := cfg.Control.Automation(control.AutomationRun{
+		ID: a.ID, Name: a.Name,
+		Actions: a.Rules[ruleIdx].Actions,
+		Music:   a.Rules[ruleIdx].Music,
+		Source:  control.SourceAutomation,
+	})
+	if err == nil {
+		err = res.Err()
 	}
-	entry := store.ActivityEntry{Kind: kind, Source: "automation", Action: "run", Label: a.Name}
-	if firstErr != nil {
-		entry.Status = "error"
-		entry.Error = firstErr.Error()
+	if err != nil {
+		return err
 	}
-	st.Activity.Add(entry)
-
-	if existing, ok := st.Automations[a.ID]; ok {
-		existing.LastFiredAt = now.UTC()
-		existing.RunCount++
+	log.Printf("automation fired: %s (%s)", a.Name, a.ID)
+	if cfg.Push != nil {
+		go cfg.Push.NotifyEvent(push.CategoryScheduleFired, "", push.PushPayload{
+			Title: fmt.Sprintf("⚙️ Automation: %s", a.Name),
+			URL:   "/#/automations",
+			Tag:   "automation-" + a.ID,
+		})
 	}
-	if err := st.Save(); err != nil && firstErr == nil {
-		firstErr = err
-	}
-	st.Mu.Unlock()
-	st.FlushLights() // off-lock bridge calls for scene brightness/colour
-	st.FlushMusic()  // and the speakers, on the same terms
-
-	if firstErr == nil {
-		log.Printf("automation fired: %s (%s)", a.Name, a.ID)
-		if pushSvc != nil {
-			go pushSvc.NotifyEvent(push.CategoryScheduleFired, "", push.PushPayload{
-				Title: fmt.Sprintf("⚙️ Automation: %s", a.Name),
-				URL:   "/#/automations",
-				Tag:   "automation-" + a.ID,
-			})
-		}
-	}
-	return firstErr
+	return nil
 }
 
 func hhmmToMin(s string) int {

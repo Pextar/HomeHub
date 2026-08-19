@@ -73,7 +73,9 @@ One line per package — read the package doc comment for the real detail.
 - **`audio/`** — live sound: the HTTP stream speakers pull from, the
   librespot and Qobuz decoders, the AirPlay sender.
 - **`announce/`** — text-to-speech announcements, and the clip host.
-- **`scheduler/`** — schedules and the automation engine, on a 5 s tick.
+- **`scheduler/`** — schedules and the automation engine, on a 5 s tick. It
+  decides *when*, never *how*: everything it fires goes out through
+  `internal/control`.
 - **`reachability/`** — polls Wi-Fi/Matter devices, pushes on drop and
   recovery. RF sockets are fire-and-forget, so they are skipped.
 - **`push/`** — Web Push categories and per-user preference matching.
@@ -118,8 +120,9 @@ One line per package — read the package doc comment for the real detail.
   `Mutate` (see `store/tx.go`). The closure is the unit of atomicity.
 - **`Mu` stays exported for one case**: the staged device flow, which has to
   release the lock to transmit and reacquire it to record the result. Inside
-  this repo that means `internal/control` and the scheduler. Everything else
-  goes through the transaction helpers.
+  this repo that means `internal/control` and nothing else — a handler or an
+  engine reaching for `Mu` is writing a fifth copy of that flow. Everything
+  else goes through the transaction helpers.
 - **`ValidateX` functions** normalise and check; they are always called
   before persisting. Never skip them.
 - **`Save()`** writes every JSON file atomically. Hot paths have their own
@@ -133,11 +136,16 @@ One line per package — read the package doc comment for the real detail.
 
 - **Device I/O must never run while `Mu` is held.** One slow speaker would
   otherwise stall every other request.
-- **Multi-socket fan-out** (bulk, room, group, scene, scheduler,
+- **Multi-socket fan-out** (bulk, room, group, scene, schedules, timers,
   automations) goes through `internal/control`: stage under the lock → send
   off-lock → apply under the lock → save. A single socket toggle transmits
   synchronously instead, so the caller can be told directly that the device
   refused.
+- **A schedule, a timer and an automation take the same door.**
+  `control.Target` is what fires at an hour, `control.Automation` is what a
+  rule fires — and the "Run" button in the automation editor calls exactly the
+  second one. Anything that fires a device on the house's own initiative
+  belongs behind one of the two, never a fresh stage/send/apply sequence.
 - **All transmissions go through `store.Transmit`** — never `RF.Send`
   directly. It serialises 433 MHz sends so concurrent transmissions cannot
   overlap on air.

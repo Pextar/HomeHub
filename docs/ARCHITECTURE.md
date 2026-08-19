@@ -101,6 +101,16 @@ under the lock   →  fold the results in, log once, save
 A single socket is the exception and transmits synchronously, because the
 caller is waiting on one device and can be told directly that it refused.
 
+That sequence is written once. It is the most consequential thing in the
+codebase to get wrong and the easiest to get subtly wrong twice, so a schedule
+coming due, a one-shot timer, an automation rule and the "Run" button in that
+rule's editor all reach it through `control.Target` or `control.Automation`
+rather than staging for themselves. They did stage for themselves, once — four
+copies — and the copies had already drifted: a schedule that reached six of
+its seven lamps threw away the six, skipping the save because one had refused,
+while the timer path directly beside it saved. Nothing announced that; the
+lights simply came back wrong after a restart.
+
 Smart-light brightness and scene music follow the same shape through a
 different door: both are *queued* while the lock is held and drained after,
 by `FlushLights()` and `FlushMusic()`. Call them beside each other; a scene
@@ -156,7 +166,8 @@ would otherwise fail silently:
 | Package | The rule |
 |---|---|
 | `app` | every store hook is installed; `New` binds nothing |
-| `control` | an empty house is a success, an empty room is a 404; one notification per bulk action |
+| `control` | an empty house is a success, an empty room is a 404; one notification per bulk action; a timer consumes itself even when the device refuses; a run with a failure in it is still a run |
+| `scheduler` | a due schedule reaches a real device; one that could not is not stamped as fired; a spent timer does not come back |
 | `musictimer` | a failed timer releases its room's fade; shutdown stops every ramp |
 | `music` | a native zone is not "decoding"; an unknown room is not an empty one |
 | `listening` | a skipped track is not one the room played |

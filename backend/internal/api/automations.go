@@ -10,6 +10,7 @@ import (
 
 	"github.com/gorilla/mux"
 
+	"homehub/internal/control"
 	"homehub/internal/store"
 )
 
@@ -198,46 +199,30 @@ func (s *Server) runAutomationRule(w http.ResponseWriter, r *http.Request) {
 // runAutomationActions transmits a set of actions immediately and records the
 // run against the automation. Shared by the whole-automation and per-rule run
 // endpoints.
+//
+// The run itself belongs to internal/control, which is also what the scheduler
+// fires an automation through: pressing "Run" and the trigger matching at
+// 07:00 are the same thing happening, and this is where they were most likely
+// to drift apart.
 func (s *Server) runAutomationActions(w http.ResponseWriter, id, name string, actions []store.AutomationAction, music []store.MusicAction) {
-	s.Store.Mu.Lock()
-	kind := "bulk"
-	if len(actions) == 1 {
-		kind = actions[0].TargetType
-	}
-	staged := s.Store.StageAutomationActions(actions)
-	// A rule's own music, queued beside whatever a scene target may have
-	// added; both come out at FlushMusic below.
-	s.Store.QueueMusic(music)
-	s.Store.Mu.Unlock()
-
-	s.Store.SendStaged(staged)
-
-	s.Store.Mu.Lock()
-	s.Store.SuppressStateChange = true
-	firstErr := s.Store.ApplyStaged(staged)
-	s.Store.SuppressStateChange = false
-
-	entry := store.ActivityEntry{Kind: kind, Source: "automation", Action: "run", Label: name}
-	if firstErr != nil {
-		entry.Status = "error"
-		entry.Error = firstErr.Error()
-	}
-	s.Store.Activity.Add(entry)
-	// Re-fetch: the automation may have been deleted while sends were in flight.
+	// Marshalled inside the same transaction that recorded the run, so the
+	// response carries the RunCount the run produced rather than whatever a
+	// concurrent request has made of it since.
 	var body []byte
-	if cur, still := s.Store.Automations[id]; still {
-		cur.LastFiredAt = time.Now().UTC()
-		cur.RunCount++
-		body, _ = json.Marshal(cur)
+	res, err := s.Control.Automation(control.AutomationRun{
+		ID: id, Name: name, Actions: actions, Music: music,
+		Source: control.SourceAutomation,
+		Recorded: func(a *store.Automation, _ control.Result) {
+			if a != nil {
+				body, _ = json.Marshal(a)
+			}
+		},
+	})
+	if err == nil {
+		err = res.Err()
 	}
-	if err := s.Store.Save(); err != nil && firstErr == nil {
-		firstErr = err
-	}
-	s.Store.Mu.Unlock()
-	s.Store.FlushLights()
-	s.Store.FlushMusic()
-	if firstErr != nil {
-		writeError(w, http.StatusInternalServerError, firstErr.Error())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	if body == nil {
