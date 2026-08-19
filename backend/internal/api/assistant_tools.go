@@ -6,14 +6,15 @@ import (
 	"strings"
 	"time"
 
+	"homehub/internal/control"
 	"homehub/internal/llm"
 	"homehub/internal/store"
 )
 
 // assistant_tools.go is the bridge between the model's tool calls and the
-// store. Every executor reuses an existing do* helper (doControlSocket,
-// doRoomSetState, doGroupAction, doActivateScene, doBulkSetState) so the
-// Mu/staged/off-lock discipline is never re-implemented here. Executors return
+// store. Every executor goes through internal/control, the same layer the REST
+// handlers use, so the lock/staged/off-lock discipline is never re-implemented
+// here. Executors return
 // a plain result string fed back to the model as the tool's reply; resolution
 // or device errors are returned as text (not Go errors) so the agent loop
 // keeps running and the model can react.
@@ -207,7 +208,7 @@ func (s *Server) toolControlDevice(user *store.User, args map[string]any) string
 	if !ok {
 		return reason
 	}
-	updated, found, err := s.doControlSocket(sock.ID, action)
+	updated, found, err := s.Control.Socket(sock.ID, action, control.SourceAssistant)
 	if !found {
 		return "device no longer exists"
 	}
@@ -225,14 +226,14 @@ func (s *Server) toolActivateScene(user *store.User, args map[string]any) string
 	if !ok {
 		return reason
 	}
-	_, okCount, failures, found, err := s.doActivateScene(id)
-	if !found {
+	res, err := s.Control.Scene(id, control.SourceAssistant)
+	if !res.Found {
 		return "scene no longer exists"
 	}
 	if err != nil {
 		return "failed to activate scene: " + err.Error()
 	}
-	return toJSON(map[string]any{"scene": name, "devices_updated": okCount, "failures": len(failures)})
+	return toJSON(map[string]any{"scene": name, "devices_updated": res.OK, "failures": len(res.Failures)})
 }
 
 func (s *Server) toolControlRoom(user *store.User, args map[string]any) string {
@@ -241,14 +242,14 @@ func (s *Server) toolControlRoom(user *store.User, args map[string]any) string {
 	if !ok {
 		return reason
 	}
-	okCount, failures, found, err := s.doRoomSetState(user, room, action == "on")
-	if !found {
+	res, err := s.Control.Room(room, allowedTo(user), action == "on", control.SourceAssistant)
+	if !res.Found {
 		return "no devices in " + room
 	}
 	if err != nil {
 		return "failed to control room: " + err.Error()
 	}
-	return toJSON(map[string]any{"room": room, "action": action, "devices_updated": okCount, "failures": len(failures)})
+	return toJSON(map[string]any{"room": room, "action": action, "devices_updated": res.OK, "failures": len(res.Failures)})
 }
 
 func (s *Server) toolControlGroup(user *store.User, args map[string]any) string {
@@ -257,23 +258,23 @@ func (s *Server) toolControlGroup(user *store.User, args map[string]any) string 
 	if !ok {
 		return reason
 	}
-	_, okCount, failures, found, err := s.doGroupAction(id, action)
-	if !found {
+	res, err := s.Control.Group(id, action, control.SourceAssistant)
+	if !res.Found {
 		return "group no longer exists"
 	}
 	if err != nil {
 		return "failed to control group: " + err.Error()
 	}
-	return toJSON(map[string]any{"group": name, "action": action, "devices_updated": okCount, "failures": len(failures)})
+	return toJSON(map[string]any{"group": name, "action": action, "devices_updated": res.OK, "failures": len(res.Failures)})
 }
 
 func (s *Server) toolAllDevices(user *store.User, args map[string]any) string {
 	action := normalizeAction(argString(args, "action"))
-	okCount, failures, err := s.doBulkSetState(user, action == "on")
+	res, err := s.Control.All(allowedTo(user), action == "on", control.SourceAssistant)
 	if err != nil {
 		return "failed to control all devices: " + err.Error()
 	}
-	return toJSON(map[string]any{"action": action, "devices_updated": okCount, "failures": len(failures)})
+	return toJSON(map[string]any{"action": action, "devices_updated": res.OK, "failures": len(res.Failures)})
 }
 
 // --- schema + arg helpers ---

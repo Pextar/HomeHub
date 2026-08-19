@@ -6,6 +6,7 @@ import (
 	"homehub/internal/announce"
 	"homehub/internal/audio"
 	"homehub/internal/autoplay"
+	"homehub/internal/control"
 	"homehub/internal/listening"
 	"homehub/internal/media"
 	"homehub/internal/music"
@@ -50,6 +51,7 @@ func newTestServer(t *testing.T, st *store.Store) *Server {
 
 	return &Server{
 		Store:       st,
+		Control:     control.New(control.Config{Store: st}),
 		SPADir:      t.TempDir(),
 		Audio:       engine,
 		Announce:    &announce.Service{PathPrefix: AnnouncePath},

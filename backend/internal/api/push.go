@@ -7,20 +7,6 @@ import (
 	"homehub/internal/store"
 )
 
-// notifyBulkState sends a single summary "device state" notification for a
-// bulk action (all-off, room, group, scene) so users don't get one push per
-// affected socket. A no-op when push is disabled or nothing changed.
-func (s *Server) notifyBulkState(title string, changed int) {
-	if s.Push == nil || changed == 0 {
-		return
-	}
-	go s.Push.NotifyEvent(push.CategoryStateChanges, "", push.PushPayload{
-		Title: title,
-		URL:   "/#/dashboard",
-		Tag:   "bulk-state",
-	})
-}
-
 // getPushVAPIDKey returns the server's VAPID public key so the browser can
 // subscribe to push notifications. No authentication required — the public
 // key is not a secret.

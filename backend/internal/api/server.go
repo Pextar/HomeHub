@@ -21,6 +21,7 @@ import (
 	"homehub/internal/announce"
 	"homehub/internal/audio"
 	"homehub/internal/autoplay"
+	"homehub/internal/control"
 	"homehub/internal/listening"
 	"homehub/internal/llm"
 	"homehub/internal/matter"
@@ -59,7 +60,11 @@ type Server struct {
 	// everything the handlers here need to know about where a household
 	// means and what can play there. Required; supplied by the composition
 	// root.
-	Music *music.Service
+	// Control is how anything switches a device: the staged flow that keeps
+	// device I/O off the store lock, shared by these handlers and the
+	// assistant. Required; supplied by the composition root.
+	Control *control.Actions
+	Music   *music.Service
 	// Autoplay is the "continue with similar music" engine. The handlers
 	// here only read and flip its per-room switch; it ticks on its own.
 	Autoplay *autoplay.Engine

@@ -27,6 +27,7 @@ import (
 	"homehub/internal/api"
 	"homehub/internal/audio"
 	"homehub/internal/autoplay"
+	"homehub/internal/control"
 	"homehub/internal/listening"
 	"homehub/internal/llm"
 	"homehub/internal/matter"
@@ -63,6 +64,7 @@ type App struct {
 	store *store.Store
 	api   *api.Server
 
+	control     *control.Actions
 	monitors    *speakermon.Monitors
 	music       *music.Service
 	autoplay    *autoplay.Engine
@@ -178,6 +180,25 @@ func New(cfg Config) (*App, error) {
 		Logf:      log.Printf,
 	})
 
+	// ── Control ──────────────────────────────────────────────────────────
+	// How anything switches a device. Every way a household reaches its
+	// sockets — a tap, a shortcut, a sentence to the assistant — comes
+	// through here, so the staged flow that keeps device I/O off the store
+	// lock exists once.
+	a.control = control.New(control.Config{
+		Store: a.store,
+		Notify: func(title string, changed int) {
+			if a.push == nil || changed == 0 {
+				return
+			}
+			go a.push.NotifyEvent(push.CategoryStateChanges, "", push.PushPayload{
+				Title: title,
+				URL:   "/#/dashboard",
+				Tag:   "bulk-state",
+			})
+		},
+	})
+
 	// ── Music ────────────────────────────────────────────────────────────
 	// Where a household means when it names a room, what can play there,
 	// and what stays running once it does. Everything above it — the HTTP
@@ -243,6 +264,7 @@ func New(cfg Config) (*App, error) {
 		Audio:         audioEngine,
 		Announce:      announcer,
 		Speakers:      a.monitors,
+		Control:       a.control,
 		Music:         a.music,
 		Autoplay:      a.autoplay,
 		Listening:     a.listening,

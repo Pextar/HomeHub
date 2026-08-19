@@ -10,6 +10,7 @@ import (
 
 	"github.com/gorilla/mux"
 
+	"homehub/internal/control"
 	"homehub/internal/store"
 )
 
@@ -137,40 +138,14 @@ func (s *Server) deleteGroup(w http.ResponseWriter, r *http.Request) {
 // of a group.
 func (s *Server) groupAction(action string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		name, ok, failures, found, err := s.doGroupAction(mux.Vars(r)["id"], action)
-		if !found {
-			writeError(w, http.StatusNotFound, "group not found")
-			return
-		}
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
+		res, err := s.Control.Group(mux.Vars(r)["id"], action, control.SourceManual)
+		if !writeStaged(w, "group", res, err) {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"group":    name,
-			"updated":  ok,
-			"failures": failures,
+			"group":    res.Label,
+			"updated":  res.OK,
+			"failures": res.Failures,
 		})
 	}
-}
-
-// doGroupAction applies an action to every member of a group through the
-// staged flow and sends a single summary notification. Shared by the group
-// REST handler and the assistant's control_group tool. found is false when no
-// group has the given id. Caller must NOT hold Mu.
-func (s *Server) doGroupAction(id, action string) (name string, ok int, failures []map[string]string, found bool, err error) {
-	return s.runStaged(stagedAction{
-		Kind: "group", Action: action, Source: "manual",
-		Stage: func() (string, []store.StagedSend, bool) {
-			g, exists := s.Store.Groups[id]
-			if !exists {
-				return "", nil, false
-			}
-			staged, _ := s.Store.StageAction("group", id, action)
-			return g.Name, staged, true
-		},
-		Notify: func(label string, _ int) string {
-			return fmt.Sprintf("%s turned %s", label, action)
-		},
-	})
 }
