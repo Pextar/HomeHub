@@ -367,7 +367,7 @@ func (s *Server) mediaZonePlay(w http.ResponseWriter, r *http.Request) {
 	// waiting for the next poll.
 	s.Music.Touch(members)
 
-	s.recordPlay("zone:"+zone.ID, zone.Name, store.MediaPlay{
+	s.Music.RecordPlay("zone:"+zone.ID, zone.Name, store.MediaPlay{
 		Provider: p.ID(),
 		Kind:     body.Kind,
 		URI:      body.URI,

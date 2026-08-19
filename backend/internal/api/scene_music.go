@@ -80,10 +80,10 @@ func (s *Server) applyMusicAction(a store.MusicAction) error {
 
 	switch a.Action {
 	case store.MusicPause:
-		// Through the timers' own pause rather than a bare transport call:
-		// it ends a streamed zone's Spotify session too, and a scene that
-		// left one held would be the same bug the sleep timer already fixed.
-		return s.pauseRoom(ctx, a.Room, eps)
+		// Through the service's pause rather than a bare transport call: it
+		// ends a streamed zone's Spotify session too, and a scene that left
+		// one held would be the same bug the sleep timer already fixed.
+		return s.Music.Pause(ctx, a.Room, eps)
 
 	case store.MusicResume:
 		// Whatever the room had loaded. A room with an empty queue refuses
@@ -109,7 +109,7 @@ func (s *Server) applyMusicAction(a store.MusicAction) error {
 		// instruction, so it takes the room. (CancelFade on a sleep fade
 		// also puts the volume back, which this immediately overwrites with
 		// the level the scene asked for.)
-		s.CancelFade(a.Room)
+		s.MusicTimers.CancelFade(a.Room)
 		return media.SetVolume(ctx, eps, *a.Volume)
 	}
 	return nil

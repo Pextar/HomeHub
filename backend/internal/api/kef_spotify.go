@@ -126,7 +126,7 @@ func (s *Server) kefPlayItem(w http.ResponseWriter, r *http.Request) {
 	// caller's now-playing off "nothing playing".
 	s.Speakers.KEF.Touch(sp.ID)
 	s.Speakers.KEF.TouchAfter(sp.ID, 3*time.Second)
-	s.recordPlay("kef:"+sp.ID, sp.Name, store.MediaPlay{
+	s.Music.RecordPlay("kef:"+sp.ID, sp.Name, store.MediaPlay{
 		Provider: "spotify",
 		Kind:     body.Kind,
 		URI:      body.URI,

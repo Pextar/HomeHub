@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"testing"
@@ -10,9 +9,9 @@ import (
 	"homehub/internal/store"
 )
 
-// The sleep gesture and the arithmetic behind a timer row. The engine's own
-// work — playing, fading, restoring — is speaker I/O and is covered where the
-// pieces live (media.Fade, store.ValidateMusicTimer); what is worth pinning
+// The sleep gesture and the arithmetic behind a timer row. What the engine
+// then does with a timer — playing, fading, restoring, and the bookkeeping
+// around a ramp — is internal/musictimer's own test; what is worth pinning
 // here is the shape of the two things a person actually does.
 
 func timerServer(t *testing.T) (*Server, string, string) {
@@ -188,52 +187,6 @@ func TestMusicTimerFixedPathsBeatTheIDRoute(t *testing.T) {
 	srv, admin, pass := timerServer(t)
 	mustStatus(t, doAs(t, srv, admin, pass, http.MethodPost,
 		"/api/media/timers/fade/cancel", `{"room":"sonos:sp1"}`), http.StatusOK)
-}
-
-// A room is "fading" only while a ramp is actually walking it. Every path
-// that doesn't hand the room to a ramp — no fade asked for, or a failure
-// before one could start — has to release it, or the room reads as fading for
-// the life of the process and its cancel func is never called.
-func TestFiringATimerWithNoRampLeavesNoRoomMarkedFading(t *testing.T) {
-	srv, _, _ := timerServer(t)
-	vol := 0
-	// No speaker answers in a test, so this fails at the point it reaches
-	// the network — which is exactly the "failed before a ramp started"
-	// path that must still tidy up. The deadline is the test's own: without
-	// one this waits out mediaTimeout against an address nobody is at.
-	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
-	defer cancel()
-	srv.fireMusicTimer(ctx, store.MusicTimer{
-		ID: "mt_1", Room: "sonos:sp1", Action: store.MusicStop,
-		Enabled: true, Volume: &vol,
-	})
-
-	if fading := srv.fadingRooms(); len(fading) != 0 {
-		t.Errorf("rooms fading after a timer with no ramp: %v", fading)
-	}
-	if srv.CancelFade("sonos:sp1") {
-		t.Error("a fade was still registered for the room")
-	}
-}
-
-// A timer aimed at a room that no longer exists is reported, not silently
-// dropped — and it must not leave a fade behind either.
-func TestFiringATimerForAMissingRoomIsRecordedAsAnError(t *testing.T) {
-	srv, _, _ := timerServer(t)
-	srv.fireMusicTimer(t.Context(), store.MusicTimer{
-		ID: "mt_1", Room: "sonos:gone", Action: store.MusicStop, Enabled: true,
-	})
-
-	entries := srv.Store.Activity.Recent(1)
-	if len(entries) != 1 {
-		t.Fatal("nothing was written to the activity log")
-	}
-	if entries[0].Status != "error" || entries[0].Source != "music-timer" {
-		t.Errorf("entry = %+v, want a music-timer error row", entries[0])
-	}
-	if fading := srv.fadingRooms(); len(fading) != 0 {
-		t.Errorf("rooms fading after a timer that could not resolve: %v", fading)
-	}
 }
 
 func TestNextMusicFire(t *testing.T) {

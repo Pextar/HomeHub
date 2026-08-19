@@ -9,6 +9,7 @@ import (
 	"homehub/internal/listening"
 	"homehub/internal/media"
 	"homehub/internal/music"
+	"homehub/internal/musictimer"
 	"homehub/internal/speakermon"
 	"homehub/internal/store"
 )
@@ -41,18 +42,21 @@ func newTestServer(t *testing.T, st *store.Store) *Server {
 		Quality:     func() media.StreamQuality { return testQuality(st) },
 	})
 
-	return &Server{
+	musicSvc := music.New(music.Config{
 		Store:    st,
-		SPADir:   t.TempDir(),
-		Audio:    engine,
-		Announce: &announce.Service{PathPrefix: AnnouncePath},
 		Speakers: speakers,
-		Music: music.New(music.Config{
-			Store:    st,
-			Speakers: speakers,
-			Audio:    engine,
-		}),
-		Autoplay: autoplay.New(autoplay.Config{Store: st, Speakers: speakers}),
+		Audio:    engine,
+	})
+
+	return &Server{
+		Store:       st,
+		SPADir:      t.TempDir(),
+		Audio:       engine,
+		Announce:    &announce.Service{PathPrefix: AnnouncePath},
+		Speakers:    speakers,
+		Music:       musicSvc,
+		Autoplay:    autoplay.New(autoplay.Config{Store: st, Speakers: speakers}),
+		MusicTimers: musictimer.New(musictimer.Config{Store: st, Music: musicSvc}),
 		Listening: listening.New(listening.Config{
 			Store:    st,
 			Speakers: speakers,

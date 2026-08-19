@@ -836,7 +836,7 @@ func (s *Server) sonosPlayFavorite(w http.ResponseWriter, r *http.Request) {
 	// A favorite is filed under its own URI, not the Spotify one it may
 	// wrap: it is played back through PlayFavorite, so that is the handle
 	// a shelf tile has to carry to be able to start it again.
-	s.recordPlay("sonos:"+sp.ID, sp.Name, store.MediaPlay{
+	s.Music.RecordPlay("sonos:"+sp.ID, sp.Name, store.MediaPlay{
 		Provider: "sonos",
 		Kind:     "station",
 		URI:      fav.URI,
@@ -894,7 +894,7 @@ func (s *Server) sonosPlayItem(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	s.recordPlay("sonos:"+sp.ID, sp.Name, store.MediaPlay{
+	s.Music.RecordPlay("sonos:"+sp.ID, sp.Name, store.MediaPlay{
 		Provider: "spotify",
 		Kind:     body.Kind,
 		URI:      body.URI,

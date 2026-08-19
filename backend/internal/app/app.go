@@ -33,6 +33,7 @@ import (
 	"homehub/internal/media"
 	"homehub/internal/mqtt"
 	"homehub/internal/music"
+	"homehub/internal/musictimer"
 	"homehub/internal/push"
 	"homehub/internal/qobuz"
 	"homehub/internal/reachability"
@@ -62,10 +63,11 @@ type App struct {
 	store *store.Store
 	api   *api.Server
 
-	monitors  *speakermon.Monitors
-	music     *music.Service
-	autoplay  *autoplay.Engine
-	listening *listening.Recorder
+	monitors    *speakermon.Monitors
+	music       *music.Service
+	autoplay    *autoplay.Engine
+	listening   *listening.Recorder
+	musicTimers *musictimer.Engine
 
 	matter *matter.Client
 	mqtt   *mqtt.Client
@@ -214,6 +216,14 @@ func New(cfg Config) (*App, error) {
 		Changed:  func() { a.api.SpeakersChanged() },
 	})
 
+	// Music that starts and stops on its own: wake-ups and sleep timers.
+	a.musicTimers = musictimer.New(musictimer.Config{
+		Store:   a.store,
+		Music:   a.music,
+		Changed: func() { a.api.SpeakersChanged() },
+		Logf:    log.Printf,
+	})
+
 	// Announcements share the audio engine's address discovery: both are
 	// "somewhere a speaker can fetch from", and resolving it twice would
 	// mean two ways to be wrong on a multi-homed box.
@@ -236,6 +246,7 @@ func New(cfg Config) (*App, error) {
 		Music:         a.music,
 		Autoplay:      a.autoplay,
 		Listening:     a.listening,
+		MusicTimers:   a.musicTimers,
 		Matter:        a.matter,
 		MQTT:          a.mqtt,
 		LLM:           llmClient,
@@ -379,7 +390,7 @@ func (a *App) startBackground(ctx context.Context) {
 	// Cancelling the context also stops any volume ramp in flight — a fade
 	// left running past shutdown would leave a room at an interim volume
 	// with nothing left to move it.
-	go a.api.RunMusicTimers(ctx)
+	go a.musicTimers.Run(ctx)
 }
 
 // shutdown reverses New, in the order the pieces depend on each other.

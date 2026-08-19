@@ -30,6 +30,11 @@ import (
 	"homehub/internal/store"
 )
 
+// Timeout caps one operation against a room. Generous because the stream route
+// can involve waking a speaker, a cloud round trip and several UPnP calls
+// before anything comes out.
+const Timeout = 45 * time.Second
+
 // kefStreamSettle is how long after a command a streamed KEF is re-read a
 // second time. The audio comes back to it over the network, so it takes a
 // moment to actually start, and a single immediate poll would catch it still
@@ -76,9 +81,13 @@ func New(cfg Config) *Service {
 	return &Service{cfg: cfg, sessions: map[string]*media.Session{}}
 }
 
-// Audio exposes the engine the service plays through, for callers that need
-// to execute a plan themselves.
-func (s *Service) Audio() *audio.Engine { return s.cfg.Audio }
+// Deps is what executing a media plan needs: the stream host, the AirPlay
+// sender and somewhere to log. Callers that run a plan themselves — a zone
+// play, a wake-up timer — pass this rather than assembling it.
+func (s *Service) Deps() media.Deps { return s.cfg.Audio.Deps() }
+
+// Quality is what the house decodes at, for callers describing the audio chain.
+func (s *Service) Quality() media.StreamQuality { return s.cfg.Audio.Quality() }
 
 // ── Where ────────────────────────────────────────────────────────────────
 
@@ -176,6 +185,69 @@ func (s *Service) Room(key string) ([]media.Endpoint, string, error) {
 	return out, name, nil
 }
 
+// RoomName is what the house calls a destination key, falling back to the key
+// itself so a log row or an activity entry is never blank.
+//
+// Room returns the same name alongside the endpoints; this is for the callers
+// that want to *say* where something happened without resolving whether it can
+// still be played to.
+func (s *Service) RoomName(key string) string {
+	st := s.cfg.Store
+	name := store.ViewValue(st, func() string {
+		if id, ok := strings.CutPrefix(key, "zone:"); ok {
+			if z, exists := st.Zones[id]; exists {
+				return z.Name
+			}
+			return ""
+		}
+		bridge, id, ok := store.SplitMember(key)
+		if !ok {
+			return ""
+		}
+		switch bridge {
+		case "kef":
+			if sp, exists := st.KEF[id]; exists {
+				return sp.Name
+			}
+		case "airplay":
+			if sp, exists := st.AirPlay[id]; exists {
+				return sp.Name
+			}
+		default:
+			if sp, exists := st.Sonos[id]; exists {
+				return sp.Name
+			}
+		}
+		return ""
+	})
+	if name == "" {
+		return key
+	}
+	return name
+}
+
+// RecordPlay files one play under a destination key.
+//
+// It belongs to this package because this is the layer that knows a play
+// succeeded: every surface that starts music comes through here, and a play the
+// speaker refused is not something to offer back from a shelf.
+//
+// Takes the write lock briefly, then persists off-lock — history is never
+// worth failing a play that already happened, so a write error is logged and
+// swallowed. Mutate rather than Update: Update pairs a mutation with a full
+// Save, and the history has its own file precisely so that starting a song
+// does not rewrite every socket in the house.
+func (s *Service) RecordPlay(roomKey, roomName string, p store.MediaPlay) {
+	if strings.TrimSpace(roomKey) == "" || strings.TrimSpace(p.URI) == "" {
+		return
+	}
+	p.RoomName = roomName
+	s.cfg.Store.Mutate(func() { s.cfg.Store.RecordPlay(roomKey, p) })
+	if err := s.cfg.Store.SaveHistory(); err != nil {
+		s.cfg.Logf("history: %v", err)
+	}
+}
+
 // Touch asks both monitors to re-read the speakers a command just reached, so
 // now-playing updates promptly instead of at the next scheduled poll.
 func (s *Service) Touch(eps []media.Endpoint) {
@@ -259,6 +331,26 @@ func (s *Service) ItemFormat(ctx context.Context, p media.Provider, item media.I
 		return nil
 	}
 	return &f
+}
+
+// Pause stops a room and releases anything it was holding.
+//
+// It is here rather than at each call site because the release is the part
+// that is easy to forget: a streamed zone leaves a decoder holding the
+// account's Spotify session, and pausing the speakers alone would keep it held
+// all night. A scene that quiets the house and a sleep timer that ends it must
+// both do this, or they are the same bug twice.
+func (s *Service) Pause(ctx context.Context, room string, eps []media.Endpoint) error {
+	ctx, cancel := context.WithTimeout(ctx, Timeout)
+	defer cancel()
+
+	zoneID, isZone := strings.CutPrefix(room, "zone:")
+	err := media.Control(ctx, s.Plan(zoneID, eps), media.TransportPause)
+	if isZone {
+		s.EndSession(zoneID)
+	}
+	s.Touch(eps)
+	return err
 }
 
 // ── What is still running ────────────────────────────────────────────────

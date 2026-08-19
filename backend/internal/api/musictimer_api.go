@@ -42,7 +42,7 @@ type musicTimerView struct {
 
 // musicTimers handles GET /api/media/timers.
 func (s *Server) musicTimers(w http.ResponseWriter, r *http.Request) {
-	fading := s.fadingRooms()
+	fading := s.MusicTimers.FadingRooms()
 	now := time.Now()
 
 	var out []musicTimerView
@@ -128,7 +128,7 @@ func (s *Server) musicUpdateTimer(w http.ResponseWriter, r *http.Request) {
 	}
 	// A timer that has just been rewritten should not have last night's
 	// ramp still walking its room.
-	s.CancelFade(saved.Room)
+	s.MusicTimers.CancelFade(saved.Room)
 	writeJSON(w, http.StatusOK, saved)
 }
 
@@ -151,7 +151,7 @@ func (s *Server) musicDeleteTimer(w http.ResponseWriter, r *http.Request) {
 	}) {
 		return
 	}
-	s.CancelFade(room)
+	s.MusicTimers.CancelFade(room)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -228,7 +228,7 @@ func (s *Server) musicSleep(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Whatever was already fading this room is not this timer's ramp.
-	s.CancelFade(t.Room)
+	s.MusicTimers.CancelFade(t.Room)
 
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"timer": t,
@@ -248,7 +248,7 @@ func (s *Server) musicCancelFade(w http.ResponseWriter, r *http.Request) {
 	if !decodeBody(w, r, &body) {
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]bool{"cancelled": s.CancelFade(strings.TrimSpace(body.Room))})
+	writeJSON(w, http.StatusOK, map[string]bool{"cancelled": s.MusicTimers.CancelFade(strings.TrimSpace(body.Room))})
 }
 
 // musicRoomNameLocked is musicRoomName for a caller already inside a View.

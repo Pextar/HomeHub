@@ -4,7 +4,6 @@
 package api
 
 import (
-	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -14,7 +13,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/gorilla/handlers"
@@ -28,6 +26,7 @@ import (
 	"homehub/internal/matter"
 	"homehub/internal/mqtt"
 	"homehub/internal/music"
+	"homehub/internal/musictimer"
 	"homehub/internal/push"
 	"homehub/internal/qobuz"
 	"homehub/internal/speakermon"
@@ -68,6 +67,9 @@ type Server struct {
 	// read that log and clear it; something with a fresh speaker reading in
 	// hand is what writes to it.
 	Listening *listening.Recorder
+	// MusicTimers runs the wake-ups and sleep timers. The handlers here
+	// create and cancel them; the engine is what fires them.
+	MusicTimers *musictimer.Engine
 
 	Matter  *matter.Client  // optional; nil-safe via Matter.Enabled()
 	MQTT    *mqtt.Client    // optional; nil-safe via MQTT.Enabled()
@@ -99,14 +101,6 @@ type Server struct {
 	// logins throttles repeated failed logins per client IP. Created
 	// lazily in Handler().
 	logins *loginLimiter
-
-	// fades holds the cancel func of each room's in-flight volume ramp,
-	// keyed by media destination key. One ramp per room: anything starting
-	// a new one cancels the old, which is what stops a wake-up fade and a
-	// sleep fade from walking the same speakers in opposite directions.
-	// See musictimer.go.
-	fadeMu sync.Mutex
-	fades  map[string]context.CancelFunc
 }
 
 // Handler returns the configured router with logging, optional basic
