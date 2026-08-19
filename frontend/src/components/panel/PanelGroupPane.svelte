@@ -168,9 +168,9 @@
                         <Icon name={m.muted ? "volumeOff" : "volume"} size={16} />
                     </button>
                     <Slider
-                        value={music.memVol[m.id] ?? m.volume}
+                        value={music.memberVol(m)}
                         label="Volume {m.name}"
-                        valueText="{music.memVol[m.id] ?? m.volume}%"
+                        valueText="{music.memberVol(m)}%"
                         onInput={(v) => music.dragMemberVolume(m.id, v)}
                         onChange={(v) => music.setMemberVolume(m.id, v)}
                     />

@@ -33,6 +33,16 @@ import type {
 export type PanelVendor = MediaVendor;
 
 /** One speaker inside a featured group or zone, coordinator/lead first. */
+/** The panel store's guarded runner: claims a busy key, re-reads on success,
+ *  toasts on failure. Every module under here takes one rather than building
+ *  its own, so one action disables the same control as any other. */
+export type PanelRunner = (
+  key: string,
+  fn: () => Promise<unknown>,
+  errTitle: string,
+  ok?: () => void,
+) => Promise<void>;
+
 export interface PanelMember {
   id: string;
   name: string;
@@ -170,8 +180,10 @@ export interface PanelVolume {
   setVolume(s: PanelSource, level: number): void;
   /** One step of the ± buttons — a fader is imprecise at arm's length. */
   nudgeVolume(s: PanelSource, delta: number): void;
-  /** Per-member faders, when a group or zone has more than one speaker. */
-  readonly memVol: Record<string, number>;
+  /** Per-member faders, when a group or zone has more than one speaker.
+   *  What one member's slider shows — the finger's value while it holds,
+   *  the speaker's own otherwise. */
+  memberVol(m: { id: string; volume: number }): number;
   dragMemberVolume(id: string, level: number): void;
   setMemberVolume(id: string, level: number): void;
   /** No memberId mutes the whole room; one mutes that speaker. */

@@ -40,21 +40,12 @@
     import MiniPlayer from "../components/music/MiniPlayer.svelte";
     import MusicHome from "../components/music/MusicHome.svelte";
     import ConfirmModal from "../components/ConfirmModal.svelte";
-    import SpeakerModal from "../modals/SpeakerModal.svelte";
-    import SonosEventsModal from "../modals/SonosEventsModal.svelte";
-    import MusicQualityModal from "../modals/MusicQualityModal.svelte";
-    import SpotifyConnectModal from "../modals/SpotifyConnectModal.svelte";
-    import QobuzConnectModal from "../modals/QobuzConnectModal.svelte";
     import LiveStatusChip from "../components/LiveStatusChip.svelte";
     import { api } from "../lib/api";
     import { toasts, route, bottomBar } from "../lib/stores.svelte";
     import { onLive } from "../lib/live";
     import { openModal } from "../lib/modal.svelte";
-    import { lockBodyScroll, unlockBodyScroll } from "../lib/scroll-lock";
     import { originOf, type Origin } from "../lib/motion";
-    import * as sheetRun from "../lib/sheet-run";
-    import type { SheetRun } from "../lib/sheet-run";
-    import { settleScroll, restoreScroll, toTop } from "../lib/music/scroll";
     import { clock } from "../lib/music/clock.svelte";
     import { createBusy } from "../lib/music/busy.svelte";
     import { createSonosBridge } from "../lib/music/sonos.svelte";
@@ -71,14 +62,14 @@
     import { createSpotify } from "../lib/music/spotify.svelte";
     import { createPlayback } from "../lib/music/playback.svelte";
     import { createCatalogCache, contextItem } from "../lib/music/catalog-cache.svelte";
+    import { createDeviceSheets } from "../lib/music/device-sheets";
+    import { createMusicNav } from "../lib/music/navigation.svelte";
+    import type { ScreenEntry } from "../lib/music/navigation.svelte";
     import type {
-        SonosSpeakerView,
         SonosFavorite,
         KEFSpeakerView,
-        AirPlaySpeakerView,
         SpotifyContextDetail,
         MediaZone,
-        UPnPRenderer,
     } from "../lib/types";
 
     // The three bridges, and the model that turns them into rooms. The busy
@@ -200,39 +191,31 @@
     // music app's drill-down reads, never "all the way home". Only the top
     // of the stack renders; what each level was scrolled to is kept on its
     // entry and restored when it surfaces again.
-    type Screen = "home" | "speakers" | "artist" | "favorite" | "browse" | "context";
-    interface ScreenEntry {
-        id: Exclude<Screen, "home">;
-        /** Catalog screens: the artist / album / playlist URI they show. */
-        uri?: string;
-        /** Where this level was scrolled when something pushed over it. */
-        scroll: number;
-    }
-    let stack = $state<ScreenEntry[]>([]);
-    const screen = $derived<Screen>(stack.length ? stack[stack.length - 1].id : "home");
-    const topEntry = $derived(stack.length ? stack[stack.length - 1] : undefined);
+    // Where the view is, and what back means from there — the screen stack,
+    // the sheet run, and the one history entry over both. The rules live in
+    // lib/music/navigation.svelte.ts; what a screen *shows*, and what a sheet
+    // is bound to while it is up, stay here and come back through the hooks.
+    const nav = createMusicNav({
+        sheetScrollEl: () => scrollEl,
+        playerKey: () => playerKey,
+        reopenPlayer: (key) => {
+            const back = rooms.byKey(key);
+            if (!back) return false;
+            openPlayer(back);
+            return true;
+        },
+        onLeftScreen,
+        onSheetsClosed: (showing) => {
+            if (showing !== "player") playerKey = null;
+            if (showing !== "room-edit") editingZone = null;
+            drag.release();
+        },
+    });
+    const screen = $derived(nav.screen);
+    const topEntry = $derived(nav.top);
 
-    /** Where Home was left, so coming back lands where you were. */
-    let homeScrollY = 0;
-
-    /**
-     * The room to hand back to on the way out of a screen reached from that
-     * room's open player — Browse, or an artist tapped inside it. Noted by
-     * `pushScreen` from whether the player was up at the moment of the push,
-     * so it takes no per-caller wiring and survives going deeper.
-     */
-    let playerReturn: string | null = null;
-
-    function pushScreen(e: ScreenEntry) {
-        if (sheets.open === "player") playerReturn = playerKey;
-        hideSheet();
-        if (stack.length === 0) homeScrollY = window.scrollY;
-        else stack[stack.length - 1].scroll = window.scrollY;
-        stack = [...stack, e];
-        toTop();
-    }
     function openSpeakers() {
-        pushScreen({ id: "speakers", scroll: 0 });
+        nav.pushScreen({ id: "speakers", scroll: 0 });
     }
     /** True when Browse was opened to type in, rather than to read. */
     let searchWantsFocus = $state(false);
@@ -240,7 +223,7 @@
         // A recent search is a request to *run* it, so it runs — and the caret
         // stays out of the way, since the results are what was asked for.
         searchWantsFocus = !q;
-        pushScreen({ id: "browse", scroll: 0 });
+        nav.pushScreen({ id: "browse", scroll: 0 });
         if (q) spotify.runQuery(q);
     }
 
@@ -255,100 +238,8 @@
         }
     }
 
-    /** Back means up one level — except when a player noted a room to come
-     *  back to, which is owed exactly once the stack runs out. */
-    function leaveScreen() {
-        const leaving = stack[stack.length - 1];
-        if (!leaving) return;
-        onLeftScreen(leaving);
-        if (stack.length > 1) {
-            stack = stack.slice(0, -1);
-            restoreScroll(stack[stack.length - 1].scroll);
-            return;
-        }
-        stack = [];
-        if (playerReturn) {
-            const back = rooms.byKey(playerReturn);
-            playerReturn = null;
-            if (back) return openPlayer(back);
-            // The room disappeared in the meantime (regrouped, removed) — fall
-            // through to Home like any other missing target.
-        }
-        restoreScroll(homeScrollY);
-    }
-
-    // ── Sheets ───────────────────────────────────────────────────────────
-    // Only ever one at a time. Sheets *swap* — they never stack — so there is
-    // only ever one scrim, one Escape, one thing to swipe away.
-    type Sheet = "player" | "room-edit";
-    let sheets = $state<SheetRun<Sheet>>(sheetRun.closed());
-
-    const openSheet = $derived(sheets.open);
-    const editorOpen = $derived(sheets.open === "room-edit");
-    const sheetUp = $derived(sheetRun.isUp(sheets));
-
-    // ── Back closes one level ────────────────────────────────────────────
-    // One history entry is held for the whole time Music is deeper than Home,
-    // and re-taken after each step back while depth remains. So back always
-    // means "up one", exactly like Escape and the back chip.
-    const navDepth = $derived(
-        (screen !== "home" ? 1 : 0) + (sheets.open ? (sheets.under ? 2 : 1) : 0),
-    );
-    let holdsEntry = false;
-
-    $effect(() => {
-        if (navDepth > 0) {
-            if (!holdsEntry) {
-                history.pushState({ musicNav: true }, "");
-                holdsEntry = true;
-            }
-        } else if (holdsEntry) {
-            holdsEntry = false;
-            history.back();
-        }
-    });
-
-    function onPopState() {
-        if (navDepth === 0) return; // not our entry — a real route change
-        holdsEntry = false; // the browser consumed it; the effect re-takes it
-        if (sheetUp) dropSheet();
-        else if (screen !== "home") leaveScreen();
-    }
-
-    // The body-scroll lock keys on *whether* a sheet is up, never on which — so
-    // a swap doesn't release and retake it, which on iOS would unpin and re-pin
-    // the body for a frame.
-    $effect(() => {
-        if (!sheetUp) return;
-        lockBodyScroll();
-        return unlockBodyScroll;
-    });
-
-    /** How far each sheet was scrolled when it handed over. */
-    const sheetScroll: Partial<Record<Sheet, number>> = {};
-    function rememberSheetScroll() {
-        if (sheets.open) sheetScroll[sheets.open] = scrollEl?.scrollTop ?? 0;
-    }
-    function restoreSheetScroll(s: Sheet) {
-        settleScroll(() => scrollEl, sheetScroll[s] ?? 0);
-    }
-
-    function dropSheet() {
-        if (!sheetUp) return;
-        const back = sheetRun.dismiss(sheets);
-        sheets = back;
-        if (back.open) restoreSheetScroll(back.open);
-        if (back.open !== "player") playerKey = null;
-        if (back.open !== "room-edit") editingZone = null;
-        drag.release();
-    }
-    function hideSheet() {
-        if (!sheetUp) return;
-        sheets = sheetRun.closeAll(sheets);
-        playerKey = null;
-        editingZone = null;
-        drag.release();
-    }
+    const openSheet = $derived(nav.openSheet);
+    const editorOpen = $derived(nav.openSheet === "room-edit");
 
     // ── The player ───────────────────────────────────────────────────────
     // Rendered inline (not via the modal stack) so it stays live against the
@@ -375,20 +266,18 @@
         if (r.zone && r.members.length === 0) return openRoomEditor(r.zone);
         // An unreachable KEF speaker can't answer anything; fixing its address
         // is what the tap actually wants.
-        if (r.speaker && !r.reachable) return void openKEFModal(r.speaker);
+        if (r.speaker && !r.reachable) return void sheetsFor.openKEF(r.speaker);
         playerOrigin = originOf(from);
         playerKey = r.key;
         destination.focus(r);
         // Opened from Browse, the player *replaces* that screen's sheet and
         // puts it back on the way out.
-        rememberSheetScroll();
-        sheets = sheetRun.swapTo(sheets, "player");
-        sheetScroll.player = 0;
+        nav.swapSheet("player");
         sheetDismissing = false;
     }
     function closePlayer() {
         if (openSheet !== "player") return;
-        dropSheet();
+        nav.dropSheet();
     }
 
     // A regroup between polls can retire the room the sheet is bound to. Close
@@ -417,7 +306,7 @@
     function configureRoom(r: Room) {
         if (r.zone) return openRoomEditor(r.zone);
         const sp = r.speaker;
-        hideSheet();
+        nav.hideSheet();
         openSpeakers();
         if (sp) return openKEFSpeaker(sp);
         // A Sonos room's settings are its coordinator's, on the Speakers screen.
@@ -518,9 +407,7 @@
         // other swapping sheet does rather than collapsing into the dock while
         // the editor rises through it.
         playerOrigin = null;
-        rememberSheetScroll();
-        sheets = sheetRun.swapTo(sheets, "room-edit");
-        sheetScroll["room-edit"] = 0;
+        nav.swapSheet("room-edit");
         sheetDismissing = false;
         // Registering or removing a speaker is the only thing that changes the
         // picker's list, and it can have happened since the view mounted.
@@ -529,7 +416,7 @@
 
     function zoneSaved(_z: MediaZone) {
         editingZone = null;
-        dropSheet();
+        nav.dropSheet();
     }
 
     async function deleteZone(z: MediaZone) {
@@ -542,7 +429,7 @@
         });
         if (!ok) return;
         if (!(await zones.remove(z.id))) return;
-        hideSheet();
+        nav.hideSheet();
     }
 
     /** Clearing stops playback, so it gets the same confirm any destructive
@@ -572,12 +459,12 @@
     const catalog = createCatalogCache({
         artistUri: () => (topEntry?.id === "artist" ? (topEntry.uri ?? null) : null),
         contextUri: () => (topEntry?.id === "context" ? (topEntry.uri ?? null) : null),
-        onFail: leaveScreen,
+        onFail: nav.leaveScreen,
     });
 
     async function openArtist(uri: string) {
         if (topEntry?.id === "artist" && topEntry.uri === uri) return;
-        pushScreen({ id: "artist", uri, scroll: 0 });
+        nav.pushScreen({ id: "artist", uri, scroll: 0 });
         await catalog.loadArtist(uri);
     }
 
@@ -586,7 +473,7 @@
      *  listing is what a tap on a container is actually asking for. */
     async function openContext(uri: string) {
         if (topEntry?.id === "context" && topEntry.uri === uri) return;
-        pushScreen({ id: "context", uri, scroll: 0 });
+        nav.pushScreen({ id: "context", uri, scroll: 0 });
         await catalog.loadContext(uri);
     }
 
@@ -598,7 +485,7 @@
      *  instead of playing outright — the corner mark on the card said so. */
     async function openFavoriteBrowse(f: SonosFavorite) {
         if (!f.spotify_uri) return;
-        pushScreen({ id: "favorite", scroll: 0 });
+        nav.pushScreen({ id: "favorite", scroll: 0 });
         browseFavorite = f;
         favoriteContext = null;
         favoriteLoading = true;
@@ -613,7 +500,7 @@
             // favorite — some of its own algorithmic playlists 404 on this
             // lookup even though Sonos plays them fine. Point at what works.
             toasts.error("Can't preview this playlist", "Try playing it instead.");
-            leaveScreen();
+            nav.leaveScreen();
         } finally {
             if (browseFavorite?.spotify_uri === uri) favoriteLoading = false;
         }
@@ -644,11 +531,11 @@
                 const name = drag.grabbedName || drag.drag?.name || "Room";
                 drag.release();
                 announce(`${name} put back.`);
-            } else if (openSheet) dropSheet();
+            } else if (openSheet) nav.dropSheet();
             // Escape backs out of a speaker's settings the same way its back
             // chip does — a drill-down owes the user the key that leaves it.
             else if (speakersScreen?.closeDetail()) return;
-            else if (screen !== "home") leaveScreen();
+            else if (screen !== "home") nav.leaveScreen();
             return;
         }
         if (e.metaKey || e.ctrlKey || e.altKey) return;
@@ -736,100 +623,19 @@
     });
 
     // ── Devices ──────────────────────────────────────────────────────────
-    // One sheet for every bridge — it carries the brand picker when adding and
-    // is locked to the owning bridge when editing.
-    async function openSpeakerModal(sp?: SonosSpeakerView) {
-        const changed = await openModal<boolean>(
-            SpeakerModal,
-            sp ? { existing: sp, brand: "sonos" as const } : {},
-        );
-        if (changed) {
-            void sonos.refresh();
-            void kef.refresh();
-            // The add sheet carries a brand picker, so a registration made
-            // from it could have been any of the four.
-            void airplay.refresh();
-            void upnp.refresh();
-            // A new or removed speaker changes both what rooms hold (the
-            // backend cascades a delete out of them) and what the picker can
-            // offer, so both reads are due.
-            void zones.refresh();
-            void zones.loadEndpoints();
-        }
-    }
-
-    /** A renderer's sheet. Same shape as the AirPlay one and for the same
-     *  reason: adding or removing one changes which routes every zone can
-     *  take, so the zone reads and the endpoint list both have to follow. */
-    async function openUPnPModal(rn: UPnPRenderer) {
-        const changed = await openModal<boolean>(SpeakerModal, {
-            existing: rn,
-            brand: "upnp" as const,
-        });
-        if (changed) {
-            void upnp.refresh();
-            void zones.refresh();
-            void zones.loadEndpoints();
-        }
-    }
-
-    async function openAirPlayModal(sp: AirPlaySpeakerView) {
-        const changed = await openModal<boolean>(SpeakerModal, {
-            existing: sp,
-            brand: "airplay" as const,
-        });
-        if (changed) {
-            void airplay.refresh();
-            void upnp.refresh();
-            void zones.refresh();
-            void zones.loadEndpoints();
-        }
-    }
-
-    async function openKEFModal(sp: KEFSpeakerView) {
-        const changed = await openModal<boolean>(SpeakerModal, {
-            existing: sp,
-            brand: "kef" as const,
-        });
-        if (changed) {
-            if (kefDetailId === sp.id) kefDetailId = null;
-            void kef.refresh();
-            void zones.refresh();
-            void zones.loadEndpoints();
-        }
-    }
-
-    /** What the audio actually is on each path, and the decode setting. Read
-     *  fresh by the sheet itself: the answer depends on the route a zone would
-     *  take, which changes with what is registered. */
-    async function openQualityModal() {
-        await openModal(MusicQualityModal, {});
-        // A changed decode quality changes what every zone read reports.
-        void zones.refresh();
-    }
-
-    /** The Connect picker. Reading the zones after it closes: a transfer made
-     *  in there can take the account's session away from a room HomeHub was
-     *  feeding, and the backend will have released that zone. */
-    async function openConnectModal() {
-        await openModal(SpotifyConnectModal, {});
-        void zones.refresh();
-    }
-
-    /** Qobuz setup. Signing in changes what every zone read reports about
-     *  quality — it is the one provider that can answer "lossless" — so the
-     *  zones are re-read the same way the quality sheet re-reads them. */
-    async function openQobuzModal() {
-        await openModal(QobuzConnectModal, {});
-        void zones.refresh();
-    }
-
-    /** The push-status sheet. Retrying inside it can turn subscriptions on, and
-     *  that changes which poll interval this view should be using. */
-    async function openEventsModal() {
-        await openModal(SonosEventsModal, {});
-        void sonos.refresh();
-    }
+    // The equipment sheets, and the reads each one is owed when it closes —
+    // lib/music/device-sheets.ts, because "what changed when a speaker did"
+    // is a rule about the house rather than about this screen.
+    const sheetsFor = createDeviceSheets({
+        sonos,
+        kef,
+        airplay,
+        upnp,
+        zones,
+        onKefEdited: (id) => {
+            if (kefDetailId === id) kefDetailId = null;
+        },
+    });
 
     // Which speaker's settings the Speakers screen has open. Held here because
     // the player's configure action pushes the screen *and* opens a pane in one
@@ -843,7 +649,7 @@
     }
 </script>
 
-<svelte:window onkeydown={onWindowKey} onpopstate={onPopState} />
+<svelte:window onkeydown={onWindowKey} onpopstate={nav.onPopState} />
 
 <!-- Anything a grouping gesture does that has no visible running commentary
      — the keyboard path especially — is said here instead. -->
@@ -872,7 +678,7 @@
                     <span class="act-label">Browse</span>
                 </button>
             {:else}
-                <button class="chip" onclick={() => openSpeakerModal()}>
+                <button class="chip" onclick={() => sheetsFor.openSpeaker()}>
                     <Icon name="plus" size={14} /> Add speaker
                 </button>
             {/if}
@@ -889,7 +695,7 @@
         title="No speakers yet"
         message="Add your Sonos or KEF speakers to control playback, volume and grouping right here, with neither app needed."
     >
-        <button class="btn btn-primary" onclick={() => openSpeakerModal()}>Add speaker</button>
+        <button class="btn btn-primary" onclick={() => sheetsFor.openSpeaker()}>Add speaker</button>
     </EmptyState>
 {/if}
 
@@ -916,17 +722,17 @@
             {airplay}
             {totalSpeakers}
             {readyCount}
-            onBack={leaveScreen}
-            onAdd={() => openSpeakerModal()}
-            onEditSonos={(sp) => void openSpeakerModal(sp)}
-            onEditKEF={(sp) => void openKEFModal(sp)}
-            onEditAirPlay={(sp) => void openAirPlayModal(sp)}
-            onEditUPnP={(rn) => void openUPnPModal(rn)}
+            onBack={nav.leaveScreen}
+            onAdd={() => sheetsFor.openSpeaker()}
+            onEditSonos={(sp) => void sheetsFor.openSpeaker(sp)}
+            onEditKEF={(sp) => void sheetsFor.openKEF(sp)}
+            onEditAirPlay={(sp) => void sheetsFor.openAirPlay(sp)}
+            onEditUPnP={(rn) => void sheetsFor.openUPnP(rn)}
             {upnp}
-            onOpenEvents={openEventsModal}
-            onOpenQuality={openQualityModal}
-            onOpenConnect={openConnectModal}
-            onOpenQobuz={openQobuzModal}
+            onOpenEvents={sheetsFor.openEvents}
+            onOpenQuality={sheetsFor.openQuality}
+            onOpenConnect={sheetsFor.openConnect}
+            onOpenQobuz={sheetsFor.openQobuz}
             spotifyPlayback={spotify.status?.playback ?? false}
             onKEFOpened={(sp) => {
                 const r = rooms.byKey("kef:" + sp.id);
@@ -943,7 +749,7 @@
             {destination}
             {busy}
             {targetRow}
-            onBack={leaveScreen}
+            onBack={nav.leaveScreen}
             onPick={playItem}
             onEnqueue={(item, next) =>
                 enqueue({ service: "Spotify", uri: item.uri, title: item.name }, next)}
@@ -958,7 +764,7 @@
             {destination}
             {busy}
             {targetRow}
-            onBack={leaveScreen}
+            onBack={nav.leaveScreen}
             onPlayAll={() => catalog.contextDetail && playItem(contextItem(catalog.contextDetail))}
             onPick={playItem}
             onEnqueue={(item, next) =>
@@ -974,7 +780,7 @@
             {destination}
             {busy}
             {targetRow}
-            onBack={leaveScreen}
+            onBack={nav.leaveScreen}
             onPlayAll={() => playFavorite(browseFavorite!)}
             playAllBusy={busy.is("fav:" + browseFavorite.id)}
             onPick={playItem}
@@ -990,7 +796,7 @@
             {destination}
             {busy}
             autofocus={searchWantsFocus}
-            onBack={leaveScreen}
+            onBack={nav.leaveScreen}
             onPlayItem={playItem}
             onEnqueue={(item, next) =>
                 enqueue({ service: "Spotify", uri: item.uri, title: item.name }, next)}
@@ -1139,7 +945,7 @@
     <ZoneEditor
         zone={editingZone}
         {zones}
-        onCancel={dropSheet}
+        onCancel={nav.dropSheet}
         onSaved={zoneSaved}
         onDelete={(z) => void deleteZone(z)}
         onOpenSpeakers={openSpeakers}

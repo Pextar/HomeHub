@@ -9,7 +9,7 @@ import type {
 } from "../types";
 import type { Busy } from "./busy.svelte";
 import { clock } from "./clock.svelte";
-import { clampVol, createVolumeThrottle } from "./volume";
+import { createFader } from "./fader.svelte";
 import { trackLines } from "./format";
 
 /**
@@ -129,15 +129,10 @@ export function createZonesBridge(busy: Busy): ZonesBridge {
    */
   const playOverride = $state<Record<string, { playing: boolean; at: number }>>({});
 
-  // The zone fader's own value while a finger is on it, and when. Same
-  // contract as the vendor bridges': for this window the value is the user's,
-  // not the poll's.
-  const vol = $state<Record<string, number>>({});
-  const volAt: Record<string, number> = {};
-  const VOL_HOLD_MS = 4000;
-
-  const dragThrottle = createVolumeThrottle((id, level) => {
-    void api.mediaZoneVolume(id, level).catch(() => {}); // a dropped mid-drag frame self-heals on release or the next poll
+  // The zone fader's own value while a finger is on it — the shared rule,
+  // same as the vendor bridges' (see fader.svelte.ts).
+  const fader = createFader((id, level) => {
+    void api.mediaZoneVolume(id, level).catch(() => {});
   });
 
   function speakersOf(z: MediaZone): MediaZoneSpeaker[] {
@@ -316,14 +311,14 @@ export function createZonesBridge(busy: Busy): ZonesBridge {
     },
 
     shownVolume(z) {
-      const ov = vol[z.id];
-      if (ov !== undefined && Date.now() - (volAt[z.id] ?? 0) < VOL_HOLD_MS) return ov;
       const live = speakersOf(z).filter((sp) => sp.state);
-      if (live.length === 0) return 0;
       // The mean, because a zone-wide set writes one level to every speaker:
       // showing the loudest would jump the fader the moment it was touched.
-      const sum = live.reduce((n, sp) => n + (sp.state?.volume ?? 0), 0);
-      return Math.round(sum / live.length);
+      // A zone has no volume of its own to report, so this stands in for one.
+      const reported = live.length
+        ? Math.round(live.reduce((n, sp) => n + (sp.state?.volume ?? 0), 0) / live.length)
+        : undefined;
+      return fader.shown(z.id, reported);
     },
 
     wouldInterrupt(z) {
@@ -382,17 +377,11 @@ export function createZonesBridge(busy: Busy): ZonesBridge {
     },
 
     dragVolume(z, v) {
-      const level = clampVol(v);
-      vol[z.id] = level;
-      volAt[z.id] = Date.now();
-      dragThrottle.schedule(z.id, level);
+      fader.drag(z.id, v);
     },
 
     setVolume(z, v) {
-      const level = clampVol(v);
-      dragThrottle.cancel(z.id);
-      vol[z.id] = level;
-      volAt[z.id] = Date.now();
+      const level = fader.commit(z.id, v);
       void run("zvol:" + z.id, () => api.mediaZoneVolume(z.id, level), "Volume failed");
     },
 

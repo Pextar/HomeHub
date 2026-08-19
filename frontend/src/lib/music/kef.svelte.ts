@@ -4,7 +4,7 @@ import { kefSourceLabel } from "../kef";
 import type { KEFStatus, KEFSpeakerView, KEFSource } from "../types";
 import type { Busy } from "./busy.svelte";
 import { clock } from "./clock.svelte";
-import { clampVol, createVolumeThrottle } from "./volume";
+import { createFader } from "./fader.svelte";
 
 /**
  * The KEF bridge, as state.
@@ -63,15 +63,10 @@ export function createKEFBridge(busy: Busy): KEFBridge {
    */
   const playOverride = $state<Record<string, { playing: boolean; at: number }>>({});
 
-  // The volume the user last set locally, and when — keyed by speaker. Both
-  // dragging and committing stamp the time: the window is "this value is the
-  // user's, not the poll's", and a finger on the slider is exactly that.
-  const vol = $state<Record<string, number>>({});
-  const volAt: Record<string, number> = {};
-  const VOL_HOLD_MS = 4000;
-
-  const dragThrottle = createVolumeThrottle((id, level) => {
-    void api.kefSetVolume(id, level).catch(() => {}); // a dropped mid-drag frame self-heals on release or the next poll
+  // The slider's own value while the finger is on it — the shared rule, not
+  // this bridge's own (see fader.svelte.ts).
+  const fader = createFader((id, level) => {
+    void api.kefSetVolume(id, level).catch(() => {});
   });
 
   const speakers = $derived.by(() => {
@@ -171,9 +166,7 @@ export function createKEFBridge(busy: Busy): KEFBridge {
     },
 
     shownVolume(sp) {
-      const ov = vol[sp.id];
-      const fresh = ov !== undefined && Date.now() - (volAt[sp.id] ?? 0) < VOL_HOLD_MS;
-      return fresh ? ov : (sp.state?.volume ?? 0);
+      return fader.shown(sp.id, sp.state?.volume);
     },
 
     async togglePlay(sp) {
@@ -202,19 +195,11 @@ export function createKEFBridge(busy: Busy): KEFBridge {
     },
 
     dragVolume(sp, v) {
-      const level = clampVol(v);
-      vol[sp.id] = level;
-      // Stamped, or `shownVolume` would read the finger's own value as stale
-      // and hand the slider back the polled one mid-drag.
-      volAt[sp.id] = Date.now();
-      dragThrottle.schedule(sp.id, level);
+      fader.drag(sp.id, v);
     },
 
     setVolume(sp, v) {
-      const level = clampVol(v);
-      dragThrottle.cancel(sp.id);
-      vol[sp.id] = level;
-      volAt[sp.id] = Date.now();
+      const level = fader.commit(sp.id, v);
       void run("kefvol:" + sp.id, () => api.kefSetVolume(sp.id, level), "Volume failed");
     },
 

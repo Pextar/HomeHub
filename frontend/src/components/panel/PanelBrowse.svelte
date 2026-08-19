@@ -32,10 +32,9 @@
     import Icon from "../Icon.svelte";
     import EmptyState from "../EmptyState.svelte";
     import QueuePane from "../music/QueuePane.svelte";
-    import ArtistScreen from "../music/ArtistScreen.svelte";
-    import ContextScreen from "../music/ContextScreen.svelte";
     import PanelPlayerCard from "./PanelPlayerCard.svelte";
-    import PanelRoomChips from "./PanelRoomChips.svelte";
+    import PanelBrowseHeader from "./PanelBrowseHeader.svelte";
+    import PanelCatalogColumn from "./PanelCatalogColumn.svelte";
     import PanelBrowseRooms from "./PanelBrowseRooms.svelte";
     import PanelSearchDock from "./PanelSearchDock.svelte";
     import PanelSearchBox from "./PanelSearchBox.svelte";
@@ -45,12 +44,12 @@
     import { clock } from "../../lib/music/clock.svelte";
     import type { SpotifyStore } from "../../lib/music/spotify.svelte";
     import type { SearchHistory } from "../../lib/music/history.svelte";
-    import { createCatalogCache, contextItem } from "../../lib/music/catalog-cache.svelte";
+    import { createCatalogStack } from "../../lib/music/catalog-stack.svelte";
+    import { createSoftKeyboard } from "../../lib/music/keyboard.svelte";
     import { fmtHour } from "../../lib/music/format";
-    import { SEARCH_KINDS as KINDS } from "../../lib/music/catalog";
+    import { searchSections } from "../../lib/music/catalog";
     import { dur } from "../../lib/motion";
     import type { PanelMusicStore } from "../../lib/panel-music.svelte";
-    import type { Busy } from "../../lib/music/busy.svelte";
     import type { SpotifyItem } from "../../lib/types";
 
     // The catalog and the room's history are the panel's, not this
@@ -165,9 +164,28 @@
     // one level instead of leaving the depth. Each detail is fetched once
     // per URI and kept for the session — coming back is instant rather
     // than a skeleton replaying itself.
-    type Level = { kind: "artist" | "context"; uri: string; scroll: number };
-    let stack = $state<Level[]>([]);
-    const topLevel = $derived(stack.length ? stack[stack.length - 1] : null);
+    // Scroll follows the level: pushing stashes where the outgoing list was,
+    // popping puts it back — the search results count as level zero, which is
+    // why `scrollOf`/`scrollTo` pick their element off the depth rather than
+    // always reaching for the stack's.
+    let resultsEl = $state<HTMLElement | null>(null);
+    let stackEl = $state<HTMLElement | null>(null);
+
+    // The ladder is shared with the kid module's search; the stashing below
+    // and the fold-away of the search layout are this pane's own.
+    const catalog = createCatalogStack({
+        onOpened: (art) => {
+            actedOnResult(art);
+            searchEl?.blur(); // chosen — the keyboard's job is done
+        },
+        // A page opened is a question answered: the typing is over, and the
+        // player comes back beside the discography being read.
+        onPush: () => (searching = false),
+        scrollOf: () => (catalog.depth === 0 ? resultsEl : stackEl)?.scrollTop ?? 0,
+        scrollTo: (y) => (catalog.depth === 0 ? resultsEl : stackEl)?.scrollTo(0, y),
+    });
+    const topLevel = $derived(catalog.top);
+
     /** The stack is the Search pane's — it was opened from a search row and
      *  it is where the back chip climbs to. With the switcher on the header
      *  it is reachable while a page is open, so Queue and Rooms answer over
@@ -180,46 +198,6 @@
      *  alone, and only while it is showing results rather than a page. */
     const fullBleed = $derived(searching && pane === "search" && !catalogOpen);
 
-    // The pages themselves are read and kept by the shared cache; the stack
-    // above stays this pane's, since only it knows what a level looks like
-    // and where it was scrolled.
-    const catalog = createCatalogCache({
-        artistUri: () => (topLevel?.kind === "artist" ? topLevel.uri : null),
-        contextUri: () => (topLevel?.kind === "context" ? topLevel.uri : null),
-        onFail: () => void popLevel(),
-    });
-
-    // Scroll follows the level: pushing stashes where the outgoing list
-    // was, popping puts it back — the search results count as level zero.
-    let resultsEl = $state<HTMLElement | null>(null);
-    let stackEl = $state<HTMLElement | null>(null);
-    let searchScroll = 0;
-
-    function pushLevel(kind: Level["kind"], uri: string) {
-        if (stack.length === 0) searchScroll = resultsEl?.scrollTop ?? 0;
-        else stack[stack.length - 1].scroll = stackEl?.scrollTop ?? 0;
-        stack = [...stack, { kind, uri, scroll: 0 }];
-        // A page opened is a question answered: the typing is over, and the
-        // player comes back beside the discography being read.
-        searching = false;
-    }
-
-    async function popLevel() {
-        if (!stack.length) return;
-        stack = stack.slice(0, -1);
-        await flushDOM();
-        if (stack.length === 0) resultsEl?.scrollTo(0, searchScroll);
-        else stackEl?.scrollTo(0, stack[stack.length - 1].scroll);
-    }
-
-    async function openArtist(uri: string, art?: { art_url?: string; round?: boolean }) {
-        if (topLevel?.kind === "artist" && topLevel.uri === uri) return;
-        actedOnResult(art);
-        searchEl?.blur(); // chosen — the keyboard's job is done
-        pushLevel("artist", uri);
-        await catalog.loadArtist(uri);
-    }
-
     /** Resolve a name to an artist page. The panel arrives here from the
      *  full player, where all that is known about who is playing is what
      *  the speaker said. */
@@ -230,7 +208,7 @@
             const res = await api.spotifySearch(name, 5, { kind: "artists" });
             const hit = res.artists?.[0];
             if (hit) {
-                await openArtist(hit.uri, { art_url: hit.art_url, round: true });
+                await catalog.openArtist(hit.uri, { art_url: hit.art_url, round: true });
                 return;
             }
         } catch {
@@ -254,51 +232,8 @@
         if (openPane === "queue" || openPane === "rooms") showPane(openPane);
     });
 
-    async function openContext(uri: string) {
-        if (topLevel?.kind === "context" && topLevel.uri === uri) return;
-        pushLevel("context", uri);
-        await catalog.loadContext(uri);
-    }
 
-    // The catalog screens were built for the app's stores; these two answer
-    // their props from the panel's own instead — the featured source is the
-    // destination, and `busy` reads the same map the rows disable on.
-    const catalogDest = {
-        get current() {
-            const f = featured;
-            return f ? { kind: f.kind, id: f.id } : null;
-        },
-        get sonosTarget() {
-            const f = featured;
-            return f?.kind === "sonos" ? f.id : null;
-        },
-    };
-    const catalogBusy: Busy = {
-        is: (k) => !!music.busy[k],
-        async claim(k, fn) {
-            if (music.busy[k]) return undefined;
-            music.busy[k] = true;
-            try {
-                return await fn();
-            } finally {
-                music.busy[k] = false;
-            }
-        },
-        async run(k, fn, errTitle, after) {
-            await catalogBusy.claim(k, async () => {
-                try {
-                    await fn();
-                    await after?.();
-                } catch (e) {
-                    toasts.error(errTitle, (e as Error).message);
-                }
-            });
-        },
-    };
-
-    // The screens' row overflow menus answer Escape before the stack does.
-    let artistScr = $state<ArtistScreen | null>(null);
-    let contextScr = $state<ContextScreen | null>(null);
+    let catalogCol = $state<PanelCatalogColumn | null>(null);
 
     // Escape leaves the depth — a catalog screen's row menu open at the
     // time gets the key first, then each level of the catalog stack, and
@@ -308,12 +243,12 @@
     onMount(() => {
         const onKey = (e: KeyboardEvent) => {
             if (e.key !== "Escape") return;
-            if (artistScr?.closeMenu() || contextScr?.closeMenu()) return;
+            if (catalogCol?.closeMenu()) return;
             // Only while the stack is the thing on screen: a page left open
             // behind the Queue pane is not what an Escape over the queue is
             // aimed at.
             if (catalogOpen) {
-                void popLevel();
+                void catalog.pop();
                 return;
             }
             // The full-bleed search is a rung of the same ladder: Escape
@@ -356,21 +291,9 @@
     // visualViewport measures the real thing: docked, floating or split,
     // and it degrades to zero (no type mode) where there is no software
     // keyboard at all.
-    let kb = $state(0);
-    const kbOpen = $derived(kb > 150);
-    onMount(() => {
-        const vv = window.visualViewport;
-        if (!vv) return;
-        const measure = () => {
-            kb = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
-        };
-        vv.addEventListener("resize", measure);
-        vv.addEventListener("scroll", measure);
-        return () => {
-            vv.removeEventListener("resize", measure);
-            vv.removeEventListener("scroll", measure);
-        };
-    });
+    const keyboard = createSoftKeyboard();
+    const kb = $derived(keyboard.height);
+    const kbOpen = $derived(keyboard.open);
 
     // A fresh page of results while typing starts the dense list from the
     // top — the first rows are the ones being aimed at.
@@ -417,15 +340,7 @@
     }
 
     // ── Results ──────────────────────────────────────────────────────────
-    // Songs lead — playing one is the commonest reason to search at all —
-    // and only shelves that matched are rendered.
-    const sections = $derived.by(() => {
-        const r = spotify.results;
-        if (!r) return [];
-        const all = KINDS.map((k) => ({ ...k, items: r[k.id] as SpotifyItem[] }));
-        if (spotify.kindFilter === "all") return all.filter((s) => s.items.length > 0);
-        return all.filter((s) => s.id === spotify.kindFilter);
-    });
+    const sections = $derived(searchSections(spotify.results, spotify.kindFilter));
 
     /** The artist the query names, pulled out of the shelf it would
      *  otherwise sit in.
@@ -520,54 +435,14 @@
     style:--kb="{kb}px"
     in:fade={{ duration: dur(160) }}
 >
-    <!-- The depth's own band, drawn the way the dashboard's status strip is:
-         a fixed 72px row, edge to edge, divided from the body by a hairline
-         rather than floated over it. It carries everything about the surface
-         that isn't the work itself — the way back, where a tap plays, and
-         which pane the work area is showing. -->
-    <header class="b-head">
-        <button class="back" onclick={back} aria-label="Back to the panel">
-            <Icon name="chevronLeft" size={18} />
-        </button>
-        <h2 class="sr-only">Music</h2>
-        <!-- Where a tap plays. Full-width here rather than stacked in the
-             player column, where six rooms cost three rows of the cover's
-             height (§16); the search below still names the same room in
-             its "Plays on {…}" line. -->
-        <PanelRoomChips {music} />
-        <!-- The pane switcher rides the header's trailing edge as one
-             segmented control. In the work area it was a band above the
-             results, and on a 656px column every band above the results is a
-             result you can't see; on the header it costs the column nothing
-             and holds the same place whichever pane is up. -->
-        <div class="p-panes" role="group" aria-label="Music panes">
-            <button
-                class="p-pane"
-                class:active={pane === "search"}
-                aria-pressed={pane === "search"}
-                onclick={() => showPane("search")}
-            >
-                Search
-            </button>
-            <button
-                class="p-pane"
-                class:active={pane === "queue"}
-                aria-pressed={pane === "queue"}
-                onclick={() => showPane("queue")}
-            >
-                Queue{#if featured?.kind === "sonos" && queueCount > 0}
-                    <span class="mono">{queueCount}</span>{/if}
-            </button>
-            <button
-                class="p-pane"
-                class:active={pane === "rooms"}
-                aria-pressed={pane === "rooms"}
-                onclick={() => showPane("rooms")}
-            >
-                Rooms <span class="mono">{music.sources.length}</span>
-            </button>
-        </div>
-    </header>
+    <PanelBrowseHeader
+        {music}
+        {featured}
+        {pane}
+        {queueCount}
+        onBack={back}
+        onPane={showPane}
+    />
 
     <div class="b-body">
         <section class="b-left">
@@ -577,38 +452,13 @@
                      stack belongs to the Search pane, so stepping over to
                      Queue and back finds the artist's page where it was
                      left rather than at the search results. -->
-                {@const level = catalogOpen}
-                <div class="b-stack" bind:this={stackEl}>
-                    {#if level.kind === "artist"}
-                        <ArtistScreen
-                            artist={catalog.artistDetail}
-                            loading={catalog.artistLoading}
-                            destination={catalogDest}
-                            busy={catalogBusy}
-                            targetRow={playOnRow}
-                            onBack={popLevel}
-                            onPick={pick}
-                            onEnqueue={(item, next) => music.enqueue(item, next)}
-                            onOpenArtist={(uri) => void openArtist(uri)}
-                            onOpenContext={(uri) => void openContext(uri)}
-                            bind:this={artistScr}
-                        />
-                    {:else}
-                        <ContextScreen
-                            context={catalog.contextDetail}
-                            loading={catalog.contextLoading}
-                            destination={catalogDest}
-                            busy={catalogBusy}
-                            targetRow={playOnRow}
-                            onBack={popLevel}
-                            onPlayAll={() => catalog.contextDetail && pick(contextItem(catalog.contextDetail))}
-                            onPick={pick}
-                            onEnqueue={(item, next) => music.enqueue(item, next)}
-                            onOpenArtist={(uri) => void openArtist(uri)}
-                            bind:this={contextScr}
-                        />
-                    {/if}
-                </div>
+                <PanelCatalogColumn
+                    {catalog}
+                    {music}
+                    {featured}
+                    onPick={pick}
+                    bind:this={catalogCol}
+                />
             {:else if pane === "search"}
                 <div class="b-search">
                     <PanelSearchBox
@@ -641,7 +491,7 @@
                         {fullBleed}
                         bind:resultsEl
                         onPick={pick}
-                        onOpenArtist={(uri, art) => void openArtist(uri, art)}
+                        onOpenArtist={(uri, art) => void catalog.openArtist(uri, art)}
                         onRunRecent={runRecent}
                     />
                 </div>
@@ -724,15 +574,6 @@
     </div>
 </div>
 
-<!-- The catalog screens name where they'll sound; on the wall that's
-     always the featured source — its chips ride on the player column. -->
-{#snippet playOnRow()}
-    <span class="play-on">
-        <Icon name="speaker" size={14} />
-        <span>{featured ? `Plays on ${featured.title}` : "No speaker reachable"}</span>
-    </span>
-{/snippet}
-
 <style>
     .b-search {
         display: flex;
@@ -752,20 +593,6 @@
            pixel the rounding invents (see `.fp-queue`). */
         overflow-x: hidden;
         padding-bottom: var(--space-2);
-    }
-    .b-stack {
-        flex: 1;
-        min-height: 0;
-        overflow-y: auto;
-        overflow-x: hidden;
-        padding-bottom: var(--space-2);
-    }
-    .play-on {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        font-size: 12.5px;
-        color: var(--text-mute);
     }
     .browse {
         /* The depth takes the whole panel grid — every row of it, so the
@@ -792,84 +619,6 @@
     /* The depth's header band: the same 72px row on both depths, drawn like
        the dashboard's status strip — a hairline under it rather than a gap,
        and its own inline padding. */
-    .b-head {
-        height: 72px;
-        flex-shrink: 0;
-        display: flex;
-        align-items: center;
-        gap: var(--space-4);
-        min-width: 0;
-        padding: 0 var(--space-8);
-        border-bottom: 1px solid var(--hairline);
-    }
-    /* The chip row keeps its own one-line, shrink-then-scroll behaviour
-       (PanelRoomChips) on every surface that carries it; here it just takes
-       the space between the back chip and the pane switcher. */
-    .b-head :global(.p-sources) {
-        flex: 1 1 auto;
-    }
-    /* The way back to the dashboard depth: a round chevron chip on the
-       leading edge, the same shape the full player's header wears. */
-    .back {
-        width: 40px;
-        height: 40px;
-        flex-shrink: 0;
-        display: grid;
-        place-items: center;
-        border-radius: 50%;
-        border: 1px solid var(--hairline);
-        background: var(--card-2);
-        color: var(--text);
-        cursor: pointer;
-        transition:
-            background var(--t-fast),
-            color var(--t-fast),
-            transform var(--t-fast);
-    }
-    .back:active {
-        transform: scale(0.94);
-        transition-duration: 80ms;
-    }
-
-    /* The pane switcher as one segmented control: a track around the three,
-       so they read as one choice rather than as three chips that happen to
-       sit together. */
-    .p-panes {
-        display: flex;
-        gap: 6px;
-        flex-shrink: 0;
-        padding: 4px;
-        border-radius: var(--r-pill);
-        border: 1px solid var(--hairline);
-        background: var(--card-2);
-    }
-    .p-pane {
-        display: inline-flex;
-        align-items: center;
-        gap: 5px;
-        min-height: 36px;
-        padding: 0 16px;
-        border: 0;
-        border-radius: var(--r-pill);
-        background: none;
-        color: var(--text-mute);
-        font-family: inherit;
-        font-size: 13px;
-        font-weight: 600;
-        cursor: pointer;
-        transition:
-            background var(--t-fast),
-            color var(--t-fast);
-    }
-    .p-pane.active {
-        background: var(--text);
-        color: var(--bg);
-    }
-    .p-pane:focus-visible {
-        outline: none;
-        box-shadow: var(--focus-ring);
-    }
-
     .b-body {
         flex: 1;
         min-height: 0;
@@ -1028,28 +777,12 @@
        so the depth's own controls clear 44px rather than inheriting a
        phone's sizing. The chip carries its own floor from app.css now that
        every pane draws one. */
-@media (pointer: coarse) {
-
-        .back {
-            width: 44px;
-            height: 44px;
-        }
-        .p-pane {
-            min-height: 44px;
-        }
-}
-
     /* Portrait / narrow fallback: search first, the player under it, and
        the page scrolls (the panel is designed landscape-first). */
 @media (orientation: portrait), (max-width: 760px) {
 
         .browse {
             min-height: 100%;
-        }
-        .b-head {
-            height: auto;
-            flex-wrap: wrap;
-            padding: var(--space-4) var(--space-5);
         }
         .b-body {
             grid-template-columns: minmax(0, 1fr);
@@ -1060,8 +793,7 @@
             border-top: 1px solid var(--hairline);
             padding: var(--space-5);
         }
-        .b-pane,
-        .b-stack {
+        .b-pane {
             overflow: visible;
             flex: none;
         }

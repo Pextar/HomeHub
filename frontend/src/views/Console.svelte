@@ -4,7 +4,11 @@
     import { data, toasts, route } from "../lib/stores.svelte";
     import { api } from "../lib/api";
     import { socketAction, protocolKind, isSmartProtocol } from "../lib/utils";
-    import type { Socket, Group } from "../lib/types";
+    import {
+        complete, deviceInRoom, extractAction, hostOf, norm, resolveGroup, resolveRoom,
+        resolveTarget, roomNames, WHOLE, type Action, type Target,
+    } from "../lib/console-language";
+    import type { Socket } from "../lib/types";
 
     const v = $derived(data.value);
 
@@ -26,12 +30,6 @@
             return a.name.localeCompare(b.name);
         }),
     );
-
-    function hostOf(s: Socket): string {
-        const ns = (s.room?.trim() || "unassigned").toLowerCase().replace(/\s+/g, "-");
-        const name = s.name.toLowerCase().replace(/\s+/g, "-");
-        return `${ns}/${name}`;
-    }
 
     // ── Live brightness ───────────────────────────────────────────────
     // Smart lights (Tasmota/Matter) carry a 0-100 level the base Socket type
@@ -190,44 +188,6 @@
     let focused = $state(false);
     let inputEl = $state<HTMLInputElement>();
 
-    type Action = "on" | "off" | "toggle";
-
-    // A command target can be a device, a group, or a room. on/off/toggle all
-    // resolve against the same name pool so you don't have to remember which
-    // kind a name is.
-    type Target =
-        | { kind: "device"; socket: Socket }
-        | { kind: "group"; group: Group }
-        | { kind: "room"; name: string };
-
-    function roomNames(): string[] {
-        return [...new Set(v.sockets.map((s) => s.room?.trim()).filter(Boolean) as string[])];
-    }
-
-    // Resolve a free-text query to a target. Exact matches (device → group →
-    // room) win; otherwise fall back to a substring match in the same order.
-    function resolveTarget(raw: string): Target | undefined {
-        const q = raw.trim().toLowerCase().replace(/^(the|my)\s+/, "");
-        if (!q) return undefined;
-        const rooms = roomNames();
-
-        const sEx = v.sockets.find((s) => s.name.toLowerCase() === q) ?? v.sockets.find((s) => hostOf(s) === q);
-        if (sEx) return { kind: "device", socket: sEx };
-        const gEx = v.groups.find((g) => g.name.toLowerCase() === q);
-        if (gEx) return { kind: "group", group: gEx };
-        const rEx = rooms.find((r) => r.toLowerCase() === q);
-        if (rEx) return { kind: "room", name: rEx };
-
-        const sIn = v.sockets.find((s) => s.name.toLowerCase().includes(q));
-        if (sIn) return { kind: "device", socket: sIn };
-        const gIn = v.groups.find((g) => g.name.toLowerCase().includes(q));
-        if (gIn) return { kind: "group", group: gIn };
-        const rIn = rooms.find((r) => r.toLowerCase().includes(q));
-        if (rIn) return { kind: "room", name: rIn };
-
-        return undefined;
-    }
-
     // Apply an action to a resolved target; returns a label for the log.
     async function applyAction(t: Target, action: Action): Promise<string> {
         if (t.kind === "device") {
@@ -246,60 +206,9 @@
         return `room:${t.name} → ${action} (${r.updated})`;
     }
 
-    // Match a room name leniently in both directions ("living room" ↔ "Living").
-    function resolveRoom(raw: string): string | undefined {
-        const q = raw.trim().toLowerCase();
-        if (!q) return undefined;
-        const rooms = roomNames();
-        return rooms.find((r) => r.toLowerCase() === q)
-            ?? rooms.find((r) => r.toLowerCase().includes(q) || q.includes(r.toLowerCase()));
-    }
-
-    function resolveGroup(raw: string): Group | undefined {
-        const q = raw.trim().toLowerCase();
-        if (!q) return undefined;
-        return v.groups.find((g) => g.name.toLowerCase() === q) ?? v.groups.find((g) => g.name.toLowerCase().includes(q));
-    }
-
-    // Find a device by name within a specific room.
-    function deviceInRoom(subject: string, room: string): Socket | undefined {
-        const n = subject.trim().toLowerCase();
-        if (!n) return undefined;
-        const inRoom = v.sockets.filter((s) => (s.room?.trim().toLowerCase() ?? "") === room.toLowerCase());
-        return inRoom.find((s) => s.name.toLowerCase() === n) ?? inRoom.find((s) => s.name.toLowerCase().includes(n));
-    }
-
-    // Words meaning "the whole scope" — drives "all"/whole-room commands.
-    const WHOLE = new Set(["everything", "all", "all lights", "lights", "light", "them", "all of them", "everything else"]);
-
-    // Strip filler words so sentences parse naturally ("turn off the lamp"
-    // → "turn off lamp"). Keeps meaningful words like "in" and "all".
-    function norm(s: string): string {
-        return s.toLowerCase()
-            .replace(/[.!?,]+$/g, "")
-            .replace(/\b(the|a|an|please|just|to|of)\b/g, " ")
-            .replace(/\s+/g, " ")
-            .trim();
-    }
-
-    // Pull the on/off/toggle action out of a token list, whether it leads
-    // ("turn off X", "off X") or trails ("X off", "turn X off").
-    function extractAction(tokens: string[]): { action: Action; rest: string[] } | null {
-        const lead = tokens[0];
-        const last = tokens[tokens.length - 1];
-        if (lead === "turn" || lead === "switch") {
-            if (tokens[1] === "on" || tokens[1] === "off") return { action: tokens[1] as Action, rest: tokens.slice(2) };
-            if (last === "on" || last === "off") return { action: last as Action, rest: tokens.slice(1, -1) };
-            return null;
-        }
-        if (lead === "on" || lead === "off" || lead === "toggle") return { action: lead as Action, rest: tokens.slice(1) };
-        if (last === "on" || last === "off" || last === "toggle") return { action: last as Action, rest: tokens.slice(0, -1) };
-        return null;
-    }
-
     async function doAction(action: Action, targetStr: string) {
         if (!targetStr.trim()) { echo("err", `usage: ${action} <device | group | room>`); return; }
-        const t = resolveTarget(targetStr);
+        const t = resolveTarget(v, targetStr);
         if (!t) { echo("err", `nothing matching "${targetStr.trim()}"`); return; }
         echo("set", await applyAction(t, action));
     }
@@ -340,7 +249,7 @@
     }
     // Apply a per-light mutation across a target, skipping non-smart members.
     async function applySmart(targetStr: string, verb: string, fn: (s: Socket) => Promise<void>) {
-        const t = resolveTarget(targetStr);
+        const t = resolveTarget(v, targetStr);
         if (!t) { echo("err", `nothing matching "${targetStr.trim()}"`); return; }
         const socks = socketsForTarget(t);
         let done = 0, skipped = 0;
@@ -370,7 +279,7 @@
                     : "devices: none",
             );
         } else if (first === "rooms") {
-            const rs = roomNames().map((r) => {
+            const rs = roomNames(v.sockets).map((r) => {
                 const ss = v.sockets.filter((s) => (s.room?.trim() ?? "") === r);
                 return `${r} ${ss.filter((s) => s.state).length}/${ss.length}`;
             });
@@ -413,7 +322,7 @@
         // explicit "room <name> on|off"
         if (first === "room") {
             const m = line.slice(4).trim().match(/^(.+?)\s+(on|off)$/i);
-            const room = m && resolveRoom(m[1]);
+            const room = m && resolveRoom(v.sockets, m[1]);
             if (!m) echo("err", "usage: room <name> on|off");
             else if (!room) echo("err", `no room matching "${m[1].trim()}"`);
             else { echo("set", await applyAction({ kind: "room", name: room }, m[2].toLowerCase() as Action)); return m[2].toLowerCase() as Action; }
@@ -422,7 +331,7 @@
         // explicit "group <name> on|off|toggle"
         if (first === "group") {
             const m = line.slice(5).trim().match(/^(.+?)\s+(on|off|toggle)$/i);
-            const g = m && resolveGroup(m[1]);
+            const g = m && resolveGroup(v.groups, m[1]);
             if (!m) echo("err", "usage: group <name> on|off|toggle");
             else if (!g) echo("err", `no group matching "${m[1].trim()}"`);
             else { echo("set", await applyAction({ kind: "group", group: g }, m[2].toLowerCase() as Action)); return m[2].toLowerCase() as Action; }
@@ -462,11 +371,11 @@
         if (inIdx >= 0) {
             const subject = rest.slice(0, inIdx).join(" ").trim();
             const roomPhrase = rest.slice(inIdx + 1).join(" ");
-            const room = resolveRoom(roomPhrase);
+            const room = resolveRoom(v.sockets, roomPhrase);
             if (!room) echo("err", `no room matching "${roomPhrase.trim()}"`);
             else if (!subject || WHOLE.has(subject)) echo("set", await applyAction({ kind: "room", name: room }, action));
             else {
-                const dev = deviceInRoom(subject, room);
+                const dev = deviceInRoom(v.sockets, subject, room);
                 if (!dev) echo("err", `no device "${subject}" in ${room}`);
                 else echo("set", await applyAction({ kind: "device", socket: dev }, action));
             }
@@ -522,16 +431,8 @@
     ]);
 
     // ── Tab completion ────────────────────────────────────────────────
-    const VERBS = [
-        "turn on ", "turn off ", "toggle ", "on ", "off ", "set ", "scene ",
-        "all off", "all on", "status", "list", "rooms", "groups", "scenes", "help", "clear",
-    ];
-    const vocab = $derived([
-        ...v.sockets.map((s) => s.name),
-        ...v.groups.map((g) => g.name),
-        ...roomNames(),
-        ...v.scenes.map((s) => s.name),
-    ]);
+    // What Tab has to offer is the language's; cycling through the offers is
+    // this component's, since it owns the input.
     let acMatches: string[] = [];
     let acIdx = 0;
     let acHead = "";
@@ -541,11 +442,9 @@
         if (acMatches.length && cmd === acLast) {
             acIdx = (acIdx + 1) % acMatches.length;
         } else {
-            const m = cmd.match(/^(\s*(?:(?:turn|switch)\s+(?:on|off)|on|off|toggle|set|dim|brighten|scene|activate|room|group)\s+)(.*)$/i);
-            acHead = m ? m[1] : "";
-            const frag = (m ? m[2] : cmd).replace(/^\s+/, "").toLowerCase();
-            const pool = m ? vocab : [...VERBS, ...vocab];
-            acMatches = pool.filter((x) => x.toLowerCase().startsWith(frag) && x.toLowerCase() !== frag);
+            const c = complete(v, cmd);
+            acHead = c.head;
+            acMatches = c.matches;
             acIdx = 0;
         }
         if (!acMatches.length) return;

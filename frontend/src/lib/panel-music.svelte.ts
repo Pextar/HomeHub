@@ -34,8 +34,12 @@ import { haptic } from "./utils";
 import { secs, toClock, sinceRead } from "./music/time";
 import { NEXT_REPEAT } from "./music/sonos.svelte";
 import { clock } from "./music/clock.svelte";
-import { clampVol, createVolumeThrottle } from "./music/volume";
+import { clampVol } from "./music/volume";
+import { createFader } from "./music/fader.svelte";
 import { buildSources, registeredCount, roomKeyOf } from "./panel-music/sources";
+import { createPanelGrouping } from "./panel-music/grouping.svelte";
+import { createPanelQueue } from "./panel-music/queue.svelte";
+import { createPanelStarting } from "./panel-music/starting.svelte";
 import { createPanelTimers } from "./panel-music/timers.svelte";
 import { createPanelAnnounce } from "./panel-music/announce.svelte";
 import { createPanelSaved } from "./panel-music/saved.svelte";
@@ -47,14 +51,10 @@ import type {
     PanelVendor,
 } from "./panel-music/types";
 import type { PanelNowPlaying } from "./panel";
-import type { PlayItemBody } from "./api";
 import type {
     SonosStatus,
-    SonosQueueItem,
-    SonosFavorite,
     KEFStatus,
     KEFSource,
-    SpotifyItem,
     MediaZone,
 } from "./types";
 
@@ -374,29 +374,15 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
     }
 
     // ── Volume ───────────────────────────────────────────────────────────
-    // The room answers the finger while it moves, not when it lifts: the
-    // local value shows at once and a throttled send goes out as the drag
-    // runs (`lib/music/volume.ts`, the same helper the Music view's faders
-    // use), with the authoritative value on release. Group volume for Sonos
-    // and zone-wide for a zone, so the whole room answers rather than one
-    // speaker in it.
+    // The room answers the finger while it moves, not when it lifts. Which
+    // value the slider shows — the finger's or the poll's — is the shared
+    // rule in `lib/music/fader.svelte.ts`, the same one the Music view's
+    // three bridges are on. Group volume for Sonos and zone-wide for a zone,
+    // so the whole room answers rather than one speaker in it.
     //
-    // The drag flags are deliberately not reactive — the sync effects must
-    // re-run when the speaker's reported volume moves, never when the finger
-    // lifts. `…At` extends the same claim past release: for a moment after
-    // the send, a poll that hasn't caught up yet must not flinch the slider
-    // back to the value the speaker was last read at.
-    const VOL_HOLD_MS = 2500;
-    let vol = $state(0);
-    let dragging = false;
-    let volAt = 0;
+    // The source behind a drag is remembered because the throttle carries
+    // only an id, and which call to make depends on the kind.
     let dragSource: PanelSource | null = null;
-    $effect(() => {
-        const level = featured?.volume;
-        if (level === undefined) return;
-        if (dragging || Date.now() - volAt < VOL_HOLD_MS) return;
-        vol = level;
-    });
 
     function sendVolume(s: PanelSource, level: number): Promise<void> {
         if (s.kind === "zone") return api.mediaZoneVolume(s.id, level);
@@ -404,47 +390,36 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
         return api.sonosSetVolume(s.id, level, true);
     }
 
-    const volThrottle = createVolumeThrottle((id, level) => {
+    const fader = createFader((id, level) => {
         const s = dragSource;
         if (!s || s.id !== id) return;
         // A dropped mid-drag frame self-heals on release or the next poll.
         void sendVolume(s, level).catch(() => { });
     });
 
+    /** The featured room's fader. Keyed by source, so switching rooms
+     *  mid-hold shows the new room's own level rather than the last one's. */
+    const vol = () => (featured ? fader.shown(featured.id, featured.volume) : 0);
+
     function dragVolume(s: PanelSource, level: number) {
-        const v = clampVol(level);
-        dragging = true;
         dragSource = s;
-        vol = v;
-        volAt = Date.now();
-        volThrottle.schedule(s.id, v);
+        fader.drag(s.id, level);
     }
     function setVolume(s: PanelSource, level: number) {
-        const v = clampVol(level);
-        volThrottle.cancel(s.id);
-        dragging = false;
-        vol = v;
-        volAt = Date.now();
+        const v = fader.commit(s.id, level);
         void run("vol:" + s.id, () => sendVolume(s, v), "Volume failed");
     }
     /** One step of the ± buttons. A 10px rail is a poor aim at arm's length,
      *  so the wall gets a discrete way to move the volume as well. */
     function nudgeVolume(s: PanelSource, delta: number) {
-        setVolume(s, clampVol(vol + delta));
+        setVolume(s, clampVol(fader.shown(s.id, s.volume) + delta));
     }
 
     // Per-member faders, one per speaker in a multi-speaker group or zone.
-    // Same contract, keyed by speaker id — and vendor-aware, because a zone
-    // can hold both makes and each takes its own call.
-    const memVol = $state<Record<string, number>>({});
-    const memDrag: Record<string, boolean> = {};
-    const memAt: Record<string, number> = {};
-    $effect(() => {
-        const now = Date.now();
-        for (const m of featured?.members ?? []) {
-            if (memDrag[m.id] || now - (memAt[m.id] ?? 0) < VOL_HOLD_MS) continue;
-            memVol[m.id] = m.volume;
-        }
+    // Same rule, keyed by speaker id — and vendor-aware, because a zone can
+    // hold both makes and each takes its own call.
+    const memFader = createFader((id, level) => {
+        void sendMemberVolume(id, level).catch(() => { });
     });
     function memberVendor(id: string): PanelVendor {
         return featured?.members?.find((m) => m.id === id)?.vendor ?? "sonos";
@@ -461,23 +436,17 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
                 return api.sonosSetVolume(id, level);
         }
     }
-    const memThrottle = createVolumeThrottle((id, level) => {
-        void sendMemberVolume(id, level).catch(() => { });
-    });
     function dragMemberVolume(id: string, level: number) {
-        const v = clampVol(level);
-        memDrag[id] = true;
-        memVol[id] = v;
-        memAt[id] = Date.now();
-        memThrottle.schedule(id, v);
+        memFader.drag(id, level);
     }
     function setMemberVolume(id: string, level: number) {
-        const v = clampVol(level);
-        memThrottle.cancel(id);
-        memDrag[id] = false;
-        memVol[id] = v;
-        memAt[id] = Date.now();
+        const v = memFader.commit(id, level);
         void run("vol:" + id, () => sendMemberVolume(id, v), "Volume failed");
+    }
+    /** What one member's slider shows. The `?? m.volume` fallback used to be
+     *  written at each of the four places that draw one. */
+    function memberVol(m: { id: string; volume: number }): number {
+        return memFader.shown(m.id, m.volume);
     }
 
     function toggleMute(s: PanelSource, memberId?: string) {
@@ -610,59 +579,12 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
 
 
     // ── Queue ────────────────────────────────────────────────────────────
-    let queue = $state<SonosQueueItem[]>([]);
-    let queueLoading = $state(false);
-    let queueSeq = 0;
-    /** Whose queue is loaded/loading, and whose answered last — a skeleton
-     *  is only worth showing while the featured room's first read is out;
-     *  the re-reads the poll triggers after that are silent. */
-    let queueFor = "";
-    let loadedFor = "";
-
-    async function loadQueue(coordinatorId: string) {
-        const mine = ++queueSeq;
-        if (loadedFor !== coordinatorId) queueLoading = true;
-        try {
-            const q = await api.sonosQueue(coordinatorId);
-            if (mine !== queueSeq) return;
-            queue = q;
-            loadedFor = coordinatorId;
-        } catch {
-            if (mine !== queueSeq) return;
-            queue = [];
-            loadedFor = coordinatorId;
-        } finally {
-            if (mine === queueSeq) queueLoading = false;
-        }
-    }
-
-    // The queue belongs to whatever Sonos group is featured — and to
-    // nothing else. Reading `featured` here re-runs this on each poll,
-    // which is exactly the cadence the queue wants: it only changes on a
-    // mutation, and those re-read it below anyway.
-    $effect(() => {
-        const f = featured;
-        const id = f?.kind === "sonos" ? f.id : "";
-        if (id !== queueFor) {
-            queueFor = id;
-            queueSeq++; // cancel any load for the previous room
-            queue = [];
-        }
-        if (id) void loadQueue(id);
-    });
-
-    /** Queue order is play order only while the group plays straight
-     *  through it. Under shuffle the speaker picks its own next track, and
-     *  under repeat-one it plays this one again — so "up next" would be a
-     *  guess, and the wall doesn't guess. */
-    const queueOrderKnown = $derived.by(() => {
-        const gs = featured?.groupState;
-        if (!gs) return false;
-        return !gs.shuffle && gs.repeat !== "one";
-    });
-    const nextInQueue = $derived(
-        queueOrderKnown ? queue.find((q) => q.track > (featured?.queueTrack ?? 0)) : undefined,
-    );
+    // The featured Sonos group's queue and every call that changes it, in
+    // panel-music/queue.svelte.ts. Two rules run through all of it: a
+    // mutation renumbers the rest so it re-reads rather than splicing, and
+    // "up next" is only a fact while the group plays straight through.
+    const queueStore = createPanelQueue({ featured: () => featured, run });
+    const nextInQueue = $derived(queueStore.nextInQueue);
 
     // ── What the ambient face says ───────────────────────────────────────
     // It lives down here rather than up with the sources because the face
@@ -708,170 +630,19 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
         };
     });
 
-    function jumpTo(track: number) {
-        const f = featured;
-        if (!f || f.kind !== "sonos") return;
-        void run("jump:" + track, () => api.sonosSeekTrack(f.id, track), "Couldn't play that track");
-    }
-    function removeQueued(track: number) {
-        const f = featured;
-        if (!f || f.kind !== "sonos") return;
-        // Removing renumbers everything below it, so re-read rather than
-        // splicing locally.
-        void run("qrm:" + track, () => api.sonosQueueRemove(f.id, track).then(() => loadQueue(f.id)), "Couldn't remove that track");
-    }
-    function clearQueue() {
-        const f = featured;
-        if (!f || f.kind !== "sonos") return;
-        void run("qclear:" + f.id, () => api.sonosQueueClear(f.id).then(() => loadQueue(f.id)), "Couldn't clear the queue");
-    }
-
-    /** Move one queued track one place up or down.
-     *
-     *  One place at a time, by tap, because this is a wall: the app's drag
-     *  would be an imprecise aim at arm's length over a five-second poll
-     *  (§16's argument for tap-based grouping applies unchanged here). The
-     *  move renumbers the rest of the queue, so it re-reads rather than
-     *  splicing locally — the same reason removing does. */
-    function moveQueued(track: number, dir: -1 | 1) {
-        const f = featured;
-        if (!f || f.kind !== "sonos") return;
-        const to = track + dir;
-        if (to < 1 || to > queue.length) return;
-        void run(
-            "qmv:" + track,
-            () => api.sonosQueueMove(f.id, track, to).then(() => loadQueue(f.id)),
-            "Couldn't move that track",
-        );
-    }
-
-    // Queueing never interrupts: `next` drops the item after the current
-    // track instead of at the end. Nothing on screen moves when it lands —
-    // adding to a group playing radio is legal but silent — so the store
-    // notes what went in and the player column says so for a few seconds.
-    // (An success toast would be the wrong instrument: the app answers
-    // quietly, and a kiosk has no one to dismiss cards.)
-    let lastQueued = $state<{ title: string; next: boolean; at: number } | null>(null);
-
-    function enqueue(item: SpotifyItem, next: boolean) {
-        const f = featured;
-        if (!f || f.kind !== "sonos") return;
-        void run(
-            "q:" + item.uri,
-            async () => {
-                await api.sonosQueueAdd(f.id, { service: "Spotify", uri: item.uri, title: item.name, next });
-                await loadQueue(f.id);
-                lastQueued = { title: item.name, next, at: Date.now() };
-            },
-            "Couldn't add to the queue",
-        );
-    }
-
-    // ── Sonos favorites ──────────────────────────────────────────────────
-    // The household's own list — radio stations, and whatever was starred
-    // in the Sonos app. Kept on the wall because it is the only thing a
-    // home without a linked Spotify account can start from here at all,
-    // and because a station is a one-tap job that search can't be.
-    let favorites = $state<SonosFavorite[]>([]);
-    let favsFor = "";
-    $effect(() => {
-        // Household-wide, so any Sonos speaker can answer for the list —
-        // read once per household rather than per featured room.
-        const anySonos = speakers.find((sp) => sp.reachable);
-        const id = anySonos?.id ?? "";
-        if (!id || id === favsFor) return;
-        favsFor = id;
-        void api
-            .sonosFavorites(id)
-            .then((f) => {
-                if (favsFor === id) favorites = f;
-            })
-            .catch(() => {
-                if (favsFor === id) favorites = [];
-            });
+    // ── Putting something on ─────────────────────────────────────────────
+    // Search results, the household's favorites and "more like this" all
+    // start audio through one call that knows a play takes a different road
+    // per make — panel-music/starting.svelte.ts.
+    const starting = createPanelStarting({
+        featured: () => featured,
+        speakers: () => speakers,
+        busy,
+        run,
+        refresh,
+        reloadQueue: (id) => queueStore.load(id),
     });
-
-    /** Favorites are a Sonos household list, so only a Sonos room takes one. */
-    function playFavorite(f: SonosFavorite) {
-        const s = featured;
-        if (!s || s.kind !== "sonos") return;
-        void run("fav:" + f.id, () => api.sonosPlayFavorite(s.id, f), "Couldn't play that");
-    }
-
-    // ── Starting something from search ───────────────────────────────────
-    // The featured source is the destination — the chips above the player
-    // are how it is chosen — and the player is the confirmation, since
-    // playback is invisible until the next poll lands.
-    async function playItem(item: SpotifyItem) {
-        const s = featured;
-        if (!s) return;
-        const key = "item:" + item.uri;
-        if (busy[key]) return;
-        busy[key] = true;
-        haptic();
-        try {
-            let body: PlayItemBody = {
-                service: "Spotify",
-                uri: item.uri,
-                title: item.name,
-                kind: item.kind,
-                // Carried for the room's history rather than for the
-                // speaker: a shelf tile needs a picture and a second line,
-                // and asking the catalog for them again later would be a
-                // service round-trip to redraw a row we already have.
-                sub: item.sub,
-                art_uri: item.art_url,
-            };
-            if (item.kind === "artist") {
-                // No speaker takes an artist URI (DESIGN.md §15), so an
-                // artist starts their top track — which the player then names.
-                const d = await api.spotifyArtist(item.uri);
-                const top = d.top_tracks[0];
-                if (!top) throw new Error(`No tracks found for ${item.name}`);
-                body = {
-                    service: "Spotify",
-                    uri: top.uri,
-                    title: top.name,
-                    kind: "track",
-                    sub: top.sub ?? item.name,
-                    art_uri: top.art_url ?? item.art_url,
-                };
-            }
-            await startOn(s, body);
-        } catch (e) {
-            toasts.error("Couldn't play", (e as Error).message);
-        } finally {
-            busy[key] = false;
-        }
-    }
-
-    /** Hand one item to whichever bridge the destination belongs to. The
-     *  three roads differ (queue-based on Sonos, Connect on a KEF, a route
-     *  the media layer picks for a zone) and nothing above this line should
-     *  have to know which. */
-    async function startOn(s: PanelSource, body: PlayItemBody) {
-        if (s.kind === "zone") {
-            // The media layer resolves a route across whatever makes are
-            // in the zone and answers with the one it chose.
-            await api.mediaZonePlay(s.id, {
-                provider: "spotify",
-                uri: body.uri,
-                title: body.title,
-                kind: body.kind,
-                sub: body.sub,
-                art_uri: body.art_uri,
-            });
-        } else if (s.kind === "sonos") {
-            await api.sonosPlayItem(s.id, body);
-        } else {
-            await api.kefPlayItem(s.id, body);
-        }
-        await refresh();
-        // A KEF or streamed play answers as soon as *Spotify* accepted it
-        // — the audio goes out to the cloud and comes back — so the read
-        // above can still say "stopped". Backstops for that gap.
-        if (s.kind !== "sonos") for (const ms of [1200, 4000]) setTimeout(() => void refresh(), ms);
-    }
+    const favorites = $derived(starting.favorites);
 
     // ── What this room played before, and keeps coming back to ──────────
     const historyStore = createPanelHistory({
@@ -880,9 +651,9 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
         run,
         playFavoriteByURI: (uri) => {
             const fav = favorites.find((f) => f.uri === uri);
-            if (fav) playFavorite(fav);
+            if (fav) starting.playFavorite(fav);
         },
-        startOn,
+        startOn: starting.startOn,
     });
 
     // ── Saving what's playing ────────────────────────────────────────────
@@ -890,65 +661,6 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
         trackURI: () => featured?.trackURI,
         run,
     });
-
-    // ── More like this ───────────────────────────────────────────────────
-    // The same engine "play similar" uses when a queue runs dry (§15.5),
-    // asked for on purpose instead of automatically. Seeded by artist name
-    // because that is what a speaker reports — a room on radio has an
-    // artist line and no catalog id at all.
-    //
-    // On Sonos it fills the queue behind what is playing, so the record you
-    // are listening to isn't interrupted by asking for more of it. Anywhere
-    // else there is no queue to fill, so the first result plays.
-    let lastRadio = $state<{ count: number; artist: string; at: number } | null>(null);
-
-    const canRadio = $derived(!!featured?.trackArtist);
-
-    function startRadio() {
-        const s = featured;
-        const artist = s?.trackArtist;
-        if (!s || !artist) return;
-        void run(
-            "radio",
-            async () => {
-                const items = await api.spotifySimilar(artist, 8);
-                if (!items.length) throw new Error(`Nothing else by ${artist} came back`);
-                if (s.kind === "sonos") {
-                    // The whole run in one request. This used to be eight
-                    // sequential calls sent *backwards* — Sonos resolves each
-                    // "play next" against wherever the queue is at that
-                    // moment, so a forwards loop scatters the run and a
-                    // reversed one happens to come out in order. That trick
-                    // worked and was a trick, and it cost eight round trips
-                    // from the slowest client this app has. The hub does the
-                    // dealing now: one request, one position read, and the
-                    // order of the array is the order they land in.
-                    const added = await api.sonosQueueAddMany(
-                        s.id,
-                        items.map((item) => ({
-                            service: "Spotify",
-                            uri: item.uri,
-                            title: item.name,
-                        })),
-                        true,
-                    );
-                    await loadQueue(s.id);
-                    lastRadio = { count: added.added || items.length, artist, at: Date.now() };
-                } else {
-                    await startOn(s, {
-                        service: "Spotify",
-                        uri: items[0].uri,
-                        title: items[0].name,
-                        kind: "track",
-                        sub: items[0].sub,
-                        art_uri: items[0].art_url,
-                    });
-                    lastRadio = { count: 1, artist, at: Date.now() };
-                }
-            },
-            "Couldn't find more like this",
-        );
-    }
 
     // ── Announcements ────────────────────────────────────────────────────
     const announceStore = createPanelAnnounce({
@@ -958,114 +670,16 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
     });
 
     // ── Grouping ─────────────────────────────────────────────────────────
-    // Sonos-native only, the daily "play together": joining is the whole
-    // card, not one speaker — a room that moves takes its partners with
-    // it. Cross-vendor zones are played from the wall but never built
-    // there; making a persistent routed room is configuration.
-    /** What a Sonos room could group with right now. A KEF speaker and a
-     *  HomeHub zone are absent rather than refused: neither joins a Sonos
-     *  household, and a zone is arranged in the Music view, never here. */
-    const joinable = $derived.by(() => {
-        const f = featured;
-        if (!f || f.kind !== "sonos") return [];
-        return sources.filter((s) => s.kind === "sonos" && s.key !== f.key);
+    // Sonos-native "play together", in panel-music/grouping.svelte.ts — the
+    // ordering it depends on belongs to the hub, and the rules about what may
+    // group with what are worth reading without the rest of this store around
+    // them.
+    const grouping = createPanelGrouping({
+        featured: () => featured,
+        sources: () => sources,
+        feature: (key) => (selected = key),
+        run,
     });
-
-    const canGroup = $derived(
-        !!featured &&
-            featured.kind === "sonos" &&
-            (joinable.length > 0 || (featured.members?.length ?? 0) > 1),
-    );
-
-    function joinSource(src: PanelSource) {
-        const f = featured;
-        if (!f || f.kind !== "sonos" || src.kind !== "sonos") return;
-        const members = (src.members ?? []).map((m) => m.id);
-        if (!members.length) return;
-        void run(
-            "join:" + src.id,
-            () => api.sonosGroup(f.id, { join: members }),
-            "Grouping failed",
-            () => {
-                selected = f.key; // the group stays featured through the reshuffle
-            },
-        );
-    }
-
-    /** Everything at once — one request, and the hub walks the household
-     *  through it in order. It has to be walked rather than fired off at
-     *  once: a household handed four `SetAVTransportURI`s in the same instant
-     *  re-elects its coordinators mid-flight and lands with a speaker or two
-     *  left out. That sequencing used to live here, which meant it survived
-     *  only as long as the page did — an iPad that slept in the middle of
-     *  "play it everywhere" left the house half grouped. */
-    function joinAll() {
-        const f = featured;
-        if (!f || f.kind !== "sonos") return;
-        const ids = joinable.flatMap((s) => (s.members ?? []).map((m) => m.id));
-        if (!ids.length) return;
-        void run(
-            "joinall",
-            () => api.sonosGroup(f.id, { join: ids }),
-            "Grouping failed",
-            () => {
-                selected = f.key;
-            },
-        );
-    }
-
-    /** Take the music with you: the featured room's group moves to `dest`
-     *  and leaves where it was.
-     *
-     *  This is the gesture a wall gets asked for on the way into the
-     *  kitchen, and until now it cost two: join, then split the room you
-     *  walked out of. Composed from the same two calls rather than given a
-     *  bridge of its own — Sonos has no "move", and what a move *is* on a
-     *  household is exactly this pair.
-     *
-     *  Order matters and is the whole reason this is one call rather than a
-     *  loop: the destination joins the group *first*, so the queue and the
-     *  stream are handed over while the old room is still coordinating, and
-     *  only then does the old room step out. Doing it the other way round
-     *  stops the music between the two calls — and doing it from here meant
-     *  the ordering held only as long as this page did, so a wall that fell
-     *  asleep between the two halves left the music where you weren't. The
-     *  hub owns the sequence now; this states the pair. */
-    function moveTo(dest: PanelSource) {
-        const f = featured;
-        if (!f || f.kind !== "sonos" || dest.kind !== "sonos" || dest.key === f.key) return;
-        const leaving = (f.members ?? []).map((m) => m.id);
-        const arriving = (dest.members ?? []).map((m) => m.id);
-        if (!leaving.length || !arriving.length) return;
-        void run(
-            "move:" + dest.id,
-            () => api.sonosGroup(f.id, { join: arriving, leave: leaving }),
-            "Couldn't move the music",
-            () => {
-                // Follow the sound: the destination is what the panel should
-                // be pointed at once the music is there.
-                selected = dest.key;
-            },
-        );
-    }
-
-    function ungroupFeatured() {
-        const f = featured;
-        if (!f || f.kind !== "sonos") return;
-        const members = (f.members ?? []).filter((m) => !m.coordinator);
-        if (!members.length) return;
-        void run(
-            "ungroup:" + f.id,
-            () => api.sonosGroup(f.id, { leave: members.map((m) => m.id) }),
-            "Ungrouping failed",
-        );
-    }
-
-    function leaveMember(memberId: string) {
-        const f = featured;
-        if (!f || f.kind !== "sonos") return;
-        void run("leave:" + memberId, () => api.sonosLeave(memberId), "Ungrouping failed");
-    }
 
     return {
         get hasSpeakers() {
@@ -1110,14 +724,12 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
         },
         seek,
         get vol() {
-            return vol;
+            return vol();
         },
         dragVolume,
         setVolume,
         nudgeVolume,
-        get memVol() {
-            return memVol;
-        },
+        memberVol,
         dragMemberVolume,
         setMemberVolume,
         toggleMute,
@@ -1156,30 +768,30 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
         },
         setSonosSleep,
         get queue() {
-            return queue;
+            return queueStore.queue;
         },
         get queueLoading() {
-            return queueLoading;
+            return queueStore.queueLoading;
         },
         get nextInQueue() {
-            return nextInQueue;
+            return queueStore.nextInQueue;
         },
         get queueOrderKnown() {
-            return queueOrderKnown;
+            return queueStore.queueOrderKnown;
         },
-        jumpTo,
-        removeQueued,
-        moveQueued,
-        clearQueue,
-        enqueue,
+        jumpTo: queueStore.jumpTo,
+        removeQueued: queueStore.removeQueued,
+        moveQueued: queueStore.moveQueued,
+        clearQueue: queueStore.clearQueue,
+        enqueue: queueStore.enqueue,
         get lastQueued() {
-            return lastQueued;
+            return queueStore.lastQueued;
         },
         get favorites() {
-            return favorites;
+            return starting.favorites;
         },
-        playFavorite,
-        playItem,
+        playFavorite: starting.playFavorite,
+        playItem: starting.playItem,
         get history() {
             return historyStore.history;
         },
@@ -1211,11 +823,11 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
         },
         toggleSaved: savedStore.toggle,
         get canRadio() {
-            return canRadio;
+            return starting.canRadio;
         },
-        startRadio,
+        startRadio: starting.startRadio,
         get lastRadio() {
-            return lastRadio;
+            return starting.lastRadio;
         },
         get announce() {
             return announceStore.status;
@@ -1225,16 +837,16 @@ export function createPanelMusic(opts: PanelMusicOptions = {}): PanelMusicStore 
             return announceStore.last;
         },
         get joinable() {
-            return joinable;
+            return grouping.joinable;
         },
         get canGroup() {
-            return canGroup;
+            return grouping.canGroup;
         },
-        joinSource,
-        joinAll,
-        moveTo,
-        ungroupFeatured,
-        leaveMember,
+        joinSource: grouping.joinSource,
+        joinAll: grouping.joinAll,
+        moveTo: grouping.moveTo,
+        ungroupFeatured: grouping.ungroupFeatured,
+        leaveMember: grouping.leaveMember,
         refresh,
     };
 }

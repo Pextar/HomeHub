@@ -8,13 +8,19 @@
  * What none of them differ on is the fetch behind the page: cache by URI,
  * flag the one in flight, toast and back out when it fails.
  *
- * So the stack stays the host's and only the loading is shared. The host says
- * which URI each kind is showing (`artistUri` / `contextUri` — getters, since
- * they follow the host's stack), pushes its own level, then calls
- * `loadArtist` / `loadContext`. A failed load calls `onFail` to undo the push
- * the host just made, and only when the level that failed is still the one on
- * top: by then the reader may have gone somewhere else, and popping a level
- * they since opened would take away a page that loaded fine.
+ * So only the loading is shared here. The host says which URI each kind is
+ * showing (`artistUri` / `contextUri` — getters, since they follow the host's
+ * stack), pushes its own level, then calls `loadArtist` / `loadContext`. A
+ * failed load calls `onFail` to undo the push the host just made, and only
+ * when the level that failed is still the one on top: by then the reader may
+ * have gone somewhere else, and popping a level they since opened would take
+ * away a page that loaded fine.
+ *
+ * Two of the three hosts turned out to keep the *same* stack around this —
+ * artist over results, record over artist — and that ladder is shared in
+ * `catalog-stack.svelte.ts`, which wraps this. Reach for that one first; come
+ * here directly only for a host whose levels are its own, as the Music view's
+ * screen router is.
  *
  * An artist or an album changes slowly and the stack wanders back and forth
  * (artist → album → back), so a URI already read renders instantly instead of

@@ -1,9 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { rowSub, topLine } from "./catalog";
-import type { SpotifyItem } from "../types";
+import { rowSub, topLine, searchSections, SEARCH_KINDS, KIND_LABEL } from "./catalog";
+import type { SpotifyItem, SpotifyResults } from "../types";
 
 /**
- * What a catalog row is allowed to say about itself.
+ * What a catalog row is allowed to say about itself, and how a result set is
+ * cut into shelves.
  *
  * Every list of rows in the app draws this line — the wall's dense list and
  * the kid module's big one — so these are rules about the vocabulary, not
@@ -58,5 +59,69 @@ describe("topLine", () => {
     expect(topLine(item({ kind: "artist", followers: 1_500_000, genres: ["art rock"] }))).toBe(
       "Artist · 1.5M followers",
     );
+  });
+});
+
+describe("searchSections", () => {
+  const results = (over: Partial<SpotifyResults> = {}): SpotifyResults => ({
+    tracks: [],
+    albums: [],
+    playlists: [],
+    artists: [],
+    ...over,
+  });
+  const one = (kind: SpotifyItem["kind"], name: string) => item({ kind, name, uri: `x:${name}` });
+
+  it("has nothing to shelve before a search has answered", () => {
+    expect(searchSections(null, "all")).toEqual([]);
+  });
+
+  it("shelves songs first — the commonest reason to search at all", () => {
+    const all = searchSections(
+      results({
+        tracks: [one("track", "Heroes")],
+        albums: [one("album", "Low")],
+        playlists: [one("playlist", "Mix")],
+        artists: [one("artist", "Bowie")],
+      }),
+      "all",
+    );
+    expect(all.map((s) => s.id)).toEqual(["tracks", "albums", "playlists", "artists"]);
+    expect(all.map((s) => s.label)).toEqual(["Songs", "Albums", "Playlists", "Artists"]);
+  });
+
+  it("gives no shelf to a kind that didn't match", () => {
+    const all = searchSections(results({ tracks: [one("track", "Heroes")] }), "all");
+    expect(all.map((s) => s.id)).toEqual(["tracks"]);
+  });
+
+  it("narrows to the one shelf a chip names", () => {
+    const only = searchSections(
+      results({ tracks: [one("track", "Heroes")], albums: [one("album", "Low")] }),
+      "albums",
+    );
+    expect(only.map((s) => s.id)).toEqual(["albums"]);
+    expect(only[0].items).toHaveLength(1);
+  });
+
+  it("keeps the named shelf when it is empty — that emptiness answers the chip", () => {
+    const only = searchSections(results({ tracks: [one("track", "Heroes")] }), "playlists");
+    expect(only.map((s) => s.id)).toEqual(["playlists"]);
+    expect(only[0].items).toEqual([]);
+  });
+});
+
+describe("the kind vocabulary", () => {
+  it("pairs each shelf with the name one item off it goes by", () => {
+    expect(SEARCH_KINDS.map((k) => [k.id, k.kind])).toEqual([
+      ["tracks", "track"],
+      ["albums", "album"],
+      ["playlists", "playlist"],
+      ["artists", "artist"],
+    ]);
+  });
+
+  it("names every kind it shelves — a surface reading this map never blanks", () => {
+    for (const k of SEARCH_KINDS) expect(KIND_LABEL[k.kind]).toBeTruthy();
   });
 });

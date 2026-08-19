@@ -38,9 +38,10 @@
     import Icon from "../Icon.svelte";
     import TrackList from "./TrackList.svelte";
     import MediaCard from "./MediaCard.svelte";
+    import SearchTopResult from "./SearchTopResult.svelte";
+    import SearchRecents from "./SearchRecents.svelte";
     import { dur } from "../../lib/motion";
     import { fmtCount, capFirst } from "../../lib/music/format";
-    import { topLine } from "../../lib/music/catalog";
     import type { SpotifyStore, SpotifyKind } from "../../lib/music/spotify.svelte";
     import type { SearchHistory } from "../../lib/music/history.svelte";
     import type { Destination } from "../../lib/music/destination.svelte";
@@ -342,38 +343,11 @@
                     {/if}
                 </div>
                 {#if showRecents}
-                    <div class="sp-history">
-                        <div class="sp-history-head">
-                            <span class="eylabel">
-                                Recent searches{#if destination.list.length > 1 && destination.label} · {destination.label}{/if}
-                            </span>
-                            <button type="button" class="chip sp-hist-clear" onclick={() => recents.clear()}>Clear</button>
-                        </div>
-                        <div class="sp-history-list">
-                            {#each recents.list as h (h.q)}
-                                <div class="sp-hist-chip">
-                                    <!-- pointerdown, not click: the chip is
-                                         shown while the box has the caret, and
-                                         a click would arrive after the blur
-                                         that hides it. -->
-                                    <button type="button" class="sp-hist-run"
-                                        onpointerdown={(e) => { e.preventDefault(); runHistoryQuery(h.q); }}>
-                                        {#if h.art_url}
-                                            <img class="sp-hist-art" class:round={h.round} src={h.art_url} alt="" />
-                                        {:else}
-                                            <Icon name="search" size={12} />
-                                        {/if}
-                                        <span>{h.q}</span>
-                                    </button>
-                                    <button type="button" class="icon-btn sp-hist-x"
-                                        aria-label={`Remove "${h.q}" from recent searches`}
-                                        onpointerdown={(e) => { e.preventDefault(); recents.remove(h.q); }}>
-                                        <Icon name="close" size={10} />
-                                    </button>
-                                </div>
-                            {/each}
-                        </div>
-                    </div>
+                    <SearchRecents
+                        {recents}
+                        roomLabel={destination.list.length > 1 ? (destination.label ?? "") : ""}
+                        onRun={runHistoryQuery}
+                    />
                 {/if}
                 <!-- The filter is a chip row, and it says how much is behind
                      each one — "Albums 12" is a decision, "Albums" is a
@@ -568,47 +542,15 @@
                                 {@const top = spotify.topResult}
                                 <div class="sp-shelf">
                                     <span class="eylabel">Top result</span>
-                                    <div class="sp-top">
-                                        <button
-                                            class="sp-top-open"
-                                            onclick={() => open(top)}
-                                            aria-label={top.kind === "track"
-                                                ? `Play ${top.name}`
-                                                : `Open ${top.name}`}
-                                        >
-                                            {#if top.art_url}
-                                                <img class="sp-top-art-img" class:round={top.kind === "artist"}
-                                                    src={top.art_url} alt="" />
-                                            {:else}
-                                                <div class="sp-top-art-img placeholder"
-                                                    class:round={top.kind === "artist"}>[ art ]</div>
-                                            {/if}
-                                            <span class="sp-top-meta">
-                                                <span class="sp-top-name">{top.name}</span>
-                                                <span class="sp-top-line">{topLine(top)}</span>
-                                                {#if top.kind !== "track"}
-                                                    <span class="sp-top-cta">
-                                                        {top.kind === "artist" ? "See top tracks & albums" : "See what's on it"}
-                                                        <Icon name="chevronLeft" size={13} />
-                                                    </span>
-                                                {/if}
-                                            </span>
-                                        </button>
-                                        <!-- An album or playlist is both a place
-                                             and a thing to play, so it gets an
-                                             explicit Play beside the way in. An
-                                             artist has no URI a speaker takes. -->
-                                        {#if playable(top)}
-                                            <button
-                                                class="sp-top-play"
-                                                disabled={busy.is("item:" + top.uri) || !destination.current}
-                                                aria-label={`Play ${top.name}${destination.label ? " on " + destination.label : ""}`}
-                                                onclick={() => onPlayItem(top)}
-                                            >
-                                                <Icon name="play" size={20} />
-                                            </button>
-                                        {/if}
-                                    </div>
+                                    <SearchTopResult
+                                        item={top}
+                                        {busy}
+                                        canPlay={!!destination.current}
+                                        destinationLabel={destination.label ?? ""}
+                                        playable={playable(top)}
+                                        onOpen={open}
+                                        onPlay={onPlayItem}
+                                    />
                                 </div>
                             {/if}
 
@@ -847,29 +789,6 @@
     .sp-note span { flex: 1; min-width: 0; }
     .sp-note .chip { flex: none; }
 
-    /* ── Recent searches ── */
-    .sp-history { display: flex; flex-direction: column; gap: var(--space-2); }
-    .sp-history-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
-    .sp-hist-clear { padding: 3px 10px; font-size: 11px; }
-    .sp-history-list { display: flex; flex-wrap: wrap; gap: var(--space-2); }
-    .sp-hist-chip {
-        display: inline-flex; align-items: center;
-        background: var(--card-2); border: 1px solid var(--hairline);
-        border-radius: var(--r-pill);
-    }
-    .sp-hist-run {
-        display: inline-flex; align-items: center; gap: 6px;
-        padding: 7px 4px 7px 12px;
-        background: transparent; border: 0; border-radius: var(--r-pill) 0 0 var(--r-pill);
-        font: inherit; font-size: 12.5px; color: var(--text-mute); cursor: pointer;
-    }
-    @media (hover: hover) { .sp-hist-run:hover { color: var(--text); } }
-    .sp-hist-chip .sp-hist-x { width: 26px; height: 26px; margin-right: 3px; color: var(--text-dim); }
-    /* The query's own top result, once the search behind it has answered —
-       round for an artist's photo, square for everything else's cover art. */
-    .sp-hist-art { width: 20px; height: 20px; border-radius: var(--r-sm); object-fit: cover; flex-shrink: 0; background: var(--card-3); }
-    .sp-hist-art.round { border-radius: 50%; }
-
     /* ── Results ── */
     .sp-groups { display: flex; flex-direction: column; gap: var(--space-6); }
     .sp-shelf { display: flex; flex-direction: column; gap: var(--space-2); }
@@ -877,68 +796,6 @@
 
     .sk-hero { height: 104px; border-radius: var(--r-lg); }
     .sk-row { height: 52px; border-radius: var(--r-md); }
-
-    /* The top result: the biggest thing on the screen, because it is the
-       answer most searches were after. */
-    .sp-top {
-        position: relative;
-        display: flex; align-items: center; gap: var(--space-2);
-        background: var(--card-2); border: 1px solid var(--hairline);
-        border-radius: var(--r-lg); padding: var(--space-3);
-        transition: border-color 150ms ease;
-    }
-    @media (hover: hover) { .sp-top:hover { border-color: var(--border-strong); } }
-    .sp-top-open {
-        flex: 1; min-width: 0;
-        display: flex; align-items: center; gap: var(--space-4);
-        background: transparent; border: 0; border-radius: var(--r-md);
-        padding: 0; color: var(--text); cursor: pointer; text-align: left; font: inherit;
-    }
-    .sp-top-art-img {
-        width: 84px; height: 84px; flex-shrink: 0;
-        border-radius: var(--r-md); object-fit: cover;
-        background: var(--card-3); border: 1px solid var(--hairline);
-    }
-    div.sp-top-art-img { display: grid; place-items: center; font-size: 9px; color: var(--text-dim); }
-    .sp-top-art-img.round { border-radius: 50%; }
-    /* Desktop has the room, and the card is the screen's answer — it earns
-       the extra size rather than floating in a wide empty row. */
-    @media (min-width: 700px) {
-        .sp-top { padding: var(--space-4); }
-        .sp-top-art-img { width: 108px; height: 108px; }
-        .sp-top-name { font-size: 22px; }
-    }
-    .sp-top-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
-    .sp-top-name {
-        font-size: 18px; font-weight: 600; letter-spacing: -0.02em;
-        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    }
-    .sp-top-line {
-        font-family: var(--font-mono); font-size: 10.5px;
-        letter-spacing: 0.05em; text-transform: uppercase; color: var(--text-mute);
-        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    }
-    /* Says where the tap goes, so "open" never has to be guessed from a
-       chevron alone. */
-    .sp-top-cta {
-        display: flex; align-items: center; gap: 3px;
-        margin-top: 2px;
-        font-size: 12px; color: var(--on);
-    }
-    .sp-top-cta :global(svg) { transform: rotate(180deg); }
-    .sp-top-play {
-        flex-shrink: 0;
-        width: 52px; height: 52px; display: grid; place-items: center;
-        border-radius: 50%; border: 0;
-        background: var(--on); color: var(--primary-fg);
-        cursor: pointer;
-        transition: transform 150ms ease, box-shadow 150ms ease;
-    }
-    @media (hover: hover) {
-        .sp-top-play:not(:disabled):hover { box-shadow: 0 4px 16px var(--on-glow); }
-    }
-    .sp-top-play:active:not(:disabled) { transform: scale(0.94); transition-duration: 80ms; }
-    .sp-top-play:disabled { opacity: 0.45; cursor: default; }
 
     /* Cards, not a carousel: a grid shows every match at once and reflows on
        a phone, where a horizontal rail hid half of them behind a swipe. */
@@ -955,8 +812,5 @@
     @media (pointer: coarse) {
         .sp-clear { width: 44px; height: 44px; }
         .sp-input, .sp-config input { font-size: 16px; } /* prevents iOS auto-zoom */
-    }
-    @media (prefers-reduced-motion: reduce) {
-        .sp-top, .sp-top-play { transition-duration: 0.001ms; }
     }
 </style>

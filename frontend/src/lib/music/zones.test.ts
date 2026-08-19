@@ -159,6 +159,11 @@ describe("zone membership and what it stands for", () => {
 
     zones.dragVolume(z, 55);
     expect(zones.shownVolume(z)).toBe(55);
+    // Still the finger's while the finger is down, however long it rests.
+    vi.advanceTimersByTime(4001);
+    expect(zones.shownVolume(z)).toBe(55);
+
+    zones.setVolume(z, 55); // let go
     vi.advanceTimersByTime(4001);
     expect(zones.shownVolume(z)).toBe(30); // the speakers are the authority again
   });

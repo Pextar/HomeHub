@@ -2,7 +2,8 @@
     import Modal from "../components/Modal.svelte";
     import Switch from "../components/Switch.svelte";
     import Icon from "../components/Icon.svelte";
-    import RuleEditor, { blankRuleAction, compileAction } from "../components/RuleEditor.svelte";
+    import RuleEditor from "../components/RuleEditor.svelte";
+    import { blankRuleAction, compileAction } from "../lib/rules";
     import { closeModal } from "../lib/modal.svelte";
     import { api } from "../lib/api";
     import { data, toasts } from "../lib/stores.svelte";

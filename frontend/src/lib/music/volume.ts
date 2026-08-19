@@ -9,12 +9,14 @@ export const clampVol = (v: number) => Math.max(0, Math.min(100, Math.round(v)))
  * Lets a drag send live, without one network call per pixel: the first move
  * in a quiet window goes out right away, further moves within `intervalMs`
  * collapse into a single trailing call carrying whatever value is current
- * when the window closes. Shared by all three bridges, keyed by whatever id
- * each uses for its faders (a speaker, a group coordinator, a zone).
+ * when the window closes. Keyed by whatever id a surface uses for its faders
+ * (a speaker, a group coordinator, a zone).
  *
- * `cancel` drops any queued trailing call. The caller's release handler
- * (`setVolume`) must call it before sending the authoritative final value,
- * so a stale mid-drag frame can't land after it.
+ * `cancel` drops any queued trailing call, and a release has to call it
+ * before sending the authoritative value or a stale mid-drag frame can land
+ * after it and undo the release. That ordering is easy to get wrong once per
+ * bridge, so `fader.svelte.ts` owns it — reach for that rather than for this
+ * directly.
  */
 export function createVolumeThrottle(send: (id: string, level: number) => void, intervalMs = 150) {
   const timers: Record<string, ReturnType<typeof setTimeout>> = {};

@@ -26,7 +26,7 @@
     import { toasts } from "../lib/stores.svelte";
     import { dur } from "../lib/motion";
     import { KEF_SOURCES, kefSourceLabel } from "../lib/kef";
-    import { clampVol, createVolumeThrottle } from "../lib/music/volume";
+    import { createFader } from "../lib/music/fader.svelte";
     import type {
         KEFSpeakerView,
         KEFSettings,
@@ -106,15 +106,20 @@
      * poll has time to agree; after that the speaker is the truth.
      */
     let playOverride = $state<{ playing: boolean; at: number } | null>(null);
-    let volDrag = $state<number | null>(null);
-    let volSentAt = 0;
 
     const playing = $derived.by(() => {
         const ov = playOverride;
         if (ov && Date.now() - ov.at < 6000) return ov.playing;
         return now?.playing ?? false;
     });
-    const volume = $derived(volDrag ?? now?.volume ?? 0);
+    // The speaker follows the finger down the slider rather than waiting for
+    // it to lift, and holds the finger's value until the poll catches up —
+    // the shared rule (`lib/music/fader.svelte.ts`), not this page's own.
+    const fader = createFader((_id, level) => {
+        void api.kefSetVolume(speaker.id, level).catch(() => {});
+    });
+
+    const volume = $derived(fader.shown(speaker.id, now?.volume));
     /** Only the transport sources can be played; the analogue inputs can't. */
     const canTransport = $derived(
         poweredOn && (now?.source === "wifi" || now?.source === "bluetooth"),
@@ -156,33 +161,14 @@
         ).catch(() => {});
     }
 
-    // The speaker follows the finger down the slider rather than waiting for
-    // it to lift — the same throttled send the Music view's faders use, so
-    // one drag is a handful of calls instead of one per pixel.
-    const volThrottle = createVolumeThrottle((_id, level) => {
-        void api.kefSetVolume(speaker.id, level).catch(() => {});
-    });
-
     function dragVolume(v: number) {
-        volDrag = clampVol(v);
-        volSentAt = Date.now();
-        volThrottle.schedule(speaker.id, volDrag);
+        fader.drag(speaker.id, v);
     }
 
     function setVolume(v: number) {
-        volDrag = clampVol(v);
-        volThrottle.cancel(speaker.id);
-        volSentAt = Date.now();
-        const sentAt = volSentAt;
-        void run("volume", () => api.kefSetVolume(speaker.id, volDrag!), "Couldn't set the volume")
-            .catch(() => {})
-            .finally(() => {
-                // Hand the slider back to the poll, unless the user has moved
-                // it again in the meantime.
-                if (volSentAt === sentAt) setTimeout(() => {
-                    if (volSentAt === sentAt) volDrag = null;
-                }, 2500);
-            });
+        const level = fader.commit(speaker.id, v);
+        void run("volume", () => api.kefSetVolume(speaker.id, level), "Couldn't set the volume")
+            .catch(() => {});
     }
 
     function toggleMute() {

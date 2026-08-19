@@ -40,10 +40,17 @@ describe("AirPlay volume", () => {
         expect(airplay.shownVolume(receiver(35))).toBe(60);
     });
 
-    it("lets the stored level take over again once the drag is old", () => {
+    it("holds the value under a finger that has stopped moving", () => {
         const airplay = createAirPlayBridge();
         airplay.dragVolume(receiver(35), 60);
-        vi.advanceTimersByTime(2500);
+        vi.advanceTimersByTime(10_000);
+        expect(airplay.shownVolume(receiver(35))).toBe(60);
+    });
+
+    it("lets the stored level take over again once the finger lifts", () => {
+        const airplay = createAirPlayBridge();
+        airplay.setVolume(receiver(35), 60);
+        vi.advanceTimersByTime(3001);
         expect(airplay.shownVolume(receiver(35))).toBe(35);
     });
 

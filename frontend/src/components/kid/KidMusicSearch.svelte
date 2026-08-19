@@ -27,8 +27,11 @@
     import { createSearchHistory } from "../../lib/music/history.svelte";
     import KidTrackRow from "./KidTrackRow.svelte";
     import KidMediaCard from "./KidMediaCard.svelte";
-    import { createCatalogCache, contextItem } from "../../lib/music/catalog-cache.svelte";
-    import { fmtCount, fmtMs, capFirst } from "../../lib/music/format";
+    import KidCatalogPage from "./KidCatalogPage.svelte";
+    import { KIND_EMOJI } from "./kind-emoji";
+    import { createCatalogStack } from "../../lib/music/catalog-stack.svelte";
+    import { SEARCH_KINDS, searchSections, topLine } from "../../lib/music/catalog";
+    import type { SearchKind } from "../../lib/music/catalog";
     import { haptic } from "../../lib/utils";
     import type { PanelMusicStore } from "../../lib/panel-music.svelte";
     import type { SpotifyItem } from "../../lib/types";
@@ -49,13 +52,6 @@
             booted = true;
         });
     });
-
-    const KIND_EMOJI: Record<string, string> = {
-        track: "🎵",
-        album: "💿",
-        playlist: "📃",
-        artist: "🎤",
-    };
 
     // ── The box behaves like a search box ────────────────────────────────
     let searchEl = $state<HTMLInputElement | null>(null);
@@ -87,44 +83,16 @@
     }
 
     // ── Results ──────────────────────────────────────────────────────────
-    const KINDS = [
-        { id: "tracks", label: "Songs", emoji: "🎵" },
-        { id: "albums", label: "Albums", emoji: "💿" },
-        { id: "playlists", label: "Playlists", emoji: "📃" },
-        { id: "artists", label: "Artists", emoji: "🎤" },
-    ] as const;
-
-    // Songs lead — playing one is the commonest reason to search at all —
-    // and only shelves that matched are rendered.
-    const sections = $derived.by(() => {
-        const r = spotify.results;
-        if (!r) return [];
-        const all = KINDS.map((k) => ({ ...k, items: r[k.id] as SpotifyItem[] }));
-        if (spotify.kindFilter === "all") return all.filter((s) => s.items.length > 0);
-        return all.filter((s) => s.id === spotify.kindFilter);
-    });
-
-    const KIND_WORD: Record<string, string> = {
-        artist: "Artist",
-        album: "Album",
-        playlist: "Playlist",
-        track: "Song",
-    };
-
-    /** The top result's own line — the kind first, then the one stat that
-     *  identifies it fastest. */
-    function topLine(item: SpotifyItem): string {
-        const bits = [KIND_WORD[item.kind]];
-        if (item.kind === "artist") {
-            if (item.followers) bits.push(`${fmtCount(item.followers)} followers`);
-        } else {
-            if (item.sub) bits.push(item.sub);
-            if (item.year) bits.push(item.year);
-            if (item.duration_ms) bits.push(fmtMs(item.duration_ms));
-            if (item.total_tracks) bits.push(`${item.total_tracks} songs`);
-        }
-        return bits.join(" · ");
-    }
+    // Shelved by the catalog's own rule, each shelf labelled with the emoji
+    // for the kind it holds.
+    const shelfEmoji = (id: SearchKind) =>
+        KIND_EMOJI[SEARCH_KINDS.find((k) => k.id === id)!.kind];
+    const sections = $derived(
+        searchSections(spotify.results, spotify.kindFilter).map((s) => ({
+            ...s,
+            emoji: shelfEmoji(s.id),
+        })),
+    );
 
     /** A search that led somewhere is worth remembering: the store remembers
      *  submissions (Enter, chip re-runs), but the kid flow is type → tap a
@@ -138,7 +106,10 @@
     // A tap plays a song or a whole container; an artist opens instead.
     function act(item: SpotifyItem) {
         if (item.kind === "artist") {
-            void openArtist(item.uri, item.art_url ? { art_url: item.art_url, round: true } : undefined);
+            void catalog.openArtist(
+                item.uri,
+                item.art_url ? { art_url: item.art_url, round: true } : undefined,
+            );
         } else {
             pick(item);
         }
@@ -174,40 +145,18 @@
     }
 
     // ── The catalog stack: artist and record pages, one level deeper ────
-    type Level = { kind: "artist" | "context"; uri: string };
-    let stack = $state<Level[]>([]);
-    const topLevel = $derived(stack.length ? stack[stack.length - 1] : null);
-
-    function pushLevel(kind: Level["kind"], uri: string) {
-        stack = [...stack, { kind, uri }];
-    }
-    function popLevel() {
-        haptic();
-        stack = stack.slice(0, -1);
-    }
-
-    // The pages themselves are read and kept by the shared cache; the stack
-    // above stays this surface's, since only it knows what a level looks like.
-    const catalog = createCatalogCache({
-        artistUri: () => (topLevel?.kind === "artist" ? topLevel.uri : null),
-        contextUri: () => (topLevel?.kind === "context" ? topLevel.uri : null),
-        onFail: popLevel,
+    // The ladder itself is shared with the wall's depth; what is this
+    // module's own is the haptic under each rung. Levels here don't scroll
+    // independently, so there is no scroll to stash.
+    const catalog = createCatalogStack({
+        onOpened: (art) => {
+            actedOnResult(art);
+            searchEl?.blur(); // chosen — the keyboard's job is done
+        },
+        onPop: haptic,
         artistError: "Couldn't load the artist",
     });
-
-    async function openArtist(uri: string, art?: { art_url?: string; round?: boolean }) {
-        if (topLevel?.kind === "artist" && topLevel.uri === uri) return;
-        actedOnResult(art);
-        searchEl?.blur(); // chosen — the keyboard's job is done
-        pushLevel("artist", uri);
-        await catalog.loadArtist(uri);
-    }
-
-    async function openContext(uri: string) {
-        if (topLevel?.kind === "context" && topLevel.uri === uri) return;
-        pushLevel("context", uri);
-        await catalog.loadContext(uri);
-    }
+    const topLevel = $derived(catalog.top);
 
     // Escape climbs the ladder: queue actions, then each level, then the
     // box's query (handled on the input itself).
@@ -218,7 +167,7 @@
                 queueFor = null;
                 return;
             }
-            if (stack.length) popLevel();
+            if (catalog.depth) void catalog.pop();
         };
         window.addEventListener("keydown", onKey);
         return () => window.removeEventListener("keydown", onKey);
@@ -231,124 +180,17 @@
 
 <div class="kms" class:kb-open={kbOpen}>
     {#if topLevel}
-        <!-- One level deeper: an artist's page or a record's listing. The
-             back button climbs exactly one level. -->
-        <button class="kms-back" onclick={popLevel} aria-label="Back one level">‹ Back</button>
-
-        {#if topLevel.kind === "artist"}
-            {#if catalog.artistLoading && !catalog.artistDetail}
-                <div class="kms-skel-hero" aria-hidden="true"></div>
-            {:else if catalog.artistDetail}
-                {@const d = catalog.artistDetail}
-                <header class="kms-hero">
-                    {#if d.art_url}
-                        <img class="kms-hero-art round" src={d.art_url} alt="" />
-                    {:else}
-                        <span class="kms-hero-art kms-card-none round" aria-hidden="true">🎤</span>
-                    {/if}
-                    <span class="kms-hero-name">{d.name}</span>
-                    {#if d.followers || d.genres?.length}
-                        <span class="kms-hero-sub">
-                            {[d.followers ? `${fmtCount(d.followers)} followers` : "", d.genres?.[0] ? capFirst(d.genres[0]) : ""]
-                                .filter(Boolean)
-                                .join(" · ")}
-                        </span>
-                    {/if}
-                    {#if d.top_tracks[0]}
-                        <!-- No speaker takes an artist URI, so the button
-                             starts their top song — and names it. -->
-                        <button
-                            class="kms-bigplay"
-                            disabled={!!music.busy["item:" + d.uri]}
-                            onclick={() => pick({ kind: "artist", uri: d.uri, name: d.name, art_url: d.art_url })}
-                        >
-                            ▶️ Play
-                        </button>
-                        <span class="kms-playnote">Plays “{d.top_tracks[0].name}”</span>
-                    {/if}
-                </header>
-
-                {#if d.top_tracks.length > 0}
-                    {@render shelfLabel("🎵 Popular songs")}
-                    {#each d.top_tracks as t, i (t.uri)}
-                        <KidTrackRow
-    item={t}
-    num={i + 1}
-    {music}
-    {kbOpen}
-    queueOpen={queueFor === (t).uri}
-    flashed={queuedFlash === (t).uri}
-    onPick={pick}
-    onToggleQueue={toggleQueueFor}
-    onQueue={queueIt}
-/>
-                    {/each}
-                {/if}
-                {#if d.albums.length > 0}
-                    {@render shelfLabel("💿 Albums")}
-                    <div class="kms-grid">
-                        {#each d.albums as a (a.uri)}
-                            <KidMediaCard item={a} onPick={(x) => void openContext(x.uri)} />
-                        {/each}
-                    </div>
-                {/if}
-                {#if d.singles.length > 0}
-                    {@render shelfLabel("💿 Singles")}
-                    <div class="kms-grid">
-                        {#each d.singles as sg (sg.uri)}
-                            <KidMediaCard item={sg} onPick={(x) => void openContext(x.uri)} />
-                        {/each}
-                    </div>
-                {/if}
-                {#if d.related.length > 0}
-                    {@render shelfLabel("🎤 More like them")}
-                    <div class="kms-grid">
-                        {#each d.related as ra (ra.uri)}
-                            <KidMediaCard item={ra} onPick={act} />
-                        {/each}
-                    </div>
-                {/if}
-            {/if}
-        {:else}
-            {#if catalog.contextLoading && !catalog.contextDetail}
-                <div class="kms-skel-hero" aria-hidden="true"></div>
-            {:else if catalog.contextDetail}
-                {@const d = catalog.contextDetail}
-                <header class="kms-hero">
-                    {#if d.art_url}
-                        <img class="kms-hero-art" src={d.art_url} alt="" />
-                    {:else}
-                        <span class="kms-hero-art kms-card-none" aria-hidden="true">{KIND_EMOJI[d.kind]}</span>
-                    {/if}
-                    <span class="kms-hero-name">{d.name}</span>
-                    <span class="kms-hero-sub">
-                        {[d.sub, d.year, d.total_tracks ? `${d.total_tracks} songs` : ""].filter(Boolean).join(" · ")}
-                    </span>
-                    <button
-                        class="kms-bigplay"
-                        disabled={!!music.busy["item:" + d.uri]}
-                        onclick={() => pick(contextItem(d))}
-                    >
-                        ▶️ Play all
-                    </button>
-                </header>
-
-                {@render shelfLabel("🎵 Songs")}
-                {#each d.tracks as t, i (t.uri)}
-                    <KidTrackRow
-    item={t}
-    num={d.kind === "album" ? i + 1 : null}
-    {music}
-    {kbOpen}
-    queueOpen={queueFor === (t).uri}
-    flashed={queuedFlash === (t).uri}
-    onPick={pick}
-    onToggleQueue={toggleQueueFor}
-    onQueue={queueIt}
-/>
-                {/each}
-            {/if}
-        {/if}
+        <KidCatalogPage
+            {catalog}
+            {music}
+            {kbOpen}
+            {queueFor}
+            {queuedFlash}
+            onPick={pick}
+            onToggleQueue={toggleQueueFor}
+            onQueue={queueIt}
+            onAct={act}
+        />
     {:else}
         <!-- The wrapper only earns its keep while the keyboard is up, when it
              becomes the band the box pins to (see .kb-open below). -->
@@ -383,13 +225,13 @@
                     class="kms-kind"
                     class:active={spotify.kindFilter === "all"}
                     onclick={() => (spotify.kindFilter = "all")}>All</button>
-                {#each KINDS as k (k.id)}
+                {#each SEARCH_KINDS as k (k.id)}
                     {#if r[k.id].length > 0}
                         <button
                             class="kms-kind"
                             class:active={spotify.kindFilter === k.id}
                             onclick={() => (spotify.kindFilter = k.id)}
-                            >{k.emoji} {k.label} <span class="mono">{r[k.id].length}</span></button>
+                            >{KIND_EMOJI[k.kind]} {k.label} <span class="mono">{r[k.id].length}</span></button>
                     {/if}
                 {/each}
             </div>
@@ -831,84 +673,11 @@
     }
     .kms-recent-x:active { color: var(--kid-pink); }
 
-    /* ── Drill-down hero ── */
-    .kms-back {
-        align-self: flex-start;
-        font-size: 1rem;
-        font-weight: 800;
-        padding: 12px 18px;
-        min-height: 48px;
-        border-radius: 999px;
-        border: none;
-        background: var(--surface-hover);
-        color: var(--text);
-        cursor: pointer;
-        -webkit-tap-highlight-color: transparent;
-    }
-    .kms-back:active { transform: scale(0.93); }
-    .kms-hero {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        gap: var(--space-2);
-        text-align: center;
-        padding: var(--space-2) 0 var(--space-3);
-    }
-    .kms-hero-art {
-        width: 132px;
-        height: 132px;
-        border-radius: var(--radius-xl);
-        object-fit: cover;
-        box-shadow: 0 10px 34px rgba(0, 0, 0, 0.35);
-    }
-    .kms-hero-art.round { border-radius: 50%; }
-    .kms-hero-name {
-        font-size: 1.5rem;
-        font-weight: 800;
-        letter-spacing: -0.02em;
-        color: var(--text);
-        line-height: 1.15;
-    }
-    .kms-hero-sub {
-        font-size: 0.9rem;
-        font-weight: 600;
-        color: var(--text-muted);
-    }
-    .kms-bigplay {
-        margin-top: var(--space-2);
-        font-size: 1.15rem;
-        font-weight: 800;
-        padding: 16px 40px;
-        min-height: 60px;
-        border-radius: 999px;
-        border: none;
-        background: var(--kid-accent-grad);
-        color: var(--kid-on-text);
-        box-shadow: 0 0 0 4px var(--kid-ring), 0 10px 30px var(--kid-glow);
-        cursor: pointer;
-        transition: transform 0.12s ease;
-        -webkit-tap-highlight-color: transparent;
-    }
-    .kms-bigplay:active { transform: scale(0.94); }
-    .kms-bigplay:disabled { opacity: 0.6; }
-    .kms-playnote {
-        font-size: 0.85rem;
-        font-weight: 600;
-        color: var(--text-muted);
-    }
-
     /* ── Skeletons & empties ── */
     .kms-sklist { display: flex; flex-direction: column; gap: var(--space-3); }
     .kms-skel {
         height: 64px;
         border-radius: var(--radius-lg);
-        background: linear-gradient(90deg, var(--surface) 0%, var(--surface-hover) 50%, var(--surface) 100%);
-        background-size: 200% 100%;
-        animation: kms-shimmer 1.5s linear infinite;
-    }
-    .kms-skel-hero {
-        height: 220px;
-        border-radius: var(--radius-xl);
         background: linear-gradient(90deg, var(--surface) 0%, var(--surface-hover) 50%, var(--surface) 100%);
         background-size: 200% 100%;
         animation: kms-shimmer 1.5s linear infinite;
@@ -1013,10 +782,7 @@
     .kb-open .kms-shelf-head { display: none; }
     .kb-open .kms-grid { grid-template-columns: repeat(auto-fill, minmax(min(110px, 30%), 1fr)); }
     @media (prefers-reduced-motion: reduce) {
-        .kms-skel,
-        .kms-skel-hero {
-            animation: none;
-        }
+        .kms-skel { animation: none; }
         .kms-top.starting .kms-top-art {
             animation: none;
         }

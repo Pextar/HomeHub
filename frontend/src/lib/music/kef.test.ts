@@ -50,15 +50,35 @@ describe("KEF volume", () => {
         expect(kef.shownVolume(sp)).toBe(50);
     });
 
-    it("lets the poll take over once the window lapses", () => {
+    it("holds it under a finger that has stopped moving, too", () => {
+        // The window used to be re-stamped by each drag frame and nothing
+        // else, so a finger resting on the slider past it got the polled
+        // value back — the slider jumping out from under the thumb holding
+        // it. The gesture is what holds now, not the last frame's clock.
         const kef = make();
         kef.dragVolume(speaker(30), 55);
+        vi.advanceTimersByTime(10_000);
+        expect(kef.shownVolume(speaker(70))).toBe(55);
+    });
+
+    it("lets the poll take over once the finger lifts and the window lapses", () => {
+        const kef = make();
+        kef.setVolume(speaker(30), 55);
         expect(kef.shownVolume(speaker(30))).toBe(55);
 
         vi.advanceTimersByTime(4001);
         // A later poll reports someone turning it up on the speaker itself.
         // The speaker is the authority on its own volume; the local value was
         // only ever a bridge across the round trip.
+        expect(kef.shownVolume(speaker(70))).toBe(70);
+    });
+
+    it("gives up on a drag whose release never arrived", () => {
+        // A touch cancelled out from under the slider leaves no `onchange`.
+        // The claim expires rather than holding the value for the session.
+        const kef = make();
+        kef.dragVolume(speaker(30), 55);
+        vi.advanceTimersByTime(31_000);
         expect(kef.shownVolume(speaker(70))).toBe(70);
     });
 
