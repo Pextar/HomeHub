@@ -98,9 +98,6 @@ func New(cfg Config) *Service {
 // play, a wake-up timer — pass this rather than assembling it.
 func (s *Service) Deps() media.Deps { return s.cfg.Audio.Deps() }
 
-// Quality is what the house decodes at, for callers describing the audio chain.
-func (s *Service) Quality() media.StreamQuality { return s.cfg.Audio.Quality() }
-
 // ── Where ────────────────────────────────────────────────────────────────
 
 // Endpoints builds live endpoints for every registered speaker, keyed by the

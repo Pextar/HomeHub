@@ -5,7 +5,6 @@ import (
 	"errors"
 	"homehub/internal/spotify"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -41,7 +40,7 @@ func (s *Server) spotifyAccount(r *http.Request) *spotify.Account {
 // instead: the browser can't load it, but the authorization code is in the
 // address bar and the user pastes that address back into the Music view
 // (see spotifyExchange). manual reports which of the two flows applies.
-func spotifyRedirectURI(r *http.Request) (uri string, manual bool) {
+func (s *Server) spotifyRedirectURI(r *http.Request) (uri string, manual bool) {
 	if isSecureRequest(r) {
 		host := r.Host
 		if xfh := r.Header.Get("X-Forwarded-Host"); xfh != "" {
@@ -50,8 +49,11 @@ func spotifyRedirectURI(r *http.Request) (uri string, manual bool) {
 		return "https://" + host + "/api/spotify/callback", false
 	}
 	// Match the real listen port so that a browser running on the HomeHub
-	// host itself still completes automatically.
-	port := os.Getenv("PORT")
+	// host itself still completes automatically. The port comes from the
+	// injected HTTPPort rather than the environment: this is the same
+	// listener Sonos posts its callbacks to, and one of the two reading PORT
+	// for itself is how they would come to disagree.
+	port := s.HTTPPort
 	if port == "" {
 		port = "8080"
 	}
@@ -74,7 +76,7 @@ func (s *Server) spotifyStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	st := s.spotifyAccount(r).Status()
-	uri, manual := spotifyRedirectURI(r)
+	uri, manual := s.spotifyRedirectURI(r)
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"configured":   st.Configured,
 		"connected":    st.Connected,
@@ -130,7 +132,7 @@ func (s *Server) spotifyLogin(w http.ResponseWriter, r *http.Request) {
 	if !s.requireSpotify(w) {
 		return
 	}
-	uri, _ := spotifyRedirectURI(r)
+	uri, _ := s.spotifyRedirectURI(r)
 	key := ""
 	if u := currentUser(r); u != nil && u.Kid {
 		key = u.ID

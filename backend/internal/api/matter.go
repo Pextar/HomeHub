@@ -4,8 +4,6 @@ import (
 	"context"
 	"log"
 	"net/http"
-	"os"
-	"strings"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -155,14 +153,7 @@ func (s *Server) matterTransport(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "matter bridge is not configured")
 		return
 	}
-	transports := []string{}
-	if strings.TrimSpace(os.Getenv("MATTER_BRIDGE_THREAD_DATASET")) != "" {
-		transports = append(transports, "thread")
-	}
-	if strings.TrimSpace(os.Getenv("MATTER_BRIDGE_WIFI_SSID")) != "" {
-		transports = append(transports, "wifi")
-	}
-	writeJSON(w, http.StatusOK, map[string][]string{"transports": transports})
+	writeJSON(w, http.StatusOK, map[string][]string{"transports": s.Matter.Transports()})
 }
 
 // matterNodeID resolves the Matter node id for a given Socket id.

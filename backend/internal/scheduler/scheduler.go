@@ -2,6 +2,11 @@
 // and (per-minute) any enabled schedules whose HH:MM + weekday match
 // the current local time. It owns no state of its own — everything
 // runs against an injected *store.Store.
+//
+// It decides *when*, never *how*: reaching a device is internal/control's
+// staged flow, the same one a tap in the app takes. A schedule turning the
+// porch light off at 23:40 and a person turning it off from the sofa are one
+// code path, which is what stops the two from drifting.
 package scheduler
 
 import (
@@ -11,9 +16,22 @@ import (
 	"math/rand"
 	"time"
 
+	"homehub/internal/control"
 	"homehub/internal/push"
 	"homehub/internal/store"
 )
+
+// Config is what the tick needs from the rest of the application.
+type Config struct {
+	// Store holds the schedules, timers and automations to match against.
+	Store *store.Store
+
+	// Control is how anything due reaches a device.
+	Control *control.Actions
+
+	// Push is optional; nil disables the notifications a fire produces.
+	Push *push.Service
+}
 
 // pendingFire holds a randomly-delayed fire time for a schedule that has
 // random_offset_minutes set. enqueued is when the base time matched, used
@@ -24,8 +42,8 @@ type pendingFire struct {
 }
 
 // Run blocks until ctx is cancelled. Spawn it in a goroutine.
-// pushSvc is optional — pass nil to disable push notifications from the scheduler.
-func Run(ctx context.Context, st *store.Store, pushSvc *push.Service) {
+func Run(ctx context.Context, cfg Config) {
+	st := cfg.Store
 	lastFired := make(map[string]string)
 	// pending holds schedules that are waiting for their random offset to elapse.
 	pending := make(map[string]pendingFire)
@@ -111,12 +129,12 @@ func Run(ctx context.Context, st *store.Store, pushSvc *push.Service) {
 		for _, s := range dueSchedules {
 			delete(pending, s.ID)
 			lastFired[s.ID] = stamp
-			if err := executeSchedule(st, s, pushSvc); err != nil {
+			if err := executeSchedule(cfg, s); err != nil {
 				log.Printf("scheduler: schedule %s failed: %v", s.ID, err)
 			}
 		}
 		for _, t := range dueTimers {
-			if err := executeTimer(st, t, pushSvc); err != nil {
+			if err := executeTimer(cfg, t); err != nil {
 				log.Printf("scheduler: timer %s failed: %v", t.ID, err)
 			}
 		}
@@ -124,132 +142,75 @@ func Run(ctx context.Context, st *store.Store, pushSvc *push.Service) {
 		// Automations run off the same tick: time triggers match the minute,
 		// while sensor/device triggers fire on edges detected against the
 		// previous tick's snapshot.
-		autos.tick(st, prevTick, now, pushSvc)
+		autos.tick(cfg, prevTick, now)
 		prevTick = now
 	}
 }
 
 // executeTimer fires a one-shot timer and removes it from the persistent
 // store regardless of success — the user already saw it scheduled and
-// will see the resulting state on the next refresh. Device I/O runs between
-// the two lock acquisitions (staged flow) so a slow device can't stall the
-// scheduler tick or the API.
-func executeTimer(st *store.Store, t store.Timer, pushSvc *push.Service) error {
-	st.Mu.Lock()
-	delete(st.Timers, t.ID)
-	label := targetLabel(st, t.TargetType, t.TargetID)
-	staged, err := st.StageAction(t.TargetType, t.TargetID, t.Action)
-	st.Mu.Unlock()
-
-	st.SendStaged(staged)
-
-	st.Mu.Lock()
-	// Suppress per-socket state-change pushes; the timer summary below covers it.
-	st.SuppressStateChange = true
-	if applyErr := st.ApplyStaged(staged); err == nil {
-		err = applyErr
-	}
-	st.SuppressStateChange = false
-	entry := store.ActivityEntry{Kind: t.TargetType, Source: "timer", Action: t.Action, Label: label}
-	if err != nil {
-		entry.Status = "error"
-		entry.Error = err.Error()
-	}
-	st.Activity.Add(entry)
-	if saveErr := st.Save(); err == nil && saveErr != nil {
-		err = saveErr
-	}
-	st.Mu.Unlock()
-	st.FlushLights() // off-lock bridge calls for scene brightness/colour
-	st.FlushMusic()  // and a scene step's music, queued while it was staged
+// will see the resulting state on the next refresh.
+func executeTimer(cfg Config, t store.Timer) error {
+	res, err := cfg.Control.Target(control.Run{
+		TargetType: t.TargetType, TargetID: t.TargetID, Action: t.Action,
+		Source: control.SourceTimer,
+		// Removed before the target is resolved and in the same transaction:
+		// a device that refuses must not leave the timer to fire again on the
+		// next tick five seconds from now.
+		Before: func() { delete(cfg.Store.Timers, t.ID) },
+	})
 	if err == nil {
-		log.Printf("timer fired: %s on %s/%s", t.Action, t.TargetType, t.TargetID)
-		if pushSvc != nil {
-			go pushSvc.NotifyEvent(push.CategoryScheduleFired, "", push.PushPayload{
-				Title: fmt.Sprintf("⏰ Timer: %s %s", label, t.Action),
-				URL:   "/#/sockets",
-				Tag:   "timer-" + t.ID,
-			})
-		}
+		err = res.Err()
 	}
-	return err
-}
-
-func executeSchedule(st *store.Store, s store.Schedule, pushSvc *push.Service) error {
-	tt, tid, action := s.TargetType, s.TargetID, s.Action
-	if tt == "" && s.SocketID != "" {
-		tt, tid = "socket", s.SocketID
-	}
-
-	st.Mu.Lock()
-	label := targetLabel(st, tt, tid)
-	staged, err := st.StageAction(tt, tid, action)
-	st.Mu.Unlock()
-
-	st.SendStaged(staged)
-
-	st.Mu.Lock()
-	// Suppress per-socket state-change pushes; the schedule summary below covers it.
-	st.SuppressStateChange = true
-	if applyErr := st.ApplyStaged(staged); err == nil {
-		err = applyErr
-	}
-	st.SuppressStateChange = false
-	entry := store.ActivityEntry{Kind: tt, Source: "schedule", Action: action, Label: label}
-	if err != nil {
-		entry.Status = "error"
-		entry.Error = err.Error()
-	}
-	st.Activity.Add(entry)
-	var saveErr error
-	if err == nil {
-		if existing, ok := st.Schedules[s.ID]; ok {
-			existing.LastFiredAt = time.Now().UTC()
-		}
-		saveErr = st.Save()
-	}
-	st.Mu.Unlock()
-	st.FlushLights() // off-lock bridge calls for scene brightness/colour
-	st.FlushMusic()  // and a scene step's music, queued while it was staged
 	if err != nil {
 		return err
 	}
-	if saveErr != nil {
-		return saveErr
-	}
-	log.Printf("scheduler: %s %s (%s/%s)", action, s.ID, tt, tid)
-	if pushSvc != nil {
-		go pushSvc.NotifyEvent(push.CategoryScheduleFired, "", push.PushPayload{
-			Title: fmt.Sprintf("⏰ Schedule: %s %s", label, action),
-			URL:   "/#/schedules",
-			Tag:   "schedule-" + s.ID,
+	log.Printf("timer fired: %s on %s/%s", t.Action, t.TargetType, t.TargetID)
+	if cfg.Push != nil {
+		go cfg.Push.NotifyEvent(push.CategoryScheduleFired, "", push.PushPayload{
+			Title: fmt.Sprintf("⏰ Timer: %s %s", res.Label, t.Action),
+			URL:   "/#/sockets",
+			Tag:   "timer-" + t.ID,
 		})
 	}
 	return nil
 }
 
-// targetLabel resolves a (kind, id) pair to a human-readable name for
-// the activity log. Falls back to the id if the target was deleted.
-func targetLabel(st *store.Store, kind, id string) string {
-	switch kind {
-	case "socket":
-		if v, ok := st.Sockets[id]; ok {
-			return v.Name
-		}
-	case "group":
-		if v, ok := st.Groups[id]; ok {
-			return v.Name
-		}
-	case "room":
-		if v, ok := st.Rooms[id]; ok {
-			return v.Name
-		}
-	case "scene":
-		if v, ok := st.Scenes[id]; ok {
-			return v.Name
-		}
+func executeSchedule(cfg Config, s store.Schedule) error {
+	tt, tid, action := s.TargetType, s.TargetID, s.Action
+	if tt == "" && s.SocketID != "" {
+		tt, tid = "socket", s.SocketID
 	}
-	return id
+
+	res, err := cfg.Control.Target(control.Run{
+		TargetType: tt, TargetID: tid, Action: action,
+		Source: control.SourceSchedule,
+		After: func(r control.Result) {
+			// Only a schedule that reached its devices counts as having
+			// fired: the next run should not be told it already happened.
+			if r.Err() != nil {
+				return
+			}
+			if existing, ok := cfg.Store.Schedules[s.ID]; ok {
+				existing.LastFiredAt = time.Now().UTC()
+			}
+		},
+	})
+	if err == nil {
+		err = res.Err()
+	}
+	if err != nil {
+		return err
+	}
+	log.Printf("scheduler: %s %s (%s/%s)", action, s.ID, tt, tid)
+	if cfg.Push != nil {
+		go cfg.Push.NotifyEvent(push.CategoryScheduleFired, "", push.PushPayload{
+			Title: fmt.Sprintf("⏰ Schedule: %s %s", res.Label, action),
+			URL:   "/#/schedules",
+			Tag:   "schedule-" + s.ID,
+		})
+	}
+	return nil
 }
 
 // scheduleMatchesNow reports whether s's trigger time falls inside the
