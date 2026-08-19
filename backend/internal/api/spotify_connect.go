@@ -96,7 +96,7 @@ func (s *Server) spotifyConnect(w http.ResponseWriter, r *http.Request) {
 // describeConnectDevices annotates the raw list with what HomeHub knows about
 // the boxes on it.
 func (s *Server) describeConnectDevices(devices []spotify.Device) []connectDevice {
-	decoderName := strings.TrimSpace(s.decoderDeviceName())
+	decoderName := strings.TrimSpace(s.Audio.DecoderName())
 
 	// Which Connect device is which HomeHub speaker is a question the KEF
 	// bridge already answers — a pinned id, or the name the speaker
@@ -140,7 +140,7 @@ func (s *Server) describeConnectDevices(devices []spotify.Device) []connectDevic
 // whatever a phone does, and warning about it would be a lie in the other
 // direction.
 func (s *Server) connectInterrupts(playing *spotify.Playback) string {
-	decoder := strings.TrimSpace(s.decoderDeviceName())
+	decoder := strings.TrimSpace(s.Audio.DecoderName())
 	if decoder == "" || playing == nil || !strings.EqualFold(playing.DeviceName, decoder) {
 		return ""
 	}
@@ -272,16 +272,4 @@ func (s *Server) releaseDecodedZones() {
 	for _, id := range ending {
 		s.endZoneSession(id)
 	}
-}
-
-// decoderDeviceName is what HomeHub's own decoder calls itself in Spotify's
-// device list. Empty when no decoder has ever been created, which is also when
-// it cannot be on the list.
-func (s *Server) decoderDeviceName() string {
-	s.streamMu.Lock()
-	defer s.streamMu.Unlock()
-	if s.librespot == nil {
-		return ""
-	}
-	return s.librespot.DeviceName()
 }

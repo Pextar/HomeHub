@@ -20,8 +20,8 @@ import (
 	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
 
-	"homehub/internal/airplay"
 	"homehub/internal/announce"
+	"homehub/internal/audio"
 	"homehub/internal/kef"
 	"homehub/internal/llm"
 	"homehub/internal/matter"
@@ -32,7 +32,6 @@ import (
 	"homehub/internal/sonos"
 	"homehub/internal/spotify"
 	"homehub/internal/store"
-	"homehub/internal/stream"
 )
 
 // maxRequestBody caps API request bodies. Generous for this app's config
@@ -41,7 +40,13 @@ const maxRequestBody = 1 << 20 // 1 MiB
 
 // Server wires HTTP handlers to a Store.
 type Server struct {
-	Store   *store.Store
+	Store *store.Store
+	// Audio holds the live sound: the stream speakers pull from, the
+	// decoders that fill it, and the AirPlay sender. Required — every media
+	// route reaches it — and supplied by the composition root so that what
+	// it is built from (the environment, the household's quality setting)
+	// stays out of the HTTP layer.
+	Audio   *audio.Engine
 	Matter  *matter.Client  // optional; nil-safe via Matter.Enabled()
 	MQTT    *mqtt.Client    // optional; nil-safe via MQTT.Enabled()
 	LLM     *llm.Client     // optional; nil-safe via LLM.Enabled(). Powers the assistant.
@@ -139,27 +144,6 @@ type Server struct {
 	// what remembers to shut it down. See media_session.go.
 	zoneMu       sync.Mutex
 	zoneSessions map[string]*media.Session
-
-	// stream serves decoded audio to speakers, and librespot is what
-	// decodes it. Both created lazily, both optional: without librespot
-	// installed only the cross-vendor route is unavailable.
-	streamMu  sync.Mutex
-	stream    *stream.Host
-	librespot *stream.Librespot
-	// librespotBitrate is what the running decoder was built for. Kept so a
-	// household changing its stream quality gets a decoder that honours the
-	// change rather than one built at the old bitrate — see decoder().
-	librespotBitrate int
-	// qobuzDecoder is built once and reused: unlike librespot it holds no
-	// subprocess and no bitrate, so nothing about a settings change requires
-	// rebuilding it.
-	qobuzDecoder *stream.Qobuz
-	// caster pushes audio to AirPlay receivers. Created lazily like the
-	// two above, and like them it holds a live session that has to be shut
-	// down: a cast that outlives its zone keeps sending to a receiver
-	// nobody is listening to. Its own mutex — see airplayCaster().
-	casterMu sync.Mutex
-	caster   *airplay.Caster
 
 	// announcer serves announcement clips to the speakers (see
 	// announce.go). Created lazily, and only ever holds the last few

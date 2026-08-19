@@ -434,8 +434,8 @@ func TestZonesListIncludesLiveState(t *testing.T) {
 func TestStreamHandlerBeforeAnyPlaybackIs404(t *testing.T) {
 	srv := withSpeakers(t)
 	rec := httptest.NewRecorder()
-	srv.streamHandler().ServeHTTP(rec,
-		httptest.NewRequest(http.MethodGet, streamPath+"/deadbeef", nil))
+	srv.Audio.Handler().ServeHTTP(rec,
+		httptest.NewRequest(http.MethodGet, StreamPath+"/deadbeef", nil))
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want 404", rec.Code)
 	}

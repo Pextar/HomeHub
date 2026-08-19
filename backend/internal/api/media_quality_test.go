@@ -195,17 +195,17 @@ func TestSettingAnUnknownQualityIsRefused(t *testing.T) {
 // nothing. This asserts the wiring rather than the process.
 func TestDecoderIsRebuiltWhenTheQualityChanges(t *testing.T) {
 	srv := testServer(t)
-	if got := srv.streamQuality().Bitrate(); got != 320 {
+	if got := srv.Audio.Quality().Bitrate(); got != 320 {
 		t.Fatalf("default bitrate = %d", got)
 	}
-	_ = srv.decoder()
-	if srv.librespotBitrate != 320 {
-		t.Fatalf("decoder built at %d kbps", srv.librespotBitrate)
+	_ = srv.Audio.Decoder()
+	if srv.Audio.DecoderBitrate() != 320 {
+		t.Fatalf("decoder built at %d kbps", srv.Audio.DecoderBitrate())
 	}
 
 	srv.Store.Settings.StreamQuality = "balanced"
-	_ = srv.decoder()
-	if srv.librespotBitrate != 160 {
-		t.Errorf("decoder still at %d kbps after the setting changed", srv.librespotBitrate)
+	_ = srv.Audio.Decoder()
+	if srv.Audio.DecoderBitrate() != 160 {
+		t.Errorf("decoder still at %d kbps after the setting changed", srv.Audio.DecoderBitrate())
 	}
 }

@@ -56,7 +56,7 @@ func qualityOptions() []qualityOption {
 
 // mediaQuality handles GET /api/media/quality.
 func (s *Server) mediaQuality(w http.ResponseWriter, r *http.Request) {
-	pref := s.streamQuality()
+	pref := s.Audio.Quality()
 
 	// Every route, not just the one some zone happens to take. The routes
 	// differ in whether this setting reaches them at all, and showing them

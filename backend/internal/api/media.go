@@ -96,11 +96,24 @@ func (s *Server) kefState(ctx context.Context, sp store.KEFSpeaker) (*kef.State,
 func (s *Server) provider(id string) (media.Provider, error) {
 	switch {
 	case id == "" || strings.EqualFold(id, "spotify"):
-		return mediabridge.NewSpotifyProvider(s.Spotify, s.decoder(), s.streamQuality()), nil
+		return mediabridge.NewSpotifyProvider(s.Spotify, s.Audio.Decoder(), s.Audio.Quality()), nil
 	case strings.EqualFold(id, "qobuz"):
-		return mediabridge.NewQobuzProvider(s.qobuzAccount(), s.qobuzDecode()), nil
+		return mediabridge.NewQobuzProvider(s.qobuzAccount(), s.Audio.QobuzDecoder()), nil
 	}
 	return nil, fmt.Errorf("%w: %q", media.ErrUnknownProvider, id)
+}
+
+// qobuzAccount adapts the optional Qobuz client to the provider's interface.
+//
+// The nil check is load-bearing rather than defensive: assigning a nil
+// *qobuz.Client straight into the interface would produce a non-nil interface
+// holding a nil pointer, and the provider's "is it configured" check would pass
+// on its way to a panic.
+func (s *Server) qobuzAccount() mediabridge.QobuzAccount {
+	if s.Qobuz == nil {
+		return nil
+	}
+	return s.Qobuz
 }
 
 // itemFormat asks a provider what one item will decode to, for the router.
@@ -130,8 +143,8 @@ func (s *Server) itemFormat(ctx context.Context, p media.Provider, item media.It
 // providers is every provider the server knows about.
 func (s *Server) providers() []media.Provider {
 	return []media.Provider{
-		mediabridge.NewSpotifyProvider(s.Spotify, s.decoder(), s.streamQuality()),
-		mediabridge.NewQobuzProvider(s.qobuzAccount(), s.qobuzDecode()),
+		mediabridge.NewSpotifyProvider(s.Spotify, s.Audio.Decoder(), s.Audio.Quality()),
+		mediabridge.NewQobuzProvider(s.qobuzAccount(), s.Audio.QobuzDecoder()),
 	}
 }
 
@@ -265,7 +278,7 @@ func (s *Server) buildZoneView(ctx context.Context, z *store.Zone, eps map[strin
 	if len(members) > 0 && p != nil {
 		if plan, err := media.Resolve(p, members); err == nil {
 			v.Route, v.Sync, v.Reason = plan.Route, plan.Sync, plan.Reason
-			chain := media.DescribeQuality(p, plan.Route, s.streamQuality())
+			chain := media.DescribeQuality(p, plan.Route, s.Audio.Quality())
 			v.Quality = &chain
 		} else {
 			v.Problem = err.Error()
@@ -515,7 +528,7 @@ func (s *Server) mediaZonePlay(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sess, err := media.Play(ctx, plan, p, item, s.mediaDeps())
+	sess, err := media.Play(ctx, plan, p, item, s.Audio.Deps())
 	if err != nil {
 		writeError(w, mediaErrStatus(err), err.Error())
 		return
@@ -535,7 +548,7 @@ func (s *Server) mediaZonePlay(w http.ResponseWriter, r *http.Request) {
 		ArtURI:   body.ArtURI,
 	})
 
-	chain := media.DescribeQuality(p, plan.Route, s.streamQuality())
+	chain := media.DescribeQuality(p, plan.Route, s.Audio.Quality())
 	writeJSON(w, http.StatusOK, map[string]any{
 		"route":      plan.Route,
 		"sync":       plan.Sync,

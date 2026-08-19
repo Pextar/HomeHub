@@ -47,7 +47,7 @@ func (s *Server) airplayStatus(w http.ResponseWriter, r *http.Request) {
 		// Casting is whether HomeHub is sending to it right now.
 		Casting bool `json:"casting"`
 	}
-	caster := s.airplayCaster()
+	caster := s.Audio.Caster()
 
 	var out []view
 	s.Store.View(func() {
@@ -260,7 +260,7 @@ func (s *Server) airplaySetVolume(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Off-lock, as every device call must be.
-	if ctrl, live := s.airplayCaster().Live(id); live {
+	if ctrl, live := s.Audio.Caster().Live(id); live {
 		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 		defer cancel()
 		if err := ctrl.SetVolume(ctx, body.Level); err != nil {
@@ -275,7 +275,7 @@ func (s *Server) airplaySetVolume(w http.ResponseWriter, r *http.Request) {
 // airplayEndpoints builds live endpoints for every registered receiver.
 // Caller must hold Mu (read is enough).
 func (s *Server) airplayEndpoints(out map[string]media.Endpoint) {
-	caster := s.airplayCaster()
+	caster := s.Audio.Caster()
 	for id, sp := range s.Store.AirPlay {
 		out[store.QualifyAirPlay(id)] = mediabridge.NewAirPlayEndpoint(*sp, caster.Live)
 	}

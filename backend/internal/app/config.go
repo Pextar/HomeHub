@@ -1,9 +1,13 @@
 package app
 
 import (
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
+
+	"homehub/internal/media"
 )
 
 // Config is everything HomeHub reads from its environment, resolved once.
@@ -48,6 +52,28 @@ type Config struct {
 	// NexaScript is the lgpio-backed 433 MHz transmitter helper. Empty runs
 	// the Nexa path in simulation mode, which is what a laptop wants.
 	NexaScript string
+
+	// StreamURL fixes the address speakers fetch audio from. Empty resolves
+	// one against a registered speaker, which is right whenever they share a
+	// subnet with us — the normal case. Set it when they do not.
+	StreamURL string
+
+	// StreamDelays spaces out when each vendor is told to start playing, so
+	// speakers that fill their buffers at different rates come in together.
+	//
+	// Empty by default. The right values depend on the speakers, the network
+	// and the firmware; inventing them would be worse than leaving a zone a
+	// few hundred milliseconds apart for someone who can actually hear it to
+	// tune. See docs/MEDIA-PROTOCOL.md.
+	StreamDelays map[media.Vendor]time.Duration
+
+	// LibrespotBin is the Spotify decoder's executable, resolved on PATH
+	// when empty. LibrespotName is what it calls itself in Spotify's device
+	// list, and LibrespotCache is where it keeps credentials and audio —
+	// which is what makes the second start much faster than the first.
+	LibrespotBin   string
+	LibrespotName  string
+	LibrespotCache string
 }
 
 // FromEnv resolves the configuration, applying the defaults a fresh checkout
@@ -64,7 +90,39 @@ func FromEnv() Config {
 	}
 	cfg.TLSCert = envOr("TLS_CERT_FILE", filepath.Join(cfg.DataDir, "tls", "cert.pem"))
 	cfg.TLSKey = envOr("TLS_KEY_FILE", filepath.Join(cfg.DataDir, "tls", "key.pem"))
+
+	cfg.StreamURL = strings.TrimRight(strings.TrimSpace(os.Getenv("HOMEHUB_STREAM_URL")), "/")
+	cfg.StreamDelays = streamDelaysFromEnv()
+	cfg.LibrespotBin = strings.TrimSpace(os.Getenv("HOMEHUB_LIBRESPOT_BIN"))
+	cfg.LibrespotName = strings.TrimSpace(os.Getenv("HOMEHUB_LIBRESPOT_NAME"))
+	cfg.LibrespotCache = filepath.Join(cfg.DataDir, "librespot")
 	return cfg
+}
+
+// streamDelaysFromEnv reads per-vendor start compensation. An unparseable
+// value is logged and ignored rather than fatal: it is a tuning knob, and a
+// house should not fail to boot over a typo in one.
+func streamDelaysFromEnv() map[media.Vendor]time.Duration {
+	out := map[media.Vendor]time.Duration{}
+	for _, v := range []struct {
+		vendor media.Vendor
+		env    string
+	}{
+		{media.VendorSonos, "HOMEHUB_STREAM_DELAY_SONOS"},
+		{media.VendorKEF, "HOMEHUB_STREAM_DELAY_KEF"},
+	} {
+		raw := strings.TrimSpace(os.Getenv(v.env))
+		if raw == "" {
+			continue
+		}
+		d, err := time.ParseDuration(raw)
+		if err != nil || d < 0 {
+			log.Printf("media: ignoring %s=%q: not a valid duration", v.env, raw)
+			continue
+		}
+		out[v.vendor] = d
+	}
+	return out
 }
 
 // envOr reads an environment variable, falling back to def when it is unset

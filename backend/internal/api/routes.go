@@ -406,7 +406,7 @@ func (s *Server) registerDeviceCallbackRoutes(r *mux.Router) {
 	// by the stream id — 128 bits of randomness, minted per playback and
 	// invalid the moment it ends. GET and HEAD only, since speakers probe with
 	// HEAD before committing to play.
-	r.PathPrefix(streamPath+"/").Handler(s.streamHandler()).Methods("GET", "HEAD")
+	r.PathPrefix(StreamPath+"/").Handler(s.Audio.Handler()).Methods("GET", "HEAD")
 
 	// The announcement clip a speaker fetches when the house is being
 	// called. Same posture as the stream: unguarded by the session because

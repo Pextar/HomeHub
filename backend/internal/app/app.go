@@ -24,8 +24,10 @@ import (
 	"time"
 
 	"homehub/internal/api"
+	"homehub/internal/audio"
 	"homehub/internal/llm"
 	"homehub/internal/matter"
+	"homehub/internal/media"
 	"homehub/internal/mqtt"
 	"homehub/internal/push"
 	"homehub/internal/qobuz"
@@ -135,6 +137,24 @@ func New(cfg Config) (*App, error) {
 		return nil, fmt.Errorf("loading qobuz state: %w", err)
 	}
 
+	// ── Live audio ───────────────────────────────────────────────────────
+	// The engine reads nothing for itself: the two things that can change
+	// while the house runs — where the speakers are, and how hard to
+	// compress — arrive as functions, and the rest as settled values.
+	audioEngine := audio.New(audio.Config{
+		BaseURL:       cfg.StreamURL,
+		HTTPPort:      cfg.HTTPPort,
+		StreamPath:    api.StreamPath,
+		StartDelays:   cfg.StreamDelays,
+		SpeakerAddr:   a.store.AnySpeakerAddr,
+		Quality:       func() media.StreamQuality { return streamQuality(a.store) },
+		LibrespotBin:  cfg.LibrespotBin,
+		LibrespotName: cfg.LibrespotName,
+		CacheDir:      cfg.LibrespotCache,
+		Qobuz:         qobuzCatalog(qobuzClient),
+		Logf:          log.Printf,
+	})
+
 	// ── HTTP ─────────────────────────────────────────────────────────────
 	secret, err := api.LoadOrCreateSessionSecret(cfg.DataDir)
 	if err != nil {
@@ -143,6 +163,7 @@ func New(cfg Config) (*App, error) {
 
 	a.api = &api.Server{
 		Store:         a.store,
+		Audio:         audioEngine,
 		Matter:        a.matter,
 		MQTT:          a.mqtt,
 		LLM:           llmClient,

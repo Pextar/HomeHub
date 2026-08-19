@@ -96,7 +96,7 @@ func (s *Server) roomPlaying(room string) (playing, known bool) {
 			// it is always available: nothing casting is a genuine "stopped"
 			// rather than a missing answer.
 			if live == nil {
-				live = s.airplayCaster().Live
+				live = s.Audio.Caster().Live
 			}
 			known = true
 			if ctrl, casting := live(id); casting && ctrl.Playing() {

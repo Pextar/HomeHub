@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"homehub/internal/audio"
+	"homehub/internal/media"
 	"homehub/internal/store"
 )
 
@@ -15,7 +17,26 @@ func testServer(t *testing.T) *Server {
 	if err := st.Load(); err != nil {
 		t.Fatalf("load store: %v", err)
 	}
-	return &Server{Store: st, SPADir: t.TempDir()}
+	return &Server{Store: st, SPADir: t.TempDir(), Audio: testAudio(st)}
+}
+
+// testAudio is the audio runtime a test server gets. It is the real engine —
+// nothing in it starts until something asks it to decode — wired to the same
+// store, so a test exercises the wiring the composition root builds rather
+// than a stand-in for it.
+func testAudio(st *store.Store) *audio.Engine {
+	return audio.New(audio.Config{
+		StreamPath:  StreamPath,
+		SpeakerAddr: st.AnySpeakerAddr,
+		Quality: func() media.StreamQuality {
+			return media.StreamQuality(store.ViewValue(st, func() string {
+				if st.Settings == nil {
+					return ""
+				}
+				return st.Settings.StreamQuality
+			}))
+		},
+	})
 }
 
 // The callback has to be reachable without credentials — speakers have none
@@ -83,12 +104,6 @@ func TestSonosCallbackURLDefaultsPort(t *testing.T) {
 	}
 	if !strings.HasSuffix(got, ":8080"+sonosEventPath) {
 		t.Errorf("callback = %q, want the default :8080", got)
-	}
-}
-
-func TestLocalAddrForRejectsUnroutable(t *testing.T) {
-	if _, err := localAddrFor("not an ip"); err == nil {
-		t.Error("localAddrFor(garbage) = nil, want an error")
 	}
 }
 

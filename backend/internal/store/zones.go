@@ -151,3 +151,37 @@ func (s *Store) ZonesForSpeaker(member string) []*Zone {
 	}
 	return out
 }
+
+// AnySpeakerAddr returns the address of some registered speaker, or empty when
+// the house has none.
+//
+// It answers a question that is not about any particular speaker: which of
+// this host's network interfaces faces the speakers? A home server is often
+// multi-homed, and the audio stream has a single URL serving every listener,
+// so the address has to be resolved toward *a* speaker rather than per
+// speaker. Any of them will do — they share a subnet in every house this can
+// work in at all.
+//
+// The makes are tried in a fixed order — Sonos, KEF, AirPlay — though which
+// speaker is picked within a make is whatever the map yields first. That is
+// fine: the caller wants an interface, not a speaker.
+func (s *Store) AnySpeakerAddr() string {
+	return ViewValue(s, func() string {
+		for _, sp := range s.Sonos {
+			if sp.IP != "" {
+				return sp.IP
+			}
+		}
+		for _, sp := range s.KEF {
+			if sp.IP != "" {
+				return sp.IP
+			}
+		}
+		for _, sp := range s.AirPlay {
+			if sp.IP != "" {
+				return sp.IP
+			}
+		}
+		return ""
+	})
+}

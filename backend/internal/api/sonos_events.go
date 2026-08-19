@@ -6,7 +6,6 @@ package api
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"log"
 	"net"
@@ -18,6 +17,7 @@ import (
 
 	"github.com/gorilla/mux"
 
+	"homehub/internal/platform/lanaddr"
 	"homehub/internal/sonos"
 	"homehub/internal/store"
 )
@@ -93,32 +93,11 @@ func (s *Server) sonosSpeakerList() []sonos.Speaker {
 //     bridge) has several local addresses, and all but one are unreachable
 //     from any given speaker.
 func (s *Server) sonosCallbackURL(speakerIP string) (string, error) {
-	local, err := localAddrFor(speakerIP)
-	if err != nil {
-		return "", fmt.Errorf("no local address can reach %s: %w", speakerIP, err)
-	}
-	port := s.HTTPPort
-	if port == "" {
-		port = "8080"
-	}
-	return "http://" + net.JoinHostPort(local, port) + sonosEventPath, nil
-}
-
-// localAddrFor asks the kernel which of our addresses it would use to reach
-// ip. Dialling UDP sends no packets — it only resolves the route — so this
-// is free, and unlike "first non-loopback interface" it is correct on a
-// multi-homed host.
-func localAddrFor(ip string) (string, error) {
-	conn, err := net.Dial("udp", net.JoinHostPort(ip, strconv.Itoa(sonos.Port)))
+	base, err := lanaddr.BaseURL(speakerIP, s.HTTPPort)
 	if err != nil {
 		return "", err
 	}
-	defer func() { _ = conn.Close() }()
-	addr, ok := conn.LocalAddr().(*net.UDPAddr)
-	if !ok || addr.IP == nil || addr.IP.IsUnspecified() {
-		return "", fmt.Errorf("no route to %s", ip)
-	}
-	return addr.IP.String(), nil
+	return base + sonosEventPath, nil
 }
 
 // ── Health ───────────────────────────────────────────────────────────────

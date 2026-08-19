@@ -102,13 +102,13 @@ func TestDescribeConnectDevicesNamesWhatHomeHubKnows(t *testing.T) {
 		ID: "kef_2", Name: "Kitchen", IP: "192.0.2.21", MAC: "b1b2c3d4e5f6",
 	}
 	// Creating the decoder is what gives it a name to match against.
-	_ = srv.decoder()
+	_ = srv.Audio.Decoder()
 
 	got := srv.describeConnectDevices([]spotify.Device{
 		{ID: "kef-connect-id", Name: "LSX II", Type: "Speaker"},
 		{ID: "other", Name: "kitchen", Type: "Speaker"}, // matched by name
 		{ID: "phone", Name: "Petter's iPhone", Type: "Smartphone"},
-		{ID: "hub", Name: srv.decoderDeviceName(), Type: "Speaker"},
+		{ID: "hub", Name: srv.Audio.DecoderName(), Type: "Speaker"},
 	})
 	if len(got) != 4 {
 		t.Fatalf("got %d devices", len(got))
@@ -132,8 +132,8 @@ func TestDescribeConnectDevicesNamesWhatHomeHubKnows(t *testing.T) {
 // warning about that would be a lie in the other direction.
 func TestInterruptsOnlyNamesRoomsHomeHubIsFeeding(t *testing.T) {
 	srv := testServer(t)
-	_ = srv.decoder()
-	hub := srv.decoderDeviceName()
+	_ = srv.Audio.Decoder()
+	hub := srv.Audio.DecoderName()
 
 	srv.Store.Zones["z1"] = &store.Zone{ID: "z1", Name: "Downstairs"}
 	srv.setZoneSession("z1", &media.Session{Route: media.RouteAirPlay})

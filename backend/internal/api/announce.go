@@ -63,7 +63,7 @@ func (s *Server) announceHost() *announce.Host {
 	if s.announcer != nil {
 		return s.announcer
 	}
-	base := s.streamBaseURL()
+	base := s.Audio.BaseURL()
 	if base == "" {
 		return nil
 	}
