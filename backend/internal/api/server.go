@@ -19,6 +19,7 @@ import (
 	"github.com/gorilla/mux"
 
 	"homehub/internal/announce"
+	"homehub/internal/assistant"
 	"homehub/internal/audio"
 	"homehub/internal/autoplay"
 	"homehub/internal/control"
@@ -60,6 +61,10 @@ type Server struct {
 	// everything the handlers here need to know about where a household
 	// means and what can play there. Required; supplied by the composition
 	// root.
+	// Assistant answers a sentence by driving the same control layer the
+	// buttons do. Required by the assistant routes; a household without a
+	// model gets an agent that says so.
+	Assistant *assistant.Agent
 	// Control is how anything switches a device: the staged flow that keeps
 	// device I/O off the store lock, shared by these handlers and the
 	// assistant. Required; supplied by the composition root.

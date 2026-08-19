@@ -377,8 +377,28 @@ func (u *User) Clone() *User {
 	return &c
 }
 
+// MayAccess is CanAccessSocket with the auth-disabled case folded in.
+//
+// A nil user means no users are configured, which is a house with the door
+// open: everything is reachable. Every caller that reads a request's user has
+// to handle that, so it is handled once, here, rather than as a nil check
+// wrapped around each call.
+func (u *User) MayAccess(socketID string) bool {
+	return u == nil || u.CanAccessSocket(socketID)
+}
+
+// IsAdmin reports whether this user administers the house. A nil user means
+// auth is disabled, which is treated as admin so the app stays fully usable.
+func (u *User) IsAdmin() bool {
+	return u == nil || u.Admin
+}
+
 // CanAccessSocket reports whether this user may see/control the given
 // socket. Admins can access everything; others are limited to SocketIDs.
+//
+// A nil user is *not* allowed here — see MayAccess for the caller that means
+// "auth is off". The difference matters: this answers "does this account have
+// the right", and an absent account does not.
 func (u *User) CanAccessSocket(socketID string) bool {
 	if u == nil {
 		return false

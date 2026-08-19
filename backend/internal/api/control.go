@@ -14,7 +14,7 @@ import (
 // enforces. It exists so internal/control stays out of the permissions model:
 // that package applies the answer, this one computes it.
 func allowedTo(user *store.User) control.Allow {
-	return func(socketID string) bool { return canAccess(user, socketID) }
+	return func(socketID string) bool { return user.MayAccess(socketID) }
 }
 
 // writeStaged renders the two failures every multi-device action shares, and

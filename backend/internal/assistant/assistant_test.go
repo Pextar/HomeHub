@@ -1,9 +1,10 @@
-package api
+package assistant
 
 import (
 	"strings"
 	"testing"
 
+	"homehub/internal/control"
 	"homehub/internal/store"
 )
 
@@ -13,7 +14,10 @@ type noopRF struct{}
 
 func (noopRF) Send(code, protocol string, state bool) error { return nil }
 
-func assistantTestServer(t *testing.T) *Server {
+// testAgent is the real agent over a small house. It has no model — every
+// test here drives the tools and the confirmation tokens directly, which is
+// exactly the half that must be right whatever the model says.
+func testAgent(t *testing.T) (*Agent, *store.Store) {
 	t.Helper()
 	st := store.New(t.TempDir(), noopRF{})
 	st.Sockets["lamp"] = &store.Socket{ID: "lamp", Name: "Kitchen Lamp", Code: "1:0", Protocol: "nexa", Room: "Kitchen", State: false}
@@ -21,21 +25,23 @@ func assistantTestServer(t *testing.T) *Server {
 	st.Rooms["r1"] = &store.Room{ID: "r1", Name: "Kitchen"}
 	st.Rooms["r2"] = &store.Room{ID: "r2", Name: "Bedroom"}
 	st.Groups["g1"] = &store.Group{ID: "g1", Name: "Lights", SocketIDs: []string{"lamp", "fan"}}
-	srv := newTestServer(t, st)
-	srv.SessionSecret = []byte("test-secret-32-bytes-long-padxxx")
-	return srv
+	return New(Config{
+		Store:   st,
+		Control: control.New(control.Config{Store: st}),
+		Secret:  []byte("test-secret-32-bytes-long-padxxx"),
+	}), st
 }
 
 func TestControlDeviceTool(t *testing.T) {
-	s := assistantTestServer(t)
-	tools := s.assistantTools()
+	a, st := testAgent(t)
+	tools := a.tools()
 
 	// Resolve by name (case-insensitive) and turn on.
 	res := tools["control_device"].Execute(nil, map[string]any{"device": "kitchen lamp", "action": "on"})
 	if !strings.Contains(res, "\"state\":\"on\"") {
 		t.Fatalf("control_device result = %q, want state on", res)
 	}
-	if !s.Store.Sockets["lamp"].State {
+	if !st.Sockets["lamp"].State {
 		t.Fatalf("lamp should be on after tool call")
 	}
 
@@ -47,19 +53,19 @@ func TestControlDeviceTool(t *testing.T) {
 }
 
 func TestControlDeviceUnsupportedAction(t *testing.T) {
-	s := assistantTestServer(t)
-	res := s.assistantTools()["control_device"].Execute(nil, map[string]any{"device": "kitchen lamp", "action": "explode"})
+	a, st := testAgent(t)
+	res := a.tools()["control_device"].Execute(nil, map[string]any{"device": "kitchen lamp", "action": "explode"})
 	if !strings.Contains(res, "unsupported action") {
 		t.Fatalf("result = %q, want unsupported action", res)
 	}
-	if s.Store.Sockets["lamp"].State {
+	if st.Sockets["lamp"].State {
 		t.Fatalf("lamp must stay off on an invalid action")
 	}
 }
 
 func TestBulkToolNeedsConfirm(t *testing.T) {
-	s := assistantTestServer(t)
-	tools := s.assistantTools()
+	a, _ := testAgent(t)
+	tools := a.tools()
 	for _, name := range []string{"all_devices", "control_room", "control_group"} {
 		if !tools[name].NeedsConfirm {
 			t.Errorf("%s should require confirmation", name)
@@ -73,14 +79,14 @@ func TestBulkToolNeedsConfirm(t *testing.T) {
 }
 
 func TestConfirmationTokenRoundTrip(t *testing.T) {
-	s := assistantTestServer(t)
+	a, _ := testAgent(t)
 	user := &store.User{ID: "u1", Admin: true}
 
-	token, err := s.signConfirmation(pendingAction{Tool: "all_devices", Args: map[string]any{"action": "off"}, UserID: "u1"})
+	token, err := a.signConfirmation(pendingAction{Tool: "all_devices", Args: map[string]any{"action": "off"}, UserID: "u1"})
 	if err != nil {
 		t.Fatalf("sign: %v", err)
 	}
-	got, err := s.verifyConfirmation(token, user)
+	got, err := a.verifyConfirmation(token, user)
 	if err != nil {
 		t.Fatalf("verify: %v", err)
 	}
@@ -89,24 +95,24 @@ func TestConfirmationTokenRoundTrip(t *testing.T) {
 	}
 
 	// A different user can't redeem it.
-	if _, err := s.verifyConfirmation(token, &store.User{ID: "u2", Admin: true}); err == nil {
+	if _, err := a.verifyConfirmation(token, &store.User{ID: "u2", Admin: true}); err == nil {
 		t.Fatalf("expected cross-user rejection")
 	}
 
 	// Tampering breaks the signature.
-	if _, err := s.verifyConfirmation(token+"x", user); err == nil {
+	if _, err := a.verifyConfirmation(token+"x", user); err == nil {
 		t.Fatalf("expected tampered token rejection")
 	}
 }
 
 func TestRoomControlAppliesToRoom(t *testing.T) {
-	s := assistantTestServer(t)
+	a, st := testAgent(t)
 	// Turn the Bedroom off (fan starts on); Kitchen lamp must be untouched.
-	res := s.assistantTools()["control_room"].Execute(nil, map[string]any{"room": "bedroom", "action": "off"})
+	res := a.tools()["control_room"].Execute(nil, map[string]any{"room": "bedroom", "action": "off"})
 	if !strings.Contains(res, "\"room\":\"Bedroom\"") {
 		t.Fatalf("control_room result = %q", res)
 	}
-	if s.Store.Sockets["fan"].State {
+	if st.Sockets["fan"].State {
 		t.Fatalf("bedroom fan should be off")
 	}
 }

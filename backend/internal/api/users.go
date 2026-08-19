@@ -90,23 +90,11 @@ func generateInviteToken() (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
-// canAccess reports whether the request's user may touch the given socket.
-// A nil user means auth is disabled (no users configured) → full access.
-func canAccess(user *store.User, socketID string) bool {
-	return user == nil || user.CanAccessSocket(socketID)
-}
-
-// isAdmin reports whether the request's user is an admin. A nil user means
-// auth is disabled → treated as admin so the app stays fully usable.
-func isAdmin(user *store.User) bool {
-	return user == nil || user.Admin
-}
-
 // requireAdmin wraps a handler so only admins (or anyone, when auth is off)
 // may reach it.
 func (s *Server) requireAdmin(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if !isAdmin(currentUser(r)) {
+		if !currentUser(r).IsAdmin() {
 			writeError(w, http.StatusForbidden, "admin access required")
 			return
 		}
@@ -121,7 +109,7 @@ func (s *Server) requireAdmin(next http.HandlerFunc) http.HandlerFunc {
 func (s *Server) requireAdminOrKid(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		u := currentUser(r)
-		if !isAdmin(u) && !u.Kid {
+		if !u.IsAdmin() && !u.Kid {
 			writeError(w, http.StatusForbidden, "admin access required")
 			return
 		}
@@ -132,7 +120,7 @@ func (s *Server) requireAdminOrKid(next http.HandlerFunc) http.HandlerFunc {
 // requireSocketAccess returns true if the request's user may act on the
 // given socket; otherwise it writes 403 and returns false.
 func (s *Server) requireSocketAccess(w http.ResponseWriter, r *http.Request, socketID string) bool {
-	if canAccess(currentUser(r), socketID) {
+	if currentUser(r).MayAccess(socketID) {
 		return true
 	}
 	writeError(w, http.StatusForbidden, "you don't have access to that device")

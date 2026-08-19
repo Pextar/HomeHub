@@ -23,7 +23,7 @@ func (s *Server) getSockets(w http.ResponseWriter, r *http.Request) {
 	s.Store.View(func() {
 		result := make([]*store.Socket, 0, len(s.Store.Sockets))
 		for _, sock := range s.Store.Sockets {
-			if !canAccess(user, sock.ID) {
+			if !user.MayAccess(sock.ID) {
 				continue
 			}
 			result = append(result, sock)

@@ -1,4 +1,4 @@
-package api
+package assistant
 
 import (
 	"encoding/json"
@@ -22,24 +22,24 @@ import (
 // v1 is control + Q&A only. Creating/deleting schedules, scenes, and groups is
 // deferred to v2 — the existing forms are faster and can't hallucinate.
 
-// assistantTool pairs a model-facing spec with its executor and a flag marking
+// tool pairs a model-facing spec with its executor and a flag marking
 // bulk/destructive tools that must be confirmed by the user before running.
-type assistantTool struct {
+type tool struct {
 	Spec         llm.Tool
 	NeedsConfirm bool
 	Execute      func(user *store.User, args map[string]any) string
 }
 
-// assistantTools builds the tool registry. It is cheap to call per request.
-func (s *Server) assistantTools() map[string]assistantTool {
-	tools := map[string]assistantTool{
+// tools builds the tool registry. It is cheap to call per request.
+func (a *Agent) tools() map[string]tool {
+	tools := map[string]tool{
 		"get_state": {
 			Spec: fnTool("get_state",
 				"Re-read the current state of the home. Use after an action to confirm the result, or when you need fresh data. Returns the requested slice as JSON.",
 				objSchema(map[string]any{
 					"kind": enumProp("Which slice to read", []string{"devices", "rooms", "scenes", "groups", "sensors", "all"}),
 				}, nil)),
-			Execute: s.toolGetState,
+			Execute: a.toolGetState,
 		},
 		"get_sensor_readings": {
 			Spec: fnTool("get_sensor_readings",
@@ -48,7 +48,7 @@ func (s *Server) assistantTools() map[string]assistantTool {
 					"sensor":        stringProp("Sensor name or id."),
 					"since_minutes": intProp("How far back to look, in minutes. Defaults to 60."),
 				}, []string{"sensor"})),
-			Execute: s.toolGetSensorReadings,
+			Execute: a.toolGetSensorReadings,
 		},
 		"control_device": {
 			Spec: fnTool("control_device",
@@ -57,7 +57,7 @@ func (s *Server) assistantTools() map[string]assistantTool {
 					"device": stringProp("Device name or id, e.g. \"kitchen lamp\"."),
 					"action": enumProp("What to do", []string{"on", "off", "toggle"}),
 				}, []string{"device", "action"})),
-			Execute: s.toolControlDevice,
+			Execute: a.toolControlDevice,
 		},
 		"activate_scene": {
 			Spec: fnTool("activate_scene",
@@ -65,7 +65,7 @@ func (s *Server) assistantTools() map[string]assistantTool {
 				objSchema(map[string]any{
 					"scene": stringProp("Scene name or id, e.g. \"movie night\"."),
 				}, []string{"scene"})),
-			Execute: s.toolActivateScene,
+			Execute: a.toolActivateScene,
 		},
 		"control_room": {
 			Spec: fnTool("control_room",
@@ -75,7 +75,7 @@ func (s *Server) assistantTools() map[string]assistantTool {
 					"action": enumProp("What to do", []string{"on", "off"}),
 				}, []string{"room", "action"})),
 			NeedsConfirm: true,
-			Execute:      s.toolControlRoom,
+			Execute:      a.toolControlRoom,
 		},
 		"control_group": {
 			Spec: fnTool("control_group",
@@ -85,7 +85,7 @@ func (s *Server) assistantTools() map[string]assistantTool {
 					"action": enumProp("What to do", []string{"on", "off", "toggle"}),
 				}, []string{"group", "action"})),
 			NeedsConfirm: true,
-			Execute:      s.toolControlGroup,
+			Execute:      a.toolControlGroup,
 		},
 		"all_devices": {
 			Spec: fnTool("all_devices",
@@ -94,14 +94,14 @@ func (s *Server) assistantTools() map[string]assistantTool {
 					"action": enumProp("What to do", []string{"on", "off"}),
 				}, []string{"action"})),
 			NeedsConfirm: true,
-			Execute:      s.toolAllDevices,
+			Execute:      a.toolAllDevices,
 		},
 	}
 	return tools
 }
 
 // specsFor returns the model-facing tool specs (the Execute funcs stripped).
-func specsFor(tools map[string]assistantTool) []llm.Tool {
+func specsFor(tools map[string]tool) []llm.Tool {
 	specs := make([]llm.Tool, 0, len(tools))
 	for _, t := range tools {
 		specs = append(specs, t.Spec)
@@ -111,8 +111,8 @@ func specsFor(tools map[string]assistantTool) []llm.Tool {
 
 // --- executors ---
 
-func (s *Server) toolGetState(user *store.User, args map[string]any) string {
-	snap := s.buildSnapshot(user)
+func (a *Agent) toolGetState(user *store.User, args map[string]any) string {
+	snap := a.buildSnapshot(user)
 	kind := strings.ToLower(argString(args, "kind"))
 	var v any
 	switch kind {
@@ -132,8 +132,8 @@ func (s *Server) toolGetState(user *store.User, args map[string]any) string {
 	return toJSON(v)
 }
 
-func (s *Server) toolGetSensorReadings(user *store.User, args map[string]any) string {
-	id, name, ok, reason := s.resolveSensor(argString(args, "sensor"))
+func (a *Agent) toolGetSensorReadings(user *store.User, args map[string]any) string {
+	id, name, ok, reason := a.resolveSensor(argString(args, "sensor"))
 	if !ok {
 		return reason
 	}
@@ -148,15 +148,15 @@ func (s *Server) toolGetSensorReadings(user *store.User, args map[string]any) st
 	var out []point
 	var unit string
 	var last *float64
-	s.Store.View(func() {
-		all := s.Store.Readings[id]
+	a.cfg.Store.View(func() {
+		all := a.cfg.Store.Readings[id]
 		out = make([]point, 0, len(all))
 		for _, rd := range all {
 			if rd.Time.After(cutoff) {
 				out = append(out, point{Time: rd.Time, Value: rd.Value})
 			}
 		}
-		if sn := s.Store.Sensors[id]; sn != nil {
+		if sn := a.cfg.Store.Sensors[id]; sn != nil {
 			unit = sn.Unit
 			last = sn.LastValue
 		}
@@ -202,13 +202,13 @@ func (s *Server) toolGetSensorReadings(user *store.User, args map[string]any) st
 	return toJSON(result)
 }
 
-func (s *Server) toolControlDevice(user *store.User, args map[string]any) string {
+func (a *Agent) toolControlDevice(user *store.User, args map[string]any) string {
 	action := normalizeAction(argString(args, "action"))
-	sock, ok, reason := s.resolveSocket(user, argString(args, "device"))
+	sock, ok, reason := a.resolveSocket(user, argString(args, "device"))
 	if !ok {
 		return reason
 	}
-	updated, found, err := s.Control.Socket(sock.ID, action, control.SourceAssistant)
+	updated, found, err := a.cfg.Control.Socket(sock.ID, action, control.SourceAssistant)
 	if !found {
 		return "device no longer exists"
 	}
@@ -221,12 +221,12 @@ func (s *Server) toolControlDevice(user *store.User, args map[string]any) string
 	})
 }
 
-func (s *Server) toolActivateScene(user *store.User, args map[string]any) string {
-	id, name, ok, reason := s.resolveScene(argString(args, "scene"))
+func (a *Agent) toolActivateScene(user *store.User, args map[string]any) string {
+	id, name, ok, reason := a.resolveScene(argString(args, "scene"))
 	if !ok {
 		return reason
 	}
-	res, err := s.Control.Scene(id, control.SourceAssistant)
+	res, err := a.cfg.Control.Scene(id, control.SourceAssistant)
 	if !res.Found {
 		return "scene no longer exists"
 	}
@@ -236,13 +236,13 @@ func (s *Server) toolActivateScene(user *store.User, args map[string]any) string
 	return toJSON(map[string]any{"scene": name, "devices_updated": res.OK, "failures": len(res.Failures)})
 }
 
-func (s *Server) toolControlRoom(user *store.User, args map[string]any) string {
+func (a *Agent) toolControlRoom(user *store.User, args map[string]any) string {
 	action := normalizeAction(argString(args, "action"))
-	room, ok, reason := s.resolveRoom(argString(args, "room"))
+	room, ok, reason := a.resolveRoom(argString(args, "room"))
 	if !ok {
 		return reason
 	}
-	res, err := s.Control.Room(room, allowedTo(user), action == "on", control.SourceAssistant)
+	res, err := a.cfg.Control.Room(room, allow(user), action == "on", control.SourceAssistant)
 	if !res.Found {
 		return "no devices in " + room
 	}
@@ -252,13 +252,13 @@ func (s *Server) toolControlRoom(user *store.User, args map[string]any) string {
 	return toJSON(map[string]any{"room": room, "action": action, "devices_updated": res.OK, "failures": len(res.Failures)})
 }
 
-func (s *Server) toolControlGroup(user *store.User, args map[string]any) string {
+func (a *Agent) toolControlGroup(user *store.User, args map[string]any) string {
 	action := normalizeAction(argString(args, "action"))
-	id, name, ok, reason := s.resolveGroup(argString(args, "group"))
+	id, name, ok, reason := a.resolveGroup(argString(args, "group"))
 	if !ok {
 		return reason
 	}
-	res, err := s.Control.Group(id, action, control.SourceAssistant)
+	res, err := a.cfg.Control.Group(id, action, control.SourceAssistant)
 	if !res.Found {
 		return "group no longer exists"
 	}
@@ -268,9 +268,9 @@ func (s *Server) toolControlGroup(user *store.User, args map[string]any) string 
 	return toJSON(map[string]any{"group": name, "action": action, "devices_updated": res.OK, "failures": len(res.Failures)})
 }
 
-func (s *Server) toolAllDevices(user *store.User, args map[string]any) string {
+func (a *Agent) toolAllDevices(user *store.User, args map[string]any) string {
 	action := normalizeAction(argString(args, "action"))
-	res, err := s.Control.All(allowedTo(user), action == "on", control.SourceAssistant)
+	res, err := a.cfg.Control.All(allow(user), action == "on", control.SourceAssistant)
 	if err != nil {
 		return "failed to control all devices: " + err.Error()
 	}
@@ -356,4 +356,10 @@ func toJSON(v any) string {
 		return fmt.Sprintf("{\"error\":%q}", err.Error())
 	}
 	return string(b)
+}
+
+// allow turns a user into the predicate internal/control enforces. The nil
+// case is auth being disabled, which is a house with the door open.
+func allow(user *store.User) control.Allow {
+	return func(socketID string) bool { return user.MayAccess(socketID) }
 }

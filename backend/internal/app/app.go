@@ -25,6 +25,7 @@ import (
 
 	"homehub/internal/announce"
 	"homehub/internal/api"
+	"homehub/internal/assistant"
 	"homehub/internal/audio"
 	"homehub/internal/autoplay"
 	"homehub/internal/control"
@@ -199,6 +200,24 @@ func New(cfg Config) (*App, error) {
 		},
 	})
 
+	// The session secret signs cookies, and the assistant's confirmation
+	// tokens with them: a paused bulk action must not outlive the session
+	// that proposed it.
+	secret, err := api.LoadOrCreateSessionSecret(cfg.DataDir)
+	if err != nil {
+		return nil, fmt.Errorf("loading session secret: %w", err)
+	}
+
+	// The local assistant acts through the same control layer the app's own
+	// buttons do, so a sentence and a tap take exactly the same path to a
+	// device — including the confirmation a bulk action needs.
+	agent := assistant.New(assistant.Config{
+		Store:   a.store,
+		LLM:     llmClient,
+		Control: a.control,
+		Secret:  secret,
+	})
+
 	// ── Music ────────────────────────────────────────────────────────────
 	// Where a household means when it names a room, what can play there,
 	// and what stays running once it does. Everything above it — the HTTP
@@ -254,17 +273,13 @@ func New(cfg Config) (*App, error) {
 	}
 
 	// ── HTTP ─────────────────────────────────────────────────────────────
-	secret, err := api.LoadOrCreateSessionSecret(cfg.DataDir)
-	if err != nil {
-		return nil, fmt.Errorf("loading session secret: %w", err)
-	}
-
 	a.api = &api.Server{
 		Store:         a.store,
 		Audio:         audioEngine,
 		Announce:      announcer,
 		Speakers:      a.monitors,
 		Control:       a.control,
+		Assistant:     agent,
 		Music:         a.music,
 		Autoplay:      a.autoplay,
 		Listening:     a.listening,

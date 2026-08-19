@@ -29,7 +29,7 @@ func (s *Server) getRooms(w http.ResponseWriter, r *http.Request) {
 		type counts struct{ total, on int }
 		byName := make(map[string]*counts)
 		for _, sock := range s.Store.Sockets {
-			if !canAccess(user, sock.ID) {
+			if !user.MayAccess(sock.ID) {
 				continue
 			}
 			key := strings.ToLower(strings.TrimSpace(sock.Room))
