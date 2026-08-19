@@ -229,7 +229,10 @@ func New(cfg Config) (*App, error) {
 		Audio:    audioEngine,
 		Spotify:  spotifyClient,
 		Qobuz:    qobuzClient,
-		Logf:     log.Printf,
+		// A scene setting a room's volume must win over a sleep fade still
+		// walking it; without this the fade would overwrite it seconds later.
+		CancelFade: func(room string) bool { return a.musicTimers.CancelFade(room) },
+		Logf:       log.Printf,
 	})
 
 	// The listening log. It observes nothing on its own: everything that
@@ -304,6 +307,7 @@ func New(cfg Config) (*App, error) {
 	}
 
 	a.handler = a.api.Handler()
+	a.wireStore()
 	if err := a.buildListeners(); err != nil {
 		return nil, err
 	}

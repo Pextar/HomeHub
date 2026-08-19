@@ -55,6 +55,15 @@ type Config struct {
 	Spotify *spotify.Client
 	Qobuz   *qobuz.Client
 
+	// CancelFade stops a volume ramp in flight on a room, if there is one.
+	//
+	// A hook rather than a dependency because the thing that owns ramps —
+	// internal/musictimer — is built on top of this package and cannot be
+	// imported from it. What it is here for: a scene setting a room's volume
+	// would otherwise be fought by a sleep fade still walking it, and the
+	// fade would win, because it writes every few seconds.
+	CancelFade func(room string) bool
+
 	Logf func(format string, args ...any)
 }
 
@@ -77,6 +86,9 @@ type Service struct {
 func New(cfg Config) *Service {
 	if cfg.Logf == nil {
 		cfg.Logf = func(string, ...any) {}
+	}
+	if cfg.CancelFade == nil {
+		cfg.CancelFade = func(string) bool { return false }
 	}
 	return &Service{cfg: cfg, sessions: map[string]*media.Session{}}
 }

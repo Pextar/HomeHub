@@ -6,7 +6,6 @@ package api
 import (
 	"encoding/base64"
 	"encoding/json"
-	"fmt"
 	"log"
 	"net/http"
 	"net/url"
@@ -113,8 +112,25 @@ type Server struct {
 	logins *loginLimiter
 }
 
+// Changed pushes a live "something changed" signal to every connected client.
+//
+// Exported so the composition root can install it as the store's OnChange
+// hook: every socket state change flows through it, including the ones the
+// scheduler and the timers make, and a phone with the app open should see
+// those without polling.
+func (s *Server) Changed() {
+	if s.events != nil {
+		s.events.broadcast()
+	}
+}
+
 // Handler returns the configured router with logging, optional basic
 // auth, the API routes, the SPA fallback and CORS — in that order.
+//
+// It builds a router and nothing else. What the store calls back into — the
+// live-update signal, a scene's music, push notifications — is installed by
+// the composition root, so that the answer to "what happens when a socket
+// changes" is in one file rather than hidden in the middle of route setup.
 func (s *Server) Handler() http.Handler {
 	if s.matterJobs == nil {
 		s.matterJobs = newCommissionJobs()
@@ -125,43 +141,6 @@ func (s *Server) Handler() http.Handler {
 	if s.logins == nil {
 		s.logins = newLoginLimiter()
 	}
-	// Push a live signal to connected clients whenever a socket's state
-	// changes — including scheduler- and timer-driven changes, since those
-	// also flow through Store.ApplyState.
-	s.Store.OnChange = s.events.broadcast
-
-	// Let a scene or an automation reach the speakers. The store holds the
-	// actions and knows nothing about how a room is reached; this is the
-	// half that does (scene_music.go).
-	s.Store.OnMusic = s.runSceneMusic
-
-	// And the other direction: let an automation *watch* a room, so a rule
-	// can fire when the living room goes quiet (automation_music.go).
-	s.Store.MusicPlaying = s.roomPlaying
-
-	// Wire push notification callbacks when the push service is available.
-	if s.Push != nil {
-		s.Store.OnStateChange = func(socket store.Socket, newState bool) {
-			action := "off"
-			if newState {
-				action = "on"
-			}
-			go s.Push.NotifyEvent(push.CategoryStateChanges, socket.ID, push.PushPayload{
-				Title: fmt.Sprintf("💡 %s turned %s", socket.Name, action),
-				URL:   "/#/sockets",
-				Tag:   "state-" + socket.ID,
-			})
-		}
-		s.Store.OnSensorAlert = func(sensor store.Sensor, value float64, direction string) {
-			go s.Push.NotifyEvent(push.CategorySensorAlerts, sensor.ID, push.PushPayload{
-				Title: fmt.Sprintf("⚠️ %s alert", sensor.Name),
-				Body:  fmt.Sprintf("%.1f%s (%s threshold)", value, sensor.Unit, direction),
-				URL:   "/#/sensors",
-				Tag:   "sensor-" + sensor.ID,
-			})
-		}
-	}
-
 	r := mux.NewRouter()
 	r.Use(loggingMiddleware)
 	r.Use(maxBodyBytes(maxRequestBody))
