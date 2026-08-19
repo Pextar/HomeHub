@@ -23,9 +23,16 @@ homehub/
 │   ├── screenshots/
 │   └── *.jsx                ← design canvas prototypes
 ├── backend/                ← Go (net/http, gorilla/mux)
+│   ├── cmd/homehub/         ← the binary: flags, then internal/app
 │   └── internal/            ← see backend/CLAUDE.md for the package map
 └── frontend/                ← Svelte 5 + Vite
     └── src/                  ← see frontend/CLAUDE.md for the layout
+```
+
+The backend is built from `./cmd/homehub`, not from the module root:
+
+```bash
+cd backend && go build -o homehub ./cmd/homehub
 ```
 
 ## Development workflow
