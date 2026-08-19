@@ -32,14 +32,14 @@ func TestNoteHeardWaitsOutTheDwell(t *testing.T) {
 	seedSonos(t, srv, "sp1")
 	track := &sonos.Track{Title: "Song", Artist: "Band", SpotifyURI: "spotify:track:1"}
 
-	srv.noteHeardSonos(snapshotOf(map[string]sonos.SpeakerState{"sp1": playing(track, "0:00:03")}))
+	srv.HeardSonos(snapshotOf(map[string]sonos.SpeakerState{"sp1": playing(track, "0:00:03")}))
 	if n := len(srv.Store.HeardIn("sonos:sp1")); n != 0 {
 		t.Fatalf("a track three seconds in was logged (%d entries)", n)
 	}
 
 	// The same track seen again, now past the dwell: this is the reading
 	// every path produces a few seconds later.
-	srv.noteHeardSonos(snapshotOf(map[string]sonos.SpeakerState{"sp1": playing(track, "0:00:42")}))
+	srv.HeardSonos(snapshotOf(map[string]sonos.SpeakerState{"sp1": playing(track, "0:00:42")}))
 	log := srv.Store.HeardIn("sonos:sp1")
 	if len(log) != 1 {
 		t.Fatalf("log = %d entries, want 1", len(log))
@@ -60,7 +60,7 @@ func TestNoteHeardWaitsOutTheDwell(t *testing.T) {
 
 	// Every further reading of the same track settles in memory.
 	for i := 0; i < 3; i++ {
-		srv.noteHeardSonos(snapshotOf(map[string]sonos.SpeakerState{"sp1": playing(track, "0:01:20")}))
+		srv.HeardSonos(snapshotOf(map[string]sonos.SpeakerState{"sp1": playing(track, "0:01:20")}))
 	}
 	if n := len(srv.Store.HeardIn("sonos:sp1")); n != 1 {
 		t.Errorf("log grew to %d entries while one track played", n)
@@ -75,7 +75,7 @@ func TestNoteHeardLogsATrackAlreadyPlaying(t *testing.T) {
 	seedSonos(t, srv, "sp1")
 	track := &sonos.Track{Title: "Song", Artist: "Band", SpotifyURI: "spotify:track:1"}
 
-	srv.noteHeardSonos(snapshotOf(map[string]sonos.SpeakerState{"sp1": playing(track, "0:02:00")}))
+	srv.HeardSonos(snapshotOf(map[string]sonos.SpeakerState{"sp1": playing(track, "0:02:00")}))
 	log := srv.Store.HeardIn("sonos:sp1")
 	if len(log) != 1 {
 		t.Fatalf("log = %d entries, want the track that was already playing", len(log))
@@ -97,7 +97,7 @@ func TestNoteHeardIgnoresSilenceAndEmptyTracks(t *testing.T) {
 	unreachable := playing(&sonos.Track{Title: "Song"}, "0:02:00")
 	unreachable.Reachable = false
 
-	srv.noteHeardSonos(snapshotOf(map[string]sonos.SpeakerState{
+	srv.HeardSonos(snapshotOf(map[string]sonos.SpeakerState{
 		"sp1": paused,
 		"sp2": unreachable,
 		"sp3": playing(&sonos.Track{Title: "   "}, "0:02:00"),
@@ -119,7 +119,7 @@ func TestNoteHeardReadsRadioTheWayThePlayerDoes(t *testing.T) {
 
 	// A stream's position is time since tune-in, so it is past the dwell
 	// from the first reading of any song after the first minute.
-	srv.noteHeardSonos(snapshotOf(map[string]sonos.SpeakerState{"sp1": playing(radio, "0:31:00")}))
+	srv.HeardSonos(snapshotOf(map[string]sonos.SpeakerState{"sp1": playing(radio, "0:31:00")}))
 	log := srv.Store.HeardIn("sonos:sp1")
 	if len(log) != 1 {
 		t.Fatalf("log = %d entries, want 1", len(log))
@@ -139,7 +139,7 @@ func TestNoteHeardSurvivesTheQueueBeingReplaced(t *testing.T) {
 
 	for _, title := range []string{"First", "Second", "Third"} {
 		track := &sonos.Track{Title: title, Artist: "Band", SpotifyURI: "spotify:track:" + title}
-		srv.noteHeardSonos(snapshotOf(map[string]sonos.SpeakerState{"sp1": playing(track, "0:00:45")}))
+		srv.HeardSonos(snapshotOf(map[string]sonos.SpeakerState{"sp1": playing(track, "0:00:45")}))
 	}
 	log := srv.Store.HeardIn("sonos:sp1")
 	if len(log) != 3 {
@@ -190,7 +190,7 @@ func TestMediaForgetHeardClearsARoomAndItsWatch(t *testing.T) {
 	admin, pass := seedAdmin(t, srv)
 	seedSonos(t, srv, "sp1")
 	track := &sonos.Track{Title: "Song", Artist: "Band", SpotifyURI: "spotify:track:1"}
-	srv.noteHeardSonos(snapshotOf(map[string]sonos.SpeakerState{"sp1": playing(track, "0:00:45")}))
+	srv.HeardSonos(snapshotOf(map[string]sonos.SpeakerState{"sp1": playing(track, "0:00:45")}))
 
 	if rec := doAs(t, srv, admin, pass, http.MethodDelete, "/api/media/heard", ""); rec.Code != http.StatusBadRequest {
 		t.Errorf("DELETE with no room = %d, want 400", rec.Code)
@@ -204,7 +204,7 @@ func TestMediaForgetHeardClearsARoomAndItsWatch(t *testing.T) {
 	}
 	// The watch went with it, so the song still playing is filed again
 	// rather than being remembered as already logged.
-	srv.noteHeardSonos(snapshotOf(map[string]sonos.SpeakerState{"sp1": playing(track, "0:01:10")}))
+	srv.HeardSonos(snapshotOf(map[string]sonos.SpeakerState{"sp1": playing(track, "0:01:10")}))
 	if n := len(srv.Store.HeardIn("sonos:sp1")); n != 1 {
 		t.Errorf("log = %d entries after clearing, want the playing track back", n)
 	}

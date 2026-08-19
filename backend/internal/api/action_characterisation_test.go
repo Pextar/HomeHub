@@ -59,7 +59,7 @@ func actionServer(t *testing.T) (*Server, *recordRF) {
 	st.Sockets["s2"] = &store.Socket{ID: "s2", Name: "Fan", Code: "1002", Protocol: "nexa", Room: "Lounge"}
 	st.Sockets["s3"] = &store.Socket{ID: "s3", Name: "Other", Code: "1003", Protocol: "nexa", Room: "Study"}
 	st.Groups["group_1"] = &store.Group{ID: "group_1", Name: "Downstairs", SocketIDs: []string{"s1", "s2"}}
-	return &Server{Store: st, SPADir: t.TempDir(), Audio: testAudio(st), Announce: testAnnouncer(), Speakers: testSpeakers(st), Music: testMusic(st)}, rf
+	return newTestServer(t, st), rf
 }
 
 type bulkResponse struct {

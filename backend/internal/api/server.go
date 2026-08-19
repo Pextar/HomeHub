@@ -22,6 +22,7 @@ import (
 
 	"homehub/internal/announce"
 	"homehub/internal/audio"
+	"homehub/internal/autoplay"
 	"homehub/internal/llm"
 	"homehub/internal/matter"
 	"homehub/internal/mqtt"
@@ -59,6 +60,9 @@ type Server struct {
 	// means and what can play there. Required; supplied by the composition
 	// root.
 	Music *music.Service
+	// Autoplay is the "continue with similar music" engine. The handlers
+	// here only read and flip its per-room switch; it ticks on its own.
+	Autoplay *autoplay.Engine
 
 	Matter  *matter.Client  // optional; nil-safe via Matter.Enabled()
 	MQTT    *mqtt.Client    // optional; nil-safe via MQTT.Enabled()
@@ -90,25 +94,6 @@ type Server struct {
 	// logins throttles repeated failed logins per client IP. Created
 	// lazily in Handler().
 	logins *loginLimiter
-
-	// autoplay is HomeHub's own "continue with similar music" setting, on
-	// top of what the speakers themselves report (DESIGN.md's "Continue play
-	// similar" note) — Sonos has no such concept, so the household doesn't
-	// either; it's ours to keep, keyed by the coordinator's registered
-	// speaker id, and only for as long as this process runs. It is on for
-	// every coordinator, so what autoplayOff holds is the opt-*out*: the
-	// rooms that were told to fall silent when their queue ends.
-	// autoplayAttempt throttles retries when finding similar tracks keeps
-	// failing, autoplayRecent remembers what a coordinator was just topped
-	// up with so a short discography doesn't loop the same handful of songs,
-	// and autoplayHeard is when each coordinator was last seen actually
-	// playing its queue — what separates "the queue just ran dry" from "this
-	// room has been quiet all evening".
-	autoplayMu      sync.Mutex
-	autoplayOff     map[string]bool
-	autoplayAttempt map[string]time.Time
-	autoplayRecent  map[string][]string
-	autoplayHeard   map[string]time.Time
 
 	// heardWatches is the listening log's memory between readings: what
 	// each room is playing, since when, and whether the log already has it.

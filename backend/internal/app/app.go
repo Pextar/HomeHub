@@ -26,6 +26,7 @@ import (
 	"homehub/internal/announce"
 	"homehub/internal/api"
 	"homehub/internal/audio"
+	"homehub/internal/autoplay"
 	"homehub/internal/llm"
 	"homehub/internal/matter"
 	"homehub/internal/media"
@@ -38,6 +39,7 @@ import (
 	"homehub/internal/rx"
 	"homehub/internal/scheduler"
 	"homehub/internal/sender"
+	"homehub/internal/sonos"
 	"homehub/internal/speakermon"
 	"homehub/internal/spotify"
 	"homehub/internal/store"
@@ -62,6 +64,7 @@ type App struct {
 
 	monitors *speakermon.Monitors
 	music    *music.Service
+	autoplay *autoplay.Engine
 
 	matter *matter.Client
 	mqtt   *mqtt.Client
@@ -186,6 +189,18 @@ func New(cfg Config) (*App, error) {
 		Logf:     log.Printf,
 	})
 
+	// "Continue play similar": tops a coordinator's queue up as it reaches
+	// the last queued track, and picks a room back up if it fell silent
+	// anyway. Its tick reads the whole household, which makes it the
+	// listening log's fallback for speakers that refuse GENA subscriptions.
+	a.autoplay = autoplay.New(autoplay.Config{
+		Store:    a.store,
+		Speakers: a.monitors,
+		Similar:  similarFinder(spotifyClient),
+		Observed: func(snap sonos.Snapshot) { a.api.HeardSonos(snap) },
+		Changed:  func() { a.api.SpeakersChanged() },
+	})
+
 	// Announcements share the audio engine's address discovery: both are
 	// "somewhere a speaker can fetch from", and resolving it twice would
 	// mean two ways to be wrong on a multi-homed box.
@@ -206,6 +221,7 @@ func New(cfg Config) (*App, error) {
 		Announce:      announcer,
 		Speakers:      a.monitors,
 		Music:         a.music,
+		Autoplay:      a.autoplay,
 		Matter:        a.matter,
 		MQTT:          a.mqtt,
 		LLM:           llmClient,
@@ -341,9 +357,9 @@ func (a *App) startBackground(ctx context.Context) {
 	// has no callback — so unlike Sonos this one has nothing to release.
 	go a.monitors.RunKEF(ctx)
 
-	// "Continue play similar": tops a group's queue up as it reaches the
-	// last queued track, and picks a room back up if it fell silent anyway.
-	go a.api.RunAutoplay(ctx)
+	// "Continue play similar", and the listening log's fallback: its tick
+	// reads the whole household either way.
+	go a.autoplay.Run(ctx)
 
 	// Music that starts and stops on its own: wake-ups and sleep timers.
 	// Cancelling the context also stops any volume ramp in flight — a fade

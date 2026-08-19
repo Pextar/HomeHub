@@ -83,7 +83,7 @@ func (s *Server) sonosStatus(w http.ResponseWriter, r *http.Request) {
 	snap := s.Speakers.Sonos.Snapshot(ctx)
 	// Before the loop below, which rewrites art paths into proxied URLs on
 	// this very snapshot: the log wants the reading as the speaker gave it.
-	s.noteHeardSonos(snap)
+	s.HeardSonos(snap)
 
 	views := make([]sonosSpeakerView, len(speakers))
 	for i, sp := range speakers {
@@ -98,7 +98,7 @@ func (s *Server) sonosStatus(w http.ResponseWriter, r *http.Request) {
 			Reachable:    cached.Reachable,
 			State:        cached.State,
 			GroupState:   cached.GroupState,
-			Autoplay:     s.autoplayEnabled(sp.ID),
+			Autoplay:     s.Autoplay.Enabled(sp.ID),
 		}
 		if !cached.At.IsZero() {
 			views[i].ReadAt = cached.At.UnixMilli()

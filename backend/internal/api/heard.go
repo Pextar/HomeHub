@@ -55,14 +55,14 @@ type heardWatch struct {
 // notification and for KEF the poller noticing a change — so a track change
 // reaches the log about as fast as it reaches the screen.
 func (s *Server) noteHeardCached() {
-	s.noteHeardSonos(s.Speakers.Sonos.Cached())
+	s.HeardSonos(s.Speakers.Sonos.Cached())
 	s.noteHeardKEF(s.Speakers.KEF.Cached())
 }
 
-// noteHeardSonos files what a Sonos snapshot shows each room playing. Safe to
+// HeardSonos files what a Sonos snapshot shows each room playing. Safe to
 // call with any snapshot, cached or freshly read: the recorder decides what
 // is new.
-func (s *Server) noteHeardSonos(snap sonos.Snapshot) {
+func (s *Server) HeardSonos(snap sonos.Snapshot) {
 	for id, cached := range snap.Speakers {
 		if !cached.Reachable || cached.State == nil || !cached.State.Playing {
 			continue

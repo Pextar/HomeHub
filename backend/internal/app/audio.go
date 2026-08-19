@@ -8,8 +8,10 @@ package app
 // the store must not know that anything decodes audio.
 
 import (
+	"homehub/internal/autoplay"
 	"homehub/internal/media"
 	"homehub/internal/qobuz"
+	"homehub/internal/spotify"
 	"homehub/internal/store"
 	"homehub/internal/stream"
 )
@@ -36,6 +38,18 @@ func streamQuality(st *store.Store) media.StreamQuality {
 // holding a nil pointer, and every "is Qobuz configured" check downstream would
 // pass on its way to a panic.
 func qobuzCatalog(c *qobuz.Client) stream.Catalog {
+	if c == nil {
+		return nil
+	}
+	return c
+}
+
+// similarFinder adapts the optional Spotify client to what autoplay needs.
+//
+// Same nil rule as qobuzCatalog, and the same reason: a nil *spotify.Client in
+// a non-nil interface would pass the engine's "is there anything to seed from"
+// check on its way to a panic. A house without Spotify simply has no autoplay.
+func similarFinder(c *spotify.Client) autoplay.SimilarFinder {
 	if c == nil {
 		return nil
 	}
