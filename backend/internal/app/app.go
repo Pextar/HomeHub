@@ -23,6 +23,7 @@ import (
 	"os"
 	"time"
 
+	"homehub/internal/announce"
 	"homehub/internal/api"
 	"homehub/internal/audio"
 	"homehub/internal/llm"
@@ -155,6 +156,14 @@ func New(cfg Config) (*App, error) {
 		Logf:          log.Printf,
 	})
 
+	// Announcements share the audio engine's address discovery: both are
+	// "somewhere a speaker can fetch from", and resolving it twice would
+	// mean two ways to be wrong on a multi-homed box.
+	announcer := &announce.Service{
+		BaseURL:    audioEngine.BaseURL,
+		PathPrefix: api.AnnouncePath,
+	}
+
 	// ── HTTP ─────────────────────────────────────────────────────────────
 	secret, err := api.LoadOrCreateSessionSecret(cfg.DataDir)
 	if err != nil {
@@ -164,6 +173,7 @@ func New(cfg Config) (*App, error) {
 	a.api = &api.Server{
 		Store:         a.store,
 		Audio:         audioEngine,
+		Announce:      announcer,
 		Matter:        a.matter,
 		MQTT:          a.mqtt,
 		LLM:           llmClient,

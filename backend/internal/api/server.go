@@ -46,7 +46,12 @@ type Server struct {
 	// route reaches it — and supplied by the composition root so that what
 	// it is built from (the environment, the household's quality setting)
 	// stays out of the HTTP layer.
-	Audio   *audio.Engine
+	Audio *audio.Engine
+	// Announce publishes announcement clips and holds the house's
+	// one-at-a-time claim while one is audible. Required by the announce
+	// routes; supplied by the composition root.
+	Announce *announce.Service
+
 	Matter  *matter.Client  // optional; nil-safe via Matter.Enabled()
 	MQTT    *mqtt.Client    // optional; nil-safe via MQTT.Enabled()
 	LLM     *llm.Client     // optional; nil-safe via LLM.Enabled(). Powers the assistant.
@@ -144,16 +149,6 @@ type Server struct {
 	// what remembers to shut it down. See media_session.go.
 	zoneMu       sync.Mutex
 	zoneSessions map[string]*media.Session
-
-	// announcer serves announcement clips to the speakers (see
-	// announce.go). Created lazily, and only ever holds the last few
-	// seconds of audio someone asked the house to hear.
-	announceMu sync.Mutex
-	announcer  *announce.Host
-	// announcing is held for as long as an announcement is audible, not
-	// just for as long as its request is: a second one starting mid-clip
-	// would snapshot the clip as what the rooms were playing.
-	announcing bool
 }
 
 // sonosAcctEntry is one cached service-account resolution.

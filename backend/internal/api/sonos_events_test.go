@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"homehub/internal/announce"
 	"homehub/internal/audio"
 	"homehub/internal/media"
 	"homehub/internal/store"
@@ -17,13 +18,17 @@ func testServer(t *testing.T) *Server {
 	if err := st.Load(); err != nil {
 		t.Fatalf("load store: %v", err)
 	}
-	return &Server{Store: st, SPADir: t.TempDir(), Audio: testAudio(st)}
+	return &Server{Store: st, SPADir: t.TempDir(), Audio: testAudio(st), Announce: testAnnouncer()}
 }
 
 // testAudio is the audio runtime a test server gets. It is the real engine —
 // nothing in it starts until something asks it to decode — wired to the same
 // store, so a test exercises the wiring the composition root builds rather
 // than a stand-in for it.
+func testAnnouncer() *announce.Service {
+	return &announce.Service{PathPrefix: AnnouncePath}
+}
+
 func testAudio(st *store.Store) *audio.Engine {
 	return audio.New(audio.Config{
 		StreamPath:  StreamPath,

@@ -412,5 +412,5 @@ func (s *Server) registerDeviceCallbackRoutes(r *mux.Router) {
 	// called. Same posture as the stream: unguarded by the session because
 	// the client is a speaker, guarded instead by an unguessable id that
 	// stops mattering a couple of minutes after it is minted.
-	r.PathPrefix(announcePath+"/").Handler(s.announceHandler()).Methods("GET", "HEAD")
+	r.PathPrefix(AnnouncePath+"/").Handler(s.Announce.Handler()).Methods("GET", "HEAD")
 }
