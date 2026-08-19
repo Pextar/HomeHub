@@ -155,7 +155,7 @@ func (s *Server) autoplayTick(ctx context.Context) {
 	}
 
 	snapCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	snap := s.sonosEvents().Snapshot(snapCtx)
+	snap := s.Speakers.Sonos.Snapshot(snapCtx)
 	cancel()
 	// This tick reads the household anyway, so it is also the listening
 	// log's fallback for a house whose speakers refuse GENA subscriptions.
@@ -228,7 +228,7 @@ func (s *Server) autoplayTopUp(ctx context.Context, sp store.SonosSpeaker, artis
 	if err != nil || len(tracks) == 0 {
 		return
 	}
-	acct, err := s.sonosServiceAccount(tctx, sp.IP, "Spotify")
+	acct, err := s.Speakers.ServiceAccount(tctx, sp.IP, "Spotify")
 	if err != nil {
 		return
 	}
@@ -276,5 +276,5 @@ func (s *Server) autoplayTopUp(ctx context.Context, sp store.SonosSpeaker, artis
 
 	// The new tracks won't show up until the next status poll otherwise —
 	// same reasoning as every other change that alters a group's queue.
-	s.broadcastMusic()
+	s.SpeakersChanged()
 }

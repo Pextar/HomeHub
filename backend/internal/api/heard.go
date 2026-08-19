@@ -55,8 +55,8 @@ type heardWatch struct {
 // notification and for KEF the poller noticing a change — so a track change
 // reaches the log about as fast as it reaches the screen.
 func (s *Server) noteHeardCached() {
-	s.noteHeardSonos(s.sonosEvents().Cached())
-	s.noteHeardKEF(s.kefEvents().Cached())
+	s.noteHeardSonos(s.Speakers.Sonos.Cached())
+	s.noteHeardKEF(s.Speakers.KEF.Cached())
 }
 
 // noteHeardSonos files what a Sonos snapshot shows each room playing. Safe to

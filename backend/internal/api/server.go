@@ -22,14 +22,13 @@ import (
 
 	"homehub/internal/announce"
 	"homehub/internal/audio"
-	"homehub/internal/kef"
 	"homehub/internal/llm"
 	"homehub/internal/matter"
 	"homehub/internal/media"
 	"homehub/internal/mqtt"
 	"homehub/internal/push"
 	"homehub/internal/qobuz"
-	"homehub/internal/sonos"
+	"homehub/internal/speakermon"
 	"homehub/internal/spotify"
 	"homehub/internal/store"
 )
@@ -51,6 +50,10 @@ type Server struct {
 	// one-at-a-time claim while one is audible. Required by the announce
 	// routes; supplied by the composition root.
 	Announce *announce.Service
+	// Speakers is the house's cached view of what every speaker is doing —
+	// Sonos over GENA, KEF by polling — plus the two slow lookups that hang
+	// off it. Required; supplied by the composition root.
+	Speakers *speakermon.Monitors
 
 	Matter  *matter.Client  // optional; nil-safe via Matter.Enabled()
 	MQTT    *mqtt.Client    // optional; nil-safe via MQTT.Enabled()
@@ -83,24 +86,6 @@ type Server struct {
 	// lazily in Handler().
 	logins *loginLimiter
 
-	// sonosAccts caches per-speaker streaming-service account lookups
-	// (sid/sn) for the play-item path. Guarded by sonosAcctMu; created
-	// lazily on first use.
-	sonosAcctMu sync.Mutex
-	sonosAccts  map[string]sonosAcctEntry
-
-	// sonosIcons caches where each speaker publishes a picture of itself,
-	// keyed by address. Resolving it means reading the device description, so
-	// without this every avatar in the speaker list would cost two round
-	// trips to the speaker instead of one. Guarded by sonosIconMu.
-	sonosIconMu sync.Mutex
-	sonosIcons  map[string]sonosIconEntry
-
-	// sonosMon watches speakers over GENA (see internal/sonos/monitor.go)
-	// and caches what they report. Created lazily by sonosEvents().
-	sonosMonMu sync.Mutex
-	sonosMon   *sonos.Monitor
-
 	// autoplay is HomeHub's own "continue with similar music" setting, on
 	// top of what the speakers themselves report (DESIGN.md's "Continue play
 	// similar" note) — Sonos has no such concept, so the household doesn't
@@ -128,13 +113,6 @@ type Server struct {
 	heardMu      sync.Mutex
 	heardWatches map[string]heardWatch
 
-	// kefMon polls the KEF speakers once for the whole process and caches
-	// what they report (see internal/kef/monitor.go). KEF's local API has no
-	// change notifications to subscribe to, so this is the closest thing to
-	// the Sonos monitor it can be. Created lazily by kefEvents().
-	kefMonMu sync.Mutex
-	kefMon   *kef.Monitor
-
 	// fades holds the cancel func of each room's in-flight volume ramp,
 	// keyed by media destination key. One ramp per room: anything starting
 	// a new one cancels the old, which is what stops a wake-up fade and a
@@ -149,20 +127,6 @@ type Server struct {
 	// what remembers to shut it down. See media_session.go.
 	zoneMu       sync.Mutex
 	zoneSessions map[string]*media.Session
-}
-
-// sonosAcctEntry is one cached service-account resolution.
-type sonosAcctEntry struct {
-	acct *sonos.ServiceAccount
-	at   time.Time
-}
-
-// sonosIconEntry is one cached device-icon lookup. An empty path is cached
-// too — a speaker that publishes no picture shouldn't be asked again on every
-// render of the list.
-type sonosIconEntry struct {
-	path string
-	at   time.Time
 }
 
 // Handler returns the configured router with logging, optional basic

@@ -30,10 +30,8 @@ import (
 
 	"github.com/gorilla/mux"
 
-	"homehub/internal/kef"
 	"homehub/internal/media"
 	"homehub/internal/mediabridge"
-	"homehub/internal/sonos"
 	"homehub/internal/store"
 )
 
@@ -52,10 +50,10 @@ func (s *Server) endpoints() map[string]media.Endpoint {
 	out := make(map[string]media.Endpoint,
 		len(s.Store.Sonos)+len(s.Store.KEF)+len(s.Store.AirPlay)+len(s.Store.UPnP))
 	for id, sp := range s.Store.Sonos {
-		out[store.QualifySonos(id)] = mediabridge.NewSonosEndpoint(*sp, "", s.sonosState)
+		out[store.QualifySonos(id)] = mediabridge.NewSonosEndpoint(*sp, "", s.Speakers.SonosState)
 	}
 	for id, sp := range s.Store.KEF {
-		out[store.QualifyKEF(id)] = mediabridge.NewKEFEndpoint(*sp, s.kefState)
+		out[store.QualifyKEF(id)] = mediabridge.NewKEFEndpoint(*sp, s.Speakers.KEFState)
 	}
 	// A UPnP renderer holds its own transport state, so unlike an AirPlay
 	// receiver it is asked rather than inferred — see mediabridge/upnp.go.
@@ -66,24 +64,6 @@ func (s *Server) endpoints() map[string]media.Endpoint {
 	// the device to poll — so their state comes from the live cast instead.
 	s.airplayEndpoints(out)
 	return out
-}
-
-// sonosState reads a speaker's state from the GENA monitor's cache.
-func (s *Server) sonosState(ctx context.Context, sp store.SonosSpeaker) (*sonos.State, error) {
-	snap := s.sonosEvents().Snapshot(ctx)
-	if cached, ok := snap.Speakers[sp.ID]; ok && cached.State != nil {
-		return cached.State, nil
-	}
-	return sonos.GetState(ctx, sp.IP)
-}
-
-// kefState reads a speaker's state from the polling monitor's cache.
-func (s *Server) kefState(ctx context.Context, sp store.KEFSpeaker) (*kef.State, error) {
-	snap := s.kefEvents().Snapshot(ctx)
-	if cached, ok := snap.Speakers[sp.ID]; ok && cached.State != nil {
-		return cached.State, nil
-	}
-	return kef.GetState(ctx, sp.IP)
 }
 
 // provider returns the media provider for an id. The lookup is by name so
@@ -761,10 +741,10 @@ func (s *Server) touchZone(eps []media.Endpoint) {
 	for _, e := range eps {
 		d := e.Descriptor()
 		if d.Vendor == media.VendorKEF {
-			s.kefEvents().Touch(d.ID)
+			s.Speakers.KEF.Touch(d.ID)
 			// A streamed KEF takes a moment to actually start, since the
 			// audio comes back to it over the network.
-			s.kefEvents().TouchAfter(d.ID, 3*time.Second)
+			s.Speakers.KEF.TouchAfter(d.ID, 3*time.Second)
 			continue
 		}
 		sonosTouched = true
@@ -772,7 +752,7 @@ func (s *Server) touchZone(eps []media.Endpoint) {
 	if sonosTouched {
 		// Sonos is event-driven, so there is nothing per-speaker to poke;
 		// a nudge makes the monitor reconcile now.
-		s.sonosEvents().Nudge()
+		s.Speakers.Sonos.Nudge()
 	}
 }
 

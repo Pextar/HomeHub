@@ -100,7 +100,7 @@ type announceTarget struct {
 func (s *Server) announceTargets() []announceTarget {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	snap := s.sonosEvents().Snapshot(ctx)
+	snap := s.Speakers.Sonos.Snapshot(ctx)
 
 	coordinators := make(map[string]bool, len(snap.Groups))
 	byUUID := map[string]string{}
@@ -295,7 +295,7 @@ func (s *Server) announceSend(w http.ResponseWriter, r *http.Request) {
 		// The rooms have moved twice without the monitor being told, so
 		// nudge it: without this the panel shows the announcement's own
 		// (empty) now-playing until the next poll lands.
-		s.sonosEvents().Nudge()
+		s.Speakers.Sonos.Nudge()
 	}()
 
 	names := make([]string, 0, len(running))

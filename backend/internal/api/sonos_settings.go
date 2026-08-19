@@ -175,7 +175,7 @@ func (s *Server) sonosImage(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), sonos.DefaultTimeout)
 	defer cancel()
 
-	path, err := s.sonosIconPath(ctx, sp.IP)
+	path, err := s.Speakers.IconPath(ctx, sp.IP)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
@@ -208,28 +208,4 @@ func (s *Server) sonosImage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "public, max-age=604800")
 	w.WriteHeader(http.StatusOK)
 	_, _ = io.Copy(w, io.LimitReader(resp.Body, 2<<20))
-}
-
-// sonosIconPath resolves (and caches for a day) where a speaker publishes its
-// own picture. The empty string means it publishes none, and is cached too so
-// a model without one isn't re-asked on every render.
-func (s *Server) sonosIconPath(ctx context.Context, ip string) (string, error) {
-	s.sonosIconMu.Lock()
-	if s.sonosIcons == nil {
-		s.sonosIcons = make(map[string]sonosIconEntry)
-	}
-	if e, ok := s.sonosIcons[ip]; ok && time.Since(e.at) < 24*time.Hour {
-		s.sonosIconMu.Unlock()
-		return e.path, nil
-	}
-	s.sonosIconMu.Unlock()
-
-	info, err := sonos.DescribeFull(ctx, ip)
-	if err != nil {
-		return "", err
-	}
-	s.sonosIconMu.Lock()
-	s.sonosIcons[ip] = sonosIconEntry{path: info.IconPath, at: time.Now()}
-	s.sonosIconMu.Unlock()
-	return info.IconPath, nil
 }

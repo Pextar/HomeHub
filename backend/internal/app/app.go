@@ -37,6 +37,7 @@ import (
 	"homehub/internal/rx"
 	"homehub/internal/scheduler"
 	"homehub/internal/sender"
+	"homehub/internal/speakermon"
 	"homehub/internal/spotify"
 	"homehub/internal/store"
 )
@@ -57,6 +58,8 @@ type App struct {
 	cfg   Config
 	store *store.Store
 	api   *api.Server
+
+	monitors *speakermon.Monitors
 
 	matter *matter.Client
 	mqtt   *mqtt.Client
@@ -156,6 +159,17 @@ func New(cfg Config) (*App, error) {
 		Logf:          log.Printf,
 	})
 
+	// ── Speakers ─────────────────────────────────────────────────────────
+	// One cached view of what every speaker is doing, asked once for the
+	// whole process however many phones are watching it.
+	a.monitors = speakermon.New(speakermon.Config{
+		Store:     a.store,
+		OnChange:  func() { a.api.SpeakersChanged() },
+		HTTPPort:  cfg.HTTPPort,
+		EventPath: api.SonosEventPath,
+		Logf:      log.Printf,
+	})
+
 	// Announcements share the audio engine's address discovery: both are
 	// "somewhere a speaker can fetch from", and resolving it twice would
 	// mean two ways to be wrong on a multi-homed box.
@@ -174,6 +188,7 @@ func New(cfg Config) (*App, error) {
 		Store:         a.store,
 		Audio:         audioEngine,
 		Announce:      announcer,
+		Speakers:      a.monitors,
 		Matter:        a.matter,
 		MQTT:          a.mqtt,
 		LLM:           llmClient,
@@ -254,7 +269,7 @@ func (a *App) Run(ctx context.Context) error {
 	sonosDone := make(chan struct{})
 	go func() {
 		defer close(sonosDone)
-		a.api.RunSonosEvents(sonosCtx)
+		a.monitors.RunSonos(sonosCtx)
 	}()
 
 	// A listener that cannot bind is fatal — the alternative is a server
@@ -307,7 +322,7 @@ func (a *App) startBackground(ctx context.Context) {
 
 	// KEF speakers are polled rather than subscribed to — their local API
 	// has no callback — so unlike Sonos this one has nothing to release.
-	go a.api.RunKEFEvents(ctx)
+	go a.monitors.RunKEF(ctx)
 
 	// "Continue play similar": tops a group's queue up as it reaches the
 	// last queued track, and picks a room back up if it fell silent anyway.

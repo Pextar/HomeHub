@@ -65,7 +65,7 @@ func (s *Server) roomPlaying(room string) (playing, known bool) {
 		switch bridge {
 		case "sonos":
 			if sonosSnap.Speakers == nil {
-				sonosSnap = s.sonosEvents().Cached()
+				sonosSnap = s.Speakers.Sonos.Cached()
 			}
 			cached, have := sonosSnap.Speakers[id]
 			if !have || !cached.Reachable || cached.State == nil {
@@ -76,7 +76,7 @@ func (s *Server) roomPlaying(room string) (playing, known bool) {
 
 		case "kef":
 			if kefSnap.Speakers == nil {
-				kefSnap = s.kefEvents().Cached()
+				kefSnap = s.Speakers.KEF.Cached()
 			}
 			cached, have := kefSnap.Speakers[id]
 			if !have || !cached.Reachable || cached.State == nil {

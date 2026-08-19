@@ -124,8 +124,8 @@ func (s *Server) kefPlayItem(w http.ResponseWriter, r *http.Request) {
 	// re-reads: the usual prompt one, and a later one for the handoff. Each
 	// pushes the `music` signal if it found a change, which is what moves the
 	// caller's now-playing off "nothing playing".
-	s.kefEvents().Touch(sp.ID)
-	s.kefEvents().TouchAfter(sp.ID, 3*time.Second)
+	s.Speakers.KEF.Touch(sp.ID)
+	s.Speakers.KEF.TouchAfter(sp.ID, 3*time.Second)
 	s.recordPlay("kef:"+sp.ID, sp.Name, store.MediaPlay{
 		Provider: "spotify",
 		Kind:     body.Kind,

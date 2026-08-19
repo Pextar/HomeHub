@@ -21,7 +21,7 @@ func assistantTestServer(t *testing.T) *Server {
 	st.Rooms["r1"] = &store.Room{ID: "r1", Name: "Kitchen"}
 	st.Rooms["r2"] = &store.Room{ID: "r2", Name: "Bedroom"}
 	st.Groups["g1"] = &store.Group{ID: "g1", Name: "Lights", SocketIDs: []string{"lamp", "fan"}}
-	return &Server{Store: st, SessionSecret: []byte("test-secret-32-bytes-long-padxxx"), Audio: testAudio(st), Announce: testAnnouncer()}
+	return &Server{Store: st, SessionSecret: []byte("test-secret-32-bytes-long-padxxx"), Audio: testAudio(st), Announce: testAnnouncer(), Speakers: testSpeakers(st)}
 }
 
 func TestControlDeviceTool(t *testing.T) {

@@ -144,7 +144,7 @@ func (s *Server) fireMusicTimer(ctx context.Context, t store.MusicTimer) {
 		s.mediaLogf("music timer %s (%s %s): %v", t.ID, t.Action, t.Room, err)
 	}
 	s.Store.Mutate(func() { s.Store.Activity.Add(entry) })
-	s.broadcastMusic()
+	s.SpeakersChanged()
 }
 
 // runMusicTimer is the timer's actual work, split out so fireMusicTimer owns
