@@ -1,4 +1,4 @@
-package api
+package assistant
 
 import (
 	"fmt"
@@ -114,20 +114,20 @@ func (snap stateSnapshot) render() string {
 // buildSnapshot assembles the snapshot under a single read lock. Devices are
 // filtered by the user's access; scenes/groups/sensors are admin-only routes
 // already, so the assistant (admin-gated) sees them all. Caller must NOT hold Mu.
-func (s *Server) buildSnapshot(user *store.User) stateSnapshot {
-	return store.ViewValue(s.Store, func() stateSnapshot {
+func (a *Agent) buildSnapshot(user *store.User) stateSnapshot {
+	return store.ViewValue(a.cfg.Store, func() stateSnapshot {
 
 		snap := stateSnapshot{
-			Devices: make([]deviceLite, 0, len(s.Store.Sockets)),
-			Scenes:  make([]sceneLite, 0, len(s.Store.Scenes)),
-			Groups:  make([]groupLite, 0, len(s.Store.Groups)),
-			Sensors: make([]sensorLite, 0, len(s.Store.Sensors)),
+			Devices: make([]deviceLite, 0, len(a.cfg.Store.Sockets)),
+			Scenes:  make([]sceneLite, 0, len(a.cfg.Store.Scenes)),
+			Groups:  make([]groupLite, 0, len(a.cfg.Store.Groups)),
+			Sensors: make([]sensorLite, 0, len(a.cfg.Store.Sensors)),
 		}
 
 		type counts struct{ total, on int }
 		byRoom := make(map[string]*counts)
-		for _, sock := range s.Store.Sockets {
-			if !canAccess(user, sock.ID) {
+		for _, sock := range a.cfg.Store.Sockets {
+			if !user.MayAccess(sock.ID) {
 				continue
 			}
 			snap.Devices = append(snap.Devices, deviceLite{
@@ -146,7 +146,7 @@ func (s *Server) buildSnapshot(user *store.User) stateSnapshot {
 				}
 			}
 		}
-		for _, rm := range s.Store.Rooms {
+		for _, rm := range a.cfg.Store.Rooms {
 			c := byRoom[strings.ToLower(rm.Name)]
 			rl := roomLite{Name: rm.Name}
 			if c != nil {
@@ -155,13 +155,13 @@ func (s *Server) buildSnapshot(user *store.User) stateSnapshot {
 			}
 			snap.Rooms = append(snap.Rooms, rl)
 		}
-		for _, sc := range s.Store.Scenes {
+		for _, sc := range a.cfg.Store.Scenes {
 			snap.Scenes = append(snap.Scenes, sceneLite{Name: sc.Name, Room: sc.Room})
 		}
-		for _, g := range s.Store.Groups {
+		for _, g := range a.cfg.Store.Groups {
 			snap.Groups = append(snap.Groups, groupLite{Name: g.Name, Devices: len(g.SocketIDs)})
 		}
-		for _, sn := range s.Store.Sensors {
+		for _, sn := range a.cfg.Store.Sensors {
 			snap.Sensors = append(snap.Sensors, sensorLite{
 				Name: sn.Name, Kind: sn.Kind, Unit: sn.Unit, Value: sn.LastValue,
 			})
@@ -190,15 +190,15 @@ func less(a, b string) bool { return strings.ToLower(a) < strings.ToLower(b) }
 // reason string the tool surfaces back to the model (so it can disambiguate or
 // pick differently) — never a Go error, so the agent loop keeps running.
 // Caller must NOT hold Mu.
-func (s *Server) resolveSocket(user *store.User, ref string) (sock store.Socket, ok bool, reason string) {
+func (a *Agent) resolveSocket(user *store.User, ref string) (sock store.Socket, ok bool, reason string) {
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
 		return store.Socket{}, false, "no device specified"
 	}
-	s.Store.View(func() {
+	a.cfg.Store.View(func() {
 
 		// Exact id first.
-		if d, found := s.Store.Sockets[ref]; found && canAccess(user, d.ID) {
+		if d, found := a.cfg.Store.Sockets[ref]; found && user.MayAccess(d.ID) {
 			sock, ok, reason = *d, true, ""
 			return
 		}
@@ -207,8 +207,8 @@ func (s *Server) resolveSocket(user *store.User, ref string) (sock store.Socket,
 		// ambiguous name can tell the model exactly which ones collided.
 		lower := strings.ToLower(ref)
 		var matches []*store.Socket
-		for _, d := range s.Store.Sockets {
-			if !canAccess(user, d.ID) {
+		for _, d := range a.cfg.Store.Sockets {
+			if !user.MayAccess(d.ID) {
 				continue
 			}
 			name := strings.ToLower(d.Name)
@@ -233,14 +233,14 @@ func (s *Server) resolveSocket(user *store.User, ref string) (sock store.Socket,
 }
 
 // resolveRoom maps a reference to a canonical room name. Caller must NOT hold Mu.
-func (s *Server) resolveRoom(ref string) (name string, ok bool, reason string) {
+func (a *Agent) resolveRoom(ref string) (name string, ok bool, reason string) {
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
 		return "", false, "no room specified"
 	}
-	s.Store.View(func() {
+	a.cfg.Store.View(func() {
 		lower := strings.ToLower(ref)
-		for _, rm := range s.Store.Rooms {
+		for _, rm := range a.cfg.Store.Rooms {
 			if rm.ID == ref || strings.ToLower(rm.Name) == lower {
 				name, ok, reason = rm.Name, true, ""
 				return
@@ -252,19 +252,19 @@ func (s *Server) resolveRoom(ref string) (name string, ok bool, reason string) {
 }
 
 // resolveGroup maps a reference to a group id. Caller must NOT hold Mu.
-func (s *Server) resolveGroup(ref string) (id, name string, ok bool, reason string) {
+func (a *Agent) resolveGroup(ref string) (id, name string, ok bool, reason string) {
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
 		return "", "", false, "no group specified"
 	}
-	s.Store.View(func() {
-		if g, found := s.Store.Groups[ref]; found {
+	a.cfg.Store.View(func() {
+		if g, found := a.cfg.Store.Groups[ref]; found {
 			id, name, ok, reason = g.ID, g.Name, true, ""
 			return
 		}
 		lower := strings.ToLower(ref)
 		var matches []*store.Group
-		for _, g := range s.Store.Groups {
+		for _, g := range a.cfg.Store.Groups {
 			if strings.ToLower(g.Name) == lower {
 				matches = append(matches, g)
 			}
@@ -289,19 +289,19 @@ func (s *Server) resolveGroup(ref string) (id, name string, ok bool, reason stri
 }
 
 // resolveScene maps a reference to a scene id. Caller must NOT hold Mu.
-func (s *Server) resolveScene(ref string) (id, name string, ok bool, reason string) {
+func (a *Agent) resolveScene(ref string) (id, name string, ok bool, reason string) {
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
 		return "", "", false, "no scene specified"
 	}
-	s.Store.View(func() {
-		if sc, found := s.Store.Scenes[ref]; found {
+	a.cfg.Store.View(func() {
+		if sc, found := a.cfg.Store.Scenes[ref]; found {
 			id, name, ok, reason = sc.ID, sc.Name, true, ""
 			return
 		}
 		lower := strings.ToLower(ref)
 		var matches []*store.Scene
-		for _, sc := range s.Store.Scenes {
+		for _, sc := range a.cfg.Store.Scenes {
 			if strings.ToLower(sc.Name) == lower {
 				matches = append(matches, sc)
 			}
@@ -326,19 +326,19 @@ func (s *Server) resolveScene(ref string) (id, name string, ok bool, reason stri
 }
 
 // resolveSensor maps a reference to a sensor id. Caller must NOT hold Mu.
-func (s *Server) resolveSensor(ref string) (id, name string, ok bool, reason string) {
+func (a *Agent) resolveSensor(ref string) (id, name string, ok bool, reason string) {
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
 		return "", "", false, "no sensor specified"
 	}
-	s.Store.View(func() {
-		if sn, found := s.Store.Sensors[ref]; found {
+	a.cfg.Store.View(func() {
+		if sn, found := a.cfg.Store.Sensors[ref]; found {
 			id, name, ok, reason = sn.ID, sn.Name, true, ""
 			return
 		}
 		lower := strings.ToLower(ref)
 		var matches []*store.Sensor
-		for _, sn := range s.Store.Sensors {
+		for _, sn := range a.cfg.Store.Sensors {
 			if strings.ToLower(sn.Name) == lower {
 				matches = append(matches, sn)
 			}

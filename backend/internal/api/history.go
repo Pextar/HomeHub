@@ -28,23 +28,6 @@ type playSuffix struct {
 	ArtURI string `json:"art_uri"`
 }
 
-// recordPlay files one play under a destination key. Takes the write lock
-// briefly, then persists off-lock — history is never worth failing a play
-// that already happened, so a write error is logged and swallowed.
-func (s *Server) recordPlay(roomKey, roomName string, p store.MediaPlay) {
-	if strings.TrimSpace(roomKey) == "" || strings.TrimSpace(p.URI) == "" {
-		return
-	}
-	p.RoomName = roomName
-	s.Store.Mutate(func() { s.Store.RecordPlay(roomKey, p) })
-	// Mutate rather than Update: Update pairs a mutation with a full Save,
-	// and history has its own file precisely so that starting a song does
-	// not rewrite every socket in the house.
-	if err := s.Store.SaveHistory(); err != nil {
-		s.mediaLogf("history: %v", err)
-	}
-}
-
 // mediaHistory handles GET /api/media/history?room=sonos:abc&limit=8 — one
 // room's plays, newest first. A room with none of its own falls back to the
 // household's, which is what makes this useful on the day a speaker is
@@ -244,7 +227,7 @@ func (s *Server) pruneDeadRooms() {
 	// The recorder's own memory of those rooms goes too, so a key that is
 	// deleted and later reused doesn't inherit a watch saying its current
 	// song has already been filed.
-	s.forgetHeardWatches(func(key string) bool { return live[key] })
+	s.Listening.ForgetMissing(func(key string) bool { return live[key] })
 	if droppedTimers {
 		// Timers live in the main save, so this is the whole store — which
 		// is right: a deletion has already rewritten it once.

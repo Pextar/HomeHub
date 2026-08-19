@@ -34,7 +34,7 @@ func scheduleSocketID(s *store.Schedule) string {
 
 func (s *Server) getSchedules(w http.ResponseWriter, r *http.Request) {
 	user := currentUser(r)
-	admin := isAdmin(user)
+	admin := user.IsAdmin()
 	now := time.Now()
 
 	var b []byte
@@ -94,7 +94,7 @@ func (s *Server) createSchedule(w http.ResponseWriter, r *http.Request) {
 	}
 
 	user := currentUser(r)
-	if !isAdmin(user) {
+	if !user.IsAdmin() {
 		// Non-admins can only schedule their own sockets — not groups, scenes, or rooms.
 		tt := strings.TrimSpace(schedule.TargetType)
 		if tt != "" && tt != "socket" {
@@ -156,7 +156,7 @@ func (s *Server) updateSchedule(w http.ResponseWriter, r *http.Request) {
 		}
 
 		user := currentUser(r)
-		if !isAdmin(user) {
+		if !user.IsAdmin() {
 			// The user must own the existing schedule (it must target their socket).
 			if sockID := scheduleSocketID(existing); !user.CanAccessSocket(sockID) {
 				return errStatus(http.StatusForbidden, "you don't own that schedule")
@@ -196,7 +196,7 @@ func (s *Server) updateSchedule(w http.ResponseWriter, r *http.Request) {
 			merged.SolarOffsetMinutes = *updates.SolarOffsetMinutes
 		}
 
-		if !isAdmin(user) {
+		if !user.IsAdmin() {
 			// After merge, the target must still be the user's own socket.
 			tt := strings.TrimSpace(merged.TargetType)
 			if tt != "" && tt != "socket" {
@@ -253,7 +253,7 @@ func (s *Server) deleteSchedule(w http.ResponseWriter, r *http.Request) {
 		}
 
 		user := currentUser(r)
-		if !isAdmin(user) {
+		if !user.IsAdmin() {
 			sockID := scheduleSocketID(sch)
 			if !user.CanAccessSocket(sockID) {
 				return errStatus(http.StatusForbidden, "you don't own that schedule")

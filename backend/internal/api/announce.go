@@ -49,60 +49,6 @@ const (
 	announceRestoreBudget = 45 * time.Second
 )
 
-// announcePath is where the clips are served. Outside /api for the same
-// reason the stream is: the clients are speakers, and /api is session-gated.
-const announcePath = "/announce"
-
-// announceHost returns the clip host, creating it on first use. It shares the
-// stream host's address discovery — the requirement is identical (an address
-// the *speakers* can reach) and solving it twice would mean two ways to be
-// wrong on a multi-homed box.
-func (s *Server) announceHost() *announce.Host {
-	s.announceMu.Lock()
-	defer s.announceMu.Unlock()
-	if s.announcer != nil {
-		return s.announcer
-	}
-	base := s.streamBaseURL()
-	if base == "" {
-		return nil
-	}
-	s.announcer = &announce.Host{BaseURL: base, PathPrefix: announcePath}
-	return s.announcer
-}
-
-// announceHandler serves the published clips to speakers.
-func (s *Server) announceHandler() http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		s.announceMu.Lock()
-		host := s.announcer
-		s.announceMu.Unlock()
-		if host == nil {
-			http.NotFound(w, r)
-			return
-		}
-		host.Handler().ServeHTTP(w, r)
-	})
-}
-
-// announceBegin claims the household for one announcement, reporting false
-// when another is still playing. announceEnd releases it.
-func (s *Server) announceBegin() bool {
-	s.announceMu.Lock()
-	defer s.announceMu.Unlock()
-	if s.announcing {
-		return false
-	}
-	s.announcing = true
-	return true
-}
-
-func (s *Server) announceEnd() {
-	s.announceMu.Lock()
-	s.announcing = false
-	s.announceMu.Unlock()
-}
-
 // announceStatus handles GET /api/announce — what the surface needs to draw
 // the control before anyone taps it: whether there is anywhere to announce
 // to, and whether it will be spoken or only chimed.
@@ -150,7 +96,7 @@ type announceTarget struct {
 func (s *Server) announceTargets() []announceTarget {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	snap := s.sonosEvents().Snapshot(ctx)
+	snap := s.Speakers.Sonos.Snapshot(ctx)
 
 	coordinators := make(map[string]bool, len(snap.Groups))
 	byUUID := map[string]string{}
@@ -218,13 +164,13 @@ func (s *Server) announceSend(w http.ResponseWriter, r *http.Request) {
 	// URL at announcement volume, with the music gone for good. The busy
 	// state on the panel's button covers the request, which is over in a
 	// second; this covers the several seconds of audio after it.
-	if !s.announceBegin() {
+	if !s.Announce.Begin() {
 		writeError(w, http.StatusConflict, "the house is already being announced to — give it a moment")
 		return
 	}
 	// Released here only on the paths that never reached a speaker; once
 	// rooms are playing it belongs to the restore goroutine.
-	release := s.announceEnd
+	release := s.Announce.End
 	defer func() {
 		if release != nil {
 			release()
@@ -249,7 +195,7 @@ func (s *Server) announceSend(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "no speaker is answering, so there is nowhere to announce")
 		return
 	}
-	host := s.announceHost()
+	host := s.Announce.Host()
 	if host == nil {
 		writeError(w, http.StatusConflict,
 			"this server has no address the speakers can reach — set HOMEHUB_STREAM_URL")
@@ -327,7 +273,7 @@ func (s *Server) announceSend(w http.ResponseWriter, r *http.Request) {
 	wait := clip.Duration() + announceTail
 	release = nil // the restore below owns it now
 	go func() {
-		defer s.announceEnd()
+		defer s.Announce.End()
 		time.Sleep(wait)
 		ctx, cancel := context.WithTimeout(context.Background(), announceRestoreBudget)
 		defer cancel()
@@ -345,7 +291,7 @@ func (s *Server) announceSend(w http.ResponseWriter, r *http.Request) {
 		// The rooms have moved twice without the monitor being told, so
 		// nudge it: without this the panel shows the announcement's own
 		// (empty) now-playing until the next poll lands.
-		s.sonosEvents().Nudge()
+		s.Speakers.Sonos.Nudge()
 	}()
 
 	names := make([]string, 0, len(running))

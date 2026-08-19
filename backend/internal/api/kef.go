@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"net/url"
 	"sort"
@@ -53,8 +52,8 @@ func (s *Server) kefStatus(w http.ResponseWriter, r *http.Request) {
 
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
-	snap := s.kefEvents().Snapshot(ctx)
-	s.noteHeardKEF(snap) // before the art rewrite below, as in sonosStatus
+	snap := s.Speakers.KEF.Snapshot(ctx)
+	s.Listening.NoteKEF(snap) // before the art rewrite below, as in sonosStatus
 
 	views := make([]kefSpeakerView, len(speakers))
 	for i, sp := range speakers {
@@ -62,7 +61,7 @@ func (s *Server) kefStatus(w http.ResponseWriter, r *http.Request) {
 		// Snapshot hands out copies, so rewriting the art URI can't corrupt
 		// what the next reader sees.
 		if cached.State != nil && cached.State.Track != nil {
-			cached.State.Track.ArtURI = s.kefArtURL(sp.ID, cached.State.Track.ArtURI)
+			cached.State.Track.ArtURI = KEFArtURL(sp.ID, cached.State.Track.ArtURI)
 		}
 		views[i] = kefSpeakerView{
 			KEFSpeaker: sp,
@@ -162,7 +161,7 @@ func (s *Server) kefCreateSpeaker(w http.ResponseWriter, r *http.Request) {
 	}) {
 		return
 	}
-	s.kefEvents().Nudge() // start watching it now, not at the next reconcile
+	s.Speakers.KEF.Nudge() // start watching it now, not at the next reconcile
 	writeJSON(w, http.StatusCreated, sp)
 }
 
@@ -200,7 +199,7 @@ func (s *Server) kefUpdateSpeaker(w http.ResponseWriter, r *http.Request) {
 	}
 	// A re-addressed speaker needs its poller repointed; the old one is
 	// reading an address that is no longer it.
-	s.kefEvents().Nudge()
+	s.Speakers.KEF.Nudge()
 	writeJSON(w, http.StatusOK, existing)
 }
 
@@ -220,8 +219,8 @@ func (s *Server) kefDeleteSpeaker(w http.ResponseWriter, r *http.Request) {
 	}) {
 		return
 	}
-	s.kefEvents().Nudge() // stop polling it
-	s.pruneDeadRooms()    // and drop its shelf with it
+	s.Speakers.KEF.Nudge() // stop polling it
+	s.pruneDeadRooms()     // and drop its shelf with it
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -258,7 +257,7 @@ func (s *Server) kefTransport(action func(context.Context, string) error) http.H
 			writeError(w, http.StatusBadGateway, err.Error())
 			return
 		}
-		s.kefEvents().Touch(sp.ID)
+		s.Speakers.KEF.Touch(sp.ID)
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
@@ -287,7 +286,7 @@ func (s *Server) kefSetVolume(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	s.kefEvents().Touch(sp.ID)
+	s.Speakers.KEF.Touch(sp.ID)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -309,7 +308,7 @@ func (s *Server) kefSetMute(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	s.kefEvents().Touch(sp.ID)
+	s.Speakers.KEF.Touch(sp.ID)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -339,7 +338,7 @@ func (s *Server) kefSetSource(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	s.kefEvents().Touch(sp.ID)
+	s.Speakers.KEF.Touch(sp.ID)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -362,7 +361,7 @@ func (s *Server) kefSetPower(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	s.kefEvents().Touch(sp.ID)
+	s.Speakers.KEF.Touch(sp.ID)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -413,16 +412,16 @@ func (s *Server) kefUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	// Volume-limit changes can move the live volume, so the status cache
 	// should catch up rather than wait out the poll.
-	s.kefEvents().Touch(sp.ID)
+	s.Speakers.KEF.Touch(sp.ID)
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// kefArtURL leaves absolute artwork URLs alone and routes speaker-relative
+// KEFArtURL leaves absolute artwork URLs alone and routes speaker-relative
 // ones through our proxy. KEF gets its artwork from the streaming service,
 // so in practice these are already absolute — but a relative path served
 // over plain HTTP would be blocked as mixed content on an HTTPS install,
 // which is the same reason the Sonos bridge proxies its album art.
-func (s *Server) kefArtURL(speakerID, artURI string) string {
+func KEFArtURL(speakerID, artURI string) string {
 	if artURI == "" || !strings.HasPrefix(artURI, "/") {
 		return artURI
 	}
@@ -467,38 +466,4 @@ func (s *Server) kefArt(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "public, max-age=86400")
 	w.WriteHeader(http.StatusOK)
 	_, _ = io.Copy(w, io.LimitReader(resp.Body, 5<<20))
-}
-
-// ── Monitor lifecycle ────────────────────────────────────────────────────
-
-// kefEvents returns the speaker monitor, building it on first use.
-func (s *Server) kefEvents() *kef.Monitor {
-	s.kefMonMu.Lock()
-	defer s.kefMonMu.Unlock()
-	if s.kefMon == nil {
-		s.kefMon = kef.NewMonitor(kef.MonitorConfig{
-			Speakers: s.kefSpeakerList,
-			OnChange: s.broadcastMusic,
-			Logf:     log.Printf,
-		})
-	}
-	return s.kefMon
-}
-
-// RunKEFEvents keeps the KEF speakers polled until ctx is cancelled. Call it
-// once, from main, after Handler().
-func (s *Server) RunKEFEvents(ctx context.Context) {
-	s.kefEvents().Run(ctx)
-}
-
-// kefSpeakerList adapts the store's speakers to what the monitor needs.
-func (s *Server) kefSpeakerList() []kef.Speaker {
-	return store.ViewValue(s.Store, func() []kef.Speaker {
-		out := make([]kef.Speaker, 0, len(s.Store.KEF))
-		for _, sp := range s.Store.KEF {
-			out = append(out, kef.Speaker{ID: sp.ID, IP: sp.IP})
-		}
-		sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
-		return out
-	})
 }

@@ -96,7 +96,7 @@ func (s *Server) spotifyConnect(w http.ResponseWriter, r *http.Request) {
 // describeConnectDevices annotates the raw list with what HomeHub knows about
 // the boxes on it.
 func (s *Server) describeConnectDevices(devices []spotify.Device) []connectDevice {
-	decoderName := strings.TrimSpace(s.decoderDeviceName())
+	decoderName := strings.TrimSpace(s.Audio.DecoderName())
 
 	// Which Connect device is which HomeHub speaker is a question the KEF
 	// bridge already answers — a pinned id, or the name the speaker
@@ -140,7 +140,7 @@ func (s *Server) describeConnectDevices(devices []spotify.Device) []connectDevic
 // whatever a phone does, and warning about it would be a lie in the other
 // direction.
 func (s *Server) connectInterrupts(playing *spotify.Playback) string {
-	decoder := strings.TrimSpace(s.decoderDeviceName())
+	decoder := strings.TrimSpace(s.Audio.DecoderName())
 	if decoder == "" || playing == nil || !strings.EqualFold(playing.DeviceName, decoder) {
 		return ""
 	}
@@ -158,25 +158,13 @@ func (s *Server) connectInterrupts(playing *spotify.Playback) string {
 	}
 }
 
-// zonesUsingTheDecoder lists the zones whose live session is one HomeHub is
-// decoding for.
+// zonesUsingTheDecoder names the zones whose live session is one HomeHub is
+// decoding for, so a warning can say which rooms a transfer would silence.
 func (s *Server) zonesUsingTheDecoder() []string {
-	s.zoneMu.Lock()
-	live := make(map[string]bool, len(s.zoneSessions))
-	for id, sess := range s.zoneSessions {
-		if sess == nil {
-			continue
-		}
-		live[id] = sess.Route == "stream" || sess.Route == "airplay"
-	}
-	s.zoneMu.Unlock()
-
+	ids := s.Music.DecodedZones()
 	var names []string
 	s.Store.View(func() {
-		for id, on := range live {
-			if !on {
-				continue
-			}
+		for _, id := range ids {
 			if z, ok := s.Store.Zones[id]; ok {
 				names = append(names, z.Name)
 			}
@@ -260,28 +248,7 @@ func (s *Server) spotifyConnectVolume(w http.ResponseWriter, r *http.Request) {
 // releaseDecodedZones ends the zone sessions HomeHub was decoding for, after
 // something else took the account's playback session away.
 func (s *Server) releaseDecodedZones() {
-	s.zoneMu.Lock()
-	var ending []string
-	for id, sess := range s.zoneSessions {
-		if sess != nil && (sess.Route == "stream" || sess.Route == "airplay") {
-			ending = append(ending, id)
-		}
+	for _, id := range s.Music.DecodedZones() {
+		s.Music.EndSession(id)
 	}
-	s.zoneMu.Unlock()
-
-	for _, id := range ending {
-		s.endZoneSession(id)
-	}
-}
-
-// decoderDeviceName is what HomeHub's own decoder calls itself in Spotify's
-// device list. Empty when no decoder has ever been created, which is also when
-// it cannot be on the list.
-func (s *Server) decoderDeviceName() string {
-	s.streamMu.Lock()
-	defer s.streamMu.Unlock()
-	if s.librespot == nil {
-		return ""
-	}
-	return s.librespot.DeviceName()
 }

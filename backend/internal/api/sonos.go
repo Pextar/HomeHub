@@ -80,10 +80,10 @@ func (s *Server) sonosStatus(w http.ResponseWriter, r *http.Request) {
 
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
-	snap := s.sonosEvents().Snapshot(ctx)
+	snap := s.Speakers.Sonos.Snapshot(ctx)
 	// Before the loop below, which rewrites art paths into proxied URLs on
 	// this very snapshot: the log wants the reading as the speaker gave it.
-	s.noteHeardSonos(snap)
+	s.Listening.NoteSonos(snap)
 
 	views := make([]sonosSpeakerView, len(speakers))
 	for i, sp := range speakers {
@@ -91,14 +91,14 @@ func (s *Server) sonosStatus(w http.ResponseWriter, r *http.Request) {
 		// Snapshot hands out copies, so rewriting the art URI to proxy
 		// through us can't corrupt what the next reader sees.
 		if cached.State != nil && cached.State.Track != nil {
-			cached.State.Track.ArtURI = s.sonosArtURL(sp.ID, cached.State.Track.ArtURI)
+			cached.State.Track.ArtURI = SonosArtURL(sp.ID, cached.State.Track.ArtURI)
 		}
 		views[i] = sonosSpeakerView{
 			SonosSpeaker: sp,
 			Reachable:    cached.Reachable,
 			State:        cached.State,
 			GroupState:   cached.GroupState,
-			Autoplay:     s.autoplayEnabled(sp.ID),
+			Autoplay:     s.Autoplay.Enabled(sp.ID),
 		}
 		if !cached.At.IsZero() {
 			views[i].ReadAt = cached.At.UnixMilli()
@@ -210,7 +210,7 @@ func (s *Server) sonosCreateSpeaker(w http.ResponseWriter, r *http.Request) {
 	}) {
 		return
 	}
-	s.sonosEvents().Nudge() // start watching it now, not at the next reconcile
+	s.Speakers.Sonos.Nudge() // start watching it now, not at the next reconcile
 	writeJSON(w, http.StatusCreated, sp)
 }
 
@@ -248,7 +248,7 @@ func (s *Server) sonosUpdateSpeaker(w http.ResponseWriter, r *http.Request) {
 	}
 	// A re-addressed speaker needs its subscriptions rebuilt against the
 	// new IP; the old ones point somewhere that is no longer it.
-	s.sonosEvents().Nudge()
+	s.Speakers.Sonos.Nudge()
 	writeJSON(w, http.StatusOK, existing)
 }
 
@@ -270,8 +270,8 @@ func (s *Server) sonosDeleteSpeaker(w http.ResponseWriter, r *http.Request) {
 	}) {
 		return
 	}
-	s.sonosEvents().Nudge() // release its subscriptions
-	s.pruneDeadRooms()      // and its shelf, which now plays to nothing
+	s.Speakers.Sonos.Nudge() // release its subscriptions
+	s.pruneDeadRooms()       // and its shelf, which now plays to nothing
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -470,7 +470,7 @@ func (s *Server) sonosQueue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for i := range items {
-		items[i].ArtURI = s.sonosArtURL(sp.ID, items[i].ArtURI)
+		items[i].ArtURI = SonosArtURL(sp.ID, items[i].ArtURI)
 	}
 	writeJSON(w, http.StatusOK, items)
 }
@@ -554,7 +554,7 @@ func (s *Server) sonosQueueAdd(w http.ResponseWriter, r *http.Request) {
 		}
 		if acct == nil {
 			var err error
-			if acct, err = s.sonosServiceAccount(ctx, sp.IP, it.Service); err != nil {
+			if acct, err = s.Speakers.ServiceAccount(ctx, sp.IP, it.Service); err != nil {
 				writeError(w, http.StatusBadGateway, err.Error())
 				return
 			}
@@ -805,7 +805,7 @@ func (s *Server) sonosFavorites(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for i := range favs {
-		favs[i].ArtURI = s.sonosArtURL(sp.ID, favs[i].ArtURI)
+		favs[i].ArtURI = SonosArtURL(sp.ID, favs[i].ArtURI)
 	}
 	writeJSON(w, http.StatusOK, favs)
 }
@@ -836,7 +836,7 @@ func (s *Server) sonosPlayFavorite(w http.ResponseWriter, r *http.Request) {
 	// A favorite is filed under its own URI, not the Spotify one it may
 	// wrap: it is played back through PlayFavorite, so that is the handle
 	// a shelf tile has to carry to be able to start it again.
-	s.recordPlay("sonos:"+sp.ID, sp.Name, store.MediaPlay{
+	s.Music.RecordPlay("sonos:"+sp.ID, sp.Name, store.MediaPlay{
 		Provider: "sonos",
 		Kind:     "station",
 		URI:      fav.URI,
@@ -880,7 +880,7 @@ func (s *Server) sonosPlayItem(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 3*sonos.DefaultTimeout)
 	defer cancel()
 
-	acct, err := s.sonosServiceAccount(ctx, sp.IP, body.Service)
+	acct, err := s.Speakers.ServiceAccount(ctx, sp.IP, body.Service)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
@@ -894,7 +894,7 @@ func (s *Server) sonosPlayItem(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	s.recordPlay("sonos:"+sp.ID, sp.Name, store.MediaPlay{
+	s.Music.RecordPlay("sonos:"+sp.ID, sp.Name, store.MediaPlay{
 		Provider: "spotify",
 		Kind:     body.Kind,
 		URI:      body.URI,
@@ -905,37 +905,16 @@ func (s *Server) sonosPlayItem(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// sonosServiceAccount resolves (and caches) a speaker's account for a
-// streaming service. The sid/sn pair only changes when the household's
-// service links change, so an hour of caching keeps play taps at four SOAP
-// calls instead of six.
-func (s *Server) sonosServiceAccount(ctx context.Context, ip, service string) (*sonos.ServiceAccount, error) {
-	key := ip + "|" + strings.ToLower(service)
-	s.sonosAcctMu.Lock()
-	if s.sonosAccts == nil {
-		s.sonosAccts = make(map[string]sonosAcctEntry)
-	}
-	if e, ok := s.sonosAccts[key]; ok && time.Since(e.at) < time.Hour {
-		s.sonosAcctMu.Unlock()
-		return e.acct, nil
-	}
-	s.sonosAcctMu.Unlock()
-
-	acct, err := sonos.GetServiceAccount(ctx, ip, service)
-	if err != nil {
-		return nil, err
-	}
-	s.sonosAcctMu.Lock()
-	s.sonosAccts[key] = sonosAcctEntry{acct: acct, at: time.Now()}
-	s.sonosAcctMu.Unlock()
-	return acct, nil
-}
-
-// sonosArtURL rewrites a speaker-relative album-art path into our proxy
+// SonosArtURL rewrites a speaker-relative album-art path into our proxy
 // endpoint (the app may be served over HTTPS, where a plain-http image from
 // the speaker would be blocked as mixed content). Absolute URLs — typically
 // CDN art from streaming services — pass through untouched.
-func (s *Server) sonosArtURL(speakerID, artURI string) string {
+//
+// Exported because the listening log stores art alongside a track and outlives
+// the reading it came from: a path that was fine while the speaker was being
+// polled is useless by the time someone scrolls back to the row. This is the
+// route that will still answer.
+func SonosArtURL(speakerID, artURI string) string {
 	if artURI == "" || !strings.HasPrefix(artURI, "/") {
 		return artURI
 	}

@@ -400,17 +400,17 @@ func (s *Server) registerDeviceCallbackRoutes(r *mux.Router) {
 	// Sonos change notifications. Guarded by the unguessable token, the SID
 	// and a source-address check; see handleSonosEvent. Bound to NOTIFY only,
 	// so a browser hitting the same path still falls through to the SPA.
-	r.HandleFunc(sonosEventPath+"/{token}", s.handleSonosEvent).Methods("NOTIFY")
+	r.HandleFunc(SonosEventPath+"/{token}", s.handleSonosEvent).Methods("NOTIFY")
 
 	// The audio stream speakers pull from on the cross-vendor route. Guarded
 	// by the stream id — 128 bits of randomness, minted per playback and
 	// invalid the moment it ends. GET and HEAD only, since speakers probe with
 	// HEAD before committing to play.
-	r.PathPrefix(streamPath+"/").Handler(s.streamHandler()).Methods("GET", "HEAD")
+	r.PathPrefix(StreamPath+"/").Handler(s.Audio.Handler()).Methods("GET", "HEAD")
 
 	// The announcement clip a speaker fetches when the house is being
 	// called. Same posture as the stream: unguarded by the session because
 	// the client is a speaker, guarded instead by an unguessable id that
 	// stops mattering a couple of minutes after it is minted.
-	r.PathPrefix(announcePath+"/").Handler(s.announceHandler()).Methods("GET", "HEAD")
+	r.PathPrefix(AnnouncePath+"/").Handler(s.Announce.Handler()).Methods("GET", "HEAD")
 }

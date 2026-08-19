@@ -5,18 +5,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-
-	"homehub/internal/store"
 )
-
-func testServer(t *testing.T) *Server {
-	t.Helper()
-	st := store.New(t.TempDir(), nil)
-	if err := st.Load(); err != nil {
-		t.Fatalf("load store: %v", err)
-	}
-	return &Server{Store: st, SPADir: t.TempDir()}
-}
 
 // The callback has to be reachable without credentials — speakers have none
 // — so it must sit outside the API's auth middleware. It must also refuse
@@ -25,7 +14,7 @@ func TestSonosEventRouteIsUnauthenticatedButGuarded(t *testing.T) {
 	srv := testServer(t)
 	h := srv.Handler()
 
-	req := httptest.NewRequest("NOTIFY", sonosEventPath+"/deadbeef", strings.NewReader(
+	req := httptest.NewRequest("NOTIFY", SonosEventPath+"/deadbeef", strings.NewReader(
 		`<e:propertyset xmlns:e="urn:schemas-upnp-org:event-1-0"></e:propertyset>`))
 	req.Header.Set("SID", "uuid:whatever")
 	req.Header.Set("SEQ", "0")
@@ -48,47 +37,9 @@ func TestSonosEventPathFallsThroughForBrowsers(t *testing.T) {
 	h := srv.Handler()
 
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, sonosEventPath+"/deadbeef", nil))
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, SonosEventPath+"/deadbeef", nil))
 	if rec.Code == http.StatusPreconditionFailed {
 		t.Error("a GET reached the event handler; the route should be NOTIFY-only")
-	}
-}
-
-// A speaker can only reach us on the address that faces its own subnet, and
-// only over plain HTTP.
-func TestSonosCallbackURL(t *testing.T) {
-	srv := testServer(t)
-	srv.HTTPPort = "8080"
-
-	got, err := srv.sonosCallbackURL("192.168.1.42")
-	if err != nil {
-		t.Skipf("no route to a LAN address in this environment: %v", err)
-	}
-	if !strings.HasPrefix(got, "http://") {
-		t.Errorf("callback = %q, want plain http — speakers will not post to TLS", got)
-	}
-	if !strings.HasSuffix(got, ":8080"+sonosEventPath) {
-		t.Errorf("callback = %q, want it to end in :8080%s", got, sonosEventPath)
-	}
-	if strings.Contains(got, "0.0.0.0") || strings.Contains(got, "127.0.0.1") {
-		t.Errorf("callback = %q, want a routable address", got)
-	}
-}
-
-func TestSonosCallbackURLDefaultsPort(t *testing.T) {
-	srv := testServer(t)
-	got, err := srv.sonosCallbackURL("192.168.1.42")
-	if err != nil {
-		t.Skipf("no route to a LAN address in this environment: %v", err)
-	}
-	if !strings.HasSuffix(got, ":8080"+sonosEventPath) {
-		t.Errorf("callback = %q, want the default :8080", got)
-	}
-}
-
-func TestLocalAddrForRejectsUnroutable(t *testing.T) {
-	if _, err := localAddrFor("not an ip"); err == nil {
-		t.Error("localAddrFor(garbage) = nil, want an error")
 	}
 }
 

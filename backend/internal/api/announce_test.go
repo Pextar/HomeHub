@@ -16,7 +16,7 @@ import (
 func TestAnnounceClipRouteIsUnauthenticatedAndGuarded(t *testing.T) {
 	srv := testServer(t)
 	rec := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, announcePath+"/deadbeef.wav", nil))
+	srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, AnnouncePath+"/deadbeef.wav", nil))
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("unknown clip id = %d, want 404 (and never a login redirect)", rec.Code)
 	}
@@ -37,10 +37,10 @@ func TestAnnounceRefusesWhenThereIsNowhereToSendIt(t *testing.T) {
 	}
 	// And the household must not be left claimed by a request that never
 	// reached a speaker — the next attempt has to be allowed to try.
-	if !srv.announceBegin() {
+	if !srv.Announce.Begin() {
 		t.Error("a refused announcement left the household claimed")
 	}
-	srv.announceEnd()
+	srv.Announce.End()
 }
 
 // A second announcement mid-clip would snapshot the *clip* as what the rooms
@@ -49,7 +49,7 @@ func TestAnnounceRefusesWhenThereIsNowhereToSendIt(t *testing.T) {
 // long as the request.
 func TestAnnounceIsOneAtATime(t *testing.T) {
 	srv := testServer(t)
-	if !srv.announceBegin() {
+	if !srv.Announce.Begin() {
 		t.Fatal("first claim was refused")
 	}
 	rec := httptest.NewRecorder()
@@ -61,11 +61,11 @@ func TestAnnounceIsOneAtATime(t *testing.T) {
 	if !strings.Contains(rec.Body.String(), "already being announced") {
 		t.Errorf("body = %q, want the reason", rec.Body.String())
 	}
-	srv.announceEnd()
-	if !srv.announceBegin() {
+	srv.Announce.End()
+	if !srv.Announce.Begin() {
 		t.Error("the claim was never released")
 	}
-	srv.announceEnd()
+	srv.Announce.End()
 }
 
 func TestAnnounceRejectsAParagraph(t *testing.T) {

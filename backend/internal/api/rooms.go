@@ -9,6 +9,7 @@ import (
 
 	"github.com/gorilla/mux"
 
+	"homehub/internal/control"
 	"homehub/internal/store"
 )
 
@@ -28,7 +29,7 @@ func (s *Server) getRooms(w http.ResponseWriter, r *http.Request) {
 		type counts struct{ total, on int }
 		byName := make(map[string]*counts)
 		for _, sock := range s.Store.Sockets {
-			if !canAccess(user, sock.ID) {
+			if !user.MayAccess(sock.ID) {
 				continue
 			}
 			key := strings.ToLower(strings.TrimSpace(sock.Room))
@@ -193,48 +194,14 @@ func (s *Server) roomSetState(target bool) http.HandlerFunc {
 			writeError(w, http.StatusBadRequest, "room is required")
 			return
 		}
-		ok, failures, found, err := s.doRoomSetState(currentUser(r), room, target)
-		if !found {
-			writeError(w, http.StatusNotFound, "no sockets in that room")
-			return
-		}
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
+		res, err := s.Control.Room(room, allowedTo(currentUser(r)), target, control.SourceManual)
+		if !writeStaged(w, "no sockets in that room", res, err) {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"room":     room,
-			"updated":  ok,
-			"failures": failures,
+			"updated":  res.OK,
+			"failures": res.Failures,
 		})
 	}
-}
-
-// doRoomSetState switches every accessible socket in a named room on or off
-// through the staged flow and sends a single summary notification. Shared by
-// the room REST handler and the assistant's control_room tool. found is false
-// when the room has no accessible sockets. Caller must NOT hold Mu.
-func (s *Server) doRoomSetState(user *store.User, room string, target bool) (ok int, failures []map[string]string, found bool, err error) {
-	action := "off"
-	if target {
-		action = "on"
-	}
-	_, ok, failures, found, err = s.runStaged(stagedAction{
-		Kind: "room", Action: action, Source: "manual",
-		Stage: func() (string, []store.StagedSend, bool) {
-			var staged []store.StagedSend
-			for _, sock := range s.Store.Sockets {
-				if !strings.EqualFold(sock.Room, room) || !canAccess(user, sock.ID) {
-					continue
-				}
-				staged = append(staged, s.Store.StageSocketSend(sock.ID, action))
-			}
-			// An empty room is a 404 rather than a no-op success.
-			return room, staged, len(staged) > 0
-		},
-		Notify: func(label string, _ int) string {
-			return fmt.Sprintf("%s turned %s", label, action)
-		},
-	})
-	return ok, failures, found, err
 }

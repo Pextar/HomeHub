@@ -10,6 +10,7 @@ import (
 
 	"github.com/gorilla/mux"
 
+	"homehub/internal/control"
 	"homehub/internal/store"
 )
 
@@ -139,54 +140,13 @@ func (s *Server) deleteScene(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) activateScene(w http.ResponseWriter, r *http.Request) {
-	name, okCount, failures, found, err := s.doActivateScene(mux.Vars(r)["id"])
-	if !found {
-		writeError(w, http.StatusNotFound, "scene not found")
-		return
-	}
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
+	res, err := s.Control.Scene(mux.Vars(r)["id"], control.SourceManual)
+	if !writeStaged(w, "scene", res, err) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"scene":    name,
-		"updated":  okCount,
-		"failures": failures,
-	})
-}
-
-// doActivateScene runs a scene's immediate step through the staged flow and
-// records activation telemetry. Shared by the scene REST handler and the
-// assistant's activate_scene tool. found is false when no scene has the given
-// id. Caller must NOT hold Mu.
-func (s *Server) doActivateScene(id string) (name string, okCount int, failures []map[string]string, found bool, err error) {
-	// Music needs nothing here: staging the scene queues the immediate
-	// step's actions in the same buffer the lights use, and runStaged drains
-	// both once the lock is released. Later steps carry their own and go out
-	// with them when they fire (Store.ScheduleStep).
-	return s.runStaged(stagedAction{
-		Kind: "scene", Action: "activate", Source: "manual",
-		Stage: func() (string, []store.StagedSend, bool) {
-			scene, ok := s.Store.Scenes[id]
-			if !ok {
-				return "", nil, false
-			}
-			// Staging also queues smart-light brightness/colour and schedules
-			// any delayed steps; FlushLights below drains the queue.
-			staged, _ := s.Store.StageAction("scene", id, "activate")
-			return scene.Name, staged, true
-		},
-		AfterApply: func(string) {
-			// Telemetry for the UI's "ran N× · 2h ago". Re-fetch: the scene
-			// may have been deleted while the sends were in flight.
-			if sc, still := s.Store.Scenes[id]; still {
-				sc.LastActivatedAt = time.Now().UTC()
-				sc.ActivateCount++
-			}
-		},
-		FlushLights: true,
-		Notify: func(label string, _ int) string {
-			return "Scene activated: " + label
-		},
+		"scene":    res.Label,
+		"updated":  res.OK,
+		"failures": res.Failures,
 	})
 }

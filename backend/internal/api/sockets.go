@@ -12,6 +12,7 @@ import (
 
 	"github.com/gorilla/mux"
 
+	"homehub/internal/control"
 	"homehub/internal/store"
 )
 
@@ -22,7 +23,7 @@ func (s *Server) getSockets(w http.ResponseWriter, r *http.Request) {
 	s.Store.View(func() {
 		result := make([]*store.Socket, 0, len(s.Store.Sockets))
 		for _, sock := range s.Store.Sockets {
-			if !canAccess(user, sock.ID) {
+			if !user.MayAccess(sock.ID) {
 				continue
 			}
 			result = append(result, sock)
@@ -223,76 +224,6 @@ func (s *Server) setSocketState(w http.ResponseWriter, r *http.Request, target *
 	writeJSON(w, http.StatusOK, socket)
 }
 
-// doControlSocket applies on/off/toggle to a single socket by id, transmitting
-// synchronously (like the toggle/on/off REST handlers) so a device error is
-// reported directly. Shared by the assistant's control_device tool. found is
-// false when no socket has the id. Caller must NOT hold Mu.
-func (s *Server) doControlSocket(id, action string) (sock store.Socket, found bool, err error) {
-	var target *bool
-	switch action {
-	case "on":
-		t := true
-		target = &t
-	case "off":
-		t := false
-		target = &t
-	case "toggle":
-		target = nil
-	default:
-		return store.Socket{}, true, fmt.Errorf("unsupported action %q (use on, off, or toggle)", action)
-	}
-
-	var applyErr error
-	saveErr := s.Store.Update(func() error {
-		socket, ok := s.Store.Sockets[id]
-		if !ok {
-			return store.ErrNoChange
-		}
-		found = true
-		applyErr = s.Store.ApplyState(socket, target)
-		entry := store.ActivityEntry{Kind: "socket", Source: "assistant", Action: action, Label: socket.Name}
-		if applyErr != nil {
-			entry.Status = "error"
-			entry.Error = applyErr.Error()
-		}
-		s.Store.Activity.Add(entry)
-		sock = *socket
-		if applyErr != nil {
-			// The transmit failed, so there is no new state to persist. The
-			// activity entry above still records the attempt.
-			return store.ErrNoChange
-		}
-		return nil
-	})
-	if !found {
-		return store.Socket{}, false, nil
-	}
-	if applyErr != nil {
-		return sock, true, applyErr
-	}
-	return sock, true, saveErr
-}
-
-// learnSocket picks a random unused code and broadcasts an ON signal so
-// a 433MHz socket in learn mode pairs to it. The caller then saves the
-// socket via the regular POST /sockets with the returned code.
-//
-// Workflow:
-//  1. User long-presses the physical socket's button (learn mode).
-//  2. Frontend hits this endpoint.
-//  3. Socket associates with the code; user verifies the socket clicked
-//     and then saves it.
-//
-// For the Nexa self-learning protocol the code is "<houseID>:<unit>" —
-// each socket gets its own random 26-bit house id, so they never
-// collide and there is no per-controller 16-unit limit. Other protocols
-// keep the legacy random 7-digit code.
-//
-// If the caller supplies a non-empty "code" field in the request body, that
-// code is re-used instead of generating a new one. This lets the user retry
-// pairing a stubborn socket (e.g. Telldus 312530) without the code changing
-// between attempts: put the socket back into learn mode, tap Pair again, and
-// the same code is broadcast so the socket can learn it on a later attempt.
 func (s *Server) learnSocket(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Protocol string `json:"protocol"`
@@ -372,61 +303,13 @@ func (s *Server) turnOff(w http.ResponseWriter, r *http.Request) {
 // bulkSetState returns a handler that switches every socket on or off.
 func (s *Server) bulkSetState(target bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		ok, failures, err := s.doBulkSetState(currentUser(r), target)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to persist data: "+err.Error())
+		res, err := s.Control.All(allowedTo(currentUser(r)), target, control.SourceManual)
+		if !writeStaged(w, "", res, err) {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"updated":  ok,
-			"failures": failures,
+			"updated":  res.OK,
+			"failures": res.Failures,
 		})
 	}
-}
-
-// doBulkSetState switches every socket the user may access on or off and
-// returns the success count plus the per-socket failure list. Device I/O
-// happens between two lock acquisitions (staged flow) so one slow device
-// can't stall the rest of the API. Shared by the bulk REST handler and the
-// assistant's all_devices tool. Caller must NOT hold Mu.
-func (s *Server) doBulkSetState(user *store.User, target bool) (ok int, failures []map[string]string, err error) {
-	action := "off"
-	if target {
-		action = "on"
-	}
-	_, ok, failures, _, err = s.runStaged(stagedAction{
-		Kind: "bulk", Action: action, Source: "manual",
-		Stage: func() (string, []store.StagedSend, bool) {
-			staged := make([]store.StagedSend, 0, len(s.Store.Sockets))
-			for _, sock := range s.Store.Sockets {
-				if !canAccess(user, sock.ID) {
-					continue
-				}
-				staged = append(staged, s.Store.StageSocketSend(sock.ID, action))
-			}
-			// Always "found": switching an empty set is a success, not a 404.
-			return "All sockets", staged, true
-		},
-		Notify: func(_ string, _ int) string {
-			return fmt.Sprintf("All devices turned %s", action)
-		},
-	})
-	return ok, failures, err
-}
-
-// stagedFailures splits staged results into a success count and the
-// per-socket failure list shape shared by all bulk endpoints.
-func stagedFailures(staged []store.StagedSend) (ok int, failures []map[string]string) {
-	failures = make([]map[string]string, 0)
-	for _, c := range staged {
-		if c.Err != nil {
-			failures = append(failures, map[string]string{
-				"socket_id": c.SocketID,
-				"error":     c.Err.Error(),
-			})
-			continue
-		}
-		ok++
-	}
-	return ok, failures
 }

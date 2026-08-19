@@ -4,35 +4,35 @@
 package api
 
 import (
-	"context"
 	"encoding/base64"
 	"encoding/json"
-	"fmt"
 	"log"
 	"net/http"
 	"net/url"
 	"os"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
 
-	"homehub/internal/airplay"
 	"homehub/internal/announce"
-	"homehub/internal/kef"
+	"homehub/internal/assistant"
+	"homehub/internal/audio"
+	"homehub/internal/autoplay"
+	"homehub/internal/control"
+	"homehub/internal/listening"
 	"homehub/internal/llm"
 	"homehub/internal/matter"
-	"homehub/internal/media"
 	"homehub/internal/mqtt"
+	"homehub/internal/music"
+	"homehub/internal/musictimer"
 	"homehub/internal/push"
 	"homehub/internal/qobuz"
-	"homehub/internal/sonos"
+	"homehub/internal/speakermon"
 	"homehub/internal/spotify"
 	"homehub/internal/store"
-	"homehub/internal/stream"
 )
 
 // maxRequestBody caps API request bodies. Generous for this app's config
@@ -41,7 +41,45 @@ const maxRequestBody = 1 << 20 // 1 MiB
 
 // Server wires HTTP handlers to a Store.
 type Server struct {
-	Store   *store.Store
+	Store *store.Store
+	// Audio holds the live sound: the stream speakers pull from, the
+	// decoders that fill it, and the AirPlay sender. Required — every media
+	// route reaches it — and supplied by the composition root so that what
+	// it is built from (the environment, the household's quality setting)
+	// stays out of the HTTP layer.
+	Audio *audio.Engine
+	// Announce publishes announcement clips and holds the house's
+	// one-at-a-time claim while one is audible. Required by the announce
+	// routes; supplied by the composition root.
+	Announce *announce.Service
+	// Speakers is the house's cached view of what every speaker is doing —
+	// Sonos over GENA, KEF by polling — plus the two slow lookups that hang
+	// off it. Required; supplied by the composition root.
+	Speakers *speakermon.Monitors
+	// Music resolves rooms and providers and owns the live playbacks —
+	// everything the handlers here need to know about where a household
+	// means and what can play there. Required; supplied by the composition
+	// root.
+	// Assistant answers a sentence by driving the same control layer the
+	// buttons do. Required by the assistant routes; a household without a
+	// model gets an agent that says so.
+	Assistant *assistant.Agent
+	// Control is how anything switches a device: the staged flow that keeps
+	// device I/O off the store lock, shared by these handlers and the
+	// assistant. Required; supplied by the composition root.
+	Control *control.Actions
+	Music   *music.Service
+	// Autoplay is the "continue with similar music" engine. The handlers
+	// here only read and flip its per-room switch; it ticks on its own.
+	Autoplay *autoplay.Engine
+	// Listening records what each room was heard playing. The handlers here
+	// read that log and clear it; something with a fresh speaker reading in
+	// hand is what writes to it.
+	Listening *listening.Recorder
+	// MusicTimers runs the wake-ups and sleep timers. The handlers here
+	// create and cancel them; the engine is what fires them.
+	MusicTimers *musictimer.Engine
+
 	Matter  *matter.Client  // optional; nil-safe via Matter.Enabled()
 	MQTT    *mqtt.Client    // optional; nil-safe via MQTT.Enabled()
 	LLM     *llm.Client     // optional; nil-safe via LLM.Enabled(). Powers the assistant.
@@ -72,122 +110,27 @@ type Server struct {
 	// logins throttles repeated failed logins per client IP. Created
 	// lazily in Handler().
 	logins *loginLimiter
-
-	// sonosAccts caches per-speaker streaming-service account lookups
-	// (sid/sn) for the play-item path. Guarded by sonosAcctMu; created
-	// lazily on first use.
-	sonosAcctMu sync.Mutex
-	sonosAccts  map[string]sonosAcctEntry
-
-	// sonosIcons caches where each speaker publishes a picture of itself,
-	// keyed by address. Resolving it means reading the device description, so
-	// without this every avatar in the speaker list would cost two round
-	// trips to the speaker instead of one. Guarded by sonosIconMu.
-	sonosIconMu sync.Mutex
-	sonosIcons  map[string]sonosIconEntry
-
-	// sonosMon watches speakers over GENA (see internal/sonos/monitor.go)
-	// and caches what they report. Created lazily by sonosEvents().
-	sonosMonMu sync.Mutex
-	sonosMon   *sonos.Monitor
-
-	// autoplay is HomeHub's own "continue with similar music" setting, on
-	// top of what the speakers themselves report (DESIGN.md's "Continue play
-	// similar" note) — Sonos has no such concept, so the household doesn't
-	// either; it's ours to keep, keyed by the coordinator's registered
-	// speaker id, and only for as long as this process runs. It is on for
-	// every coordinator, so what autoplayOff holds is the opt-*out*: the
-	// rooms that were told to fall silent when their queue ends.
-	// autoplayAttempt throttles retries when finding similar tracks keeps
-	// failing, autoplayRecent remembers what a coordinator was just topped
-	// up with so a short discography doesn't loop the same handful of songs,
-	// and autoplayHeard is when each coordinator was last seen actually
-	// playing its queue — what separates "the queue just ran dry" from "this
-	// room has been quiet all evening".
-	autoplayMu      sync.Mutex
-	autoplayOff     map[string]bool
-	autoplayAttempt map[string]time.Time
-	autoplayRecent  map[string][]string
-	autoplayHeard   map[string]time.Time
-
-	// heardWatches is the listening log's memory between readings: what
-	// each room is playing, since when, and whether the log already has it.
-	// It exists so that recording what a house is hearing costs a mutex and
-	// a string compare on the readings that change nothing — which is
-	// almost all of them. See heard.go.
-	heardMu      sync.Mutex
-	heardWatches map[string]heardWatch
-
-	// kefMon polls the KEF speakers once for the whole process and caches
-	// what they report (see internal/kef/monitor.go). KEF's local API has no
-	// change notifications to subscribe to, so this is the closest thing to
-	// the Sonos monitor it can be. Created lazily by kefEvents().
-	kefMonMu sync.Mutex
-	kefMon   *kef.Monitor
-
-	// fades holds the cancel func of each room's in-flight volume ramp,
-	// keyed by media destination key. One ramp per room: anything starting
-	// a new one cancels the old, which is what stops a wake-up fade and a
-	// sleep fade from walking the same speakers in opposite directions.
-	// See musictimer.go.
-	fadeMu sync.Mutex
-	fades  map[string]context.CancelFunc
-
-	// zoneSessions tracks live zone playbacks. Only the stream route
-	// leaves anything running — a decoder holding the account's Spotify
-	// session and an HTTP stream several speakers pull from — so this is
-	// what remembers to shut it down. See media_session.go.
-	zoneMu       sync.Mutex
-	zoneSessions map[string]*media.Session
-
-	// stream serves decoded audio to speakers, and librespot is what
-	// decodes it. Both created lazily, both optional: without librespot
-	// installed only the cross-vendor route is unavailable.
-	streamMu  sync.Mutex
-	stream    *stream.Host
-	librespot *stream.Librespot
-	// librespotBitrate is what the running decoder was built for. Kept so a
-	// household changing its stream quality gets a decoder that honours the
-	// change rather than one built at the old bitrate — see decoder().
-	librespotBitrate int
-	// qobuzDecoder is built once and reused: unlike librespot it holds no
-	// subprocess and no bitrate, so nothing about a settings change requires
-	// rebuilding it.
-	qobuzDecoder *stream.Qobuz
-	// caster pushes audio to AirPlay receivers. Created lazily like the
-	// two above, and like them it holds a live session that has to be shut
-	// down: a cast that outlives its zone keeps sending to a receiver
-	// nobody is listening to. Its own mutex — see airplayCaster().
-	casterMu sync.Mutex
-	caster   *airplay.Caster
-
-	// announcer serves announcement clips to the speakers (see
-	// announce.go). Created lazily, and only ever holds the last few
-	// seconds of audio someone asked the house to hear.
-	announceMu sync.Mutex
-	announcer  *announce.Host
-	// announcing is held for as long as an announcement is audible, not
-	// just for as long as its request is: a second one starting mid-clip
-	// would snapshot the clip as what the rooms were playing.
-	announcing bool
 }
 
-// sonosAcctEntry is one cached service-account resolution.
-type sonosAcctEntry struct {
-	acct *sonos.ServiceAccount
-	at   time.Time
-}
-
-// sonosIconEntry is one cached device-icon lookup. An empty path is cached
-// too — a speaker that publishes no picture shouldn't be asked again on every
-// render of the list.
-type sonosIconEntry struct {
-	path string
-	at   time.Time
+// Changed pushes a live "something changed" signal to every connected client.
+//
+// Exported so the composition root can install it as the store's OnChange
+// hook: every socket state change flows through it, including the ones the
+// scheduler and the timers make, and a phone with the app open should see
+// those without polling.
+func (s *Server) Changed() {
+	if s.events != nil {
+		s.events.broadcast()
+	}
 }
 
 // Handler returns the configured router with logging, optional basic
 // auth, the API routes, the SPA fallback and CORS — in that order.
+//
+// It builds a router and nothing else. What the store calls back into — the
+// live-update signal, a scene's music, push notifications — is installed by
+// the composition root, so that the answer to "what happens when a socket
+// changes" is in one file rather than hidden in the middle of route setup.
 func (s *Server) Handler() http.Handler {
 	if s.matterJobs == nil {
 		s.matterJobs = newCommissionJobs()
@@ -198,43 +141,6 @@ func (s *Server) Handler() http.Handler {
 	if s.logins == nil {
 		s.logins = newLoginLimiter()
 	}
-	// Push a live signal to connected clients whenever a socket's state
-	// changes — including scheduler- and timer-driven changes, since those
-	// also flow through Store.ApplyState.
-	s.Store.OnChange = s.events.broadcast
-
-	// Let a scene or an automation reach the speakers. The store holds the
-	// actions and knows nothing about how a room is reached; this is the
-	// half that does (scene_music.go).
-	s.Store.OnMusic = s.runSceneMusic
-
-	// And the other direction: let an automation *watch* a room, so a rule
-	// can fire when the living room goes quiet (automation_music.go).
-	s.Store.MusicPlaying = s.roomPlaying
-
-	// Wire push notification callbacks when the push service is available.
-	if s.Push != nil {
-		s.Store.OnStateChange = func(socket store.Socket, newState bool) {
-			action := "off"
-			if newState {
-				action = "on"
-			}
-			go s.Push.NotifyEvent(push.CategoryStateChanges, socket.ID, push.PushPayload{
-				Title: fmt.Sprintf("💡 %s turned %s", socket.Name, action),
-				URL:   "/#/sockets",
-				Tag:   "state-" + socket.ID,
-			})
-		}
-		s.Store.OnSensorAlert = func(sensor store.Sensor, value float64, direction string) {
-			go s.Push.NotifyEvent(push.CategorySensorAlerts, sensor.ID, push.PushPayload{
-				Title: fmt.Sprintf("⚠️ %s alert", sensor.Name),
-				Body:  fmt.Sprintf("%.1f%s (%s threshold)", value, sensor.Unit, direction),
-				URL:   "/#/sensors",
-				Tag:   "sensor-" + sensor.ID,
-			})
-		}
-	}
-
 	r := mux.NewRouter()
 	r.Use(loggingMiddleware)
 	r.Use(maxBodyBytes(maxRequestBody))
