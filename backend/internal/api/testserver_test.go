@@ -6,6 +6,7 @@ import (
 	"homehub/internal/announce"
 	"homehub/internal/audio"
 	"homehub/internal/autoplay"
+	"homehub/internal/listening"
 	"homehub/internal/media"
 	"homehub/internal/music"
 	"homehub/internal/speakermon"
@@ -52,6 +53,12 @@ func newTestServer(t *testing.T, st *store.Store) *Server {
 			Audio:    engine,
 		}),
 		Autoplay: autoplay.New(autoplay.Config{Store: st, Speakers: speakers}),
+		Listening: listening.New(listening.Config{
+			Store:    st,
+			Speakers: speakers,
+			SonosArt: SonosArtURL,
+			KEFArt:   KEFArtURL,
+		}),
 	}
 }
 

@@ -38,7 +38,7 @@ func (s *Server) SpeakersChanged() {
 	// is the only hook that fires without anyone watching — a house whose
 	// speakers are subscribed keeps its listening log whether or not a phone
 	// is open. Reads the caches, never a speaker. See heard.go.
-	s.noteHeardCached()
+	s.Listening.NoteCached()
 }
 
 // ── Health ───────────────────────────────────────────────────────────────

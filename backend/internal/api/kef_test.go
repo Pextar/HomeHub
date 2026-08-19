@@ -131,14 +131,13 @@ func TestKEFArtRefusesNonRelativePaths(t *testing.T) {
 }
 
 func TestKEFArtURLOnlyProxiesRelativePaths(t *testing.T) {
-	srv := testServer(t)
 	// KEF gets its artwork from the streaming service, so most URLs are
 	// already absolute and must pass through untouched.
 	abs := "https://art.example/cover.jpg"
-	if got := srv.kefArtURL("kef_1", abs); got != abs {
+	if got := KEFArtURL("kef_1", abs); got != abs {
 		t.Errorf("absolute art URL was rewritten to %q", got)
 	}
-	got := srv.kefArtURL("kef 1", "/art?id=5")
+	got := KEFArtURL("kef 1", "/art?id=5")
 	if !strings.HasPrefix(got, "/api/kef/kef%201/art?u=") {
 		t.Errorf("relative art URL = %q, want it proxied with the id escaped", got)
 	}

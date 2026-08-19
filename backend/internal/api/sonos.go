@@ -83,7 +83,7 @@ func (s *Server) sonosStatus(w http.ResponseWriter, r *http.Request) {
 	snap := s.Speakers.Sonos.Snapshot(ctx)
 	// Before the loop below, which rewrites art paths into proxied URLs on
 	// this very snapshot: the log wants the reading as the speaker gave it.
-	s.HeardSonos(snap)
+	s.Listening.NoteSonos(snap)
 
 	views := make([]sonosSpeakerView, len(speakers))
 	for i, sp := range speakers {
@@ -91,7 +91,7 @@ func (s *Server) sonosStatus(w http.ResponseWriter, r *http.Request) {
 		// Snapshot hands out copies, so rewriting the art URI to proxy
 		// through us can't corrupt what the next reader sees.
 		if cached.State != nil && cached.State.Track != nil {
-			cached.State.Track.ArtURI = s.sonosArtURL(sp.ID, cached.State.Track.ArtURI)
+			cached.State.Track.ArtURI = SonosArtURL(sp.ID, cached.State.Track.ArtURI)
 		}
 		views[i] = sonosSpeakerView{
 			SonosSpeaker: sp,
@@ -470,7 +470,7 @@ func (s *Server) sonosQueue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for i := range items {
-		items[i].ArtURI = s.sonosArtURL(sp.ID, items[i].ArtURI)
+		items[i].ArtURI = SonosArtURL(sp.ID, items[i].ArtURI)
 	}
 	writeJSON(w, http.StatusOK, items)
 }
@@ -805,7 +805,7 @@ func (s *Server) sonosFavorites(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for i := range favs {
-		favs[i].ArtURI = s.sonosArtURL(sp.ID, favs[i].ArtURI)
+		favs[i].ArtURI = SonosArtURL(sp.ID, favs[i].ArtURI)
 	}
 	writeJSON(w, http.StatusOK, favs)
 }
@@ -905,11 +905,16 @@ func (s *Server) sonosPlayItem(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// sonosArtURL rewrites a speaker-relative album-art path into our proxy
+// SonosArtURL rewrites a speaker-relative album-art path into our proxy
 // endpoint (the app may be served over HTTPS, where a plain-http image from
 // the speaker would be blocked as mixed content). Absolute URLs — typically
 // CDN art from streaming services — pass through untouched.
-func (s *Server) sonosArtURL(speakerID, artURI string) string {
+//
+// Exported because the listening log stores art alongside a track and outlives
+// the reading it came from: a path that was fine while the speaker was being
+// polled is useless by the time someone scrolls back to the row. This is the
+// route that will still answer.
+func SonosArtURL(speakerID, artURI string) string {
 	if artURI == "" || !strings.HasPrefix(artURI, "/") {
 		return artURI
 	}

@@ -27,6 +27,7 @@ import (
 	"homehub/internal/api"
 	"homehub/internal/audio"
 	"homehub/internal/autoplay"
+	"homehub/internal/listening"
 	"homehub/internal/llm"
 	"homehub/internal/matter"
 	"homehub/internal/media"
@@ -39,7 +40,6 @@ import (
 	"homehub/internal/rx"
 	"homehub/internal/scheduler"
 	"homehub/internal/sender"
-	"homehub/internal/sonos"
 	"homehub/internal/speakermon"
 	"homehub/internal/spotify"
 	"homehub/internal/store"
@@ -62,9 +62,10 @@ type App struct {
 	store *store.Store
 	api   *api.Server
 
-	monitors *speakermon.Monitors
-	music    *music.Service
-	autoplay *autoplay.Engine
+	monitors  *speakermon.Monitors
+	music     *music.Service
+	autoplay  *autoplay.Engine
+	listening *listening.Recorder
 
 	matter *matter.Client
 	mqtt   *mqtt.Client
@@ -189,6 +190,18 @@ func New(cfg Config) (*App, error) {
 		Logf:     log.Printf,
 	})
 
+	// The listening log. It observes nothing on its own: everything that
+	// already has a fresh speaker reading in hand hands it over — the
+	// monitors' change hook, the autoplay tick, and the status handlers the
+	// app's own polling calls.
+	a.listening = listening.New(listening.Config{
+		Store:    a.store,
+		Speakers: a.monitors,
+		SonosArt: api.SonosArtURL,
+		KEFArt:   api.KEFArtURL,
+		Logf:     log.Printf,
+	})
+
 	// "Continue play similar": tops a coordinator's queue up as it reaches
 	// the last queued track, and picks a room back up if it fell silent
 	// anyway. Its tick reads the whole household, which makes it the
@@ -197,7 +210,7 @@ func New(cfg Config) (*App, error) {
 		Store:    a.store,
 		Speakers: a.monitors,
 		Similar:  similarFinder(spotifyClient),
-		Observed: func(snap sonos.Snapshot) { a.api.HeardSonos(snap) },
+		Observed: a.listening.NoteSonos,
 		Changed:  func() { a.api.SpeakersChanged() },
 	})
 
@@ -222,6 +235,7 @@ func New(cfg Config) (*App, error) {
 		Speakers:      a.monitors,
 		Music:         a.music,
 		Autoplay:      a.autoplay,
+		Listening:     a.listening,
 		Matter:        a.matter,
 		MQTT:          a.mqtt,
 		LLM:           llmClient,

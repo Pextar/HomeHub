@@ -53,7 +53,7 @@ func (s *Server) kefStatus(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 	snap := s.Speakers.KEF.Snapshot(ctx)
-	s.noteHeardKEF(snap) // before the art rewrite below, as in sonosStatus
+	s.Listening.NoteKEF(snap) // before the art rewrite below, as in sonosStatus
 
 	views := make([]kefSpeakerView, len(speakers))
 	for i, sp := range speakers {
@@ -61,7 +61,7 @@ func (s *Server) kefStatus(w http.ResponseWriter, r *http.Request) {
 		// Snapshot hands out copies, so rewriting the art URI can't corrupt
 		// what the next reader sees.
 		if cached.State != nil && cached.State.Track != nil {
-			cached.State.Track.ArtURI = s.kefArtURL(sp.ID, cached.State.Track.ArtURI)
+			cached.State.Track.ArtURI = KEFArtURL(sp.ID, cached.State.Track.ArtURI)
 		}
 		views[i] = kefSpeakerView{
 			KEFSpeaker: sp,
@@ -416,12 +416,12 @@ func (s *Server) kefUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// kefArtURL leaves absolute artwork URLs alone and routes speaker-relative
+// KEFArtURL leaves absolute artwork URLs alone and routes speaker-relative
 // ones through our proxy. KEF gets its artwork from the streaming service,
 // so in practice these are already absolute — but a relative path served
 // over plain HTTP would be blocked as mixed content on an HTTPS install,
 // which is the same reason the Sonos bridge proxies its album art.
-func (s *Server) kefArtURL(speakerID, artURI string) string {
+func KEFArtURL(speakerID, artURI string) string {
 	if artURI == "" || !strings.HasPrefix(artURI, "/") {
 		return artURI
 	}

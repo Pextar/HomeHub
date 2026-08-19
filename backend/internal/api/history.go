@@ -244,7 +244,7 @@ func (s *Server) pruneDeadRooms() {
 	// The recorder's own memory of those rooms goes too, so a key that is
 	// deleted and later reused doesn't inherit a watch saying its current
 	// song has already been filed.
-	s.forgetHeardWatches(func(key string) bool { return live[key] })
+	s.Listening.ForgetMissing(func(key string) bool { return live[key] })
 	if droppedTimers {
 		// Timers live in the main save, so this is the whole store — which
 		// is right: a deletion has already rewritten it once.

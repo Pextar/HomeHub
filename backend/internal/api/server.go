@@ -23,6 +23,7 @@ import (
 	"homehub/internal/announce"
 	"homehub/internal/audio"
 	"homehub/internal/autoplay"
+	"homehub/internal/listening"
 	"homehub/internal/llm"
 	"homehub/internal/matter"
 	"homehub/internal/mqtt"
@@ -63,6 +64,10 @@ type Server struct {
 	// Autoplay is the "continue with similar music" engine. The handlers
 	// here only read and flip its per-room switch; it ticks on its own.
 	Autoplay *autoplay.Engine
+	// Listening records what each room was heard playing. The handlers here
+	// read that log and clear it; something with a fresh speaker reading in
+	// hand is what writes to it.
+	Listening *listening.Recorder
 
 	Matter  *matter.Client  // optional; nil-safe via Matter.Enabled()
 	MQTT    *mqtt.Client    // optional; nil-safe via MQTT.Enabled()
@@ -94,14 +99,6 @@ type Server struct {
 	// logins throttles repeated failed logins per client IP. Created
 	// lazily in Handler().
 	logins *loginLimiter
-
-	// heardWatches is the listening log's memory between readings: what
-	// each room is playing, since when, and whether the log already has it.
-	// It exists so that recording what a house is hearing costs a mutex and
-	// a string compare on the readings that change nothing — which is
-	// almost all of them. See heard.go.
-	heardMu      sync.Mutex
-	heardWatches map[string]heardWatch
 
 	// fades holds the cancel func of each room's in-flight volume ramp,
 	// keyed by media destination key. One ramp per room: anything starting
