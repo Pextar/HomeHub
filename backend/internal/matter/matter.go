@@ -41,6 +41,13 @@ type State struct {
 	Level     *int   `json:"level,omitempty"` // 0..100
 	Color     string `json:"color,omitempty"` // RRGGBB
 	CT        *int   `json:"ct,omitempty"`    // 153..500 mired
+
+	// Temperature and Humidity are set when the device exposes the
+	// TemperatureMeasurement / RelativeHumidityMeasurement clusters — plain
+	// Matter sensors (no OnOff at all) as well as combo devices. Nil when
+	// the device doesn't expose that cluster.
+	Temperature *float64 `json:"temperature,omitempty"` // °C
+	Humidity    *float64 `json:"humidity,omitempty"`    // 0..100 %RH
 }
 
 // StateUpdate is a partial change applied via SetState.

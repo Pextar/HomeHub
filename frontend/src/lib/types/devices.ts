@@ -29,6 +29,13 @@ export interface TasmotaStateUpdate {
   ct?: number;
 }
 
+// One Tasmota device found by the LAN sweep behind GET /tasmota/discover.
+export interface TasmotaDevice {
+  ip: string;
+  name?: string;
+  topic?: string;
+}
+
 // Matter device state (mirrors the matter-bridge sidecar's DeviceState).
 // Fields are undefined when the device doesn't expose that capability.
 export interface MatterState {
@@ -38,9 +45,15 @@ export interface MatterState {
   product?: string;
   reachable: boolean;
   on?: boolean;
-  level?: number;   // 0..100
-  color?: string;   // RRGGBB hex
-  ct?: number;      // 153..500 mired
+  level?: number;        // 0..100
+  color?: string;        // RRGGBB hex
+  ct?: number;           // 153..500 mired
+  // Present when the node exposes the measurement clusters — a plain sensor
+  // (no OnOff at all) as well as a combo device. Absent means "this device
+  // has no such cluster", which is what the add-device wizard reads to decide
+  // whether a commissioned node needs Sensor records alongside its Socket.
+  temperature?: number;  // °C
+  humidity?: number;     // 0..100 %RH
 }
 
 export interface MatterStateUpdate {

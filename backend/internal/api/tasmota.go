@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"net/http"
+	"time"
 
 	"github.com/gorilla/mux"
 
@@ -75,6 +76,26 @@ func (s *Server) tasmotaProbe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "ip": ip})
+}
+
+// tasmotaDiscoverTimeout bounds the whole LAN sweep. Generous enough for a
+// /24 at the sweep's concurrency, short enough that the wizard's discovery
+// step doesn't feel stalled.
+const tasmotaDiscoverTimeout = 20 * time.Second
+
+// tasmotaDiscover handles GET /api/tasmota/discover — sweeps the host's own
+// subnets for devices answering the Tasmota HTTP API. Used by the add-device
+// wizard so a user never has to read an IP off their router.
+func (s *Server) tasmotaDiscover(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), tasmotaDiscoverTimeout)
+	defer cancel()
+
+	devices, err := tasmota.Discover(ctx)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"devices": devices})
 }
 
 // tasmotaIP resolves the Tasmota device IP for a socket.

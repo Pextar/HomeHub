@@ -8,7 +8,7 @@
     import { data, route } from "../lib/stores.svelte";
     import { groupSocketsByRoom, runAction } from "../lib/utils";
     import { openModal } from "../lib/modal.svelte";
-    import SocketModal from "../modals/SocketModal.svelte";
+    import AddDeviceModal from "../modals/AddDeviceModal.svelte";
     import { scale, fade } from "svelte/transition";
     import { flip } from "svelte/animate";
     import { cubicOut } from "svelte/easing";
@@ -65,13 +65,13 @@
 
 <Topbar title="Devices" subtitle="{v.sockets.length} configured · RF, Wi-Fi &amp; Matter">
     {#snippet actions()}
-        <button class="chip" onclick={() => openModal(SocketModal, {})}><Icon name="plus" size={14} /> Add</button>
+        <button class="chip" onclick={() => openModal(AddDeviceModal, {})}><Icon name="plus" size={14} /> Add</button>
     {/snippet}
 </Topbar>
 
 {#if v.sockets.length === 0}
     <EmptyState fill icon="socket" title="No devices yet" message="Add your first device — RF, Tasmota, or Matter.">
-        <button class="btn btn-primary" onclick={() => openModal(SocketModal, {})}>Add device</button>
+        <button class="btn btn-primary" onclick={() => openModal(AddDeviceModal, {})}>Add device</button>
     </EmptyState>
 {:else}
     <div class="toolbar">

@@ -1,34 +1,33 @@
 <script lang="ts">
     import Modal from "../components/Modal.svelte";
-    import { closeModal, openModal } from "../lib/modal.svelte";
+    import { closeModal } from "../lib/modal.svelte";
     import { api } from "../lib/api";
     import { toasts, data } from "../lib/stores.svelte";
     import { PROTOCOLS } from "../lib/utils";
     import { untrack } from "svelte";
     import type { Socket } from "../lib/types";
-    import MatterCommissionModal from "./MatterCommissionModal.svelte";
 
-    interface Props { existing?: Socket | null; }
-    let { existing = null }: Props = $props();
+    // Edit only. Adding a device goes through AddDeviceModal, which
+    // discovers the device first and decides from its capabilities whether
+    // it becomes a socket, some sensors, or both.
+    interface Props { existing: Socket; }
+    let { existing }: Props = $props();
 
-    let name     = $state(untrack(() => existing?.name     ?? ""));
-    let room     = $state(untrack(() => existing?.room     ?? ""));
-    let code     = $state(untrack(() => existing?.code     ?? ""));
-    let protocol = $state(untrack(() => existing?.protocol || "nexa"));
-    let emoji    = $state(untrack(() => existing?.emoji    ?? ""));
-    let readOnly = $state(untrack(() => existing?.readonly ?? false));
+    let name     = $state(untrack(() => existing.name     ?? ""));
+    let room     = $state(untrack(() => existing.room     ?? ""));
+    let code     = $state(untrack(() => existing.code     ?? ""));
+    let protocol = $state(untrack(() => existing.protocol || "nexa"));
+    let emoji    = $state(untrack(() => existing.emoji    ?? ""));
+    let readOnly = $state(untrack(() => existing.readonly ?? false));
 
     // Quick-pick set shown in kid mode. Tapping the active one clears it.
     const EMOJI_CHOICES = ["💡", "🛏️", "🌟", "🚀", "🦕", "🐙", "🌈", "🎮", "📺", "🎄", "🔦", "🛋️"];
 
-    const isEdit     = $derived(!!existing);
     const isTasmota  = $derived(protocol === "tasmota");
     const isMatter   = $derived(protocol === "matter" || protocol === "matter-thread");
-    const isThread   = $derived(protocol === "matter-thread");
     const isMqtt     = $derived(protocol === "mqtt");
     const isNexa     = $derived(protocol === "nexa");
 
-    let pairing      = $state(false);
     let probing      = $state(false);
     let publishing   = $state(false);
     let saving       = $state(false);
@@ -40,39 +39,6 @@
     // shape for that, and was the only reason they were toasts.
     let probeResult  = $state<{ ok: boolean; text: string } | null>(null);
     const clear = (k: "name" | "code") => { if (errors[k]) errors = { ...errors, [k]: undefined }; };
-
-    async function pair() {
-        if (pairing) return;
-        pairing = true;
-        probeResult = null;
-        try {
-            // Pass the current code if one was already generated — the backend
-            // will resend it instead of picking a new one. This lets the user
-            // retry a stubborn socket (like Telldus 312530) without the code
-            // changing between attempts.
-            const isRetry = !!code;
-            const r = await api.learnSocket({ protocol, code: code || undefined });
-            code = r.code;
-            probeResult = {
-                ok: true,
-                text: isRetry
-                    ? "Signal sent (×2). Sent the same code again — did your socket click on this time?"
-                    : "Signal sent (×2). Did your socket click on? If not, long-press its button again and tap Pair — the same code will be resent.",
-            };
-        } catch (e) {
-            probeResult = { ok: false, text: `Pairing failed: ${(e as Error).message}` };
-        } finally {
-            pairing = false;
-        }
-    }
-
-    function startMatterSetup() {
-        // Hand off to the dedicated wizard. It owns the whole flow
-        // (scan/paste → commission → name/room → save), so we close
-        // this generic Add Socket modal first to avoid stacking.
-        closeModal();
-        openModal(MatterCommissionModal, {});
-    }
 
     async function testConnection() {
         if (probing) return;
@@ -121,7 +87,7 @@
                         : "RF code";
         const errs: typeof errors = {};
         if (!payload.name) errs.name = "Give the device a name.";
-        if (!payload.code) errs.code = isMatter ? "Commission a device first." : `Enter the ${codeLabel}.`;
+        if (!payload.code) errs.code = `Enter the ${codeLabel}.`;
         errors = errs;
         if (errs.name || errs.code) return;
         saving = true;
@@ -151,46 +117,10 @@
 {/snippet}
 
 <Modal
-    title={isEdit ? "Edit socket" : "Add socket"}
-    subtitle={isEdit
-        ? "Update this socket's details."
-        : isTasmota
-            ? "Configure a Tasmota Wi-Fi device."
-            : isThread
-                ? "Commission a Matter Thread device."
-                : isMatter
-                    ? "Commission a Matter Wi-Fi device."
-                    : isMqtt
-                        ? "Publish on/off to an MQTT command topic."
-                        : "Configure a new 433MHz controllable socket."}
+    title="Edit device"
+    subtitle="Update this device's details."
 >
     {#snippet body()}
-        {#if isMatter && !isEdit}
-            <!-- Matter onboarding lives in its own wizard. Show only a
-                 protocol picker + a clear hand-off so users aren't asked
-                 for fields the wizard will collect itself. -->
-            <div class="field">
-                <label for="sock-proto">Protocol</label>
-                <select id="sock-proto" bind:value={protocol}>
-                    {#each PROTOCOLS as p (p.value)}
-                        <option value={p.value}>{p.label}</option>
-                    {/each}
-                </select>
-            </div>
-            <div class="matter-lead">
-                <h3>{isThread ? "Matter Thread device" : "Matter Wi-Fi device"}</h3>
-                <p>
-                    Matter devices use a one-time onboarding flow over Bluetooth.
-                    We'll scan the QR code (or accept the manual pairing code), commission
-                    the device onto your {isThread ? "Thread network" : "Wi-Fi"}, then add
-                    it here — all in one step.
-                </p>
-                <button type="button" class="btn btn-primary" onclick={startMatterSetup}>
-                    Start Matter setup
-                </button>
-                <p class="hint">Takes about 30–60 seconds once you start.</p>
-            </div>
-        {:else}
             <form onsubmit={(e) => { e.preventDefault(); save(); }}>
                 <div class="field">
                     <label for="sock-name">Name</label>
@@ -283,30 +213,14 @@
                         </div>
                         {@render probeLine()}
                     </div>
-                {:else if !isEdit}
-                    <div class="field" style="margin-top:var(--space-3)">
-                        <button type="button" class="btn btn-secondary" onclick={pair} disabled={pairing}>
-                            {pairing ? "Sending…" : "Pair with socket"}
-                        </button>
-                        <div class="field-help">
-                            Long-press the button on your socket until its indicator flashes,
-                            then tap Pair. I'll pick a random code and broadcast it.
-                        </div>
-                        {@render probeLine()}
-                    </div>
                 {/if}
             </form>
-        {/if}
     {/snippet}
     {#snippet actions()}
-        {#if isMatter && !isEdit}
-            <button class="btn btn-ghost" onclick={() => closeModal()}>Cancel</button>
-        {:else}
-            <button class="btn btn-ghost" onclick={() => closeModal()}>Cancel</button>
-            <button class="btn btn-primary" onclick={save} disabled={saving}>
-                {saving ? "Saving…" : isEdit ? "Save" : "Add socket"}
-            </button>
-        {/if}
+        <button class="btn btn-ghost" onclick={() => closeModal()}>Cancel</button>
+        <button class="btn btn-primary" onclick={save} disabled={saving}>
+            {saving ? "Saving…" : "Save"}
+        </button>
     {/snippet}
 </Modal>
 
@@ -349,30 +263,5 @@
         border-color: var(--primary);
         background: var(--primary-soft);
         box-shadow: 0 0 0 2px var(--primary-glow);
-    }
-
-    .matter-lead {
-        margin-top: var(--space-4);
-        padding: var(--space-4);
-        background: var(--surface);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-2);
-        align-items: flex-start;
-    }
-    .matter-lead h3 {
-        font-size: 14px;
-        font-weight: 600;
-    }
-    .matter-lead p {
-        font-size: 13px;
-        color: var(--text-muted);
-        margin: 0;
-    }
-    .matter-lead .hint {
-        font-size: 12px;
-        color: var(--text-faint);
     }
 </style>

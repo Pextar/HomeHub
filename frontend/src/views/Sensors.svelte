@@ -9,7 +9,7 @@
     import { data, toasts } from "../lib/stores.svelte";
     import { openModal } from "../lib/modal.svelte";
     import SensorModal from "../modals/SensorModal.svelte";
-    import PairSensorModal from "../modals/PairSensorModal.svelte";
+    import AddDeviceModal from "../modals/AddDeviceModal.svelte";
     import { scale, fly } from "svelte/transition";
     import { flip } from "svelte/animate";
     import { cubicOut } from "svelte/easing";
@@ -76,16 +76,14 @@
 
 <Topbar title="Sensors" subtitle="{v.sensors.length} configured">
     {#snippet actions()}
-        <button class="chip" onclick={() => openModal(PairSensorModal, {})}><Icon name="plus" size={14} /> Pair</button>
-        <button class="chip" onclick={() => openModal(SensorModal, {})}><Icon name="plus" size={14} /> Add</button>
+        <button class="chip" onclick={() => openModal(AddDeviceModal, {})}><Icon name="plus" size={14} /> Add</button>
     {/snippet}
 </Topbar>
 
 {#if v.sensors.length === 0}
     <EmptyState fill icon="sensor" title="No sensors yet"
-        message="Pair a 433MHz sensor by triggering it, or add one by hand.">
-        <button class="btn btn-primary" onclick={() => openModal(PairSensorModal, {})}>Pair sensor</button>
-        <button class="btn btn-ghost" onclick={() => openModal(SensorModal, {})}>Add manually</button>
+        message="Add a sensor and we'll find it — 433MHz, Matter or MQTT.">
+        <button class="btn btn-primary" onclick={() => openModal(AddDeviceModal, {})}>Add sensor</button>
     </EmptyState>
 {:else}
     {#if selected}

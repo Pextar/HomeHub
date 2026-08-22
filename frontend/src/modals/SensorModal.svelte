@@ -6,24 +6,21 @@
     import { automationsUsingSensor, plural } from "../lib/utils";
     import { untrack } from "svelte";
     import ConfirmModal from "../components/ConfirmModal.svelte";
+    import { defaultUnit, defaultField } from "../lib/device-setup";
     import type { Sensor, SensorKind } from "../lib/types";
 
-    interface Prefill {
-        code?: string;
-        protocol?: string;
-        field?: string;
-    }
-    interface Props { existing?: Sensor | null; prefill?: Prefill | null; }
-    let { existing = null, prefill = null }: Props = $props();
-    const isEdit = $derived(!!existing);
+    // Edit only. New sensors come from AddDeviceModal, which discovers the
+    // device and fills every one of these fields from what it found.
+    interface Props { existing: Sensor; }
+    let { existing }: Props = $props();
 
-    let name = $state(untrack(() => existing?.name ?? ""));
-    let kind = $state<SensorKind>(untrack(() => existing?.kind ?? "temperature"));
-    let unit = $state(untrack(() => existing?.unit ?? defaultUnit(existing?.kind ?? "temperature")));
-    let code = $state(untrack(() => existing?.code ?? prefill?.code ?? ""));
-    let protocol = $state(untrack(() => existing?.protocol ?? prefill?.protocol ?? "rtl_433"));
-    let field = $state(untrack(() => existing?.field ?? prefill?.field ?? defaultField(existing?.kind ?? "temperature")));
-    let room = $state(untrack(() => existing?.room ?? ""));
+    let name = $state(untrack(() => existing.name ?? ""));
+    let kind = $state<SensorKind>(untrack(() => existing.kind ?? "temperature"));
+    let unit = $state(untrack(() => existing.unit ?? defaultUnit(existing.kind ?? "temperature")));
+    let code = $state(untrack(() => existing.code ?? ""));
+    let protocol = $state(untrack(() => existing.protocol ?? "rtl_433"));
+    let field = $state(untrack(() => existing.field ?? defaultField(existing.kind ?? "temperature")));
+    let room = $state(untrack(() => existing.room ?? ""));
     // Empty string = no threshold. Stored as numbers (or omitted) on save.
     let alertMin = $state(untrack(() => existing?.alert_min ?? ""));
     let alertMax = $state(untrack(() => existing?.alert_max ?? ""));
@@ -41,27 +38,6 @@
         field = defaultField(kind);
     });
 
-    function defaultUnit(k: SensorKind): string {
-        switch (k) {
-            case "temperature": return "°C";
-            case "humidity":    return "%";
-            case "light":       return "lux";
-            case "power":       return "W";
-            case "motion":      return "";
-            default:            return "";
-        }
-    }
-    function defaultField(k: SensorKind): string {
-        switch (k) {
-            case "temperature": return "temperature_C";
-            case "humidity":    return "humidity";
-            case "light":       return "lux";
-            case "power":       return "power_W";
-            case "motion":      return "motion";
-            default:            return "";
-        }
-    }
-
     async function save() {
         if (saving) return;
         const errs: typeof errors = {};
@@ -76,11 +52,7 @@
         };
         saving = true;
         try {
-            if (existing) {
-                await api.updateSensor(existing.id, payload);
-            } else {
-                await api.createSensor(payload);
-            }
+            await api.updateSensor(existing.id, payload);
             closeModal();
             await data.refresh();
         } catch (e) {
@@ -91,7 +63,6 @@
     }
 
     async function remove() {
-        if (!existing) return;
         const autoN = automationsUsingSensor(data.value.automations, existing.id);
         const extra = autoN > 0 ? ` ${plural(autoN, "automation")} triggered by it will also be removed.` : "";
         const ok = await openModal<boolean>(ConfirmModal, {
@@ -112,8 +83,8 @@
 </script>
 
 <Modal
-    title={isEdit ? "Edit sensor" : "Add sensor"}
-    subtitle={isEdit ? "Update how this 433MHz sensor is matched and displayed." : "Configure a 433MHz sensor to start collecting readings."}
+    title="Edit sensor"
+    subtitle="Update how this sensor is matched and displayed."
 >
     {#snippet body()}
         <form onsubmit={(e) => { e.preventDefault(); save(); }}>
@@ -152,9 +123,10 @@
                     oninput={() => clear("code")} />
                 {#if errors.code}<div id="sensor-code-err" class="field-error">{errors.code}</div>{/if}
                 <div class="field-help">
-                    For 433MHz this is the device identifier (with rtl_433, usually <code>model:id</code>).
-                    For an MQTT sensor, set protocol to <code>mqtt</code> and use the topic to subscribe
-                    to (wildcards <code>+</code>/<code>#</code> allowed).
+                    What identifies this sensor to its transport: the device id for 433MHz
+                    (with rtl_433, usually <code>model:id</code>), the topic to subscribe to
+                    for MQTT (wildcards <code>+</code>/<code>#</code> allowed), or the
+                    commissioned node id for Matter.
                 </div>
             </div>
 
@@ -164,12 +136,14 @@
                     <input id="sensor-protocol" type="text" bind:value={protocol} placeholder="rtl_433" />
                 </div>
                 <div class="field">
-                    <label for="sensor-field">JSON field</label>
+                    <label for="sensor-field">Reading</label>
                     <input id="sensor-field" type="text" bind:value={field} placeholder="temperature_C" />
                 </div>
             </div>
             <div class="field-help" style="margin-top:calc(var(--space-2) * -1)">
-                Which key in the decoder's JSON output holds the numeric value. Leave blank to auto-pick the first number.
+Which value to chart. For 433MHz and MQTT that is a key in the decoder's JSON
+                output — leave blank to auto-pick the first number. For Matter it selects the
+                cluster: <code>temperature</code> or <code>humidity</code>.
             </div>
 
             <div class="field" style="margin-top:var(--space-4)">
@@ -193,12 +167,10 @@
         </form>
     {/snippet}
     {#snippet actions()}
-        {#if isEdit}
-            <button class="btn btn-ghost danger" onclick={remove}>Delete</button>
-        {/if}
+        <button class="btn btn-ghost danger" onclick={remove}>Delete</button>
         <button class="btn btn-ghost" onclick={() => closeModal()}>Cancel</button>
         <button class="btn btn-primary" onclick={save} disabled={saving}>
-            {saving ? "Saving…" : isEdit ? "Save" : "Add sensor"}
+            {saving ? "Saving…" : "Save"}
         </button>
     {/snippet}
 </Modal>
