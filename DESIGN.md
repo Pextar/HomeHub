@@ -2570,7 +2570,88 @@ KidSlider.svelte`) — a real range input over a painted track and fill,
 
 ---
 
-## 18. When in doubt
+## 18. Home — a screen the house arranges
+
+Home was a fixed run of sections in source order, and its sensor row was
+`sensors.slice(0, 6)` — whichever six the controller happened to list first.
+Every house disagreed with it differently: a freezer probe took a card while
+the outdoor thermometer had none, and the "inside" reading beside the master
+switch was the mean of all four, which described nowhere. It is a list now,
+and the person looking at it owns the order.
+
+- **A section is a component, and the list is the layout.**
+  `lib/home-layout.ts` names every section that exists; the stored layout says
+  which of them appear and in what order. `views/Dashboard.svelte` is the shell
+  around that — the greeting, the clock, the way in — and every section is its
+  own file under `components/home/`, because a thing you can move has to be one
+  thing, with its CSS travelling inside it.
+- **A new section lands where the design put it, not at the bottom.** A saved
+  order is a snapshot of the sections that existed when it was saved, so a
+  release that adds one inserts it directly after the nearest section above it
+  that the user still has (`normalizeLayout`). Appending would file every new
+  feature under the device grid.
+- **Arranging is a mode on Home, not a screen somewhere else.** The thing being
+  arranged is this route, so the switch into it sits in Home's own header, and
+  the list that comes up is in the order the page is. Sections collapse to one
+  row each while it is up: what you are moving is the *order*, and a 400px room
+  grid is not something a thumb can drag around a phone.
+- **Three targets per row, each ≥44px** — the grip moves it, the body opens
+  whatever settings the section has, the switch decides whether it is on the
+  screen at all (§11's list shape). A section with nothing to configure gets
+  **no body button**, not a dead one.
+- **Switching a section off keeps its place.** `hidden` is a set beside the
+  order, never a second list, so switching it back on puts it where it was.
+- **Nothing here is saved.** Every change applies as it is made and the screen
+  behind the mode is the confirmation (§10). There is no Save button and so
+  there is nothing to lose by leaving.
+- **The gesture is the handle, and the keyboard is not a mirror of it.**
+  `lib/list-reorder.svelte.ts`: a row lifts the instant a pointer goes down on
+  its grip — no hold timer, because the grip only exists while the list is
+  being arranged and a press on it can't be anything else — and the rows it
+  passes shove one slot aside while nothing moves in the DOM until the drop.
+  On the keyboard, ↑ and ↓ on a focused grip move the row a place per press and
+  a live region says where it landed; a pick-up/put-down mode would be a truer
+  mirror of the drag and a worse way to move a row three places. Stated once as
+  a footnote under the list, never as chrome on every row.
+- **Two sections only render at one end of the breakpoint** — Rooms on phones,
+  the device grid on desktop (§5). The editor says so on the row rather than
+  offering a switch that promises more than it can keep.
+
+### 18.1 Sensors on Home
+
+- **One sheet, two questions**, reached from the Sensors section itself and
+  from its row in the editor: *which thermometer is "the house"*, and *which
+  readings are worth a card*. They are the same question asked twice and
+  answering one usually settles the other.
+- **Every row carries its live reading.** "Sensor 3" and "Bedroom 2" are not
+  choosable by name; 20.4 °C beside them is.
+- **The list's order is fixed and the selection follows it.** Floating ticked
+  rows to the top would move a row out from under the finger that just tapped
+  it, and "the order you happened to tick them in" is not an order anyone can
+  predict a week later.
+- **Opening the picker on "automatic" starts from what is on screen**, so the
+  first tick changes something the user can see rather than an empty list.
+- **The house's temperature says what it is.** A named sensor is read by name
+  in the hero ("21° Hall"); with more than one and nobody picking, the tile
+  says `Average of 4` rather than labelling a mean with one room's name. With
+  exactly one thermometer the question isn't asked at all — there is nothing to
+  average and nothing to choose.
+- **Picking none is not the same as having none.** A Sensors section whose
+  cards were all switched off says so, because a section that quietly vanished
+  reads as a bug.
+
+### 18.2 Where the layout lives
+
+localStorage, per device (`home.layout.v1`), beside the theme and the floor
+plan's positions — **not** in the controller's settings. The wall panel, the
+phone in a pocket and the tablet on the counter are looked at for different
+reasons and want different screens, and one person tidying their phone must not
+rearrange everyone else's home. A layout that follows an account across devices
+is a different feature and needs the backend; this is not it.
+
+---
+
+## 19. When in doubt
 
 1. Open `index.html` in the design project — it's the source of truth.
 2. Pick the nearest existing screen and copy its skeleton.

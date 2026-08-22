@@ -296,8 +296,8 @@
 
 <style>
     /* Section chrome matches Dashboard's other sections exactly — this card
-       is a Home section that happens to own its own data. */
-    .home-section { display: flex; flex-direction: column; gap: var(--space-3); }
+       is a Home section that happens to own its own data. `.home-section`
+       itself is global (app.css), shared with every other home section. */
     .section-head {
         display: flex;
         align-items: center;

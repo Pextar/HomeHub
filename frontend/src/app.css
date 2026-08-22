@@ -620,6 +620,34 @@ textarea[aria-invalid="true"]:focus-visible {
    of an otherwise blank screen — center it in the leftover space instead. */
 .empty-fill { min-height: min(54vh, 540px); justify-content: center; }
 
+/* ---------- Home screen ----------
+   Home is a run of sections the user can reorder, so each one is its own
+   component (components/home/) and scoped CSS can't reach between them. The
+   three rules every section shares live here instead of being copied into
+   each: the section's own stack, the card grid inside it, and the count pill
+   in its head. */
+.home-section { display: flex; flex-direction: column; gap: var(--space-3); }
+.home-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+}
+@media (min-width: 600px) {
+    .home-grid { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--space-3); }
+}
+/* A lone card never leaves half a row of nothing beside it. */
+.home-grid > :only-child { grid-column: 1 / -1; }
+.header-meta {
+    font-size: 12px;
+    color: var(--text-mute);
+    background: var(--card-2);
+    border: 1px solid var(--hairline);
+    padding: 2px 9px;
+    border-radius: var(--r-pill);
+    font-family: var(--font-mono);
+    font-feature-settings: "tnum" 1;
+}
+
 /* Scene-run pulse: a quick amber ring that washes over each affected tile.
    Global so any card surface can flash without growing its own copy. */
 @keyframes scene-flash {
