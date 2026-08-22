@@ -362,6 +362,50 @@ The systemd unit assumes the SSH user is `pi`; if not, edit
 `deploy/homehub.service` (User= and the WorkingDirectory paths)
 before `scripts/build-pi.sh`.
 
+### Continuous deployment (CI/CD)
+
+`.github/workflows/deploy.yml` builds and installs a fresh release on the
+Pi automatically whenever a push or merge to `master` passes CI
+(`.github/workflows/ci.yml`). It runs on a **self-hosted GitHub Actions
+runner installed on the Pi itself** — the build is native (no
+cross-compiling, no SSH) and "deploy" is just running
+`scripts/build-pi.sh` followed by `scripts/deploy-local.sh` locally.
+Nothing sensitive (SSH keys, Tailscale auth keys) needs to be stored in
+GitHub for this to work.
+
+To set it up:
+
+```bash
+# On the Pi, as the same user the homehub.service unit runs as
+# (`claw` by default — see deploy/homehub.service):
+mkdir -p ~/actions-runner && cd ~/actions-runner
+curl -o actions-runner.tar.gz -L \
+  https://github.com/actions/runner/releases/latest/download/actions-runner-linux-arm64-<version>.tar.gz
+tar xzf actions-runner.tar.gz
+
+# Get a registration token from:
+#   GitHub repo → Settings → Actions → Runners → New self-hosted runner
+./config.sh --url https://github.com/Pextar/homehub --token <TOKEN> \
+  --labels homehub-pi --unattended
+
+sudo ./svc.sh install
+sudo ./svc.sh start
+```
+
+`scripts/deploy-local.sh` installs `homehub.service` (and, on first run,
+`matter-bridge.service`) into `/etc/systemd/system/` and restarts them, which
+needs root. Grant the runner's user passwordless sudo for just those two
+commands rather than running the whole runner as root:
+
+```bash
+# /etc/sudoers.d/homehub-ci  (edit with `sudo visudo -f ...`)
+claw ALL=(root) NOPASSWD: /usr/bin/systemctl, /usr/bin/install
+```
+
+From then on, every push to `master` that passes CI is live on the Pi a
+minute or two later — check progress under the repo's **Actions** tab, or
+`journalctl -u actions.runner.* -f` on the Pi.
+
 ### Authentication & profiles
 
 Login uses named **profiles** stored on the server (in `data/users.json`,
