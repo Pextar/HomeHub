@@ -1,0 +1,48 @@
+name: Deploy
+
+# Runs after CI succeeds on master (i.e. every push/merge to master that
+# passes the backend + frontend checks) and installs the result on the Pi.
+#
+# This job runs on a self-hosted runner registered on the Pi itself, so the
+# build is native (no cross-compilation) and "deploy" is just installing the
+# freshly built release next to the running service and restarting it —
+# no SSH keys or Tailscale credentials need to live in GitHub. See
+# docs/INSTALL.md's "Continuous deployment" section for how to register the
+# runner and grant it the sudo rights deploy-local.sh needs.
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [master]
+
+jobs:
+  deploy:
+    name: Build & deploy to the Pi
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: [self-hosted, homehub-pi]
+    # Never run two deploys at once, and never skip a deploy in favor of a
+    # newer one — each push to master should actually land.
+    concurrency:
+      group: deploy-homehub-pi
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build release
+        run: scripts/build-pi.sh
+
+      - name: Install + restart service
+        run: scripts/deploy-local.sh
