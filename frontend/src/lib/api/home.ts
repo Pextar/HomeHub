@@ -26,6 +26,7 @@ import type {
   Socket,
   SocketAction,
   TargetType,
+  TasmotaDevice,
   TasmotaState,
   TasmotaStateUpdate,
   Timer,
@@ -338,6 +339,12 @@ export const homeApi = {
   },
   tasmotaProbe(ip: string) {
     return req<{ status: string; ip: string }>(`/tasmota/probe?ip=${encodeURIComponent(ip)}`);
+  },
+  // Sweeps the host's own subnets for devices answering the Tasmota HTTP
+  // API. Slow by nature (a full /24 of probes), so callers should expect
+  // this to take several seconds.
+  tasmotaDiscover() {
+    return req<{ devices: TasmotaDevice[] }>("/tasmota/discover");
   },
 
   // Matter devices (via the matter-bridge sidecar)

@@ -11,7 +11,7 @@
     import { runAction, describeTarget, haptic } from "../lib/utils";
     import { openModal } from "../lib/modal.svelte";
     import EmptyState from "../components/EmptyState.svelte";
-    import SocketModal from "../modals/SocketModal.svelte";
+    import AddDeviceModal from "../modals/AddDeviceModal.svelte";
     import { fly, scale } from "svelte/transition";
     import { flip } from "svelte/animate";
     import { cubicOut } from "svelte/easing";
@@ -174,7 +174,7 @@
                 <Icon name="search" size={14} />
                 Search devices…
             </button>
-            <button class="chip add-device" onclick={() => openModal(SocketModal, {})}>
+            <button class="chip add-device" onclick={() => openModal(AddDeviceModal, {})}>
                 <Icon name="plus" size={14} /> Add device
             </button>
             <button class="chip icon-chip" aria-label="Activity" onclick={() => route.go("activity")}>
@@ -205,7 +205,7 @@
     <EmptyState fill icon="socket" title="No devices yet"
         message="Add your first RF socket or smart light to start controlling your home.">
         {#if session.isAdmin}
-            <button class="btn btn-primary" onclick={() => openModal(SocketModal, {})}>Add device</button>
+            <button class="btn btn-primary" onclick={() => openModal(AddDeviceModal, {})}>Add device</button>
         {/if}
     </EmptyState>
 {:else}

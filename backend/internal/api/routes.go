@@ -152,6 +152,7 @@ func (s *Server) registerAdminRoutes(api *mux.Router) {
 
 func (s *Server) registerTasmotaRoutes(api *mux.Router) {
 	api.HandleFunc("/tasmota/probe", s.requireAdmin(s.tasmotaProbe)).Methods("GET")
+	api.HandleFunc("/tasmota/discover", s.requireAdmin(s.tasmotaDiscover)).Methods("GET")
 	api.HandleFunc("/tasmota/{socketId}", s.tasmotaGetState).Methods("GET")
 	api.HandleFunc("/tasmota/{socketId}/state", s.tasmotaSetState).Methods("PUT")
 }
