@@ -154,7 +154,10 @@
                 <div class="field-help">
                     For 433MHz this is the device identifier (with rtl_433, usually <code>model:id</code>).
                     For an MQTT sensor, set protocol to <code>mqtt</code> and use the topic to subscribe
-                    to (wildcards <code>+</code>/<code>#</code> allowed).
+                    to (wildcards <code>+</code>/<code>#</code> allowed). For a Matter temperature/humidity
+                    sensor, set protocol to <code>matter</code> and use the commissioned node id (same id a
+                    Matter light or plug stores) — set the JSON field to <code>temperature</code> or
+                    <code>humidity</code> to pick which cluster is read.
                 </div>
             </div>
 

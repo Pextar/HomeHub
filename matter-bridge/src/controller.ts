@@ -28,7 +28,13 @@ import {
     ManualPairingCodeCodec,
     QrPairingCodeCodec,
 } from "@matter/types";
-import { OnOff, LevelControl, ColorControl } from "@matter/types/clusters";
+import {
+    OnOff,
+    LevelControl,
+    ColorControl,
+    TemperatureMeasurement,
+    RelativeHumidityMeasurement,
+} from "@matter/types/clusters";
 import { StorageBackendDisk } from "@matter/nodejs";
 import path from "node:path";
 import fs from "node:fs";
@@ -45,6 +51,8 @@ export interface DeviceState {
     level?: number;         // 0..100
     color?: string;         // RRGGBB hex
     ct?: number;            // 153..500 mired
+    temperature?: number;   // °C
+    humidity?: number;      // 0..100 %RH
 }
 
 export interface MatterController {
@@ -153,24 +161,50 @@ export async function startController(): Promise<MatterController> {
             state.name = asString(info.nodeLabel) ?? state.product;
         }
         const ep = pickPrimaryEndpoint(node);
-        if (!ep) return state;
+        if (ep) {
+            const onOff = ep.getClusterClient(OnOff.Cluster);
+            if (onOff) state.on = await safeRead<boolean>(() => onOff.attributes.onOff.get());
 
-        const onOff = ep.getClusterClient(OnOff.Cluster);
-        if (onOff) state.on = await safeRead<boolean>(() => onOff.attributes.onOff.get());
+            const level = ep.getClusterClient(LevelControl.Cluster);
+            if (level) {
+                const raw = await safeRead<number>(() => level.attributes.currentLevel.get());
+                if (raw != null) state.level = Math.round((raw / 254) * 100);
+            }
 
-        const level = ep.getClusterClient(LevelControl.Cluster);
-        if (level) {
-            const raw = await safeRead<number>(() => level.attributes.currentLevel.get());
-            if (raw != null) state.level = Math.round((raw / 254) * 100);
+            const color = ep.getClusterClient(ColorControl.Cluster);
+            if (color) {
+                const ct = await safeRead<number>(() => color.attributes.colorTemperatureMireds.get());
+                if (ct != null) state.ct = ct;
+                const hue = await safeRead<number>(() => color.attributes.currentHue.get());
+                const sat = await safeRead<number>(() => color.attributes.currentSaturation.get());
+                if (hue != null && sat != null) state.color = hsToHex(hue, sat);
+            }
         }
 
-        const color = ep.getClusterClient(ColorControl.Cluster);
-        if (color) {
-            const ct = await safeRead<number>(() => color.attributes.colorTemperatureMireds.get());
-            if (ct != null) state.ct = ct;
-            const hue = await safeRead<number>(() => color.attributes.currentHue.get());
-            const sat = await safeRead<number>(() => color.attributes.currentSaturation.get());
-            if (hue != null && sat != null) state.color = hsToHex(hue, sat);
+        // Temperature/humidity sensors are their own device types (Matter
+        // composes a combo sensor as separate endpoints, one per cluster) so
+        // unlike OnOff/Level/Color above we can't assume they sit on the
+        // "primary" endpoint — scan every endpoint the node exposes.
+        for (const d of node.getDevices()) {
+            const sensorEp = d as any;
+            if (typeof sensorEp.getClusterClient !== "function") continue;
+
+            if (state.temperature === undefined) {
+                const temp = sensorEp.getClusterClient(TemperatureMeasurement.Cluster);
+                if (temp) {
+                    const raw = await safeRead<number | null>(() => temp.attributes.measuredValue.get());
+                    // measuredValue is int16 in 0.01 °C units; null means "unknown".
+                    if (raw != null) state.temperature = raw / 100;
+                }
+            }
+            if (state.humidity === undefined) {
+                const hum = sensorEp.getClusterClient(RelativeHumidityMeasurement.Cluster);
+                if (hum) {
+                    const raw = await safeRead<number | null>(() => hum.attributes.measuredValue.get());
+                    // measuredValue is uint16 in 0.01 %RH units.
+                    if (raw != null) state.humidity = raw / 100;
+                }
+            }
         }
         return state;
     }

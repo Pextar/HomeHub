@@ -424,6 +424,9 @@ func (a *App) startBackground(ctx context.Context) {
 	// Wi-Fi/Matter device reachability, with push on drop and recovery.
 	go reachability.Run(ctx, a.store, a.matter, a.push)
 
+	// Matter temperature/humidity sensors have no push path — poll them.
+	go matter.SensorPoller{Client: a.matter}.Run(ctx, a.store)
+
 	// KEF speakers are polled rather than subscribed to — their local API
 	// has no callback — so unlike Sonos this one has nothing to release.
 	go a.monitors.RunKEF(ctx)
