@@ -77,6 +77,7 @@ frontend/src/
 │   ├── stores.svelte.ts
 │   └── utils.ts
 ├── components/    ← shared primitives (Modal, Icon, Switch, …)
+│   ├── home/      ← the home screen's sections + its editor (DESIGN.md §18)
 │   ├── music/     ← the Music view's parts
 │   ├── panel/     ← the wall's parts
 │   └── kid/       ← the kid module's parts (DESIGN.md §17)
@@ -143,10 +144,27 @@ belongs in `lib/`, not in a component's `<script module>`.
 |---|---|
 | `rules.ts` | what an automation rule means — the target vocabulary, and `compileAction`, which translates the shape a rule is *authored* in into the shape it is *run* in |
 | `console-language.ts` | how the console understands a name: resolution order, sentence parsing, and what Tab offers |
+| `home-layout.ts` | what the home screen is made of: the section catalog, what a stored layout means, how a saved order absorbs a section a later release added, and which sensors the screen reads (DESIGN.md §18) |
+| `list-reorder.svelte.ts` | reordering a vertical list by hand or by arrow key — the lift, the shove, the edge auto-scroll, and what gets announced |
 
 Both of these lived in a component and were imported *from* a `.svelte` file
 by other components, which is the tell. Both had no test until they moved,
 and both turned out to have a bug in them.
+
+## Home's sections (`components/home/`)
+
+Home is a list the user arranges, so **each section is one component that
+carries its own CSS** — a thing you can move has to be one thing. `Dashboard`
+renders them from `homeLayout`'s order and does nothing else.
+
+Adding a section is three edits: the component here, an entry in
+`HOME_SECTIONS` (`lib/home-layout.ts`), and its branch in `Dashboard`. Every
+saved layout picks it up on the next load, at the position the catalog puts it
+in — the migration is `normalizeLayout`'s job, not the component's. The three
+rules the sections share (`.home-section`, `.home-grid`, `.header-meta`) are
+global in `app.css` rather than copied into each, because scoped CSS does not
+reach between siblings; the section head is `HomeSectionHead.svelte` for the
+same reason.
 
 ## Splitting a big file
 
